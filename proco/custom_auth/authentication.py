@@ -1,12 +1,15 @@
+import logging
+
 from django.contrib.auth import get_user_model
 from django.utils.translation import ugettext as _
 from rest_framework import exceptions
 from rest_framework_jwt import authentication as jwt_authentication
 from rest_framework_jwt.settings import api_settings
 
-from proco.custom_auth.models import Role
 from proco.core.utils import is_blank_string
+from proco.custom_auth.models import Role
 
+logger = logging.getLogger('gigamaps.' + __name__)
 jwt_decode_handler = api_settings.JWT_DECODE_HANDLER
 
 
@@ -59,5 +62,5 @@ class JSONWebTokenAuthentication(jwt_authentication.JSONWebTokenAuthentication):
         except user_model.DoesNotExist:
             msg = _('Invalid signatures.')
             e = exceptions.AuthenticationFailed(msg)
-            print(str(e))
+            logger.debug(str(e))
             raise e

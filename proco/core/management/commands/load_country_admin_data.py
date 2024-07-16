@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import logging
 
 import numpy as np
 import pandas as pd
@@ -10,6 +11,8 @@ from django.db.models.functions import Lower
 
 from proco.core import utils as core_utilities
 from proco.locations.models import Country, CountryAdminMetadata
+
+logger = logging.getLogger('gigamaps.' + __name__)
 
 
 def is_file(fp):
@@ -43,14 +46,15 @@ def load_admin0_file_data(file_path):
     csv_required_cols = ['iso31661', 'iso31661alpha3', 'name', 'nameen', 'description', 'centroid', 'bbox', 'mapboxid']
 
     core_utilities.column_normalize(input_df, valid_columns=csv_required_cols)
-    print('CSV normalized columns: {0}'.format(input_df.columns.tolist()))
+    logger.debug('Csv normalized columns: {0}.'.format(input_df.columns.tolist()))
 
     input_df.drop_duplicates(subset=['iso31661', 'iso31661alpha3'], keep='last', inplace=True)
 
     country_codes = dict(Country.objects.all().annotate(code_lower=Lower('code')).values_list('code_lower', 'id'))
-    country_iso3_codes = dict(Country.objects.all().annotate(iso3_format_lower=Lower('iso3_format')).values_list('iso3_format_lower', 'id'))
-    print('Country Code mapping: {0}'.format(country_codes))
-    print('Country ISO3 Code mapping: {0}'.format(country_iso3_codes))
+    country_iso3_codes = dict(
+        Country.objects.all().annotate(iso3_format_lower=Lower('iso3_format')).values_list('iso3_format_lower', 'id'))
+    logger.debug('Country code mapping: {0}'.format(country_codes))
+    logger.debug('Country ISO3 code mapping: {0}'.format(country_iso3_codes))
 
     input_df['errors'] = None
 
@@ -69,20 +73,20 @@ def load_admin0_file_data(file_path):
             errors.append('Name field is required')
 
         if len(errors) > 0:
-            print('Errors: ', errors, ', Code: ', row['iso31661'], ', Country Id: ', country_id)
+            logger.debug('Errors: ', errors, ', Code: ', row['iso31661'], ', Country Id: ', country_id)
 
             has_data_errors = True
             input_df.at[index, 'errors'] = ','.join(errors)
 
-    print('Has data errors: {0}'.format(has_data_errors))
+    logger.debug('Has data errors: {0}'.format(has_data_errors))
     if has_data_errors:
         error_file = '_errors.'.join(get_file_name_and_extension(file_path))
-        print('ERROR: CSV has data errors. Please check the error file, correct it and then start again.'
-              ' Error file: {0}'.format(error_file))
+        logger.error('Csv has data errors. Please check the error file, correct it and then start again.'
+                     ' Error file: {0}'.format(error_file))
         input_df.to_csv(error_file, quotechar='"', index=False)
         return
 
-    print('SUCCESS: Validation has passed by the input file.')
+    logger.info('Success: Validation has passed by the input file.')
     input_df = input_df.replace(np.nan, None)
     rows = input_df.to_dict(orient='records')
 
@@ -116,16 +120,16 @@ def load_admin1_file_data(file_path):
 
     core_utilities.column_normalize(input_df, valid_columns=csv_required_cols)
 
-    print('CSV normalized columns: {0}'.format(input_df.columns.tolist()))
+    logger.debug('Csv normalized columns: {0}'.format(input_df.columns.tolist()))
 
     input_df.drop_duplicates(subset=['iso31661', 'iso31661alpha3', 'admin1idgiga'], keep='last', inplace=True)
 
     country_codes = dict(Country.objects.all().annotate(code_lower=Lower('code')).values_list('code_lower', 'id'))
-    print('Country Code mapping: {0}'.format(country_codes))
+    logger.debug('Country code mapping: {0}'.format(country_codes))
 
     country_iso3_codes = dict(
         Country.objects.all().annotate(iso3_format_lower=Lower('iso3_format')).values_list('iso3_format_lower', 'id'))
-    print('Country ISO3 Code mapping: {0}'.format(country_iso3_codes))
+    logger.debug('Country ISO3 code mapping: {0}'.format(country_iso3_codes))
 
     parent_code_vs_id = dict(
         CountryAdminMetadata.objects.all().filter(
@@ -133,7 +137,7 @@ def load_admin1_file_data(file_path):
             giga_id_admin_lower=Lower('giga_id_admin')).values_list(
             'giga_id_admin_lower', 'id'),
     )
-    print('Country Giga ID Code - ID mapping: {0}'.format(parent_code_vs_id))
+    logger.debug('Country giga id code - ID mapping: {0}'.format(parent_code_vs_id))
 
     input_df['errors'] = None
 
@@ -157,20 +161,20 @@ def load_admin1_file_data(file_path):
             errors.append('Name field is required')
 
         if len(errors) > 0:
-            print('Errors: ', errors, ', Code: ', row['admin1idgiga'], ', Country Id: ', country_id)
+            logger.debug('Errors: ', errors, ', Code: ', row['admin1idgiga'], ', Country Id: ', country_id)
 
             has_data_errors = True
             input_df.at[index, 'errors'] = ','.join(errors)
 
-    print('Has data errors: {0}'.format(has_data_errors))
+    logger.debug('Has data errors: {0}'.format(has_data_errors))
     if has_data_errors:
         error_file = '_errors.'.join(get_file_name_and_extension(file_path))
-        print('ERROR: CSV has data errors. Please check the error file, correct it and then start again.'
-              ' Error file: {0}'.format(error_file))
+        logger.error('Csv has data errors. Please check the error file, correct it and then start again.'
+                     ' Error file: {0}'.format(error_file))
         input_df.to_csv(error_file, quotechar='"', index=False)
         return
 
-    print('SUCCESS: Validation has passed by the input file.')
+    logger.info('Success: Validation has passed by the input file.')
     input_df = input_df.replace(np.nan, None)
     rows = input_df.to_dict(orient='records')
 
@@ -205,14 +209,15 @@ def load_admin2_file_data(file_path):
 
     core_utilities.column_normalize(input_df, valid_columns=csv_required_cols)
 
-    print('CSV normalized columns: {0}'.format(input_df.columns.tolist()))
+    logger.debug('Csv normalized columns: {0}'.format(input_df.columns.tolist()))
 
     input_df.drop_duplicates(subset=['iso31661', 'iso31661alpha3', 'admin2idgiga'], keep='last', inplace=True)
 
     country_codes = dict(Country.objects.all().annotate(code_lower=Lower('code')).values_list('code_lower', 'id'))
-    country_iso3_codes = dict(Country.objects.all().annotate(iso3_format_lower=Lower('iso3_format')).values_list('iso3_format_lower', 'id'))
-    print('Country Code mapping: {0}'.format(country_codes))
-    print('Country ISO3 Code mapping: {0}'.format(country_iso3_codes))
+    country_iso3_codes = dict(
+        Country.objects.all().annotate(iso3_format_lower=Lower('iso3_format')).values_list('iso3_format_lower', 'id'))
+    logger.debug('Country code mapping: {0}'.format(country_codes))
+    logger.debug('Country ISO3 code mapping: {0}'.format(country_iso3_codes))
 
     parent_code_vs_id = dict(
         CountryAdminMetadata.objects.all().filter(
@@ -220,7 +225,7 @@ def load_admin2_file_data(file_path):
             giga_id_admin_lower=Lower('giga_id_admin')).values_list(
             'giga_id_admin_lower', 'id'),
     )
-    print('Admin1 Giga ID Code - ID mapping: {0}'.format(parent_code_vs_id))
+    logger.debug('Admin1 giga id code - ID mapping: {0}'.format(parent_code_vs_id))
 
     input_df['errors'] = None
 
@@ -242,20 +247,20 @@ def load_admin2_file_data(file_path):
             errors.append('Name field is required')
 
         if len(errors) > 0:
-            print('Errors: ', errors, ', Code: ', row['admin2idgiga'], ', Country Id: ', country_id)
+            logger.error('Errors: ', errors, ', Code: ', row['admin2idgiga'], ', Country Id: ', country_id)
 
             has_data_errors = True
             input_df.at[index, 'errors'] = ','.join(errors)
 
-    print('Has data errors: {0}'.format(has_data_errors))
+    logger.debug('Has data errors: {0}'.format(has_data_errors))
     if has_data_errors:
         error_file = '_errors.'.join(get_file_name_and_extension(file_path))
-        print('ERROR: CSV has data errors. Please check the error file, correct it and then start again.'
-              ' Error file: {0}'.format(error_file))
+        logger.error('Csv has data errors. Please check the error file, correct it and then start again.'
+                     ' Error file: {0}'.format(error_file))
         input_df.to_csv(error_file, quotechar='"', index=False)
         return
 
-    print('SUCCESS: Validation has passed by the input file.')
+    logger.info('Success: Validation has passed by the input file.')
     input_df = input_df.replace(np.nan, None)
     rows = input_df.to_dict(orient='records')
 
@@ -305,11 +310,11 @@ class Command(BaseCommand):
                 ['admin0', 'admin1', 'admin2']))
 
         with transaction.atomic():
-            print('Loading Admins data for {0} ....'.format(admin_type))
+            logger.info('Loading admins data for {0} ....'.format(admin_type))
             if admin_type == 'admin0':
                 load_admin0_file_data(input_file)
             elif admin_type == 'admin1':
                 load_admin1_file_data(input_file)
             elif admin_type == 'admin2':
                 load_admin2_file_data(input_file)
-            print('Data loaded successfully!\n')
+            logger.info('Data loaded successfully!\n')

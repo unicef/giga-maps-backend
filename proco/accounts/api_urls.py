@@ -30,6 +30,7 @@ urlpatterns = [
     path('invalidate-cache/', api.InvalidateCache.as_view(), name='admin-invalidate-cache'),
 
     path('app_configs/', api.AppStaticConfigurationsViewSet.as_view(), name='get-app-static-configurations'),
+    path('advanced_filters/', api.AdvancedFiltersViewSet.as_view(), name='list-advanced-filters'),
     path('data_sources/', api.DataSourceViewSet.as_view({
         'get': 'list',
         'post': 'create',
@@ -65,7 +66,7 @@ urlpatterns = [
         'get': 'list',
     }), name='list-published-data-layers'),
 
-    path('recent_action_log/', api.LogActionViewSet.as_view({'get': 'list', }), name='recent_action_log'),
+    path('recent_action_log/', api.LogActionViewSet.as_view({'get': 'list', }), name='list-recent-action-log'),
 
     path('time-players/v2/', api.TimePlayerViewSet.as_view(), name='get-time-player-data-v2'),
 ]

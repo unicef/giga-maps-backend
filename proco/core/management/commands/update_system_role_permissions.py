@@ -1,4 +1,5 @@
 # encoding: utf-8
+import logging
 
 from collections import OrderedDict
 
@@ -6,6 +7,8 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from proco.custom_auth.models import Role, RolePermission
+
+logger = logging.getLogger('gigamaps.' + __name__)
 
 role_permissions = OrderedDict({
     Role.SYSTEM_ROLE_NAME_ADMIN: [perm[0] for perm in RolePermission.PERMISSION_CHOICES],
@@ -34,7 +37,7 @@ class Command(BaseCommand):
     help = "Update the System Role's permissions as it can not be updated from GUI."
 
     def handle(self, **options):
-        print('*** System role update operation STARTED ***')
+        logger.info('System role update operation started.')
         with transaction.atomic():
             populate_role_permissions()
-        print('*** System role update operation ENDED ***')
+        logger.info('System role update operation ended.')

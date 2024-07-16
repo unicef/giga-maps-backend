@@ -1,4 +1,5 @@
 import re
+import logging
 from collections import OrderedDict
 
 from django.db.models.functions.text import Lower
@@ -23,6 +24,7 @@ from proco.locations.models import Country, CountryAdminMetadata
 from proco.schools.models import School
 from proco.schools.serializers import ExpandCountrySerializer
 
+logger = logging.getLogger('gigamaps.' + __name__)
 
 class ExpandCountryAdminMetadataSerializer(FlexFieldsModelSerializer):
     """
@@ -168,26 +170,26 @@ class CountryUpdateRetriveSerializer(serializers.ModelSerializer):
         if deleted_country_with_same_code_iso3_format:
             validated_data['deleted'] = None
             country_instance = super().update(deleted_country_with_same_code_iso3_format, validated_data)
-            print('Country restored')
+            logger.info('Country restored.')
 
             CountryDailyStatus.objects.all_deleted().filter(country=country_instance).update(deleted=None)
-            print('Country Daily restored')
+            logger.info('Country daily restored.')
 
             CountryWeeklyStatus.objects.all_deleted().filter(country=country_instance).update(deleted=None)
-            print('Country Weekly restored')
+            logger.info('Country weekly restored.')
 
             School.objects.all_deleted().filter(country=country_instance).update(deleted=None)
-            print('Schools restored')
+            logger.info('Schools restored.')
 
             SchoolDailyStatus.objects.all_deleted().filter(school__country=country_instance).update(deleted=None)
-            print('School Daily restored')
+            logger.info('School daily restored.')
 
             SchoolWeeklyStatus.objects.all_deleted().filter(school__country=country_instance).update(deleted=None)
-            print('School Weekly restored')
+            logger.info('School weekly restored.')
 
             SchoolRealTimeRegistration.objects.all_deleted().filter(school__country=country_instance).update(
                 deleted=None)
-            print('School Real Time Registration restored')
+            logger.info('School real time registration restored.')
 
             request_user = core_utilities.get_current_user(context=self.context)
             DataLayerCountryRelationship.objects.filter(country=country_instance).update(
@@ -206,10 +208,10 @@ class CountryUpdateRetriveSerializer(serializers.ModelSerializer):
                     api_key__valid_to__gte=core_utilities.get_current_datetime_object().date(),
                     deleted__isnull=True,
                 ).exists():
-                    print('WARNING: API Key for country ({0}) already exists.'.format(country_instance.iso3_format))
+                    logger.debug('Warning: api key for country ({0}) already exists.'.format(country_instance.iso3_format))
                 else:
                     country_api_key_relationship_obj.update(deleted=None, last_modified_by=request_user)
-                    print('API Key restored.')
+                    logger.info('Api key restored.')
 
         else:
             country_instance = super().create(validated_data)

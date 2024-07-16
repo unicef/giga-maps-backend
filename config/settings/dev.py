@@ -28,11 +28,8 @@ DATABASES = {
 
 try:
     DATABASES['read_only_database'] = env.db_url(var='READ_ONLY_DATABASE_URL')
-    DATABASES['realtime'] = env.db_url(var='REALTIME_DATABASE_URL')
-    DATABASES['dailycheckapp_realtime'] = env.db_url(var='REALTIME_DAILYCHECKAPP_DATABASE_URL')
 except ImproperlyConfigured:
-    DATABASES['realtime'] = DATABASES['default']
-    DATABASES['dailycheckapp_realtime'] = DATABASES['default']
+    pass
 
 # Email settings
 # --------------------------------------------------------------------------

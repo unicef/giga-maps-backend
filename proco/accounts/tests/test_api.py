@@ -1,5 +1,6 @@
 import os
 from collections import OrderedDict
+from datetime import timedelta
 
 from django.conf import settings
 from django.core.cache import cache
@@ -9,23 +10,27 @@ from django.urls import resolve, reverse
 from rest_framework import status
 
 from proco.accounts import models as accounts_models
+from proco.accounts.tests import test_utils as accounts_test_utilities
+from proco.core import utils as core_utilities
 from proco.custom_auth.tests import test_utils as test_utilities
 from proco.locations.tests.factories import CountryFactory
+from proco.schools.tests.factories import SchoolFactory
 from proco.utils.tests import TestAPIViewSetMixin
 
 
 def accounts_url(url_params, query_param, view_name='list-or-create-api-keys'):
     url = reverse('accounts:' + view_name, args=url_params)
-    view_info = resolve(url).func
+    view = resolve(url)
+    view_info = view.func
 
     if len(query_param) > 0:
         query_params = '?' + '&'.join([key + '=' + str(val) for key, val in query_param.items()])
         url += query_params
-    return url, view_info
+    return url, view, view_info
 
 
 class APIsApiTestCase(TestAPIViewSetMixin, TestCase):
-    databases = ['default']
+    databases = ['default', ]
 
     @classmethod
     def setUpTestData(cls):
@@ -43,7 +48,7 @@ class APIsApiTestCase(TestAPIViewSetMixin, TestCase):
         super().setUp()
 
     def test_list_apis_all(self):
-        url, view = accounts_url((), {}, view_name='list-apis')
+        url, _, view = accounts_url((), {}, view_name='list-apis')
 
         response = self.forced_auth_req('get', url, user=self.user, view=view)
 
@@ -56,7 +61,7 @@ class APIsApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(len(response_data['results']), 5)
 
     def test_list_apis_filter_on_code(self):
-        url, view = accounts_url((), {
+        url, _, view = accounts_url((), {
             'code': 'DAILY_CHECK_APP'
         }, view_name='list-apis')
 
@@ -71,7 +76,7 @@ class APIsApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(len(response_data['results']), 1)
 
     def test_list_apis_filter_on_category_public(self):
-        url, view = accounts_url((), {
+        url, _, view = accounts_url((), {
             'category': 'public'
         }, view_name='list-apis')
 
@@ -86,7 +91,7 @@ class APIsApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(len(response_data['results']), 2)
 
     def test_list_apis_filter_on_category_private(self):
-        url, view = accounts_url((), {
+        url, _, view = accounts_url((), {
             'category': 'private'
         }, view_name='list-apis')
 
@@ -102,7 +107,7 @@ class APIsApiTestCase(TestAPIViewSetMixin, TestCase):
 
 
 class APIKeysApiTestCase(TestAPIViewSetMixin, TestCase):
-    databases = ['default']
+    databases = ['default', ]
 
     @classmethod
     def setUpTestData(cls):
@@ -116,14 +121,14 @@ class APIKeysApiTestCase(TestAPIViewSetMixin, TestCase):
         cls.admin_user = test_utilities.setup_admin_user_by_role()
         cls.read_only_user = test_utilities.setup_read_only_user_by_role()
 
-        cls.country_one = CountryFactory()
+        cls.country = CountryFactory()
 
     def setUp(self):
         cache.clear()
         super().setUp()
 
     def test_list_api_keys_all_for_logged_in_user(self):
-        url, view = accounts_url((), {})
+        url, _, view = accounts_url((), {})
 
         response = self.forced_auth_req('get', url, user=self.admin_user, view=view)
 
@@ -136,7 +141,7 @@ class APIKeysApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(len(response_data['results']), 0)
 
     def test_list_api_keys_all_for_read_only_user(self):
-        url, view = accounts_url((), {})
+        url, _, view = accounts_url((), {})
 
         response = self.forced_auth_req('get', url, user=self.read_only_user, view=view)
 
@@ -149,14 +154,14 @@ class APIKeysApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(len(response_data['results']), 0)
 
     def test_list_api_keys_all_for_non_logged_in_user(self):
-        url, view = accounts_url((), {})
+        url, _, view = accounts_url((), {})
 
         response = self.forced_auth_req('get', url, user=None, view=view)
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_create_api_keys_for_admin_for_public_api(self):
-        url, view = accounts_url((), {})
+        url, _, view = accounts_url((), {})
 
         response = self.forced_auth_req(
             'post',
@@ -171,7 +176,7 @@ class APIKeysApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
     def test_validate_api_keys_for_admin_for_public_api(self):
-        url, view = accounts_url((), {})
+        url, _, view = accounts_url((), {})
 
         response = self.forced_auth_req(
             'post',
@@ -188,7 +193,7 @@ class APIKeysApiTestCase(TestAPIViewSetMixin, TestCase):
         response_data = response.data
         api_key = response_data['api_key']
 
-        url, view = accounts_url((), {}, view_name='validate-an-api-key')
+        url, _, view = accounts_url((), {}, view_name='validate-an-api-key')
 
         get_response = self.forced_auth_req(
             'put',
@@ -202,8 +207,40 @@ class APIKeysApiTestCase(TestAPIViewSetMixin, TestCase):
 
         self.assertEqual(get_response.status_code, status.HTTP_200_OK)
 
+    def test_validate_invalid_api_key_for_admin_for_public_api(self):
+        url, _, view = accounts_url((), {})
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.admin_user,
+            view=view,
+            data={
+                'api': accounts_models.API.objects.get(code='COUNTRY').id,
+            }
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        response_data = response.data
+        api_key = response_data['api_key']
+
+        url, _, view = accounts_url((), {}, view_name='validate-an-api-key')
+
+        get_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'api_id': accounts_models.API.objects.get(code='COUNTRY').id,
+                'api_key': api_key + 'abc',
+            }
+        )
+
+        self.assertEqual(get_response.status_code, status.HTTP_404_NOT_FOUND)
+
     def test_create_api_keys_for_admin_for_private_api(self):
-        url, view = accounts_url((), {})
+        url, _, view = accounts_url((), {})
 
         response = self.forced_auth_req(
             'post',
@@ -212,14 +249,14 @@ class APIKeysApiTestCase(TestAPIViewSetMixin, TestCase):
             view=view,
             data={
                 'api': accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
-                'active_countries_list': [self.country_one.id, ]
+                'active_countries_list': [self.country.id, ]
             }
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
     def test_create_api_keys_for_read_only_user_for_public_api(self):
-        url, view = accounts_url((), {})
+        url, _, view = accounts_url((), {})
 
         response = self.forced_auth_req(
             'post',
@@ -228,14 +265,14 @@ class APIKeysApiTestCase(TestAPIViewSetMixin, TestCase):
             view=view,
             data={
                 'api': accounts_models.API.objects.get(code='COUNTRY').id,
-                'active_countries_list': [self.country_one.id, ]
+                'active_countries_list': [self.country.id, ]
             }
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
     def test_create_api_keys_for_read_only_user_for_private_api(self):
-        url, view = accounts_url((), {})
+        url, _, view = accounts_url((), {})
 
         response = self.forced_auth_req(
             'post',
@@ -244,14 +281,162 @@ class APIKeysApiTestCase(TestAPIViewSetMixin, TestCase):
             view=view,
             data={
                 'api': accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
-                'active_countries_list': [self.country_one.id, ]
+                'active_countries_list': [self.country.id, ]
             }
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
+    def test_approve_api_key_for_read_only_user_for_private_api_by_admin(self):
+        url, _, view = accounts_url((), {})
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.read_only_user,
+            view=view,
+            data={
+                'api': accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
+                'active_countries_list': [self.country.id, ]
+            }
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        response_data = response.data
+
+        api_key_id = response_data['id']
+
+        url, _, view = accounts_url((api_key_id,), {},
+                                    view_name='update-and-delete-api-key')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.APIKey.APPROVED,
+                'valid_to': core_utilities.get_current_datetime_object().date() + timedelta(days=30),
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+    def test_create_api_key_extension_request_for_private_api(self):
+        url, _, view = accounts_url((), {})
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.read_only_user,
+            view=view,
+            data={
+                'api': accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
+                'active_countries_list': [self.country.id, ]
+            }
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        response_data = response.data
+
+        api_key_id = response_data['id']
+
+        url, _, view = accounts_url((api_key_id,), {},
+                                    view_name='update-and-delete-api-key')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.APIKey.APPROVED,
+                'valid_to': core_utilities.get_current_datetime_object().date() + timedelta(days=30),
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, _, view = accounts_url((api_key_id,), {},
+                                    view_name='request-api-key-extension')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.read_only_user,
+            data={
+                'extension_valid_to': core_utilities.get_current_datetime_object().date() + timedelta(days=60),
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+    def test_approve_api_key_extension_request_for_private_api_by_admin(self):
+        url, _, view = accounts_url((), {})
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.read_only_user,
+            view=view,
+            data={
+                'api': accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
+                'active_countries_list': [self.country.id, ]
+            }
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        response_data = response.data
+
+        api_key_id = response_data['id']
+
+        url, _, view = accounts_url((api_key_id,), {},
+                                    view_name='update-and-delete-api-key')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.APIKey.APPROVED,
+                'valid_to': core_utilities.get_current_datetime_object().date() + timedelta(days=30),
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, _, view = accounts_url((api_key_id,), {},
+                                    view_name='request-api-key-extension')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.read_only_user,
+            data={
+                'extension_valid_to': core_utilities.get_current_datetime_object().date() + timedelta(days=60),
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, _, view = accounts_url((api_key_id,), {},
+                                    view_name='update-and-delete-api-key')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'extension_status': accounts_models.APIKey.APPROVED,
+                'extension_valid_to': core_utilities.get_current_datetime_object().date() + timedelta(days=100),
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
     def test_delete_api_key_by_admin(self):
-        url, view = accounts_url((), {})
+        url, _, view = accounts_url((), {})
 
         response = self.forced_auth_req(
             'post',
@@ -269,8 +454,8 @@ class APIKeysApiTestCase(TestAPIViewSetMixin, TestCase):
 
         api_key_id = response_data['id']
 
-        url, view = accounts_url((api_key_id,), {},
-                                 view_name='update-and-delete-api-key')
+        url, _, view = accounts_url((api_key_id,), {},
+                                    view_name='update-and-delete-api-key')
 
         delete_response = self.forced_auth_req(
             'delete',
@@ -281,7 +466,7 @@ class APIKeysApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
 
     def test_delete_api_key_by_read_only_user(self):
-        url, view = accounts_url((), {})
+        url, _, view = accounts_url((), {})
 
         response = self.forced_auth_req(
             'post',
@@ -299,8 +484,8 @@ class APIKeysApiTestCase(TestAPIViewSetMixin, TestCase):
 
         api_key_id = response_data['id']
 
-        url, view = accounts_url((api_key_id,), {},
-                                 view_name='update-and-delete-api-key')
+        url, _, view = accounts_url((api_key_id,), {},
+                                    view_name='update-and-delete-api-key')
 
         delete_response = self.forced_auth_req(
             'delete',
@@ -308,11 +493,11 @@ class APIKeysApiTestCase(TestAPIViewSetMixin, TestCase):
             user=self.read_only_user,
         )
 
-        self.assertEqual(delete_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
 
 
 class NotificationsApiTestCase(TestAPIViewSetMixin, TestCase):
-    databases = ['default']
+    databases = ['default', ]
 
     @classmethod
     def setUpTestData(cls):
@@ -324,7 +509,7 @@ class NotificationsApiTestCase(TestAPIViewSetMixin, TestCase):
         super().setUp()
 
     def test_list_for_admin_user(self):
-        url, view = accounts_url((), {}, view_name='list-send-notifications')
+        url, _, view = accounts_url((), {}, view_name='list-send-notifications')
 
         response = self.forced_auth_req('get', url, user=self.admin_user, view=view)
 
@@ -337,21 +522,21 @@ class NotificationsApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(len(response_data['results']), 0)
 
     def test_list_for_real_only_user(self):
-        url, view = accounts_url((), {}, view_name='list-send-notifications')
+        url, _, view = accounts_url((), {}, view_name='list-send-notifications')
 
         response = self.forced_auth_req('get', url, user=self.read_only_user, view=view)
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_list_for_non_logged_in_user(self):
-        url, view = accounts_url((), {}, view_name='list-send-notifications')
+        url, _, view = accounts_url((), {}, view_name='list-send-notifications')
 
         response = self.forced_auth_req('get', url, user=None, view=view)
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_create_notification_by_admin(self):
-        url, view = accounts_url((), {}, view_name='list-send-notifications')
+        url, _, view = accounts_url((), {}, view_name='list-send-notifications')
 
         response = self.forced_auth_req(
             'post',
@@ -369,7 +554,7 @@ class NotificationsApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
     def test_create_notification_by_admin_single_recipient(self):
-        url, view = accounts_url((), {}, view_name='list-send-notifications')
+        url, _, view = accounts_url((), {}, view_name='list-send-notifications')
 
         response = self.forced_auth_req(
             'post',
@@ -387,7 +572,7 @@ class NotificationsApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
     def test_create_notification_by_admin_invalid_recipient(self):
-        url, view = accounts_url((), {}, view_name='list-send-notifications')
+        url, _, view = accounts_url((), {}, view_name='list-send-notifications')
 
         response = self.forced_auth_req(
             'post',
@@ -406,12 +591,12 @@ class NotificationsApiTestCase(TestAPIViewSetMixin, TestCase):
 
 
 class AppStaticConfigurationsApiTestCase(TestAPIViewSetMixin, TestCase):
-    databases = ['default']
+    databases = ['default', ]
 
     def test_get(self):
-        url, view = accounts_url((), {}, view_name='get-app-static-configurations')
+        url, _, view = accounts_url((), {}, view_name='get-app-static-configurations')
 
-        response = self.forced_auth_req('get', url, view=view)
+        response = self.forced_auth_req('get', url, _, view=view)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
@@ -422,21 +607,122 @@ class AppStaticConfigurationsApiTestCase(TestAPIViewSetMixin, TestCase):
 
 
 class TimePlayerApiTestCase(TestAPIViewSetMixin, TestCase):
-    databases = ['default']
+    databases = ['default', ]
+
+    @classmethod
+    def setUpTestData(cls):
+        args = ['--delete_data_sources', '--update_data_sources', '--update_data_layers']
+        call_command('load_system_data_layers', *args)
+
+        cls.admin_user = test_utilities.setup_admin_user_by_role()
+        cls.read_only_user = test_utilities.setup_read_only_user_by_role()
 
     def test_get_invalid_layer_id(self):
-        url, view = accounts_url((), {
+        url, _, view = accounts_url((), {
             'layer_id': 123,
             'country_id': 123,
         }, view_name='get-time-player-data-v2')
 
-        response = self.forced_auth_req('get', url, view=view)
+        response = self.forced_auth_req('get', url, _, view=view)
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
+    def test_for_live_layer(self):
+        pcdc_data_source = accounts_models.DataSource.objects.filter(
+            data_source_type=accounts_models.DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP,
+        ).first()
+
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.admin_user,
+            view=view,
+            data={
+                'icon': '<icon>',
+                'name': 'Test data layer 3',
+                'description': 'Test data layer 3 description',
+                'version': '1.0.0',
+                'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
+                'data_sources_list': [pcdc_data_source.id, ],
+                'data_source_column': pcdc_data_source.column_config[0],
+                'global_benchmark': {
+                    'value': '20000000',
+                    'unit': 'bps',
+                    'convert_unit': 'mbps'
+                },
+                'is_reverse': False,
+                'legend_configs': {
+                    'good': {
+                        'values': [],
+                        'labels': 'Good'
+                    },
+                    'moderate': {
+                        'values': [],
+                        'labels': 'Moderate'
+                    },
+                    'bad': {
+                        'values': [],
+                        'labels': 'Bad'
+                    },
+                    'unknown': {
+                        'values': [],
+                        'labels': 'Unknown'
+                    }
+                }
+            }
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        response_data = response.data
+
+        layer_id = response_data['id']
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='update-or-delete-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_READY_TO_PUBLISH,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='publish-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, _, view = accounts_url((), {
+            'layer_id': layer_id,
+            'country_id': 123,
+            'z': '2',
+            'x': '1',
+            'y': '2.mvt',
+        }, view_name='get-time-player-data-v2')
+
+        response = self.forced_auth_req('get', url, _, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
 
 class DataSourceApiTestCase(TestAPIViewSetMixin, TestCase):
-    databases = ['default']
+    databases = ['default', ]
 
     @classmethod
     def setUpTestData(cls):
@@ -450,7 +736,7 @@ class DataSourceApiTestCase(TestAPIViewSetMixin, TestCase):
         super().setUp()
 
     def test_list_data_sources_all(self):
-        url, view = accounts_url((), {}, view_name='list-or-create-data-sources')
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-sources')
 
         response = self.forced_auth_req('get', url, user=self.user, view=view)
 
@@ -463,7 +749,7 @@ class DataSourceApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(len(response_data['results']), 3)
 
     def test_list_data_sources_filter_on_status_published(self):
-        url, view = accounts_url((), {
+        url, _, view = accounts_url((), {
             'status': 'PUBLISHED'
         }, view_name='list-or-create-data-sources')
 
@@ -478,7 +764,7 @@ class DataSourceApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(len(response_data['results']), 3)
 
     def test_list_data_sources_filter_on_status_draft(self):
-        url, view = accounts_url((), {
+        url, _, view = accounts_url((), {
             'status': 'DRAFT'
         }, view_name='list-or-create-data-sources')
 
@@ -493,7 +779,7 @@ class DataSourceApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(len(response_data['results']), 0)
 
     def test_list_data_sources_filter_on_status_published_without_auth(self):
-        url, view = accounts_url((), {
+        url, _, view = accounts_url((), {
             'status': 'PUBLISHED'
         }, view_name='list-or-create-data-sources')
 
@@ -502,7 +788,7 @@ class DataSourceApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_delete_data_source_by_admin(self):
-        url, view = accounts_url((), {}, view_name='list-or-create-data-sources')
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-sources')
 
         response = self.forced_auth_req(
             'post',
@@ -526,8 +812,8 @@ class DataSourceApiTestCase(TestAPIViewSetMixin, TestCase):
 
         source_id = response_data['id']
 
-        url, view = accounts_url((source_id,), {},
-                                 view_name='update-or-delete-data-source')
+        url, _, view = accounts_url((source_id,), {},
+                                    view_name='update-or-delete-data-source')
 
         delete_response = self.forced_auth_req(
             'delete',
@@ -538,7 +824,7 @@ class DataSourceApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
 
     def test_publish_data_source_by_admin(self):
-        url, view = accounts_url((), {}, view_name='list-or-create-data-sources')
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-sources')
 
         response = self.forced_auth_req(
             'post',
@@ -562,8 +848,8 @@ class DataSourceApiTestCase(TestAPIViewSetMixin, TestCase):
 
         source_id = response_data['id']
 
-        url, view = accounts_url((source_id,), {},
-                                 view_name='publish-data-source')
+        url, _, view = accounts_url((source_id,), {},
+                                    view_name='publish-data-source')
 
         put_response = self.forced_auth_req(
             'put',
@@ -578,7 +864,7 @@ class DataSourceApiTestCase(TestAPIViewSetMixin, TestCase):
 
 
 class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
-    databases = ['default']
+    databases = ['default', ]
 
     @classmethod
     def setUpTestData(cls):
@@ -593,7 +879,7 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
         super().setUp()
 
     def test_list_data_layers_all(self):
-        url, view = accounts_url((), {}, view_name='list-or-create-data-layers')
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')
 
         response = self.forced_auth_req('get', url, user=self.admin_user, view=view)
 
@@ -606,7 +892,7 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(len(response_data['results']), 2)
 
     def test_list_data_layers_filter_on_status_published(self):
-        url, view = accounts_url((), {
+        url, _, view = accounts_url((), {
             'status': 'PUBLISHED'
         }, view_name='list-or-create-data-layers')
 
@@ -621,7 +907,7 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(len(response_data['results']), 2)
 
     def test_list_published_data_layers_for_admin(self):
-        url, view = accounts_url(('PUBLISHED',), {
+        url, _, view = accounts_url(('PUBLISHED',), {
         }, view_name='list-published-data-layers')
 
         response = self.forced_auth_req('get', url, user=self.admin_user, view=view)
@@ -635,7 +921,7 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(len(response_data['results']), 2)
 
     def test_list_published_data_layers_without_auth(self):
-        url, view = accounts_url(('PUBLISHED',), {
+        url, _, view = accounts_url(('PUBLISHED',), {
         }, view_name='list-published-data-layers')
 
         response = self.forced_auth_req('get', url, user=None, view=view)
@@ -649,7 +935,7 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(len(response_data['results']), 2)
 
     def test_list_published_data_layers_for_country(self):
-        url, view = accounts_url(('PUBLISHED',), {
+        url, _, view = accounts_url(('PUBLISHED',), {
             'country_id': 123456789,
         }, view_name='list-published-data-layers')
 
@@ -664,7 +950,7 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(len(response_data['results']), 0)
 
     def test_list_data_layers_filter_on_status_draft(self):
-        url, view = accounts_url((), {
+        url, _, view = accounts_url((), {
             'status': 'DRAFT'
         }, view_name='list-or-create-data-layers')
 
@@ -679,7 +965,7 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(len(response_data['results']), 0)
 
     def test_list_data_layers_filter_on_status_published_without_auth(self):
-        url, view = accounts_url((), {
+        url, _, view = accounts_url((), {
             'status': 'PUBLISHED'
         }, view_name='list-or-create-data-layers')
 
@@ -692,7 +978,7 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
             data_source_type=accounts_models.DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP,
         ).first()
 
-        url, view = accounts_url((), {}, view_name='list-or-create-data-layers')
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')
 
         response = self.forced_auth_req(
             'post',
@@ -707,6 +993,30 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                 'data_sources_list': [pcdc_data_source.id, ],
                 'data_source_column': pcdc_data_source.column_config[0],
+                'global_benchmark': {
+                    'value': '20000000',
+                    'unit': 'bps',
+                    'convert_unit': 'mbps'
+                },
+                'is_reverse': False,
+                'legend_configs': {
+                    'good': {
+                        'values': [],
+                        'labels': 'Good'
+                    },
+                    'moderate': {
+                        'values': [],
+                        'labels': 'Moderate'
+                    },
+                    'bad': {
+                        'values': [],
+                        'labels': 'Bad'
+                    },
+                    'unknown': {
+                        'values': [],
+                        'labels': 'Unknown'
+                    }
+                }
             }
         )
 
@@ -717,7 +1027,7 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
             data_source_type=accounts_models.DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP,
         ).first()
 
-        url, view = accounts_url((), {}, view_name='list-or-create-data-layers')
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')
 
         response = self.forced_auth_req(
             'post',
@@ -732,6 +1042,30 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                 'data_sources_list': [pcdc_data_source.id, ],
                 'data_source_column': pcdc_data_source.column_config[0],
+                'global_benchmark': {
+                    'value': '20000000',
+                    'unit': 'bps',
+                    'convert_unit': 'mbps'
+                },
+                'is_reverse': False,
+                'legend_configs': {
+                    'good': {
+                        'values': [],
+                        'labels': 'Good'
+                    },
+                    'moderate': {
+                        'values': [],
+                        'labels': 'Moderate'
+                    },
+                    'bad': {
+                        'values': [],
+                        'labels': 'Bad'
+                    },
+                    'unknown': {
+                        'values': [],
+                        'labels': 'Unknown'
+                    }
+                }
             }
         )
 
@@ -741,8 +1075,8 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
 
         layer_id = response_data['id']
 
-        url, view = accounts_url((layer_id,), {},
-                                 view_name='publish-data-layer')
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='publish-data-layer')
 
         put_response = self.forced_auth_req(
             'put',
@@ -760,7 +1094,7 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
             data_source_type=accounts_models.DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP,
         ).first()
 
-        url, view = accounts_url((), {}, view_name='list-or-create-data-layers')
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')
 
         response = self.forced_auth_req(
             'post',
@@ -775,6 +1109,30 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                 'data_sources_list': [pcdc_data_source.id, ],
                 'data_source_column': pcdc_data_source.column_config[0],
+                'global_benchmark': {
+                    'value': '20000000',
+                    'unit': 'bps',
+                    'convert_unit': 'mbps'
+                },
+                'is_reverse': False,
+                'legend_configs': {
+                    'good': {
+                        'values': [],
+                        'labels': 'Good'
+                    },
+                    'moderate': {
+                        'values': [],
+                        'labels': 'Moderate'
+                    },
+                    'bad': {
+                        'values': [],
+                        'labels': 'Bad'
+                    },
+                    'unknown': {
+                        'values': [],
+                        'labels': 'Unknown'
+                    }
+                }
             }
         )
 
@@ -784,8 +1142,8 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
 
         layer_id = response_data['id']
 
-        url, view = accounts_url((layer_id,), {},
-                                 view_name='update-or-delete-data-layer')
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='update-or-delete-data-layer')
 
         put_response = self.forced_auth_req(
             'delete',
@@ -800,7 +1158,7 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
             data_source_type=accounts_models.DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP,
         ).first()
 
-        url, view = accounts_url((), {}, view_name='list-or-create-data-layers')
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')
 
         response = self.forced_auth_req(
             'post',
@@ -815,6 +1173,30 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                 'data_sources_list': [pcdc_data_source.id, ],
                 'data_source_column': pcdc_data_source.column_config[0],
+                'global_benchmark': {
+                    'value': '20000000',
+                    'unit': 'bps',
+                    'convert_unit': 'mbps'
+                },
+                'is_reverse': False,
+                'legend_configs': {
+                    'good': {
+                        'values': [],
+                        'labels': 'Good'
+                    },
+                    'moderate': {
+                        'values': [],
+                        'labels': 'Moderate'
+                    },
+                    'bad': {
+                        'values': [],
+                        'labels': 'Bad'
+                    },
+                    'unknown': {
+                        'values': [],
+                        'labels': 'Unknown'
+                    }
+                }
             }
         )
 
@@ -824,8 +1206,8 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
 
         layer_id = response_data['id']
 
-        url, view = accounts_url((layer_id,), {},
-                                 view_name='update-or-delete-data-layer')
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='update-or-delete-data-layer')
 
         put_response = self.forced_auth_req(
             'put',
@@ -838,8 +1220,8 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
 
         self.assertEqual(put_response.status_code, status.HTTP_200_OK)
 
-        url, view = accounts_url((layer_id,), {},
-                                 view_name='publish-data-layer')
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='publish-data-layer')
 
         put_response = self.forced_auth_req(
             'put',
@@ -857,7 +1239,7 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
             data_source_type=accounts_models.DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP,
         ).first()
 
-        url, view = accounts_url((), {}, view_name='list-or-create-data-layers')
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')
 
         response = self.forced_auth_req(
             'post',
@@ -872,6 +1254,30 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                 'data_sources_list': [pcdc_data_source.id, ],
                 'data_source_column': pcdc_data_source.column_config[0],
+                'global_benchmark': {
+                    'value': '20000000',
+                    'unit': 'bps',
+                    'convert_unit': 'mbps'
+                },
+                'is_reverse': False,
+                'legend_configs': {
+                    'good': {
+                        'values': [],
+                        'labels': 'Good'
+                    },
+                    'moderate': {
+                        'values': [],
+                        'labels': 'Moderate'
+                    },
+                    'bad': {
+                        'values': [],
+                        'labels': 'Bad'
+                    },
+                    'unknown': {
+                        'values': [],
+                        'labels': 'Unknown'
+                    }
+                }
             }
         )
 
@@ -881,8 +1287,8 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
 
         layer_id = response_data['id']
 
-        url, view = accounts_url((layer_id,), {},
-                                 view_name='preview-data-layer')
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='preview-data-layer')
 
         put_response = self.forced_auth_req(
             'get',
@@ -897,7 +1303,7 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
             data_source_type=accounts_models.DataSource.DATA_SOURCE_TYPE_QOS,
         ).first()
 
-        url, view = accounts_url((), {}, view_name='list-or-create-data-layers')
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')
 
         response = self.forced_auth_req(
             'post',
@@ -912,6 +1318,30 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                 'data_sources_list': [qos_data_source.id, ],
                 'data_source_column': qos_data_source.column_config[0],
+                'global_benchmark': {
+                    'value': '20000000',
+                    'unit': 'bps',
+                    'convert_unit': 'mbps'
+                },
+                'is_reverse': False,
+                'legend_configs': {
+                    'good': {
+                        'values': [],
+                        'labels': 'Good'
+                    },
+                    'moderate': {
+                        'values': [],
+                        'labels': 'Moderate'
+                    },
+                    'bad': {
+                        'values': [],
+                        'labels': 'Bad'
+                    },
+                    'unknown': {
+                        'values': [],
+                        'labels': 'Unknown'
+                    }
+                }
             }
         )
 
@@ -921,8 +1351,8 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
 
         layer_id = response_data['id']
 
-        url, view = accounts_url((layer_id,), {},
-                                 view_name='preview-data-layer')
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='preview-data-layer')
 
         put_response = self.forced_auth_req(
             'get',
@@ -933,27 +1363,14 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(put_response.status_code, status.HTTP_200_OK)
 
     def test_preview_static_data_layer_by_admin(self):
-        master_data_source = accounts_models.DataSource.objects.filter(
-            data_source_type=accounts_models.DataSource.DATA_SOURCE_TYPE_SCHOOL_MASTER,
-        ).first()
-
-        url, view = accounts_url((), {}, view_name='list-or-create-data-layers')
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')
 
         response = self.forced_auth_req(
             'post',
             url,
             user=self.admin_user,
             view=view,
-            data={
-                'icon': '<icon>',
-                'name': 'Test data layer',
-                'description': 'Test data layer description',
-                'version': '1.0.0',
-                'type': accounts_models.DataLayer.LAYER_TYPE_STATIC,
-                'data_sources_list': [master_data_source.id, ],
-                'data_source_column': master_data_source.column_config[0],
-                'legend_configs': {},
-            }
+            data=accounts_test_utilities.static_coverage_layer_data()
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
@@ -962,8 +1379,8 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
 
         layer_id = response_data['id']
 
-        url, view = accounts_url((layer_id,), {},
-                                 view_name='preview-data-layer')
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='preview-data-layer')
 
         put_response = self.forced_auth_req(
             'get',
@@ -972,3 +1389,639 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
         )
 
         self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+
+class AdvanceFiltersApiTestCase(TestAPIViewSetMixin, TestCase):
+    databases = ['default', ]
+
+    def setUp(self):
+        cache.clear()
+        super().setUp()
+
+    def test_list_advance_filters(self):
+        url, _, view = accounts_url((), {}, view_name='list-advanced-filters')
+
+        response = self.forced_auth_req('get', url, _, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+
+        self.assertEqual(type(response_data), dict)
+        self.assertTrue(response_data['count'] > 0)
+        self.assertTrue(len(response_data['results']) > 0)
+
+
+class LogActionApiTestCase(TestAPIViewSetMixin, TestCase):
+    databases = ['default', ]
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin_user = test_utilities.setup_admin_user_by_role()
+        cls.read_only_user = test_utilities.setup_read_only_user_by_role()
+
+    def test_list_for_admin_user(self):
+        url, _, view = accounts_url((), {}, view_name='list-recent-action-log')
+
+        response = self.forced_auth_req('get', url, user=self.admin_user, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+
+        self.assertEqual(type(response_data), dict)
+        self.assertEqual(response_data['count'], 0)
+        self.assertEqual(len(response_data['results']), 0)
+
+    def test_list_for_readonly_user(self):
+        url, _, view = accounts_url((), {}, view_name='list-recent-action-log')
+
+        response = self.forced_auth_req('get', url, user=self.read_only_user, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class DataLayerMapApiTestCase(TestAPIViewSetMixin, TestCase):
+    databases = ['default', ]
+
+    @classmethod
+    def setUpTestData(cls):
+        args = ['--delete_data_sources', '--update_data_sources', '--update_data_layers']
+        call_command('load_system_data_layers', *args)
+
+        cls.admin_user = test_utilities.setup_admin_user_by_role()
+        cls.read_only_user = test_utilities.setup_read_only_user_by_role()
+
+        cls.country = CountryFactory()
+
+    def setUp(self):
+        cache.clear()
+        super().setUp()
+
+    def test_static_data_layer_map_country_view(self):
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.admin_user,
+            view=view,
+            data=accounts_test_utilities.static_coverage_layer_data()
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        response_data = response.data
+
+        layer_id = response_data['id']
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='update-or-delete-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_READY_TO_PUBLISH,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='publish-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, view, view_info = accounts_url(
+            (layer_id,),
+            {
+                'country_id': self.country.id,
+                'z': '8',
+                'x': '82',
+                'y': '114.mvt'
+            },
+            view_name='map-data-layer'
+        )
+
+        response = self.forced_auth_req(
+            'get',
+            url,
+            view=view,
+            view_info=view_info,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_static_data_layer_map_school_view(self):
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.admin_user,
+            view=view,
+            data=accounts_test_utilities.static_coverage_layer_data()
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        response_data = response.data
+
+        layer_id = response_data['id']
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='update-or-delete-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_READY_TO_PUBLISH,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='publish-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, view, view_info = accounts_url(
+            (layer_id,),
+            {
+                'country_id': self.country.id,
+                'school_id': '1234567',
+                'z': '8',
+                'x': '82',
+                'y': '114.mvt'
+            },
+            view_name='map-data-layer'
+        )
+
+        response = self.forced_auth_req(
+            'get',
+            url,
+            view=view,
+            view_info=view_info,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_live_data_layer_map_country_view(self):
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.admin_user,
+            view=view,
+            data=accounts_test_utilities.live_download_layer_data_pcdc(),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        response_data = response.data
+
+        layer_id = response_data['id']
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='update-or-delete-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_READY_TO_PUBLISH,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='publish-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, view, view_info = accounts_url(
+            (layer_id,),
+            {
+                'country_id': self.country.id,
+                'benchmark': 'global',
+                'start_date': '24-06-2024',
+                'end_date': '30-06-2024',
+                'is_weekly': 'true',
+                'z': '8',
+                'x': '82',
+                'y': '114.mvt'
+            },
+            view_name='map-data-layer'
+        )
+
+        response = self.forced_auth_req(
+            'get',
+            url,
+            view=view,
+            view_info=view_info,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_live_data_layer_map_school_view(self):
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.admin_user,
+            view=view,
+            data=accounts_test_utilities.live_download_layer_data_pcdc(),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        response_data = response.data
+
+        layer_id = response_data['id']
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='update-or-delete-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_READY_TO_PUBLISH,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='publish-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, view, view_info = accounts_url(
+            (layer_id,),
+            {
+                'country_id': self.country.id,
+                'school_id': '1234568',
+                'benchmark': 'global',
+                'start_date': '24-06-2024',
+                'end_date': '30-06-2024',
+                'is_weekly': 'true',
+                'z': '8',
+                'x': '82',
+                'y': '114.mvt'
+            },
+            view_name='map-data-layer'
+        )
+
+        response = self.forced_auth_req(
+            'get',
+            url,
+            view=view,
+            view_info=view_info,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+
+class DataLayerInfoApiTestCase(TestAPIViewSetMixin, TestCase):
+    databases = ['default', ]
+
+    @classmethod
+    def setUpTestData(cls):
+        args = ['--delete_data_sources', '--update_data_sources', '--update_data_layers']
+        call_command('load_system_data_layers', *args)
+
+        cls.admin_user = test_utilities.setup_admin_user_by_role()
+        cls.read_only_user = test_utilities.setup_read_only_user_by_role()
+
+        cls.country = CountryFactory()
+        cls.school = SchoolFactory()
+
+    def setUp(self):
+        cache.clear()
+        super().setUp()
+
+    def test_static_data_layer_map_country_view(self):
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.admin_user,
+            view=view,
+            data=accounts_test_utilities.static_coverage_layer_data()
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        response_data = response.data
+
+        layer_id = response_data['id']
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='update-or-delete-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_READY_TO_PUBLISH,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='publish-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, view, view_info = accounts_url(
+            (layer_id,),
+            {
+                'country_id': self.country.id,
+            },
+            view_name='info-data-layer'
+        )
+
+        response = self.forced_auth_req(
+            'get',
+            url,
+            view=view,
+            view_info=view_info,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_static_data_layer_map_school_view(self):
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.admin_user,
+            view=view,
+            data=accounts_test_utilities.static_coverage_layer_data()
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        response_data = response.data
+
+        layer_id = response_data['id']
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='update-or-delete-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_READY_TO_PUBLISH,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='publish-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, view, view_info = accounts_url(
+            (layer_id,),
+            {
+                'country_id': self.country.id,
+                'school_id': '1234567',
+            },
+            view_name='info-data-layer'
+        )
+
+        response = self.forced_auth_req(
+            'get',
+            url,
+            view=view,
+            view_info=view_info,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_live_data_layer_map_country_view(self):
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.admin_user,
+            view=view,
+            data=accounts_test_utilities.live_download_layer_data_pcdc(),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        response_data = response.data
+
+        layer_id = response_data['id']
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='update-or-delete-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_READY_TO_PUBLISH,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='publish-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, view, view_info = accounts_url(
+            (layer_id,),
+            {
+                'country_id': self.country.id,
+                'benchmark': 'global',
+                'start_date': '24-06-2024',
+                'end_date': '30-06-2024',
+                'is_weekly': 'true',
+            },
+            view_name='info-data-layer'
+        )
+
+        response = self.forced_auth_req(
+            'get',
+            url,
+            view=view,
+            view_info=view_info,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_live_data_layer_map_school_view(self):
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.admin_user,
+            view=view,
+            data=accounts_test_utilities.live_download_layer_data_pcdc(),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        response_data = response.data
+
+        layer_id = response_data['id']
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='update-or-delete-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_READY_TO_PUBLISH,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='publish-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, view, view_info = accounts_url(
+            (layer_id,),
+            {
+                'country_id': self.country.id,
+                'school_id': '123456',
+                'benchmark': 'global',
+                'start_date': '24-06-2024',
+                'end_date': '30-06-2024',
+                'is_weekly': 'true',
+            },
+            view_name='info-data-layer'
+        )
+
+        response = self.forced_auth_req(
+            'get',
+            url,
+            view=view,
+            view_info=view_info,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+
+class InvalidateCacheApiTestCase(TestAPIViewSetMixin, TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin_user = test_utilities.setup_admin_user_by_role()
+        cls.read_only_user = test_utilities.setup_read_only_user_by_role()
+
+    def test_hard_cache_clean_for_admin(self):
+        url, view, view_info = accounts_url((), {'hard': 'true'}, view_name='admin-invalidate-cache')
+
+        response = self.forced_auth_req('get', url, user=self.admin_user, view=view, view_info=view_info)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_soft_cache_clean_for_admin(self):
+        url, view, view_info = accounts_url((), {'hard': 'false'}, view_name='admin-invalidate-cache')
+
+        response = self.forced_auth_req('get', url, user=self.admin_user, view=view, view_info=view_info)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)

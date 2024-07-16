@@ -10,11 +10,10 @@ from proco.custom_auth import models as auth_models
 
 class ContactAPITestCase(TestAPIViewSetMixin, TestCase):
     base_view = 'contact:'
-    databases = {'read_only_database', 'default'}
+    databases = {'default', }
 
     @classmethod
     def setUpTestData(cls):
-        # self.databases = 'default'
         cls.email = 'test@test.com'
         cls.password = 'SomeRandomPass96'
         cls.user = auth_models.ApplicationUser.objects.create_user(username=cls.email, password=cls.password)

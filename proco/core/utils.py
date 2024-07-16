@@ -3,6 +3,7 @@ import hashlib
 import locale
 import random
 import re
+import logging
 from decimal import Decimal
 
 import pytz
@@ -11,6 +12,7 @@ from django.utils import timezone
 
 from proco.core.config import app_config as core_config
 
+logger = logging.getLogger('gigamaps.' + __name__)
 
 def get_timezone_converted_value(value, tz=settings.TIME_ZONE):
     """
@@ -186,24 +188,16 @@ def get_random_choice(choices):
     return random.choice(choices)
 
 
-def get_sender_email():
-    """
-    get email id for sending emails
-    :return:
-    """
-    emails = settings.DEFAULT_FROM_EMAIL
-    email_options = emails.split(',')
-    return get_random_choice(email_options)
-
-
 def get_support_email():
     """
     get email id for sending emails
     :return:
     """
     emails = settings.SUPPORT_EMAIL_ID
-    email_options = emails.split(',')
-    return get_random_choice(email_options)
+    if len(emails) > 0:
+        email_options = emails.split(',')
+        return get_random_choice(email_options)
+    return ''
 
 
 def get_project_title():
@@ -233,7 +227,7 @@ def queryset_iterator(queryset, chunk_size=1000, print_msg=True):
     Note that the implementation of the iterator does not support ordered query sets.
     """
     if not queryset:
-        print('Queryset has not data to iterate over: {0}'.format(queryset.query))
+        logger.debug('Queryset has not data to iterate over: {0}'.format(queryset.query))
         return list(queryset)
 
     pk = 0
@@ -241,7 +235,7 @@ def queryset_iterator(queryset, chunk_size=1000, print_msg=True):
     queryset = queryset.order_by('pk')
     while pk < last_pk:
         if print_msg:
-            print('Current selection query: {0}'.format(queryset.filter(pk__gt=pk)[:chunk_size].query))
+            logger.debug('Current selection query: {0}'.format(queryset.filter(pk__gt=pk)[:chunk_size].query))
         row = list(queryset.filter(pk__gt=pk)[:chunk_size])
         pk = row[-1].pk
         yield row
@@ -300,7 +294,7 @@ def bulk_create_or_update(records, model, unique_fields, batch_size=1000):
     ]
 
     if len(records_to_create) > 0:
-        print('Total records to create: {}'.format(len(records_to_create)))
+        logger.debug('Total records to create: {}'.format(len(records_to_create)))
         # Remove the 'id' field, as these will all hold a value of None,
         # since these records do not already exist in the DB
         [record.pop('id') for record in records_to_create]
@@ -310,7 +304,7 @@ def bulk_create_or_update(records, model, unique_fields, batch_size=1000):
         )
 
     if len(records_to_update) > 0:
-        print('Total records to update: {}'.format(len(records_to_update)))
+        logger.debug('Total records to update: {}'.format(len(records_to_update)))
         for f in unique_fields:
             [record.pop(f) for record in records_to_update]
 
@@ -323,3 +317,82 @@ def bulk_create_or_update(records, model, unique_fields, batch_size=1000):
             batch_size=batch_size,
         )
 
+
+def get_filter_sql(request, filter_key, table_name):
+    filter_fields = core_config.get_giga_filter_fields[filter_key]
+    query_params = request.query_params.dict()
+
+    advance_filters = set(filter_fields) & set(query_params.keys())
+
+    sql_list = []
+    for field_filter in advance_filters:
+        filter_value = str(query_params[field_filter]).lower()
+        sql_str = None
+        field_name = None
+
+        if field_filter.endswith('__iexact'):
+            field_name = field_filter.replace('__iexact', '')
+
+            if filter_value == 'none':
+                sql_str = """coalesce(TRIM({table_name}."{field_name}"), '') = ''"""
+            else:
+                sql_str = """LOWER({table_name}."{field_name}") = '{value}'"""
+        elif field_filter.endswith('__on'):
+            field_name = field_filter.replace('__on', '')
+
+            if filter_value == 'none':
+                sql_str = """{table_name}."{field_name}" IS NULL"""
+            else:
+                sql_str = """{table_name}."{field_name}" = {value}"""
+        elif field_filter.endswith('__range'):
+            field_name = field_filter.replace('__range', '')
+
+            start, end = filter_value.split(',')
+            if start != 'null':
+                sql_list.append("""{table_name}."{field_name}" >= {value}""".format(
+                    table_name=table_name,
+                    field_name=field_name,
+                    value=start,
+                ))
+            if end != 'null':
+                sql_list.append("""{table_name}."{field_name}" <= {value}""".format(
+                    table_name=table_name,
+                    field_name=field_name,
+                    value=end,
+                ))
+        elif field_filter.endswith('__none_range'):
+            field_name = field_filter.replace('__none_range', '')
+            none_sql_str = """{table_name}."{field_name}" IS NULL""".format(
+                table_name=table_name,
+                field_name=field_name,
+            )
+
+            start, end = filter_value.split(',')
+            range_sql_list = []
+            if start != 'null':
+                range_sql_list.append("""{table_name}."{field_name}" >= {value}""".format(
+                    table_name=table_name,
+                    field_name=field_name,
+                    value=start,
+                ))
+            if end != 'null':
+                range_sql_list.append("""{table_name}."{field_name}" <= {value}""".format(
+                    table_name=table_name,
+                    field_name=field_name,
+                    value=end,
+                ))
+            if len(range_sql_list) == 0:
+                sql_list.append(none_sql_str)
+            elif len(range_sql_list) == 1:
+                sql_list.append('(' + none_sql_str + ' OR ' + range_sql_list[0] + ')')
+            elif len(range_sql_list) == 2:
+                sql_list.append('(' + none_sql_str + ' OR (' + range_sql_list[0] + ' AND ' + range_sql_list[1] + '))')
+        elif field_filter.endswith('__in'):
+            field_name = field_filter.replace('__in', '')
+            filter_value = ','.join(["'" + str(f).lower() + "'" for f in filter_value.split(',')])
+            sql_str = """LOWER({table_name}."{field_name}") IN ({value})"""
+
+        if sql_str:
+            sql_list.append(sql_str.format(table_name=table_name, field_name=field_name, value=filter_value))
+
+    return ' AND '.join(sql_list)

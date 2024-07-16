@@ -1,11 +1,11 @@
-import traceback
+from datetime import datetime
 
+import pytz
+import uuid
+from django.core.cache import cache
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework import status
-from django.core.cache import cache
-from datetime import datetime
-import pytz, uuid
 
 from proco.background.models import BackgroundTask
 from proco.custom_auth import models as auth_models
@@ -14,11 +14,10 @@ from proco.utils.tests import TestAPIViewSetMixin
 
 class BackgroundTaskTestCase(TestAPIViewSetMixin, TestCase):
     base_view = 'background:'
-    databases = {'read_only_database', 'default'}
+    databases = {'default', }
 
     @classmethod
     def setUpTestData(cls):
-        # self.databases = 'default'
         cls.email = 'test@test.com'
         cls.password = 'SomeRandomPass96'
         cls.user = auth_models.ApplicationUser.objects.create_user(username=cls.email, password=cls.password)
@@ -36,7 +35,7 @@ class BackgroundTaskTestCase(TestAPIViewSetMixin, TestCase):
         cache.clear()
         super().setUp()
 
-    def test_retrive(self):
+    def test_retrieve(self):
         response = self.forced_auth_req(
             'get',
             reverse(self.base_view + "update_or_retrieve_backgroundtask", args=(self.task.task_id,)),
@@ -58,7 +57,7 @@ class BackgroundTaskTestCase(TestAPIViewSetMixin, TestCase):
 
 class BackgroundTaskHistoryTestCase(TestAPIViewSetMixin, TestCase):
     base_view = 'background:'
-    databases = {'default', 'read_only_database'}
+    databases = {'default', }
 
     def setUp(self):
         self.email = 'test@test.com'

@@ -15,6 +15,7 @@ app.autodiscover_tasks(lambda: settings.INSTALLED_APPS)
 app.conf.timezone = 'UTC'
 app.conf.broker_transport_options = {"visibility_timeout": 36000}  # 10h
 app.conf.worker_deduplicate_successful_tasks = True
+app.conf.redbeat_lock_key = None
 
 
 @app.on_after_finalize.connect
@@ -46,7 +47,7 @@ def finalize_setup(sender, **kwargs):
         'proco.data_sources.tasks.update_static_data': {
             'task': 'proco.data_sources.tasks.update_static_data',
             # Executes at 4:00 AM every day
-            'schedule': crontab(hour=3, minute=0),  # crontab(hour=1, minute=0, day_of_week='mon'),
+            'schedule': crontab(hour='*/4', minute=47),  # crontab(hour=1, minute=0, day_of_week='mon'),
             'args': (),
         },
         'proco.data_sources.tasks.update_live_data': {
@@ -87,6 +88,11 @@ def finalize_setup(sender, **kwargs):
         'proco.data_sources.tasks.clean_old_live_data': {
             'task': 'proco.data_sources.tasks.clean_old_live_data',
             'schedule': crontab(hour=5, minute=10),
+            'args': (),
+        },
+        'proco.utils.tasks.duplicate_task_test': {
+            'task': 'proco.utils.tasks.duplicate_task_test',
+            'schedule': crontab(minute='*/20'),
             'args': (),
         },
         # 'drf_secure_token.tasks.delete_old_tokens': DELETE_OLD_TOKENS,

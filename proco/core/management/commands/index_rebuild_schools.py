@@ -2,6 +2,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import time
+import logging
 
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
@@ -16,6 +17,8 @@ from proco.locations.models import Country
 from proco.locations.search_indexes import SchoolIndex
 from proco.schools.models import School
 
+logger = logging.getLogger('gigamaps.' + __name__)
+
 # Create a service client
 cognitive_search_settings = settings.AZURE_CONFIG.get('COGNITIVE_SEARCH')
 
@@ -27,10 +30,10 @@ def delete_index():
 
     try:
         result = admin_client.delete_index(SchoolIndex.Meta.index_name)
-        print('Index', SchoolIndex.Meta.index_name, 'Deleted')
-        print(result)
+        logger.debug('Index: ', SchoolIndex.Meta.index_name, 'Deleted')
+        logger.debug(result)
     except Exception as ex:
-        print(ex)
+        logger.error(ex)
 
 
 def create_index():
@@ -48,7 +51,7 @@ def create_index():
     cors_options = CorsOptions(allowed_origins=['*'], max_age_in_seconds=24 * 60 * 60)
     scoring_profiles = []
 
-    print('Index name: ', SchoolIndex.Meta.index_name)
+    logger.debug('Index name: ', SchoolIndex.Meta.index_name)
 
     index = SearchIndex(
         name=SchoolIndex.Meta.index_name,
@@ -59,9 +62,9 @@ def create_index():
 
     try:
         result = admin_client.create_index(index)
-        print('Index', result.name, 'created')
+        logger.debug('Index: ', result.name, 'created')
     except Exception as ex:
-        print(ex)
+        logger.error(ex)
 
 
 def clear_index():
@@ -69,11 +72,12 @@ def clear_index():
                                  AzureKeyCredential(cognitive_search_settings['SEARCH_API_KEY']))
 
     doc_counts = search_client.get_document_count()
-    print("There are {0} documents in the {1} search index.".format(doc_counts, repr(SchoolIndex.Meta.index_name)))
+    logger.debug("There are {0} documents in the {1} search index.".format(
+        doc_counts, repr(SchoolIndex.Meta.index_name)))
 
     if doc_counts > 0:
         all_docs = search_client.search('*')
-        print('All documents: {0}'.format(all_docs))
+        logger.debug('All documents: {0}'.format(all_docs))
 
         search_client.delete_documents(all_docs)
 
@@ -112,7 +116,7 @@ def collect_data(country_id):
             del qry_data['admin2_id']
         docs.append(qry_data)
 
-    print('Total records to upload: {0}'.format(len(docs)))
+    logger.debug('Total records to upload: {0}'.format(len(docs)))
     # docs = docs[0:100000]
     # print('Total records to upload: {0}'.format(len(docs)))
     return docs
@@ -130,13 +134,14 @@ def upload_docs(search_client, headers, data_chunk, failed_data_chunks, count, r
     while retry_no <= 3 and not uploaded:
         try:
             result = search_client.upload_documents(documents=data_chunk, headers=headers)
-            print("Upload of new document SUCCEEDED for count '{0}' in retry no: '{1}': {2}".format(
+            logger.debug("Upload of new document succeeded for count '{0}' in retry no: '{1}': {2}".format(
                 count, retry_no, result[0].succeeded)
             )
             uploaded = True
             break
         except Exception as ex:
-            print("Upload of new document FAILED for count '{0}' in retry no: '{1}': {2}".format(count, retry_no, ex))
+            logger.error(
+                "Upload of new document failed for count '{0}' in retry no: '{1}': {2}".format(count, retry_no, ex))
             time.sleep(1.0)
             retry_no += 1
             uploaded = upload_docs(search_client, headers, data_chunk, failed_data_chunks, count, retry_no=retry_no)
@@ -160,7 +165,7 @@ def load_index(docs, batch_size=1000):
     for data_chunk in divide_chunks(docs, batch_size=batch_size):
         uploaded = upload_docs(search_client, headers, data_chunk, failed_data_chunks, count, retry_no=1)
         if not uploaded:
-            print('ERROR: Failed to upload the docs even after 3 retries. Please check error file for more details.')
+            logger.error('Failed to upload the docs even after 3 retries. Please check error file for more details.')
             failed_data_chunks.append(data_chunk)
 
         time.sleep(1.0)
@@ -197,29 +202,29 @@ class Command(BaseCommand):
         )
 
     def handle(self, **options):
-        print('*** Index operations STARTED ({0}) ***'.format(SchoolIndex.Meta.index_name))
+        logger.debug('Index operations STARTED ({0})'.format(SchoolIndex.Meta.index_name))
         if settings.ENABLE_AZURE_COGNITIVE_SEARCH:
             country_id = options.get('country_id', False)
 
             if options.get('delete_index', False):
-                print('DELETE_INDEX - START')
+                logger.info('Delete index - Start')
                 delete_index()
 
             if options.get('create_index', False):
-                print('CREATE_INDEX - START')
+                logger.info('Create index - Start')
                 create_index()
 
             if options.get('clean_index', False):
-                print('CLEAR_INDEX - START')
+                logger.info('Clear index - Start')
                 clear_index()
 
             if options.get('update_index', False):
-                print('COLLECT_INDEX_DATA - START')
+                logger.info('Collect index data - Start')
                 if country_id:
                     data_to_load = collect_data(country_id)
 
                     if len(data_to_load) > 0:
-                        print('LOAD_INDEX - START - {0}'.format(country_id))
+                        logger.debug('Load index - Start - {0}'.format(country_id))
                         load_index(data_to_load, batch_size=10000)
                 else:
                     all_countries = list(
@@ -229,7 +234,7 @@ class Command(BaseCommand):
                         data_to_load = collect_data(country_id)
 
                         if len(data_to_load) > 0:
-                            print('LOAD_INDEX - START - {0}'.format(country_id))
+                            logger.debug('Load index - Start - {0}'.format(country_id))
                             load_index(data_to_load, batch_size=10000)
 
-        print('*** Index operations ENDED ({0}) ***'.format(SchoolIndex.Meta.index_name))
+        logger.debug('Index operations ENDED ({0})'.format(SchoolIndex.Meta.index_name))

@@ -51,7 +51,7 @@ class TestSchoolWeeklyStatusModel(TestCase):
         cls.school_weekly = SchoolWeeklyStatusFactory(
             school=cls.school,
             connectivity=True, connectivity_speed=3 * (10 ** 6),
-            coverage_availability=True, coverage_type='3g',
+            coverage_availability=True, coverage_type='4g',
         )
 
         cls.school.last_weekly_status = cls.school_weekly

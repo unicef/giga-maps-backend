@@ -1,3 +1,5 @@
+import logging
+
 from django.core.management import call_command
 from django.core.management.base import BaseCommand
 from django.core.validators import validate_email
@@ -9,16 +11,18 @@ from proco.core.utils import get_current_datetime_object, get_random_string
 from proco.custom_auth.models import ApplicationUser
 from proco.utils import dates as date_utilities
 
+logger = logging.getLogger('gigamaps.' + __name__)
+
 
 def get_user(email, force_user, first_name, last_name, inactive_email):
-    print('Validating: {0}'.format(email))
+    logger.debug('Validating: {0}'.format(email))
     validate_email(email)
 
     application_user = ApplicationUser.objects.all().annotate(email_lower=Lower('email')).filter(
         email_lower=str(email).lower()).first()
 
     if not application_user and force_user:
-        print('Creating the superuser as user with given email does not exist.')
+        logger.info('Creating the superuser as user with given email does not exist.')
         args = ['-email={0}'.format(email)]
         if first_name:
             args.append('-first_name={0}'.format(first_name))
@@ -32,10 +36,10 @@ def get_user(email, force_user, first_name, last_name, inactive_email):
         application_user = ApplicationUser.objects.all().annotate(email_lower=Lower('email')).filter(
             email_lower=str(email).lower()).first()
     elif application_user:
-        print('User with given email already exists.')
+        logger.info('User with given email already exists.')
     else:
-        print('ERROR: User with give email address is not present in the system. '
-              'To force this user, please pass --force_user argument.')
+        logger.error('User with give email address is not present in the system. '
+                     'To force this user, please pass --force_user argument.')
         exit(0)
     return application_user
 
@@ -82,7 +86,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, **options):
-        print('Creating API Key with write access....')
+        logger.info('Creating API Key with write access.')
         user_email = options.get('user_email')
         force_user = options.get('force_user')
 
@@ -109,7 +113,7 @@ class Command(BaseCommand):
             api_key_instance.write_access_reason = reason
             api_key_instance.valid_to = valid_till_date
             api_key_instance.save(update_fields=('write_access_reason', 'valid_to',))
-            print('API Key with write access updated successfully!\n')
+            logger.info('Api key with write access updated successfully!\n')
         else:
             api_key_instance = accounts_models.APIKey.objects.create(
                 api=get_object_or_404(accounts_models.API.objects.all(), code=api_code),
@@ -120,7 +124,6 @@ class Command(BaseCommand):
                 has_write_access=True,
                 write_access_reason=reason,
             )
-            print('API Key with write access created successfully!\n')
+            logger.info('Api key with write access created successfully!\n')
 
-        print('API Key: {0}'.format(api_key_instance.api_key))
-        print('\n')
+        logger.debug('Api key: {0}'.format(api_key_instance.api_key))

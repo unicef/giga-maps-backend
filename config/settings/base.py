@@ -1,3 +1,6 @@
+import json
+import os
+import sys
 import warnings
 
 import environ
@@ -34,7 +37,7 @@ AUTH_USER_MODEL = 'custom_auth.ApplicationUser'
 # --------------------------------------------------------------------------
 
 DJANGO_APPS = [
-    'config.apps.CustomAdminConfig',
+    'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
@@ -73,12 +76,9 @@ LOCAL_APPS = [
     'proco.locations',
     'proco.connection_statistics',
     'proco.contact',
-    'proco.dailycheckapp_contact',
     'proco.background',
-    'proco.realtime_unicef',
-    'proco.realtime_dailycheckapp',
     'proco.proco_data_migrations',
-    'proco.data_sources'
+    'proco.data_sources',
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -342,7 +342,6 @@ ADMIN_REORDER = (
     'schools',
     'background',
     'contact',
-    'dailycheckapp_contact',
     'accounts',
     'data_sources',
 )
@@ -350,7 +349,6 @@ ADMIN_REORDER = (
 RANDOM_SCHOOLS_DEFAULT_AMOUNT = env('RANDOM_SCHOOLS_DEFAULT_AMOUNT', default=20000)
 
 CONTACT_MANAGERS = env.list('CONTACT_MANAGERS', default=['test@test.test'])
-DAILYCHECKAPP_CONTACT_MANAGERS = env.list('DAILYCHECKAPP_CONTACT_MANAGERS', default=['test@test.test'])
 
 CONSTANCE_REDIS_CONNECTION = env('REDIS_URL', default='redis://localhost:6379/0')
 CONSTANCE_ADDITIONAL_FIELDS = {
@@ -361,7 +359,6 @@ CONSTANCE_ADDITIONAL_FIELDS = {
 }
 CONSTANCE_CONFIG = {
     'CONTACT_EMAIL': ('', 'Email to receive contact messages', 'email_input'),
-    'DAILYCHECKAPP_CONTACT_EMAIL': ('', 'Email to receive dailycheckapp_contact messages', 'email_input'),
 }
 
 # Cache control headers
@@ -436,4 +433,48 @@ DATA_SOURCE_CONFIG = {
 
 INVALIDATE_CACHE_HARD = env('INVALIDATE_CACHE_HARD', default='false')
 
+with open(os.path.join(BASE_DIR, 'proco', 'core', 'resources', 'filters.json')) as filters_json_file:
+    FILTERS_DATA = json.load(filters_json_file)
+
 # DATABASE_ROUTERS = ["proco.utils.read_db_router.StandbyRouter"]
+
+GIGAMAPS_LOG_LEVEL = env('GIGAMAPS_LOG_LEVEL', default='INFO')
+
+# LOGGING
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'filters': {
+        'require_debug_false': {
+            '()': 'django.utils.log.RequireDebugFalse',
+        },
+        'require_debug_true': {
+            '()': 'django.utils.log.RequireDebugTrue',
+        },
+        'hostname_filter': {
+            '()': 'proco.core.filters.HostInfoFilter',
+        },
+    },
+    'formatters': {
+        'verbose': {
+            'format': '%(hostname)s %(hostip)s %(asctime)s %(levelname)s %(pathname)s %(process)d '
+                      '%(processName)s %(thread)d: %(message)s'
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': GIGAMAPS_LOG_LEVEL,
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+            'stream': sys.stderr,
+            'filters': ['hostname_filter'],
+        },
+    },
+    'loggers': {
+        'gigamaps': {
+            'level': GIGAMAPS_LOG_LEVEL,
+            'handlers': ['console'],
+            'filters': ['hostname_filter'],
+        },
+    },
+}

@@ -375,7 +375,6 @@ class PublishSchoolMasterDataSerializer(serializers.ModelSerializer):
             raise source_exceptions.InvalidSchoolMasterDataRowStatusError(message_kwargs=message_kwargs)
 
     def delete_all_related_rows(self, instance):
-        print('Deleting all the row for same school giga id: {0}'.format(instance.school_id_giga))
         sources_models.SchoolMasterData.objects.filter(
             school_id_giga=instance.school_id_giga,
         ).exclude(

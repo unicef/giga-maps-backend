@@ -28,11 +28,10 @@ from proco.utils.dates import get_current_week, get_current_year
 
 
 class AggregateConnectivityDataTestCase(TestCase):
-    databases = ['default', 'read_only_database']
+    databases = ['default',]
+
     @classmethod
     def setUpTestData(cls):
-        # cls.databases = ['default']
-        # cls.databases = ['default', 'read_only_database']
         cls.country = CountryFactory()
         cls.school = SchoolFactory(country=cls.country)
         RealTimeConnectivityFactory(school=cls.school, connectivity_speed=4000000)

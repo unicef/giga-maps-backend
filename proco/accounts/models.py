@@ -122,7 +122,7 @@ class APIKey(core_models.BaseModel):
         ordering = ['last_modified_at']
 
 
-class APIKeyCountryRelationship(core_models.BaseModel):
+class APIKeyCountryRelationship(core_models.BaseModelMixin):
     """
     APIKeyCountryRelationship
         This model is used to store the Api Key and Country relationship.
@@ -314,6 +314,14 @@ class DataLayer(core_models.BaseModel):
     icon = models.TextField(null=True, blank=True)
 
     # Unique
+    code = models.CharField(
+        max_length=255,
+        null=False,
+        verbose_name='Layer Code',
+        default='UNKNOWN',
+        db_index=True,
+    )
+
     name = models.CharField(
         max_length=255,
         null=False,
@@ -360,8 +368,12 @@ class DataLayer(core_models.BaseModel):
     class Meta:
         ordering = ['last_modified_at']
 
+    def save(self, **kwargs):
+        self.code = str(self.code).upper()
+        super().save(**kwargs)
 
-class DataLayerDataSourceRelationship(core_models.BaseModel):
+
+class DataLayerDataSourceRelationship(core_models.BaseModelMixin):
     """
     DataLayerDataSourceRelationship
         This model is used to store the Data Layer and Data Source relationship.
@@ -376,7 +388,7 @@ class DataLayerDataSourceRelationship(core_models.BaseModel):
         ordering = ['last_modified_at']
 
 
-class DataLayerCountryRelationship(core_models.BaseModel):
+class DataLayerCountryRelationship(core_models.BaseModelMixin):
     """
     DataLayerCountryRelationship
         This model is used to store the Data Layer and Country relationship.

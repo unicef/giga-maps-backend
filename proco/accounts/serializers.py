@@ -128,15 +128,6 @@ class APIsListSerializer(FlexFieldsModelSerializer):
         return False
 
     def apply_api_key_filters(self, filters):
-        """
-        filters = {
-            'country_id': '144',
-            'start_date': '22-09-2023',
-            'end_date': '28-09-2023',
-            'is_weekly': 'true',
-            'is_export': 'true',
-        }
-        """
         return filters if isinstance(filters, dict) > 0 else {}
 
     def get_download_url(self, api_instance):
@@ -157,8 +148,10 @@ class APIsListSerializer(FlexFieldsModelSerializer):
 
     def get_report_title(self, api_instance):
         report_file_name = api_instance.report_title
-        if (api_instance.category == accounts_models.API.API_CATEGORY_PUBLIC and
-            core_utilities.is_blank_string(report_file_name)):
+        if (
+            api_instance.category == accounts_models.API.API_CATEGORY_PUBLIC and
+            core_utilities.is_blank_string(report_file_name)
+        ):
             report_file_name = str('_'.join([api_instance.name, api_instance.category, '{dt}']))
 
         return report_file_name.format(
@@ -361,9 +354,11 @@ class CreateAPIKeysSerializer(serializers.ModelSerializer):
 
         # If API key is created for a Public API, then update status as APPROVED
         # If API key is created by Admin/Superuser, then also mark it as APPROVED
-        if api_instance and api_instance.category == accounts_models.API.API_CATEGORY_PUBLIC:
-            return accounts_models.APIKey.APPROVED
-        elif core_utilities.is_superuser(request_user):
+        if (
+            (api_instance and api_instance.category == accounts_models.API.API_CATEGORY_PUBLIC) or
+            core_utilities.is_superuser(request_user) or
+            request_user.permissions.get(auth_models.RolePermission.CAN_APPROVE_REJECT_API_KEY, False)
+        ):
             return accounts_models.APIKey.APPROVED
         return accounts_models.APIKey.INITIATED
 
@@ -648,7 +643,7 @@ class UpdateAPIKeysForExtensionSerializer(serializers.ModelSerializer):
         )
         if has_active_request:
             message_kwargs = {
-                'msg': f'Invalid API Key Extension Request as an active request already logged'
+                'msg': 'Invalid API Key Extension Request as an active request already logged'
             }
             raise accounts_exceptions.InvalidAPIKeyExtensionError(message_kwargs=message_kwargs)
 
@@ -665,7 +660,7 @@ class UpdateAPIKeysForExtensionSerializer(serializers.ModelSerializer):
         ):
             return extension_valid_to
         message_kwargs = {
-            'msg': f'Invalid API Key Extension Request Date as only 365 days extension is allowed from the current date'
+            'msg': 'Invalid API Key Extension Request Date as only 365 days extension is allowed from the current date'
         }
         raise accounts_exceptions.InvalidAPIKeyExtensionError(message_kwargs=message_kwargs)
 
@@ -808,8 +803,6 @@ class SendNotificationSerializer(serializers.ModelSerializer):
                 for email in recipients:
                     validate_email(email)
                 return recipients
-
-            print('Invalid Email Id email: {0}'.format(str(recipients)))
             raise accounts_exceptions.InvalidEmailId()
         # For SMS notification
         elif message_type == accounts_models.Message.TYPE_SMS:
@@ -821,8 +814,6 @@ class SendNotificationSerializer(serializers.ModelSerializer):
                     ):
                         raise accounts_exceptions.InvalidPhoneNumberError()
                 return recipients
-
-            print('Invalid phone nos: {0}'.format(str(recipients)))
             raise accounts_exceptions.InvalidPhoneNumberError()
         elif message_type == accounts_models.Message.TYPE_NOTIFICATION:
             if isinstance(recipients, list):
@@ -834,8 +825,6 @@ class SendNotificationSerializer(serializers.ModelSerializer):
                     ):
                         raise accounts_exceptions.InvalidUserIdError()
                 return recipients
-
-            print('Invalid user ids: {0}'.format(str(recipients)))
             raise accounts_exceptions.InvalidPhoneNumberError()
 
         return recipients
@@ -947,21 +936,11 @@ class BaseDataSourceCRUDSerializer(serializers.ModelSerializer):
     column_config = serializers.JSONField()
 
     def validate_name(self, name):
-        if re.match(r'[a-zA-Z0-9-\' _()]*$', name):
+        if re.match(account_config.valid_name_pattern, name):
             if accounts_models.DataSource.objects.filter(name=name).exists():
                 raise accounts_exceptions.DuplicateDataSourceNameError(message_kwargs={'name': name})
             return name
         raise accounts_exceptions.InvalidDataSourceNameError()
-
-    # def validate_request_config(self, request_config):
-    #     if isinstance(request_config, dict):
-    #         if (
-    #             not core_utilities.is_blank_string(request_config.get('url', None)) and
-    #             not core_utilities.is_blank_string(request_config.get('method', None)) and
-    #             request_config.get('method').lower() in ['get', 'post']
-    #         ):
-    #             return request_config
-    #     raise accounts_exceptions.InvalidDataSourceRequestConfigError()
 
     def validate_column_config(self, column_config):
         if isinstance(column_config, dict) and len(column_config) > 0:
@@ -1052,22 +1031,25 @@ class UpdateDataSourceSerializer(BaseDataSourceCRUDSerializer):
         }
 
     def validate_name(self, name):
-        if re.match(r'[a-zA-Z0-9-\' _()]*$', name):
+        if re.match(account_config.valid_name_pattern, name):
             if name != self.instance.name and accounts_models.DataSource.objects.filter(name=name).exists():
                 raise accounts_exceptions.DuplicateDataSourceNameError(message_kwargs={'name': name})
             return name
         raise accounts_exceptions.DuplicateDataSourceNameError(message_kwargs={'name': name})
 
     def validate_status(self, status):
-        if status in [accounts_models.DataSource.DATA_SOURCE_STATUS_DRAFT,
-                      accounts_models.DataSource.DATA_SOURCE_STATUS_READY_TO_PUBLISH]:
-            if self.instance.status in [accounts_models.DataSource.DATA_SOURCE_STATUS_DRAFT,
-                                        accounts_models.DataSource.DATA_SOURCE_STATUS_READY_TO_PUBLISH]:
-                return status
-        elif status == accounts_models.DataSource.DATA_SOURCE_STATUS_DISABLED:
-            if self.instance.status == accounts_models.DataSource.DATA_SOURCE_STATUS_PUBLISHED:
-                return status
-
+        if (
+            (
+                status in [accounts_models.DataSource.DATA_SOURCE_STATUS_DRAFT,
+                           accounts_models.DataSource.DATA_SOURCE_STATUS_READY_TO_PUBLISH] and
+                self.instance.status in [accounts_models.DataSource.DATA_SOURCE_STATUS_DRAFT,
+                                         accounts_models.DataSource.DATA_SOURCE_STATUS_READY_TO_PUBLISH]
+            ) or
+            (
+                status == accounts_models.DataSource.DATA_SOURCE_STATUS_DISABLED and
+                self.instance.status == accounts_models.DataSource.DATA_SOURCE_STATUS_PUBLISHED)
+        ):
+            return status
         raise accounts_exceptions.InvalidDataSourceStatusUpdateError()
 
 
@@ -1140,6 +1122,7 @@ class DataLayersListSerializer(FlexFieldsModelSerializer):
         read_only_fields = fields = (
             'id',
             'icon',
+            'code',
             'name',
             'description',
             'version',
@@ -1262,11 +1245,21 @@ class DataLayerDataSourceRelationshipSerializer(serializers.ModelSerializer):
 
 class BaseDataLayerCRUDSerializer(serializers.ModelSerializer):
     def validate_name(self, name):
-        if re.match(r'[a-zA-Z0-9-\' _()]*$', name):
-            if accounts_models.DataLayer.objects.filter(name=name).exists():
-                raise accounts_exceptions.DuplicateDataLayerNameError(message_kwargs={'name': name})
+        if re.match(account_config.valid_name_pattern, name):
             return name
         raise accounts_exceptions.InvalidDataLayerNameError()
+
+    def validate_code(self, code):
+        if re.match(r'[A-Z0-9-\' _]*$', code):
+            # If its Existing layer, then code should match. Else raise error
+            # If its new Layer, then code should be unique. Else raise error
+            if (
+                (self.instance and code != self.instance.code) or
+                (not self.instance and accounts_models.DataLayer.objects.filter(code=code).exists())
+            ):
+                raise accounts_exceptions.DuplicateDataLayerCodeError(message_kwargs={'code': code})
+            return code
+        raise accounts_exceptions.InvalidDataLayerCodeError()
 
     def validate_applicable_countries(self, applicable_countries):
         """
@@ -1295,7 +1288,8 @@ class BaseDataLayerCRUDSerializer(serializers.ModelSerializer):
                             code_lower=Lower('code'),
                             name_lower=Lower('name')
                         ).filter(
-                            Q(name_lower=country_name_or_code.lower()) | Q(code_lower=country_name_or_code.lower())
+                            Q(name_lower=str(country_name_or_code).lower()) | Q(
+                                code_lower=str(country_name_or_code).lower())
                         ).last()
                     else:
                         country_instance = locations_models.Country.objects.filter(id=country_data).last()
@@ -1374,10 +1368,6 @@ class CreateDataLayersSerializer(BaseDataLayerCRUDSerializer):
     legend_configs = serializers.JSONField(required=False)
 
     data_sources_list = serializers.JSONField()
-    # serializers.PrimaryKeyRelatedField(
-    #     many=True,
-    #     queryset=accounts_models.DataSource.objects.all()
-    # )
     data_source_column = serializers.JSONField()
 
     class Meta:
@@ -1391,6 +1381,7 @@ class CreateDataLayersSerializer(BaseDataLayerCRUDSerializer):
 
         fields = read_only_fields + (
             'icon',
+            'code',
             'name',
             'description',
             'version',
@@ -1407,6 +1398,7 @@ class CreateDataLayersSerializer(BaseDataLayerCRUDSerializer):
 
         extra_kwargs = {
             'icon': {'required': True},
+            # 'code': {'required': True},
             'name': {'required': True},
             'type': {'required': True},
             'data_sources_list': {'required': True},
@@ -1418,6 +1410,11 @@ class CreateDataLayersSerializer(BaseDataLayerCRUDSerializer):
                       accounts_models.DataLayer.LAYER_STATUS_READY_TO_PUBLISH]:
             return status
         raise accounts_exceptions.InvalidDataLayerStatusError()
+
+    def to_internal_value(self, data):
+        if not data.get('code') and data.get('name'):
+            data['code'] = core_utilities.normalize_str(str(data.get('name'))).upper()
+        return super().to_internal_value(data)
 
     def create(self, validated_data):
         """
@@ -1484,6 +1481,7 @@ class UpdateDataLayerSerializer(BaseDataLayerCRUDSerializer):
         )
 
         fields = read_only_fields + (
+            'code',
             'icon',
             'name',
             'description',
@@ -1502,13 +1500,6 @@ class UpdateDataLayerSerializer(BaseDataLayerCRUDSerializer):
         extra_kwargs = {
             'status': {'required': True},
         }
-
-    def validate_name(self, name):
-        if re.match(r'[a-zA-Z0-9-\' _()]*$', name):
-            if name != self.instance.name and accounts_models.DataLayer.objects.filter(name=name).exists():
-                raise accounts_exceptions.DuplicateDataLayerNameError(message_kwargs={'name': name})
-            return name
-        raise accounts_exceptions.InvalidDataLayerNameError()
 
     def validate_status(self, status):
         if status in [accounts_models.DataLayer.LAYER_STATUS_DRAFT,
@@ -1545,7 +1536,6 @@ class UpdateDataLayerSerializer(BaseDataLayerCRUDSerializer):
 
         if request_user == instance.created_by:
             return True
-
         user_is_publisher = len(get_user_emails_for_permissions(
             [auth_models.RolePermission.CAN_PUBLISH_DATA_LAYER],
             ids_to_filter=[request_user.id]
@@ -1623,6 +1613,7 @@ class PublishDataLayerSerializer(BaseDataLayerCRUDSerializer):
             'created',
             'last_modified_at',
             'icon',
+            'code',
             'name',
             'description',
             'version',
@@ -1719,18 +1710,15 @@ class LogActionSerializer(serializers.ModelSerializer):
                 instance.object_id,
             )
             return self.make_url(request.build_absolute_uri(url_name))
-        return
 
     def get_section_type(self, instance):
         if instance.content_type:
             return apps.get_model(instance.content_type.app_label,
                                   instance.content_type.model)._meta.verbose_name.title()
-        return
 
     def get_content_type(self, instance):
         if instance.content_type:
             return instance.content_type.app_label
-        return
 
     def get_action_flag(self, instance):
         if instance.action_flag == 1:

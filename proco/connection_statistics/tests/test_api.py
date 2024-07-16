@@ -24,7 +24,7 @@ from proco.utils.tests import TestAPIViewSetMixin
 
 
 class GlobalStatisticsApiTestCase(TestAPIViewSetMixin, TestCase):
-    databases = ['default', 'read_only_database']
+    databases = ['default',]
 
     @classmethod
     def setUpTestData(cls):
@@ -56,7 +56,7 @@ class GlobalStatisticsApiTestCase(TestAPIViewSetMixin, TestCase):
                          ['connected', 'not_connected', 'unknown'])
 
     def test_global_stats_queries(self):
-        with self.assertNumQueries(7):
+        with self.assertNumQueries(2):
             self.forced_auth_req(
                 'get',
                 reverse('connection_statistics:global-stat'),
@@ -788,7 +788,6 @@ class CountryWeekStatsApiTestCase(TestAPIViewSetMixin, TestCase):
         })
 
         response = self.forced_auth_req('get', url, user=self.user, view=view)
-        # print(response.data)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
         response_data = response.data
@@ -815,7 +814,6 @@ class CountryWeekStatsApiTestCase(TestAPIViewSetMixin, TestCase):
         })
 
         response = self.forced_auth_req('get', url, user=self.user, view=view)
-        # print(response.data)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         # self.assertEqual(response.data[0]['schools_total'], self.stat_one.schools_total)
         # self.assertEqual(response.data[0]['school_with_realtime_data'], self.stat_one.schools_connected)
@@ -834,7 +832,6 @@ class CountryWeekStatsApiTestCase(TestAPIViewSetMixin, TestCase):
         })
 
         response = self.forced_auth_req('get', url, user=self.user, view=view)
-        # print(response.data)
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_country_download_connectivity_stat_for_invalid_date_range(self):
@@ -884,7 +881,6 @@ class CountryWeekStatsApiTestCase(TestAPIViewSetMixin, TestCase):
         })
 
         response = self.forced_auth_req('get', url, user=self.user, view=view)
-        # print(response.data)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         # self.assertEqual(response.data['schools_total'], self.stat_one.schools_total)
 
@@ -995,7 +991,6 @@ class CountryCoverageStatsAPITestCase(APITestCase):
         url = reverse('connection_statistics:country-coverage-stat')
         query_params = {'country_id': self.country_one.id}
         response = self.client.get(url, query_params)
-        # print(response.data)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['total_schools'], self.stat_one.schools_total)
         # self.assertEqual(response.data['connected_schools']['5g_4g'], self.stat_one.schools_coverage_good)

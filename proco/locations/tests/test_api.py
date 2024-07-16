@@ -101,7 +101,7 @@ class CountryBoundaryApiTestCase(TestAPIViewSetMixin, TestCase):
 
 class CountryDataTestCase(TestAPIViewSetMixin, TestCase):
     base_view = 'locations:'
-    databases = {'default', 'read_only_database'}
+    databases = {'default',}
 
     def setUp(self):
         self.email = 'test@test.com'

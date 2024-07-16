@@ -1,15 +1,18 @@
+import sys
+import logging
 from collections import OrderedDict
 
 from django.core.management.base import BaseCommand
 from django.db import connection
 from django.db import transaction
 from django.utils import timezone
-import sys
+
+logger = logging.getLogger('gigamaps.' + __name__)
 
 
 @transaction.atomic
 def create_and_execute_update_query(column, data_dict_list):
-    print('Executing update statement for: {0} records'.format(len(data_dict_list)))
+    logger.debug('Executing update statement for: {0} records'.format(len(data_dict_list)))
 
     # create update query
     stmt = "UPDATE schools_school SET {column} = {value} WHERE id = {school_id}"
@@ -17,7 +20,7 @@ def create_and_execute_update_query(column, data_dict_list):
         for data_dict in data_dict_list:
             update_query = stmt.format(column=column, value=data_dict[column], school_id=data_dict['school_id'])
             # print('Current record: {}'.format(data_dict))
-            print('Current Update Query: {}'.format(update_query))
+            logger.debug('Current update query: {}'.format(update_query))
             cursor.execute(update_query)
 
 
@@ -55,8 +58,8 @@ def populate_school_admin1_data(start_school_id, end_school_id):
 
     query = query.format(where_condition=where_condition)
 
-    print('Getting select statement query result from "schools_with_admin_data" table for Admin1 records.')
-    print('Query: {}'.format(query))
+    logger.info('Getting select statement query result from "schools_with_admin_data" table for Admin1 records.')
+    logger.debug('Query: {}'.format(query))
     data_list = []
 
     with connection.cursor() as cursor:
@@ -71,7 +74,7 @@ def populate_school_admin1_data(start_school_id, end_school_id):
     create_and_execute_update_query('admin1_id', data_list)
 
     te = timezone.now()
-    print('Executed the function in {} seconds'.format((te - ts).seconds))
+    logger.debug('Executed the function in {} seconds'.format((te - ts).seconds))
 
 
 def populate_school_admin2_data(start_school_id, end_school_id):
@@ -107,8 +110,8 @@ def populate_school_admin2_data(start_school_id, end_school_id):
 
     query = query.format(where_condition=where_condition)
 
-    print('Getting select statement query result from "schools_with_admin_data" table for Admin2.')
-    print('Query: {}'.format(query))
+    logger.info('Getting select statement query result from "schools_with_admin_data" table for Admin2.')
+    logger.debug('Query: {}'.format(query))
     data_list = []
 
     with connection.cursor() as cursor:
@@ -123,7 +126,7 @@ def populate_school_admin2_data(start_school_id, end_school_id):
     create_and_execute_update_query('admin2_id', data_list)
 
     te = timezone.now()
-    print('Executed the function in {} seconds'.format((te - ts).seconds))
+    logger.debug('Executed the function in {} seconds'.format((te - ts).seconds))
 
 
 class Command(BaseCommand):
@@ -156,7 +159,8 @@ class Command(BaseCommand):
             sys.exit("Mandatory argument '--admin-type/-at' is missing. Available options: {0}".format(
                 ['admin1', 'admin2', 'both']))
 
-        print('*** School update operation STARTED ({0} - {1}) ***'.format(start_school_id, end_school_id))
+        logger.debug('School update operation started for: Start school ID - {0}, End school ID - {1}'.format(
+            start_school_id, end_school_id))
 
         if admin_type == 'admin1':
             populate_school_admin1_data(start_school_id, end_school_id)
@@ -166,4 +170,4 @@ class Command(BaseCommand):
             populate_school_admin1_data(start_school_id, end_school_id)
             populate_school_admin2_data(start_school_id, end_school_id)
 
-        print('Data loaded successfully!\n')
+        logger.info('Data loaded successfully!\n')

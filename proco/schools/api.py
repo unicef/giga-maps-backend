@@ -1,4 +1,5 @@
 import re
+import logging
 from datetime import datetime, time
 
 from django.conf import settings
@@ -42,10 +43,10 @@ from proco.schools.tasks import process_loaded_file
 from proco.utils import dates as date_utilities
 from proco.utils.error_message import id_missing_error_mess, delete_succ_mess, \
     error_mess
-from proco.utils.filters import NullsAlwaysLastOrderingFilter
 from proco.utils.log import action_log, changed_fields
 from proco.utils.mixins import CachedListMixin
 
+logger = logging.getLogger('gigamaps.' + __name__)
 
 @method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
 class SchoolsViewSet(
@@ -100,10 +101,6 @@ class SchoolsViewSet(
 
     @action(methods=['get'], detail=False, url_path='export-csv-schools', url_name='export_csv_schools')
     def export_csv_schools(self, request, *args, **kwargs):
-        # country = get_object_or_404(
-        #     self.get_queryset().annotate(code_lower=Lower('country__code')),
-        #     code_lower=self.kwargs.get('country_code').lower(),
-        # )
         country = self.get_country()
         serializer = self.get_serializer(self.get_queryset(), many=True)
         csvwriter = SchoolsCSVWriterBackend(serializer, country)
@@ -130,9 +127,6 @@ class RandomSchoolsListAPIView(CachedListMixin, ListAPIView):
 
 
 class BaseTileGenerator:
-    # def __init__(self,  table_config):
-    #     self.table_config = table_config
-
     def path_to_tile(self, request):
         path = "/" + request.query_params.get('z') + "/" + request.query_params.get(
             'x') + "/" + request.query_params.get('y')
@@ -191,7 +185,6 @@ class BaseTileGenerator:
             return Response({"error": "An error occurred while executing SQL query"}, status=500)
 
     def generate_tile(self, request):
-        # start_time = time.time()
         tile = self.path_to_tile(request)
         if not (tile and self.tile_is_valid(tile)):
             return Response({"error": "Invalid tile path"}, status=400)
@@ -200,7 +193,7 @@ class BaseTileGenerator:
 
         sql = self.envelope_to_sql(env, request)
 
-        print(sql.replace('\n', ''))
+        logger.debug(sql.replace('\n', ''))
 
         pbf = self.sql_to_pbf(sql)
         if isinstance(pbf, memoryview):
@@ -218,7 +211,6 @@ class SchoolTileGenerator(BaseTileGenerator):
     def envelope_to_sql(self, env, request):
         country_id = request.query_params.get('country_id', None)
         admin1_id = request.query_params.get('admin1_id', None)
-        # school_ids = request.query_params.get('school_ids', "")
 
         tbl = self.table_config.copy()
         tbl['env'] = self.envelope_to_bounds_sql(env)
@@ -230,19 +222,12 @@ class SchoolTileGenerator(BaseTileGenerator):
 
         if country_id or admin1_id:
             if admin1_id:
-                tbl['admin1_condition'] = f"AND t.admin1_id = {admin1_id}"
+                tbl['admin1_condition'] = f"AND schools_school.admin1_id = {admin1_id}"
 
             if country_id:
-                tbl['country_condition'] = f"AND t.country_id = {country_id}"
+                tbl['country_condition'] = f"AND schools_school.country_id = {country_id}"
         else:
             tbl['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', 0)) == 2 else ''
-
-        # # Splitting the school_ids string into a list of individual IDs
-        # school_id_list = school_ids.split(',')
-
-        # school_condition = ""
-        # if school_id_list:
-        #     school_condition = "AND t._id IN ({0})".format(','.join(school_id_list))
 
         """In order to cater school requirements, {school_condition} can be added to id before/after country_condition
          in the query"""
@@ -253,26 +238,47 @@ class SchoolTileGenerator(BaseTileGenerator):
                    {env}::box2d AS b2d
             ),
             mvtgeom AS (
-            SELECT ST_AsMVTGeom(ST_Transform(t.{geomColumn}, 3857), bounds.b2d) AS geom,
-                {attrColumns}, t.coverage_type,
-                CASE WHEN LOWER(t."coverage_type") IN ('5g', '4g') THEN 'good'
-                    WHEN LOWER(t."coverage_type") IN ('3g', '2g') THEN 'moderate'
-                    WHEN LOWER(t."coverage_type") = 'no' THEN 'bad'
+            SELECT ST_AsMVTGeom(ST_Transform(schools_school."geopoint", 3857), bounds.b2d) AS geom,
+                schools_school."id",
+                schools_school."coverage_type",
+                CASE WHEN LOWER(schools_school."coverage_type") IN ('5g', '4g') THEN 'good'
+                    WHEN LOWER(schools_school."coverage_type") IN ('3g', '2g') THEN 'moderate'
+                    WHEN LOWER(schools_school."coverage_type") = 'no' THEN 'bad'
                     ELSE 'unknown'
                 END AS coverage_status,
-                CASE WHEN t.connectivity_status IN ('good', 'moderate') THEN 'connected'
-                    WHEN t.connectivity_status = 'no' THEN 'not_connected' ELSE 'unknown'
+                CASE WHEN schools_school."connectivity_status" IN ('good', 'moderate') THEN 'connected'
+                    WHEN schools_school."connectivity_status" = 'no' THEN 'not_connected' ELSE 'unknown'
                 END AS connectivity_status
-            FROM {table} t, bounds
-            WHERE ST_Intersects(t.{geomColumn}, ST_Transform(bounds.geom, {srid}))
-             AND t."deleted" IS NULL
+            FROM schools_school
+            INNER JOIN bounds ON ST_Intersects(schools_school."geopoint", ST_Transform(bounds.geom, 4326))
+            {school_weekly_join}
+            WHERE schools_school."deleted" IS NULL
              {country_condition}
              {admin1_condition}
+             {school_condition}
+             {school_weekly_condition}
              {random_order}
              {limit_condition}
             )
             SELECT ST_AsMVT(DISTINCT mvtgeom.*) FROM mvtgeom
         """
+
+        tbl['school_condition'] = ''
+        tbl['school_weekly_join'] = ''
+        tbl['school_weekly_condition'] = ''
+
+        school_filters = core_utilities.get_filter_sql(request, 'schools', 'schools_school')
+        if len(school_filters) > 0:
+            tbl['school_condition'] = 'AND ' + school_filters
+
+        school_static_filters = core_utilities.get_filter_sql(request, 'school_static',
+                                                              'connection_statistics_schoolweeklystatus')
+        if len(school_static_filters) > 0:
+            tbl['school_weekly_join'] = """
+            LEFT OUTER JOIN connection_statistics_schoolweeklystatus
+                ON schools_school."last_weekly_status_id" = connection_statistics_schoolweeklystatus."id"
+            """
+            tbl['school_weekly_condition'] = 'AND ' + school_static_filters
 
         return sql_tmpl.format(**tbl)
 
@@ -294,7 +300,7 @@ class SchoolTileRequestHandler(APIView):
         try:
             return self.tile_generator.generate_tile(request)
         except Exception as ex:
-            print('Exception occurred for school tiles endpoint: {}'.format(ex))
+            logger.error('Exception occurred for school tiles endpoint: {}'.format(ex))
             return Response({"error": "An error occurred while processing the request"}, status=500)
 
 
@@ -315,22 +321,22 @@ class ConnectivityTileGenerator(BaseTileGenerator):
             'school_id__in' in request.query_params
         ):
             if 'country_id' in request.query_params:
-                table_configs['country_condition'] = f" AND t.country_id = {request.query_params['country_id']}"
+                table_configs['country_condition'] = f" AND schools_school.country_id = {request.query_params['country_id']}"
             elif 'country_id__in' in request.query_params:
                 country_ids = ','.join([c.strip() for c in request.query_params['country_id__in'].split(',')])
-                table_configs['country_condition'] = f" AND t.country_id IN ({country_ids})"
+                table_configs['country_condition'] = f" AND schools_school.country_id IN ({country_ids})"
 
             if 'admin1_id' in request.query_params:
-                table_configs['admin1_condition'] = f" AND t.admin1_id = {request.query_params['admin1_id']}"
+                table_configs['admin1_condition'] = f" AND schools_school.admin1_id = {request.query_params['admin1_id']}"
             elif 'admin1_id__in' in request.query_params:
                 admin1_ids = ','.join([c.strip() for c in request.query_params['admin1_id__in'].split(',')])
-                table_configs['admin1_condition'] = f" AND t.admin1_id IN ({admin1_ids})"
+                table_configs['admin1_condition'] = f" AND schools_school.admin1_id IN ({admin1_ids})"
 
             if 'school_id' in request.query_params:
-                table_configs['school_condition'] = f" AND t.id = {request.query_params['school_id']}"
+                table_configs['school_condition'] = f" AND schools_school.id = {request.query_params['school_id']}"
             elif 'school_id__in' in request.query_params:
                 school_ids = ','.join([c.strip() for c in request.query_params['school_id__in'].split(',')])
-                table_configs['school_condition'] = f" AND t.id IN ({school_ids})"
+                table_configs['school_condition'] = f" AND schools_school.id IN ({school_ids})"
         else:
             zoom_level = int(request.query_params.get('z', '0'))
             if zoom_level == 0:
@@ -371,7 +377,7 @@ class ConnectivityTileGenerator(BaseTileGenerator):
                     # If for any week of the month data is not available then pick last week number
                     week_number = week_numbers_for_month[-1]
 
-            table_configs['weekly_lookup_condition'] = (f'ON t.id = c.school_id AND c.week={week_number} '
+            table_configs['weekly_lookup_condition'] = (f'ON schools_school.id = c.school_id AND c.week={week_number} '
                                                         f'AND c.year={year_number}')
 
         table_configs['benchmark'], table_configs['benchmark_unit'] = get_benchmark_value_for_default_download_layer(
@@ -387,97 +393,21 @@ class ConnectivityTileGenerator(BaseTileGenerator):
         tbl['country_condition'] = ''
         tbl['admin1_condition'] = ''
         tbl['school_condition'] = ''
-        tbl['weekly_lookup_condition'] = 'ON t.last_weekly_status_id = c.id'
+        tbl['weekly_lookup_condition'] = 'ON schools_school.last_weekly_status_id = c.id'
         tbl['random_order'] = ''
         tbl['rt_date_condition'] = ''
 
         self.query_filters(request, tbl)
 
         """sql with join and connectivity_speed"""
-        # sql_tmpl = """
-        #     WITH bounds AS (
-        #         SELECT {env} AS geom,
-        #         {env}::box2d AS b2d
-        #     ),
-        #     rt_status AS (
-        #         SELECT DISTINCT t.id as school_id,
-        #             true rt_registered,
-        #             FIRST_VALUE(dailystat.created) OVER (PARTITION BY dailystat.school_id ORDER BY dailystat.created)
-        #             rt_registration_date
-        #         FROM connection_statistics_schooldailystatus dailystat
-        #         INNER JOIN schools_school t ON t.id = dailystat.school_id
-        #         {country_condition}{school_condition}
-        #     ),
-        #     mvtgeom AS (
-        #         SELECT ST_AsMVTGeom(ST_Transform(t.{geomColumn}, 3857), bounds.b2d) AS geom,
-        #         t.{attrColumns},
-        #         c.connectivity_speed,
-        #         t.connectivity_status as connectivity,
-        #         CASE WHEN c.connectivity_speed >  {benchmark} THEN 'good'
-        #             WHEN c.connectivity_speed < {benchmark} and c.connectivity_speed >= 1000000 THEN 'moderate'
-        #             WHEN c.connectivity_speed < 1000000  THEN 'bad'
-        #             ELSE 'unknown'
-        #         END as hist_connectivity,
-        #         CASE WHEN t.connectivity_status IN ('good', 'moderate') THEN 'connected'
-        #             WHEN t.connectivity_status = 'no' THEN 'not_connected'
-        #             ELSE 'unknown'
-        #         END as connectivity_status,
-        #         CASE WHEN rt_status.rt_registered = True {rt_date_condition} THEN True
-        #             ELSE False
-        #         END as is_rt_connected
-        #         FROM {table} t
-        #         INNER JOIN bounds ON ST_Intersects(t.{geomColumn}, ST_Transform(bounds.geom, {srid}))
-        #         {country_condition}{school_condition}
-        #         LEFT JOIN connection_statistics_schoolweeklystatus c {weekly_lookup_condition}
-        #         LEFT JOIN rt_status ON rt_status.school_id = t.id
-        #         {random_order}
-        #         {limit_condition}
-        #     )
-        #     SELECT ST_AsMVT(mvtgeom.*) FROM mvtgeom;
-        # """
-
-        # sql_tmpl = """
-        #             WITH bounds AS (
-        #                 SELECT {env} AS geom,
-        #                 {env}::box2d AS b2d
-        #             ),
-        #             mvtgeom AS (
-        #                 SELECT ST_AsMVTGeom(ST_Transform(t.{geomColumn}, 3857), bounds.b2d) AS geom,
-        #                 t.{attrColumns},
-        #                 c.connectivity_speed,
-        #                 t.connectivity_status as connectivity,
-        #                 CASE WHEN c.connectivity_speed >  {benchmark} THEN 'good'
-        #                     WHEN c.connectivity_speed < {benchmark} and c.connectivity_speed >= 1000000
-        #                     THEN 'moderate'
-        #                     WHEN c.connectivity_speed < 1000000  THEN 'bad'
-        #                     ELSE 'unknown'
-        #                 END as hist_connectivity,
-        #                 CASE WHEN t.connectivity_status IN ('good', 'moderate') THEN 'connected'
-        #                     WHEN t.connectivity_status = 'no' THEN 'not_connected'
-        #                     ELSE 'unknown'
-        #                 END as connectivity_status,
-        #                 CASE WHEN rt_status.rt_registered = True {rt_date_condition} THEN True
-        #                     ELSE False
-        #                 END as is_rt_connected
-        #                 FROM {table} t
-        #                 INNER JOIN bounds ON ST_Intersects(t.{geomColumn}, ST_Transform(bounds.geom, {srid}))
-        #                 {country_condition}{school_condition}
-        #                 LEFT JOIN connection_statistics_schoolweeklystatus c {weekly_lookup_condition}
-        #                 LEFT JOIN school_rt_connectivity_stat rt_status ON rt_status.giga_id_school = t.giga_id_school
-        #                 {random_order}
-        #                 {limit_condition}
-        #             )
-        #             SELECT ST_AsMVT(mvtgeom.*) FROM mvtgeom;
-        #         """
-
         sql_tmpl = """
             WITH bounds AS (
                 SELECT {env} AS geom,
                 {env}::box2d AS b2d
             ),
             mvtgeom AS (
-                SELECT ST_AsMVTGeom(ST_Transform(t.{geomColumn}, 3857), bounds.b2d) AS geom,
-                t.{attrColumns},
+                SELECT ST_AsMVTGeom(ST_Transform(schools_school.geopoint, 3857), bounds.b2d) AS geom,
+                schools_school.id,
                 CASE WHEN c.id is NULL AND rt_status.rt_registered = True {rt_date_condition} THEN 'unknown'
                     WHEN c.id is NULL THEN NULL
                     WHEN c.connectivity_speed >  {benchmark} THEN 'good'
@@ -485,25 +415,43 @@ class ConnectivityTileGenerator(BaseTileGenerator):
                     WHEN c.connectivity_speed < 1000000  THEN 'bad'
                     ELSE 'unknown'
                 END as connectivity,
-                CASE WHEN t.connectivity_status IN ('good', 'moderate') THEN 'connected'
-                    WHEN t.connectivity_status = 'no' THEN 'not_connected'
+                CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                    WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
                     ELSE 'unknown'
                 END as connectivity_status,
                 CASE WHEN rt_status.rt_registered = True {rt_date_condition} THEN True
                     ELSE False
                 END as is_rt_connected
-                FROM {table} t
-                INNER JOIN bounds ON ST_Intersects(t.{geomColumn}, ST_Transform(bounds.geom, {srid}))
-                    AND t."deleted" IS NULL {country_condition}{admin1_condition}{school_condition}
+                FROM schools_school
+                INNER JOIN bounds ON ST_Intersects(schools_school.geopoint, ST_Transform(bounds.geom, {srid}))
+                    AND schools_school."deleted" IS NULL {country_condition}{admin1_condition}{school_condition}
+                {school_weekly_join}
                 LEFT JOIN connection_statistics_schoolweeklystatus c {weekly_lookup_condition}
                     AND c."deleted" IS NULL
-                LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = t.id
+                LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = schools_school.id
                     AND rt_status."deleted" IS NULL
+                {school_weekly_condition}
                 {random_order}
                 {limit_condition}
             )
             SELECT ST_AsMVT(DISTINCT mvtgeom.*) FROM mvtgeom;
         """
+
+        tbl['school_weekly_join'] = ''
+        tbl['school_weekly_condition'] = ''
+
+        school_filters = core_utilities.get_filter_sql(request, 'schools', 'schools_school')
+        if len(school_filters) > 0:
+            tbl['school_condition'] += ' AND ' + school_filters
+
+        school_static_filters = core_utilities.get_filter_sql(request, 'school_static',
+                                                              'connection_statistics_schoolweeklystatus')
+        if len(school_static_filters) > 0:
+            tbl['school_weekly_join'] = """
+                    LEFT OUTER JOIN connection_statistics_schoolweeklystatus
+                        ON schools_school."last_weekly_status_id" = connection_statistics_schoolweeklystatus."id"
+                    """
+            tbl['school_weekly_condition'] = 'WHERE ' + school_static_filters
 
         return sql_tmpl.format(**tbl)
 
@@ -525,7 +473,7 @@ class ConnectivityTileRequestHandler(APIView):
         try:
             return self.tile_generator.generate_tile(request)
         except Exception as ex:
-            print('Exception occurred for school connectivity tiles endpoint: {}'.format(ex))
+            logger.error('Exception occurred for school connectivity tiles endpoint: {}'.format(ex))
             return Response({'error': 'An error occurred while processing the request'}, status=500)
 
 

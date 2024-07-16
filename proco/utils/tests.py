@@ -26,7 +26,11 @@ class APITestCaseMixin(object):
 
         if 'view' in kwargs:
             view = kwargs.pop('view')
-            response = view(request)
+            if 'view_info' in kwargs:
+                view_info = kwargs.pop('view_info')
+                response = view_info(request, *view.args, **view.kwargs)
+            else:
+                response = view(request)
         else:
             view_info = resolve(url)
             view = view_info.func

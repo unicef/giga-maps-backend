@@ -38,7 +38,7 @@ def setup_read_only_role():
         role = auth_models.Role.objects.create(name=auth_models.Role.SYSTEM_ROLE_NAME_READ_ONLY,
                                                category=auth_models.Role.ROLE_CATEGORY_SYSTEM)
 
-        perms = []
+        perms = [auth_models.RolePermission.CAN_DELETE_API_KEY, ]
 
         for perm in perms:
             auth_models.RolePermission.objects.get_or_create(
@@ -58,7 +58,13 @@ def setup_admin_user_by_role():
     password = 'SomeRandomPass96'
     user = auth_models.ApplicationUser.objects.filter(username=email).first()
     if not user:
-        user = auth_models.ApplicationUser.objects.create_user(username=email, password=password)
+        user = auth_models.ApplicationUser.objects.create_user(
+            username=email,
+            email=email,
+            password=password,
+            first_name='Admin',
+            last_name='User',
+        )
 
         admin_role = setup_admin_role()
         auth_models.UserRoleRelationship.objects.create(user=user, role=admin_role)
@@ -71,7 +77,13 @@ def setup_read_only_user_by_role():
     password = 'SomeRandomPass96'
     user = auth_models.ApplicationUser.objects.filter(username=email).first()
     if not user:
-        user = auth_models.ApplicationUser.objects.create_user(username=email, password=password)
+        user = auth_models.ApplicationUser.objects.create_user(
+            username=email,
+            email=email,
+            password=password,
+            first_name='Read Only',
+            last_name='User',
+        )
 
         read_only_role = setup_read_only_role()
         auth_models.UserRoleRelationship.objects.create(user=user, role=read_only_role)

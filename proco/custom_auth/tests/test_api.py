@@ -19,7 +19,7 @@ def custom_auth_url(url_params, query_param, view_name='create-and-list-users'):
 
 
 class UserApiTestCase(TestAPIViewSetMixin, TestCase):
-    databases = ['default']
+    databases = ['default',]
 
     @classmethod
     def setUpTestData(cls):

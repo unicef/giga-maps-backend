@@ -1,9 +1,9 @@
 class AppConfig(object):
 
     @property
-    def active_api_key_count_for_single_api_limit(self):
-        """API Key count limit"""
-        return 1
+    def valid_name_pattern(self):
+        """Regex to validate names"""
+        return r'[a-zA-Z0-9-\' _()]*$'
 
     @property
     def public_api_key_generation_email_subject_format(self):

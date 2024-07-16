@@ -23,8 +23,6 @@ SECRET_KEY = env('SECRET_KEY')
 DATABASES = {
     'default': env.db(),
     'read_only_database': env.db_url(var='READ_ONLY_DATABASE_URL'),
-    'realtime': env.db_url(var='REALTIME_DATABASE_URL'),
-    'dailycheckapp_realtime': env.db_url(var='REALTIME_DAILYCHECKAPP_DATABASE_URL'),
 }
 
 # Template

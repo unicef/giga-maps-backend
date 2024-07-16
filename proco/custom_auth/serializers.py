@@ -1,11 +1,9 @@
 import re
+import logging
 
-from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.utils.translation import ugettext as _
 from rest_flex_fields.serializers import FlexFieldsModelSerializer
 from rest_framework import serializers
-from rest_framework_jwt import serializers as jwt_serializers
 
 from proco.core import utils as core_utilities
 from proco.custom_auth import exceptions as auth_exceptions
@@ -13,6 +11,7 @@ from proco.custom_auth import models as auth_models
 from proco.custom_auth import utils as auth_utilities
 from proco.custom_auth.config import app_config as auth_config
 
+logger = logging.getLogger('gigamaps.' + __name__)
 
 class RoleSerializer(serializers.ModelSerializer):
     """
@@ -262,11 +261,11 @@ class BaseUserSerializer(serializers.ModelSerializer):
         email_lower = email.lower()
         if auth_models.ApplicationUser.objects.filter(email=email_lower).exists():
             e = auth_exceptions.EmailAlreadyExistsError()
-            print(e.message)
-            print('Details: {0}'.format(email_lower))
+            logger.error(e.message)
+            logger.debug('Details: {0}'.format(email_lower))
             raise e
-        print('Email validated')
-        print('Details: {0}'.format(email_lower))
+        logger.info('Email validated.')
+        logger.debug('Details: {0}'.format(email_lower))
         return email_lower
 
     def get_role_fields(self):

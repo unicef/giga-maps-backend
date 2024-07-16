@@ -1,15 +1,17 @@
-from collections import OrderedDict
+import logging
+import sys
 
 from django.core.management.base import BaseCommand
 from django.db import connection
 from django.db import transaction
 from django.utils import timezone
-import sys
+
+logger = logging.getLogger('gigamaps.' + __name__)
 
 
 @transaction.atomic
 def create_and_execute_update_query(stmt):
-    print('Current Update Query: {}'.format(stmt))
+    logger.debug('Current update query: {}'.format(stmt))
     with connection.cursor() as cursor:
         cursor.execute(stmt)
 
@@ -52,7 +54,7 @@ def populate_ui_label_for_admin1_data(country_id, parent_id):
     create_and_execute_update_query(query)
 
     te = timezone.now()
-    print('Executed the function in {} seconds'.format((te - ts).seconds))
+    logger.debug('Executed the function in {} seconds'.format((te - ts).seconds))
 
 
 def populate_ui_label_for_admin2_data(country_id, parent_id):
@@ -92,7 +94,7 @@ def populate_ui_label_for_admin2_data(country_id, parent_id):
     create_and_execute_update_query(query)
 
     te = timezone.now()
-    print('Executed the function in {} seconds'.format((te - ts).seconds))
+    logger.debug('Executed the function in {} seconds'.format((te - ts).seconds))
 
 
 class Command(BaseCommand):
@@ -133,7 +135,7 @@ class Command(BaseCommand):
         country_id = options.get('country_id')
         parent_id = options.get('parent_id')
 
-        print('*** Admin update operation STARTED ({0} - {1}) ***'.format(country_id, parent_id))
+        logger.debug('Admin update operation started ({0} - {1})'.format(country_id, parent_id))
 
         if admin_type == 'admin1':
             populate_ui_label_for_admin1_data(country_id, parent_id)
@@ -143,4 +145,4 @@ class Command(BaseCommand):
             populate_ui_label_for_admin1_data(country_id, parent_id)
             populate_ui_label_for_admin2_data(country_id, parent_id)
 
-        print('Data loaded successfully!\n')
+        logger.info('Data loaded successfully!\n')

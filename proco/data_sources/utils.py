@@ -13,7 +13,6 @@ from delta_sharing.reader import DeltaSharingReader
 from django.conf import settings
 from django.db.models import Q
 from django.db.models.functions import Lower
-from django.utils import timezone
 from rest_framework import status
 
 from proco.accounts.models import APIKey
@@ -27,7 +26,7 @@ from proco.schools.models import School
 from proco.utils.dates import format_date
 from proco.utils.urls import add_url_params
 
-logger = logging.getLogger('django.' + __name__)
+logger = logging.getLogger('gigamaps.' + __name__)
 
 response_timezone = pytz.timezone(settings.TIME_ZONE)
 
@@ -180,15 +179,15 @@ def parse_row(row):
 def sync_school_master_data(profile_file, share_name, schema_name, table_name, changes_for_countries, deleted_schools,
                             school_master_fields):
     country = Country.objects.filter(iso3_format=table_name, ).first()
-    print('Country object: {0}'.format(country))
+    logger.debug('Country object: {0}'.format(country))
 
     if not country:
-        print('ERROR: Country with ISO3 Format ({0}) not found in PROCO DB. '
-              'Hence skipping the load for current table.'.format(table_name))
+        logger.error('Country with ISO3 Format ({0}) not found in DB. '
+                     'Hence skipping the load for current table.'.format(table_name))
         raise ValueError(f"Invalid 'iso3_format': {table_name}")
 
     table_last_data_version = sources_models.SchoolMasterData.get_last_version(table_name)
-    print('Table last data version present in PROCO DB: {0}'.format(table_last_data_version))
+    logger.debug('Table last data version present in DB: {0}'.format(table_last_data_version))
 
     # Create an url to access a shared table.
     # A table path is the profile file path following with `#` and the fully qualified name of a table
@@ -198,21 +197,21 @@ def sync_school_master_data(profile_file, share_name, schema_name, table_name, c
         schema_name=schema_name,
         table_name=table_name,
     )
-    print('Table URL: %s', table_url)
+    logger.debug('Table URL: %s', table_url)
 
     table_current_version = delta_sharing.get_table_version(table_url)
-    print('Table current version from API: {0}'.format(table_current_version))
+    logger.debug('Table current version from API: {0}'.format(table_current_version))
 
     if table_last_data_version == table_current_version:
-        print('Both School Master data version in DB and Table version from API, are same. '
-              'Hence skipping the data update for current country ({0}).'.format(country))
+        logger.info('Both School Master data version in DB and Table version from API, are same. '
+                    'Hence skipping the data update for current country ({0}).'.format(country))
         return
 
     table_protocol = delta_sharing.get_table_protocol(table_url)
-    print('Table Protocol: {0}'.format(table_protocol))
+    logger.debug('Table Protocol: {0}'.format(table_protocol))
 
     table_meta_data = delta_sharing.get_table_metadata(table_url)
-    print('Table Metadata: {0}'.format(table_meta_data.__dict__))
+    logger.debug('Table Metadata: {0}'.format(table_meta_data.__dict__))
 
     # loaded_data_df = delta_sharing.load_as_pandas(table_url, None, table_current_version)
     loaded_data_df = delta_sharing.load_table_changes_as_pandas(
@@ -222,7 +221,7 @@ def sync_school_master_data(profile_file, share_name, schema_name, table_name, c
         None,
         None,
     )
-    print('Total count of rows in the data: {0}'.format(len(loaded_data_df)))
+    logger.debug('Total count of rows in the data: {0}'.format(len(loaded_data_df)))
 
     if len(loaded_data_df) > 0:
         # Sort the values based on _commit_timestamp ASC
@@ -237,15 +236,15 @@ def sync_school_master_data(profile_file, share_name, schema_name, table_name, c
         loaded_data_df = loaded_data_df[loaded_data_df[DeltaSharingReader._change_type_col_name()].isin(
             ['insert', 'update_postimage', 'remove', 'delete'])]
 
-        print('Total count of rows in the data after duplicate cleanup: {0}'.format(len(loaded_data_df)))
+        logger.debug('Total count of rows in the data after duplicate cleanup: {0}'.format(len(loaded_data_df)))
 
         df_columns = list(loaded_data_df.columns.tolist())
         cols_to_delete = list(set(df_columns) - set(school_master_fields)) + ['id', 'created', 'modified', 'school_id',
                                                                               'country_id', 'status',
                                                                               'modified_by', 'published_by',
                                                                               'published_at', 'is_read', ]
-        print('All School Master API response columns: {}'.format(df_columns))
-        print('All School Master API response columns to delete: {}'.format(
+        logger.debug('All School Master API response columns: {}'.format(df_columns))
+        logger.debug('All School Master API response columns to delete: {}'.format(
             list(set(df_columns) - set(school_master_fields))))
 
         insert_entries = []
@@ -257,10 +256,6 @@ def sync_school_master_data(profile_file, share_name, schema_name, table_name, c
 
         loaded_data_df['version'] = table_current_version
         loaded_data_df['country'] = country
-
-        # print('Table data: ')
-        # print(loaded_data_df)
-        # print(loaded_data_df.to_dict(orient='records'))
 
         for _, row in loaded_data_df.iterrows():
             change_type = row[DeltaSharingReader._change_type_col_name()]
@@ -291,11 +286,11 @@ def sync_school_master_data(profile_file, share_name, schema_name, table_name, c
                 insert_entries.append(sources_models.SchoolMasterData(**row_as_dict))
 
                 if len(insert_entries) == 5000:
-                    print('Loading the data to "SchoolMasterData" table as it has reached 5000 benchmark.')
+                    logger.debug('Loading the data to "SchoolMasterData" table as it has reached 5000 benchmark.')
                     sources_models.SchoolMasterData.objects.bulk_create(insert_entries)
                     insert_entries = []
-                    print('#' * 10)
-                    print('\n\n')
+                    logger.debug('#' * 10)
+                    logger.debug('\n\n')
 
             elif change_type in ['remove', 'delete']:
                 school = School.objects.filter(
@@ -313,24 +308,24 @@ def sync_school_master_data(profile_file, share_name, schema_name, table_name, c
                     remove_entries.append(sources_models.SchoolMasterData(**row_as_dict))
 
                 if len(remove_entries) == 5000:
-                    print('Loading the data to "SchoolMasterData" table as it has reached 5000 benchmark.')
+                    logger.info('Loading the data to "SchoolMasterData" table as it has reached 5000 benchmark.')
                     sources_models.SchoolMasterData.objects.bulk_create(remove_entries)
                     remove_entries = []
-                    print('#' * 10)
-                    print('\n\n')
+                    logger.debug('#' * 10)
+                    logger.debug('\n\n')
 
-        print('Loading the remaining ({0}) data to "SchoolMasterData" table.'.format(len(insert_entries)))
+        logger.info('Loading the remaining ({0}) data to "SchoolMasterData" table.'.format(len(insert_entries)))
         if len(insert_entries) > 0:
             sources_models.SchoolMasterData.objects.bulk_create(insert_entries)
 
-        print('Removing ({0}) records from "SchoolMasterData" table.'.format(len(remove_entries)))
+        logger.info('Removing ({0}) records from "SchoolMasterData" table.'.format(len(remove_entries)))
         if len(remove_entries) > 0:
             sources_models.SchoolMasterData.objects.bulk_create(remove_entries)
 
             deleted_schools.extend(
                 [country.name + ' : ' + school_master_row.school_name for school_master_row in remove_entries])
     else:
-        print('INFO: No data to update in current table: {0}.'.format(table_name))
+        logger.info('No data to update in current table: {0}.'.format(table_name))
 
 
 def get_request_headers(request_configs):
@@ -384,7 +379,7 @@ def load_daily_check_app_data_source_response_to_model(model, request_configs):
     new_params = {}
 
     while has_more_data:
-        print('#' * 10)
+        logger.debug('#' * 10)
         source_url = request_configs.get('url')
 
         if request_configs.get('query_params'):
@@ -394,19 +389,19 @@ def load_daily_check_app_data_source_response_to_model(model, request_configs):
             page_no += 1
             source_url = add_url_params(request_configs.get('url'), new_params)
 
-        print('Executing the request URL: {0}'.format(source_url))
-        print('Request header: {0}'.format(source_request_headers))
+        logger.debug('Executing the request URL: {0}'.format(source_url))
+        logger.debug('Request header: {0}'.format(source_request_headers))
 
         response = requests.get(source_url, headers=source_request_headers)
 
         if response.status_code != status.HTTP_200_OK:
-            print('ERROR: Invalid response received {0}'.format(response))
+            logger.error('Invalid response received {0}'.format(response))
             return
 
         response_data = response.json()
 
         if len(response_data) == 0:
-            print('No records to read further.')
+            logger.debug('No records to read further.')
             has_more_data = False
         else:
             for data in response_data:
@@ -416,13 +411,13 @@ def load_daily_check_app_data_source_response_to_model(model, request_configs):
                 insert_entries.append(model(**data))
 
         if len(insert_entries) >= 5000:
-            print('Loading the data to "{0}" table as it has reached 5000 benchmark.'.format(model.__name__))
+            logger.info('Loading the data to "{0}" table as it has reached 5000 benchmark.'.format(model.__name__))
             model.objects.bulk_create(insert_entries)
             insert_entries = []
-            print('#' * 10)
-            print('\n\n')
+            logger.debug('#' * 10)
+            logger.debug('\n\n')
 
-    print('Loading the remaining ({0}) data to "{1}" table.'.format(len(insert_entries), model.__name__))
+    logger.info('Loading the remaining ({0}) data to "{1}" table.'.format(len(insert_entries), model.__name__))
     if len(insert_entries) > 0:
         model.objects.bulk_create(insert_entries)
 
@@ -431,7 +426,7 @@ def sync_dailycheckapp_realtime_data():
     current_datetime = core_utilities.get_current_datetime_object()
 
     last_measurement_date = sources_models.DailyCheckAppMeasurementData.get_last_dailycheckapp_measurement_date()
-    print('Daily Check APP Last Measurement Date: {0}'.format(last_measurement_date))
+    logger.info('Daily Check APP last measurement date: {0}'.format(last_measurement_date))
 
     request_configs = {
         'url': '{0}/measurements/v2'.format(ds_settings.get('DAILY_CHECK_APP').get('BASE_URL')),
@@ -460,8 +455,8 @@ def sync_dailycheckapp_realtime_data():
         (Q(upload__isnull=True) | Q(upload__gte=0)) &
         (Q(latency__isnull=True) | Q(latency__gte=0)),
     )
-    print('Migrating the records from "DailyCheckAppMeasurementData" to "RealTimeConnectivity" '
-          'with date range: {0} - {1}'.format(last_measurement_date, current_datetime))
+    logger.debug('Migrating the records from "DailyCheckAppMeasurementData" to "RealTimeConnectivity" '
+                 'with date range: {0} - {1}'.format(last_measurement_date, current_datetime))
 
     realtime = []
 
@@ -470,7 +465,7 @@ def sync_dailycheckapp_realtime_data():
     ).order_by('country_code'))
 
     for country_code in countries:
-        print('Current Country Code: {}'.format(country_code))
+        logger.debug('Current Country Code: {}'.format(country_code))
         if country_code:
             country = Country.objects.filter(code=country_code).first()
         else:
@@ -491,7 +486,7 @@ def sync_dailycheckapp_realtime_data():
             school.giga_id_school: school
             for school in schools_qs.filter(giga_id_school__in=dcm_giga_ids)
         }
-        print('Total schools in DailyCheckApp: {0}, Successfully mapped schools: {1}'.format(
+        logger.debug('Total schools in DailyCheckApp: {0}, Successfully mapped schools: {1}'.format(
             len(dcm_giga_ids), len(dcm_schools)))
 
         mlab_school_ids = set(dailycheckapp_measurements.filter(
@@ -505,7 +500,7 @@ def sync_dailycheckapp_realtime_data():
             school.external_id: school
             for school in schools_qs.filter(external_id__in=mlab_school_ids)
         }
-        print('Total schools in MLab: {0}, Successfully mapped schools: {1}'.format(
+        logger.debug('Total schools in MLab: {0}, Successfully mapped schools: {1}'.format(
             len(mlab_school_ids), len(mlab_schools)))
 
         for dailycheckapp_measurement in dailycheckapp_measurements.filter(country_code=country_code):
@@ -544,11 +539,11 @@ def sync_dailycheckapp_realtime_data():
             ))
 
             if len(realtime) == 5000:
-                print('Loading the data to "RealTimeConnectivity" table as it has reached 5000 benchmark.')
+                logger.info('Loading the data to "RealTimeConnectivity" table as it has reached 5000 benchmark.')
                 RealTimeConnectivity.objects.bulk_create(realtime)
                 realtime = []
 
-    print('Loading the remaining ({0}) data to "RealTimeConnectivity" table.'.format(len(realtime)))
+    logger.info('Loading the remaining ({0}) data to "RealTimeConnectivity" table.'.format(len(realtime)))
     if len(realtime) > 0:
         RealTimeConnectivity.objects.bulk_create(realtime)
 
@@ -592,32 +587,32 @@ def load_qos_data_source_response_to_model():
 
         if qos_schema:
             schema_tables = client.list_tables(qos_schema)
-            print('All tables ready to access: {0}'.format(schema_tables))
+            logger.debug('All tables ready to access: {0}'.format(schema_tables))
 
             qos_model_fields = [f.name for f in sources_models.QoSData._meta.get_fields()]
 
             for schema_table in schema_tables:
-                print('#' * 10)
-                print('Table: %s', schema_table)
+                logger.debug('#' * 10)
+                logger.debug('Table: %s', schema_table)
 
                 table_name = schema_table.name
 
                 try:
                     country = Country.objects.filter(iso3_format=table_name).first()
-                    print('Country object: {0}'.format(country))
+                    logger.debug('Country object: {0}'.format(country))
 
                     if not country:
-                        print('ERROR: Country with ISO3 Format ({0}) not found in PROCO DB. '
-                              'Hence skipping the load for current table.'.format(table_name))
+                        logger.error('Country with ISO3 Format ({0}) not found in DB. '
+                                     'Hence skipping the load for current table.'.format(table_name))
                         continue
 
                     if len(country_codes_for_exclusion) > 0 and table_name in country_codes_for_exclusion:
-                        print('WARNING: Country with ISO3 Format ({0}) asked to exclude in PROCO DB. '
-                              'Hence skipping the load for current table.'.format(table_name))
+                        logger.warning('Country with ISO3 Format ({0}) asked to exclude in PROCO DB. '
+                                       'Hence skipping the load for current table.'.format(table_name))
                         continue
 
                     table_last_data_version = sources_models.QoSData.get_last_version(table_name)
-                    print('Table last data version present in PROCO DB: {0}'.format(table_last_data_version))
+                    logger.debug('Table last data version present in DB: {0}'.format(table_last_data_version))
 
                     # Create an url to access a shared table.
                     # A table path is the profile file path following with `#` and the fully qualified name of a table
@@ -627,21 +622,21 @@ def load_qos_data_source_response_to_model():
                         schema_name=schema_name,
                         table_name=table_name,
                     )
-                    print('Table URL: %s', table_url)
+                    logger.debug('Table URL: %s', table_url)
 
                     table_current_version = delta_sharing.get_table_version(table_url)
-                    print('Table current version from API: {0}'.format(table_current_version))
+                    logger.debug('Table current version from API: {0}'.format(table_current_version))
 
                     if table_last_data_version == table_current_version:
-                        print('Both QoS data version in DB and Table version from API, are same. '
-                              'Hence skipping the data update for current country ({0}).'.format(country))
+                        logger.info('Both QoS data version in DB and Table version from API, are same. '
+                                    'Hence skipping the data update for current country ({0}).'.format(country))
                         continue
 
                     table_protocol = delta_sharing.get_table_protocol(table_url)
-                    print('Table Protocol: {0}'.format(table_protocol))
+                    logger.debug('Table Protocol: {0}'.format(table_protocol))
 
                     table_meta_data = delta_sharing.get_table_metadata(table_url)
-                    print('Table Metadata: {0}'.format(table_meta_data.__dict__))
+                    logger.debug('Table Metadata: {0}'.format(table_meta_data.__dict__))
 
                     if not table_last_data_version:
                         # In case if its 1st pull, then pull only last 10 version's data at max
@@ -658,12 +653,14 @@ def load_qos_data_source_response_to_model():
                             None,
                             None,
                         )
-                        print('Total count of rows in the {0} version data: {1}'.format(version, len(loaded_data_df)))
+                        logger.debug(
+                            'Total count of rows in the {0} version data: {1}'.format(version, len(loaded_data_df)))
                         loaded_data_df = loaded_data_df[loaded_data_df[DeltaSharingReader._change_type_col_name()].isin(
                             ['insert', 'update_postimage'])]
 
-                        print('Total count of rows after filtering only ["insert", "update_postimage"] in the "{0}" '
-                              'version data: {1}'.format(version, len(loaded_data_df)))
+                        logger.debug(
+                            'Total count of rows after filtering only ["insert", "update_postimage"] in the "{0}" '
+                            'version data: {1}'.format(version, len(loaded_data_df)))
 
                         if len(loaded_data_df) > 0:
                             insert_entries = []
@@ -675,8 +672,8 @@ def load_qos_data_source_response_to_model():
                                                                                               'modified', 'school_id',
                                                                                               'country_id',
                                                                                               'modified_by', ]
-                            print('All QoS API response columns: {}'.format(df_columns))
-                            print('All QoS API response columns to delete: {}'.format(
+                            logger.debug('All QoS API response columns: {}'.format(df_columns))
+                            logger.debug('All QoS API response columns to delete: {}'.format(
                                 list(set(df_columns) - set(qos_model_fields))))
 
                             loaded_data_df.drop(columns=cols_to_delete, inplace=True, errors='ignore', )
@@ -692,8 +689,9 @@ def load_qos_data_source_response_to_model():
                                 ).first()
 
                                 if not school:
-                                    print('ERROR: School with Giga ID ({0}) not found in PROCO DB. '
-                                          'Hence skipping the load for current school.'.format(row['school_id_giga']))
+                                    logger.warning('School with Giga ID ({0}) not found in PROCO DB. '
+                                                   'Hence skipping the load for current school.'.format(
+                                        row['school_id_giga']))
                                     continue
 
                                 row['school'] = school
@@ -702,25 +700,26 @@ def load_qos_data_source_response_to_model():
                                 insert_entries.append(row_as_dict)
 
                                 if len(insert_entries) == 5000:
-                                    print('Loading the data to "QoSData" table as it has reached 5000 benchmark.')
+                                    logger.info('Loading the data to "QoSData" table as it has reached 5000 benchmark.')
                                     core_utilities.bulk_create_or_update(insert_entries, sources_models.QoSData,
                                                                          ['school', 'timestamp'])
                                     insert_entries = []
-                                    print('#' * 10)
-                                    print('\n\n')
+                                    logger.debug('#' * 10)
+                                    logger.debug('\n\n')
 
-                            print('Loading the remaining ({0}) data to "QoSData" table.'.format(len(insert_entries)))
+                            logger.info(
+                                'Loading the remaining ({0}) data to "QoSData" table.'.format(len(insert_entries)))
                             if len(insert_entries) > 0:
                                 core_utilities.bulk_create_or_update(insert_entries, sources_models.QoSData,
                                                                      ['school', 'timestamp'])
                     else:
-                        print('INFO: No data to update in current table: {0}.'.format(table_name))
+                        logger.info('No data to update in current table: {0}.'.format(table_name))
                 except Exception as ex:
-                    print('ERROR: Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
+                    logger.error('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
         else:
-            print('ERROR: QoS schema ({0}) does not exist to use for share ({1}).'.format(schema_name, share_name))
+            logger.error('QoS schema ({0}) does not exist to use for share ({1}).'.format(schema_name, share_name))
     else:
-        print('ERROR: QoS share ({0}) does not exist to use.'.format(share_name))
+        logger.error('QoS share ({0}) does not exist to use.'.format(share_name))
 
     try:
         os.remove(profile_file)
@@ -747,7 +746,7 @@ def sync_qos_realtime_data():
         'speed_download_probe', 'speed_upload_probe', 'latency_probe',
     ).order_by('timestamp').distinct(*['timestamp', 'school'])
 
-    print('Migrating the records from "QoSData" to "RealTimeConnectivity" with date range: {0} - {1}'.format(
+    logger.debug('Migrating the records from "QoSData" to "RealTimeConnectivity" with date range: {0} - {1}'.format(
         last_entry_date, current_datetime))
 
     realtime = []
@@ -790,10 +789,10 @@ def sync_qos_realtime_data():
         ))
 
         if len(realtime) == 5000:
-            print('Loading the data to "RealTimeConnectivity" table as it has reached 5000 benchmark.')
+            logger.info('Loading the data to "RealTimeConnectivity" table as it has reached 5000 benchmark.')
             RealTimeConnectivity.objects.bulk_create(realtime)
             realtime = []
 
-    print('Loading the remaining ({0}) data to "RealTimeConnectivity" table.'.format(len(realtime)))
+    logger.info('Loading the remaining ({0}) data to "RealTimeConnectivity" table.'.format(len(realtime)))
     if len(realtime) > 0:
         RealTimeConnectivity.objects.bulk_create(realtime)

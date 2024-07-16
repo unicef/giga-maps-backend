@@ -1,5 +1,6 @@
 import os
 import uuid
+import logging
 from datetime import timedelta
 
 from django.db import transaction
@@ -7,6 +8,8 @@ from django.db.models import Q
 
 from proco.core import utils as core_utilities
 from proco.schools.constants import statuses_schema
+
+logger = logging.getLogger('gigamaps.' + __name__)
 
 
 def get_imported_file_path(instance, filename):
@@ -126,7 +129,7 @@ def update_school_from_country_or_school_weekly_update(start_time=None, end_time
         modified__lt=end_time,
     ).values_list('id', flat=True).order_by('id').distinct('id')
 
-    print('Query to select countries updated between ({0} - {1}): {2}'.format(
+    logger.debug('Query to select countries updated between ({0} - {1}): {2}'.format(
         start_time, end_time, country_ids_updated_in_last_12_hours.query))
 
     # CountryWeeklyStatus modified in last 24 hours
@@ -136,7 +139,7 @@ def update_school_from_country_or_school_weekly_update(start_time=None, end_time
     ).exclude(id__in=list(country_ids_updated_in_last_12_hours)).values_list(
         'id', flat=True).order_by('id').distinct('id')
 
-    print('Query to select countries where CountryWeeklyStatus updated between ({0} - {1}): {2}'.format(
+    logger.debug('Query to select countries where CountryWeeklyStatus updated between ({0} - {1}): {2}'.format(
         start_time, end_time, country_status_updated_in_last_12_hours.query))
 
     # SchoolWeeklyStatus updated in last 24 hours
@@ -145,7 +148,7 @@ def update_school_from_country_or_school_weekly_update(start_time=None, end_time
         Q(country_id__in=list(country_ids_updated_in_last_12_hours) + list(country_status_updated_in_last_12_hours))
     )
 
-    print('Query to select schools where SchoolWeeklyStatus updated between ({0} - {1}): {2}'.format(
+    logger.debug('Query to select schools where SchoolWeeklyStatus updated between ({0} - {1}): {2}'.format(
         start_time, end_time, school_updated_in_last_12_hours.query))
 
     for data_chunk in core_utilities.queryset_iterator(school_updated_in_last_12_hours, chunk_size=20000):

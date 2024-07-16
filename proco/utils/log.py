@@ -1,8 +1,10 @@
 import traceback
+import logging
 
 from django.contrib.admin.models import LogEntry, ADDITION, CHANGE, DELETION
 from django.contrib.contenttypes.models import ContentType
 
+logger = logging.getLogger('gigamaps.' + __name__)
 
 def action_log(request, queryset, checked, change_message, model, field_name):
     action_flag = ADDITION
@@ -36,7 +38,10 @@ def action_log(request, queryset, checked, change_message, model, field_name):
             change_message=change_message)
 
 
-def changed_fields(instance, validated_data, changed_data=[]):
+def changed_fields(instance, validated_data, changed_data=None):
+    if not changed_data:
+        changed_data = []
+
     model_instance = ['country', 'school', 'last_weekly_status', 'location']
     try:
         for field, value in validated_data.items():
@@ -44,8 +49,12 @@ def changed_fields(instance, validated_data, changed_data=[]):
                 if field in model_instance and int(value) != int(getattr(instance, field, None).id):
                     changed_data.append(field)
                 elif 'date' in field:
-                    if (getattr(instance, field, None) != None and str(getattr(instance, field, None).strftime(
-                        "%d-%m-%Y")) != value) or getattr(instance, field, None) == None and value != '':
+                    if (
+                        (
+                            getattr(instance, field, None) is not None and
+                            str(getattr(instance, field, None).strftime("%d-%m-%Y")) != value
+                        ) or getattr(instance, field, None) is None and value != ''
+                    ):
                         changed_data.append(field)
                     else:
                         try:
@@ -53,18 +62,22 @@ def changed_fields(instance, validated_data, changed_data=[]):
                         except:
                             pass
                 elif 'date' not in field and field not in model_instance and value != getattr(instance, field, None):
-                    if value == "" and (
-                        getattr(instance, field, None) == None or getattr(instance, field, None) == '') or (
-                        field in ['schools_with_data_percentage'] and getattr(instance, field, None) == float(value)):
+                    if (
+                        value == "" and
+                        (getattr(instance, field, None) is None or getattr(instance, field, None) == '') or
+                        (field in ['schools_with_data_percentage'] and getattr(instance, field, None) == float(value))
+                    ):
                         pass
-                    elif (getattr(instance, field, None) != '' and (value != "" or value == "")) or (
-                        getattr(instance, field, None) == None and value != "") or (
-                        getattr(instance, field, None) == '' and value != ""):
+                    elif (
+                        (getattr(instance, field, None) != '' and (value != "" or value == "")) or
+                        (getattr(instance, field, None) is None and value != "") or
+                        (getattr(instance, field, None) == '' and value != "")
+                    ):
                         changed_data.append(field)
             else:
                 changed_fields(getattr(instance, field), validated_data[field], changed_data)
     except:
-        print(traceback.format_exc())
+        logger.error(traceback.format_exc())
 
     changed_data = list(set(changed_data))
     remove_item = ["created", "modified"]
@@ -74,17 +87,22 @@ def changed_fields(instance, validated_data, changed_data=[]):
     return changed_data
 
 
-def changed_about_us_content_fields(instance, validated_data, changed_data=[], d=True):
+def changed_about_us_content_fields(instance, validated_data, changed_data=None):
+    if not changed_data:
+        changed_data = []
+
     try:
         for field, value in validated_data.items():
             if not isinstance(value, dict) and not isinstance(value, list):
                 if value != getattr(instance, field, None):
-                    if (getattr(instance, field, None) != '' and (value != "" or value == "")) or (
-                        getattr(instance, field, None) == None and value != "") or (
-                        getattr(instance, field, None) == '' and value != ""):
+                    if (
+                        (getattr(instance, field, None) != '' and (value != "" or value == "")) or
+                        (getattr(instance, field, None) is None and value != "") or
+                        (getattr(instance, field, None) == '' and value != "")
+                    ):
                         changed_data.append(field)
             elif isinstance(value, dict):
-                changed_about_us_content_fields(getattr(instance, field), validated_data[field], changed_data, 'dict')
+                changed_about_us_content_fields(getattr(instance, field), validated_data[field], changed_data)
             elif isinstance(value, list) and len(value) > 0 and isinstance(value[0], str):
                 try:
                     if set(instance[field]) != set(value):
@@ -99,8 +117,7 @@ def changed_about_us_content_fields(instance, validated_data, changed_data=[], d
                     for dict_field, dict_value in item.items():
                         if isinstance(dict_value, dict):
                             changed_about_us_content_fields(getattr(instance, field)[i][dict_field], item[dict_field],
-                                                            changed_data,
-                                                            'dict')
+                                                            changed_data)
                         elif isinstance(dict_value, list):
                             if set(dict_value) != set(getattr(instance, field)[i][dict_field]):
                                 changed_data.append(field + '_' + dict_field)
@@ -109,5 +126,5 @@ def changed_about_us_content_fields(instance, validated_data, changed_data=[], d
                                 changed_data.append(field + '_' + dict_field)
                     i += 1
     except:
-        print(traceback.format_exc())
+        logger.error(traceback.format_exc())
     return changed_data

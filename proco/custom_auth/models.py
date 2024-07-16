@@ -175,7 +175,7 @@ class Role(core_models.BaseModel):
         return self.permissions.all().values_list('slug', flat=True)
 
 
-class UserRoleRelationship(core_models.BaseModel):
+class UserRoleRelationship(core_models.BaseModelMixin):
     """
     UserRoleRelationship
         This model is used to store the user roles.
@@ -192,7 +192,7 @@ class UserRoleRelationship(core_models.BaseModel):
         return role_perms
 
 
-class RolePermission(core_models.BaseModel):
+class RolePermission(core_models.BaseModelMixin):
     """
     RolePermission
 

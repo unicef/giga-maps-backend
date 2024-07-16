@@ -79,6 +79,7 @@ djangorestframework-jwt = "==1.11.0"
 jsonfield = "==2.0.2"
 azure-search-documents = "==11.3.0"
 django-prometheus = "==2.2.0"
+celery-redbeat = "==2.2.0"
 
 [requires]
 python_version = "3.8"

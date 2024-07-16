@@ -1,14 +1,17 @@
 import random
 import traceback
+import uuid
+import logging
 from collections import Counter
 from copy import copy
 from random import randint  # noqa
 from typing import List
 
+from celery import current_task
 from django.contrib.gis.geos import MultiPoint, Point
-from django.core.cache import cache
 from django.db import transaction
 
+from proco.background import utils as background_task_utilities
 from proco.connection_statistics.utils import update_country_data_source_by_csv_filename, update_country_weekly_status
 from proco.core import utils as core_utilities
 from proco.locations.models import Country
@@ -20,6 +23,7 @@ from proco.taskapp import app
 from proco.utils.dates import format_date
 from proco.utils.tasks import update_country_related_cache
 
+logger = logging.getLogger('gigamaps.' + __name__)
 
 class FailedImportError(Exception):
     pass
@@ -140,17 +144,17 @@ def update_school_records():
         Periodic task executed every day at 01:00 AM and 01:00 PM to update the school fields based on changes in
         SchoolWeekly or CountryWeekly tables.
     """
-    task_cache_key = 'update_school_records_status_{current_time}'.format(
+    task_key = 'update_school_records_status_{current_time}'.format(
             current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
-    running_task = cache.get(task_cache_key, None)
 
-    if running_task in [None, b'completed', 'completed']:
-        print('***** Not found running Job *****')
-        cache.set(task_cache_key, 'running', None)
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(
+        task_id, task_key, 'Update the school fields based on changes in SchoolWeekly or CountryWeekly tables')
 
+    if task_instance:
+        logger.debug('Not found running job.')
         school_utilities.update_school_from_country_or_school_weekly_update()
-
-        cache.set(task_cache_key, 'completed', None)
+        background_task_utilities.task_on_complete(task_instance)
     else:
-        print('***** Found running Job with "{0}" name so skipping current iteration *****'.format(task_cache_key))
+        logger.debug('Found running job with "{0}" name so skipping current iteration.'.format(task_key))
 

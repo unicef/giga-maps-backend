@@ -2,6 +2,7 @@ from collections import OrderedDict
 
 from django.db import transaction
 
+from proco.core import utils as core_utilities
 from proco.custom_auth.models import Role, RolePermission, ApplicationUser, UserRoleRelationship
 
 
@@ -22,10 +23,7 @@ def populate_roles_data():
 
 role_permissions = OrderedDict({
     Role.SYSTEM_ROLE_NAME_ADMIN: [perm[0] for perm in RolePermission.PERMISSION_CHOICES],
-    Role.SYSTEM_ROLE_NAME_READ_ONLY: [
-        RolePermission.CAN_VIEW_COUNTRY,
-        RolePermission.CAN_VIEW_ALL_ROLES,
-    ],
+    Role.SYSTEM_ROLE_NAME_READ_ONLY: [RolePermission.CAN_DELETE_API_KEY, ],
 })
 
 
@@ -44,10 +42,10 @@ def populate_role_permissions():
 
 
 def clean_data():
-    UserRoleRelationship.objects.all().delete()
-    ApplicationUser.objects.all().delete()
-    RolePermission.objects.all().delete()
-    Role.objects.all().delete()
+    UserRoleRelationship.objects.all().update(deleted=core_utilities.get_current_datetime_object())
+    # ApplicationUser.objects.all().update(deleted=core_utilities.get_current_datetime_object())
+    RolePermission.objects.all().update(deleted=core_utilities.get_current_datetime_object())
+    Role.objects.all().update(deleted=core_utilities.get_current_datetime_object())
 
 
 def create_user_role_relationship(user, role_name):

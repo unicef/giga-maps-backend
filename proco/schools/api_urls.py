@@ -20,11 +20,11 @@ urlpatterns = [
         'get': 'list',
         'post': 'create',
         'delete': 'destroy',
-    }), name='list_or_create_or_destroy_school'),
+    }), name='list-create-destroy-school'),
     path('schools/school/<int:pk>/', api.AdminViewSchoolAPIViewSet.as_view({
         'put': 'update',
         'get': 'retrieve',
-    }), name='update_or_retrieve_school'),
+    }), name='update-or-retrieve-school'),
     path('schools/fileimport/', api.ImportCSVViewSet.as_view({
         'post': 'fileimport',
         'get': 'list',

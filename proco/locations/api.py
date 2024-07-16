@@ -1,4 +1,5 @@
 import copy
+import logging
 import traceback
 from collections import OrderedDict
 
@@ -32,7 +33,7 @@ from proco.core.viewsets import BaseModelViewSet
 from proco.data_sources.models import SchoolMasterData
 from proco.locations.models import Country, CountryAdminMetadata
 from proco.locations.search_indexes import SchoolIndex
-from proco.locations.serializers import (  # BoundaryListCountrySerializer,
+from proco.locations.serializers import (
     CountryCSVSerializer,
     CountrySerializer,
     CountryStatusSerializer,
@@ -49,6 +50,8 @@ from proco.utils.filters import NullsAlwaysLastOrderingFilter
 from proco.utils.log import action_log, changed_fields
 from proco.utils.mixins import CachedListMixin, CachedRetrieveMixin
 from proco.utils.tasks import update_country_related_cache
+
+logger = logging.getLogger('gigamaps.' + __name__)
 
 
 @method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
@@ -126,7 +129,6 @@ class CountryViewSet(
         return queryset
 
 
-# @method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
 class CountryDataViewSet(BaseModelViewSet):
     model = Country
     serializer_class = CountrySerializer
@@ -278,55 +280,6 @@ def validate_ids(data, field='id', unique=True):
     return [int(data[field])]
 
 
-# @method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
-# class CountryBoundaryListAPIView(CachedListMixin, ListAPIView):
-#     LIST_CACHE_KEY_PREFIX = 'COUNTRY_BOUNDARY'
-#
-#     queryset = Country.objects.all().annotate(
-#         geometry_empty=Func(F('geometry'), function='ST_IsEmpty', output_field=BooleanField()),
-#     ).filter(geometry_empty=False).only('id', 'code', 'geometry_simplified')
-#     serializer_class = BoundaryListCountrySerializer
-#     pagination_class = None
-
-
-# class CountryTileGenerator(BaseTileGenerator):
-#     def __init__(self, table_config):
-#         super().__init__()
-#         self.table_config = table_config
-#
-#     def envelope_to_sql(self, env, request):
-#         tbl = self.table_config.copy()
-#         tbl['env'] = self.envelope_to_bounds_sql(env)
-#         tbl['limit'] = int(request.query_params.get('limit', 100000))
-#         # tbl['random_order'] = "ORDER BY random()" if int(request.query_params.get('z', 0)) == 2 else ""
-#
-#         """sql with join and connectivity_speed at country level """
-#         sql_tmpl = """
-#
-#         """
-#
-#         return sql_tmpl.format(**tbl)
-
-#
-# class CountryTileRequestHandler(APIView):
-#     def __init__(self, *args, **kwargs):
-#         super().__init__(*args, **kwargs)
-#
-#         table_config = {
-#             'table': 'schools_school',
-#             'srid': '4326',
-#             'geomColumn': 'geopoint',
-#             'attrColumns': 'id',
-#         }
-#         self.tile_generator = CountryTileGenerator(table_config)
-#
-#     def get(self, request):
-#         try:
-#             return self.tile_generator.generate_tile(request)
-#         except Exception as e:
-#             return Response({"error": "An error occurred while processing the request"}, status=500)
-
-
 class DownloadCountriesViewSet(BaseModelViewSet, core_mixins.DownloadAPIDataToCSVMixin):
     model = Country
     queryset = Country.objects.all().select_related('last_weekly_status')
@@ -427,10 +380,7 @@ class SearchListAPIView(BaseModelViewSet):
         if page_size:
             page = self.paginate_queryset(queryset)
             if page is not None:
-                # serializer = self.get_serializer(page, many=True)
                 return self.get_paginated_response(page)
-
-        # serializer = self.get_serializer(queryset, many=True)
         return Response(list(queryset))
 
     def finalize_response(self, request, response, *args, **kwargs):
@@ -515,8 +465,6 @@ class SearchListAPIView(BaseModelViewSet):
                 response.data = OrderedDict()
 
             response.data['results'] = data
-            # response.data['results'] = response_data
-
         return response
 
 
@@ -535,18 +483,7 @@ class CountrySearchStatListAPIView(CachedListMixin, ListAPIView):
     LIST_CACHE_KEY_PREFIX = 'GLOBAL_COUNTRY_SEARCH_MAPPING'
 
     def get_queryset(self):
-        # fields = ('country_id', 'country_name', 'country_code', 'admin1_name', 'admin2_name', 'id', 'name')
-        # ordering_fields = ('country_name', 'admin1_name', 'admin2_name', 'name')
-
-        queryset = self.model.objects.all()  # .filter(country_id=144)
-
-        # qs = queryset.prefetch_related(
-        #     Prefetch('country',
-        #              Country.objects.defer('geometry', 'geometry_simplified')),
-        # ).annotate(
-        #     country_name=F('country__name'),
-        #     country_code=F('country__code'),
-        # ).values(*fields).order_by(*ordering_fields).distinct(*fields)
+        queryset = self.model.objects.all()
 
         qs = queryset.values(
             'country__id', 'country__name', 'country__code', 'country__last_weekly_status__integration_status',
@@ -618,7 +555,6 @@ class CountrySearchStatListAPIView(CachedListMixin, ListAPIView):
                 admin1_name_data['data'] = admin2_data
 
             country_data['data'][admin1_name] = admin1_name_data
-            # country_data['data'] = admin1_name_data
             data[country_id] = country_data
 
         for country_id, country_data in data.items():
@@ -634,7 +570,6 @@ class CountrySearchStatListAPIView(CachedListMixin, ListAPIView):
 
         queryset = self.get_queryset()
         queryset_data = list(queryset)
-        # data = self._format_result(queryset_data)
         data = self._format_result(queryset_data)
 
         request_path = remove_query_param(request.get_full_path(), self.CACHE_KEY)
@@ -805,7 +740,7 @@ class BaseSearchMixin:
         self.params = dict(request.query_params)
 
         search_client = self.create_search_client()
-        print(
+        logger.debug(
             'Search params: \nsearch_text - {search_text}\ninclude_total_count - {include_total_count}'
             '\norder_by - {order_by}\nsearch_fields - {search_fields}\nselect - {select}'
             '\nskip - {skip}\ntop - {top}\nfilter - {filter}\nquery_type - {query_type}'.format(
@@ -831,10 +766,7 @@ class BaseSearchMixin:
             query_type=self.get_query_type,
         )
 
-        print('Total Documents Matching Query:', results.get_count())
-        # for result in results:
-        #     print("{0}".format(result))
-
+        logger.debug('Total Documents Matching Query:', results.get_count())
         return results
 
 
@@ -869,24 +801,9 @@ class AggregateSearchViewSet(BaseSearchMixin, ListAPIView):
     def list(self, request, *args, **kwargs):
         resp_data = OrderedDict()
         data = self.index_search(request, *args, **kwargs)
-
         counts = data.get_count()
-        # next_url = None
-        # previous_url = None
-
-        # page = int(str(self.params.get('page', ['0'])[-1]))
-        # page_size = int(str(self.params.get('page_size', ['20'])[-1]))
-        # limit = (page * page_size) + page_size
-        # if counts > limit:
-        #     next_url = replace_query_param(request.get_full_path(), 'page', page + 1)
-        # if page > 0:
-        #     previous_url = replace_query_param(request.get_full_path(), 'page', page - 1)
-
         resp_data['count'] = counts
-        # resp_data['next'] = next_url
-        # resp_data['previous'] = previous_url
         resp_data['results'] = list(data)
-
         return Response(resp_data)
 
 
@@ -960,5 +877,5 @@ class MarkAsJoinedViewSet(BaseModelViewSet):
                         message = 'Countries validation started. Please wait.'
                         return Response({'desc': message, 'task_id': [task.id]}, status=rest_status.HTTP_200_OK)
             except:
-                print(traceback.format_exc())
+                logger.error(traceback.format_exc())
                 return Response(data=error_mess, status=rest_status.HTTP_502_BAD_GATEWAY)

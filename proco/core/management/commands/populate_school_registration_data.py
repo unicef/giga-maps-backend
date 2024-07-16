@@ -1,3 +1,4 @@
+import logging
 from collections import OrderedDict
 
 from django.core.management.base import BaseCommand
@@ -6,6 +7,8 @@ from django.db import transaction
 from django.utils import timezone
 from proco.core.utils import get_current_datetime_object
 from proco.connection_statistics import models as statistics_models
+
+logger = logging.getLogger('gigamaps.' + __name__)
 
 
 def delete_relationships(country_id, school_id):
@@ -38,11 +41,11 @@ def create_and_execute_insert_query(table_columns, insert_statement_list):
         )
 
         insert_ts = timezone.now()
-        print('Executing bulk insert for: {0} records'.format(len(insert_statement_list)))
-        print(insert_statement)
+        logger.debug('Executing bulk insert for total: {} records'.format(len(insert_statement_list)))
+        logger.debug(insert_statement)
         cursor.executemany(insert_statement, insert_statement_list)
         insert_te = timezone.now()
-        print('bulk insert time is {} second'.format((insert_te - insert_ts).seconds))
+        logger.debug('Bulk insert time is "{}" second'.format((insert_te - insert_ts).seconds))
 
 
 def populate_school_registration_data(country_id, school_id):
@@ -72,8 +75,8 @@ def populate_school_registration_data(country_id, school_id):
         query += f' AND school.country_id = {country_id}'
 
     with connection.cursor() as cursor:
-        print('getting select statement query result from School + SchoolDailyStatus tables')
-        print('Query: {}'.format(query))
+        logger.debug('Getting select statement query result from School + SchoolDailyStatus tables')
+        logger.debug('Query: {}'.format(query))
 
         cursor.execute(query)
         description = cursor.description
@@ -94,7 +97,7 @@ def populate_school_registration_data(country_id, school_id):
     create_and_execute_insert_query(table_columns, insert_statement_list)
 
     te = timezone.now()
-    print('Executed the function in {} seconds'.format((te - ts).seconds))
+    logger.debug('Executed the function in "{}" seconds'.format((te - ts).seconds))
     return current_rows_num, last_processed_id
 
 
@@ -122,12 +125,10 @@ class Command(BaseCommand):
         school_id = options.get('school_id')
 
         if options.get('reset_mapping', False):
-            print('DELETE_OLD_RECORDS - START')
+            logger.debug('Starting deleting old records.')
             delete_relationships(country_id, school_id)
-            print('DELETE_OLD_RECORDS - END')
+            logger.debug('Deleted old records.')
 
-        print('*** School Registration update operation STARTED ({0}) ***'.format(options))
-
+        logger.info('School Registration update operation STARTED ({0})'.format(options))
         populate_school_registration_data(country_id, school_id)
-
-        print('*** School Registration update operation ENDED ({0}) ***'.format(options))
+        logger.info('School Registration update operation ENDED ({0})'.format(options))

@@ -1,5 +1,6 @@
 import json
 import os
+import logging
 from datetime import timedelta
 
 import delta_sharing
@@ -17,6 +18,8 @@ from proco.data_sources.tasks import finalize_previous_day_data
 from proco.locations.models import Country
 from proco.schools.models import School
 from proco.utils import dates as date_utilities
+
+logger = logging.getLogger('gigamaps.' + __name__)
 
 ds_settings = settings.DATA_SOURCE_CONFIG
 
@@ -62,18 +65,18 @@ def load_qos_data_source_response_to_model(version_number, country):
                 if country.iso3_format != table_name:
                     continue
 
-                print('#' * 10)
+                logger.debug('#' * 10)
                 try:
                     if QoSData.objects.all().filter(
                         country=country,
                         version=version_number,
                     ).exists():
-                        print('WARNING: QoSData table has given version data already in the table. '
+                        logger.debug('WARNING: QoSData table has given version data already in the table. '
                               'To re collect, please clean this version data first then retry again.'
-                              'Country Code: {0}, \t\tVersion: {1}'.format(table_name, version_number))
+                              'Country code: {0}, \t\tVersion: {1}'.format(table_name, version_number))
                         continue
 
-                    print('Current version data not available in the table. Hence fetching the data from QoS API.')
+                    logger.info('Current version data not available in the table. Hence fetching the data from QoS api.')
 
                     # Create an url to access a shared table.
                     # A table path is the profile file path following with `#` and the fully qualified name of a table
@@ -85,10 +88,10 @@ def load_qos_data_source_response_to_model(version_number, country):
                     )
 
                     api_current_version = delta_sharing.get_table_version(table_url)
-                    print('Current version from API: {0}'.format(api_current_version))
+                    logger.debug('Current version from api: {0}'.format(api_current_version))
 
                     if version_number > api_current_version:
-                        print('ERROR: Given version must not be higher then latest API version. '
+                        logger.error('Given version must not be higher then latest api version. '
                               'Hence skipping current data pull.')
                         exit(0)
 
@@ -99,12 +102,12 @@ def load_qos_data_source_response_to_model(version_number, country):
                         None,
                         None,
                     )
-                    print('Total count of rows in the {0} version data: {1}'.format(
+                    logger.debug('Total count of rows in the {0} version data: {1}'.format(
                         version_number, len(loaded_data_df)))
 
                     loaded_data_df = loaded_data_df[loaded_data_df[DeltaSharingReader._change_type_col_name()].isin(
                         ['insert', 'update_postimage'])]
-                    print('Total count of rows after filtering only ["insert", "update_postimage"] in the "{0}" '
+                    logger.info('Total count of rows after filtering only ["insert", "update_postimage"] in the "{0}" '
                           'version data: {1}'.format(version_number, len(loaded_data_df)))
 
                     if len(loaded_data_df) > 0:
@@ -117,8 +120,8 @@ def load_qos_data_source_response_to_model(version_number, country):
                                                                                           'modified', 'school_id',
                                                                                           'country_id',
                                                                                           'modified_by', ]
-                        print('All QoS API response columns: {}'.format(df_columns))
-                        print('All QoS API response columns to delete: {}'.format(
+                        logger.debug('All QoS api response columns: {}'.format(df_columns))
+                        logger.debug('All QoS api response columns to delete: {}'.format(
                             list(set(df_columns) - set(qos_model_fields))))
 
                         loaded_data_df.drop(columns=cols_to_delete, inplace=True, errors='ignore', )
@@ -134,7 +137,7 @@ def load_qos_data_source_response_to_model(version_number, country):
                             ).first()
 
                             if not school:
-                                print('ERROR: School with Giga ID ({0}) not found in PROCO DB. '
+                                logger.error('School with giga ID ({0}) not found in proco db. '
                                       'Hence skipping the load for current school.'.format(row['school_id_giga']))
                                 continue
 
@@ -147,10 +150,10 @@ def load_qos_data_source_response_to_model(version_number, country):
                                 version__gt=version_number,
                             )
                             if duplicate_higher_version_records.exists():
-                                print('ERROR: Higher version for same School ID and Timestamp already exists. '
+                                logger.error('Higher version for same school ID and timestamp already exists. '
                                       'Hence skipping the update for current row.')
                                 qos_instance = duplicate_higher_version_records.first()
-                                print('School ID: {0},\tTimestamp: {1},\tCurrent Version: {2},\t'
+                                logger.debug('School ID: {0},\tTimestamp: {1},\tCurrent Version: {2},\t'
                                       'Higher Version: {3}'.format(qos_instance.school_id, qos_instance.timestamp,
                                                                    version_number, qos_instance.version))
                                 continue
@@ -158,24 +161,23 @@ def load_qos_data_source_response_to_model(version_number, country):
                             insert_entries.append(row_as_dict)
 
                             if len(insert_entries) == 5000:
-                                print('Loading the data to "QoSData" table as it has reached 5000 benchmark.')
+                                logger.info('Loading the data to "QoSData" table as it has reached 5000 benchmark.')
                                 bulk_create_or_update(insert_entries, QoSData, ['school', 'timestamp'])
                                 insert_entries = []
-                                print('#' * 10)
-                                print('\n\n')
+                                logger.debug('#\n' * 10)
 
-                        print('Loading the remaining ({0}) data to "QoSData" table.'.format(len(insert_entries)))
+                        logger.debug('Loading the remaining ({0}) data to "QoSData" table.'.format(len(insert_entries)))
                         if len(insert_entries) > 0:
                             bulk_create_or_update(insert_entries, QoSData, ['school', 'timestamp'])
                     else:
-                        print('INFO: No data to update in current table: {0}.'.format(table_name))
+                        logger.debug('No data to update in current table: {0}.'.format(table_name))
                 except Exception as ex:
-                    print('ERROR: Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
+                    logger.error('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
         else:
-            print('ERROR: QoS schema ({0}) does not exist to use for share ({1}).'.format(schema_name, share_name))
+            logger.error('QoS schema ({0}) does not exist to use for share ({1}).'.format(schema_name, share_name))
             exit(0)
     else:
-        print('ERROR: QoS share ({0}) does not exist to use.'.format(share_name))
+        logger.error('QoS share ({0}) does not exist to use.'.format(share_name))
         exit(0)
 
 
@@ -199,10 +201,10 @@ def sync_qos_realtime_data(date, country):
     ).order_by('school')
 
     if not qos_measurements.exists():
-        print('ERROR: No records to aggregate on provided date: "{0}". Hence skipping for the given date.'.format(date))
+        logger.debug('No records to aggregate on provided date: "{0}". Hence skipping for the given date.'.format(date))
         return
 
-    print('Migrating the records from "QoSData" to "RealTimeConnectivity" with date: {0} '.format(date))
+    logger.debug('Migrating the records from "QoSData" to "RealTimeConnectivity" with date: {0} '.format(date))
 
     realtime = []
 
@@ -244,11 +246,11 @@ def sync_qos_realtime_data(date, country):
         ))
 
         if len(realtime) == 5000:
-            print('Loading the data to "RealTimeConnectivity" table as it has reached 5000 benchmark.')
+            logger.debug('Loading the data to "RealTimeConnectivity" table as it has reached 5000 benchmark.')
             RealTimeConnectivity.objects.bulk_create(realtime)
             realtime = []
 
-    print('Loading the remaining ({0}) data to "RealTimeConnectivity" table.'.format(len(realtime)))
+    logger.debug('Loading the remaining ({0}) data to "RealTimeConnectivity" table.'.format(len(realtime)))
     if len(realtime) > 0:
         RealTimeConnectivity.objects.bulk_create(realtime)
 
@@ -265,7 +267,7 @@ def get_latest_api_version(country_code=None):
 
         if qos_schema:
             schema_tables = client.list_tables(qos_schema)
-            print('\nAll tables ready to access: {0}'.format(schema_tables))
+            logger.debug('\nAll tables ready to access: {0}'.format(schema_tables))
 
             for schema_table in schema_tables:
                 table_name = schema_table.name
@@ -284,11 +286,11 @@ def get_latest_api_version(country_code=None):
                     )
 
                     table_current_version = delta_sharing.get_table_version(table_url)
-                    print('Country "{0}" current version from API: {1}\n'.format(table_name, table_current_version))
+                    logger.debug('Country "{0}" current version from API: {1}\n'.format(table_name, table_current_version))
 
                     version_for_countries[table_name] = table_current_version
                 except Exception as ex:
-                    print('ERROR: Exception caught for "{0}": {1}\n'.format(table_name, str(ex)))
+                    logger.error('Exception caught for "{0}": {1}\n'.format(table_name, str(ex)))
 
     return version_for_countries
 
@@ -320,9 +322,9 @@ def check_missing_versions_from_table(country_code=None):
 
         missing_version_list = list(set(must_version_list) - set(versions_list))
 
-        print('Missing versions details for country "{0}" are: \n\tStart Version from DB: {1}'
-              '\n\tEnd Version from API: {2}'
-              '\n\tmissing versions: {3}\n'.format(country_iso_code, start_version, end_version, missing_version_list))
+        logger.debug('Missing versions details for country "{0}" are: \n\tStart version from DB: {1}'
+              '\n\tEnd version from API: {2}'
+              '\n\tMissing versions: {3}\n'.format(country_iso_code, start_version, end_version, missing_version_list))
 
 
 class Command(BaseCommand):
@@ -374,7 +376,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, **options):
-        print('Executing "data_loss_recovery_for_QoS" ....\n')
+        logger.info('Executing data loss recovery for QoS" ....\n')
 
         check_missing_versions = options.get('check_missing_versions')
         country_iso3_format = options.get('country_iso3_format')
@@ -382,22 +384,22 @@ class Command(BaseCommand):
         country = None
         if country_iso3_format:
             country = Country.objects.filter(iso3_format=country_iso3_format).first()
-            print('Country object: {0}'.format(country))
+            logger.debug('Country object: {0}'.format(country))
 
             if not country:
-                print('ERROR: Country with ISO3 Format ({0}) not found in PROCO DB. '
+                logger.error('Country with ISO3 format ({0}) not found in proco db. '
                       'Hence stopping the load.'.format(country_iso3_format))
                 exit(0)
 
         if check_missing_versions:
-            print('\n*** Checking the missing versions ***')
+            logger.info('\nChecking the missing versions.')
             check_missing_versions_from_table(country_code=country_iso3_format)
-            print('*** Checking the missing versions action completed successfully ***\n')
+            logger.debug('Checking the missing versions action completed successfully.\n')
 
         pull_data = options.get('pull_data')
         if pull_data:
             if not country:
-                print('ERROR: Country Code is mandatory to pull the data.'
+                logger.error('Country code is mandatory to pull the data.'
                       ' Please pass required parameters as: -country_code=<COUNTRY-ISO3-FORMAT>\n')
                 exit(0)
 
@@ -405,12 +407,12 @@ class Command(BaseCommand):
             pull_end_version = options.get('pull_end_version')
 
             if pull_start_version and pull_end_version and pull_start_version <= pull_end_version:
-                print('\n*** Loading the API data to "data_sources_qosdata" table ***\n')
+                logger.debug('\nLoading the api data to "data_sources_qosdata" table ***\n')
                 for version_number in range(pull_start_version, pull_end_version + 1):
                     load_qos_data_source_response_to_model(version_number, country)
-                print('\n*** Data load completed successfully ***\n')
+                logger.info('\nData load completed successfully.\n')
             else:
-                print('ERROR: Please provide valid required parameters as:'
+                logger.error('Please provide valid required parameters as:'
                       ' -pull_start_version=<VERSION-NUMBER> -pull_end_version=<VERSION-NUMBER>\n')
                 exit(0)
 
@@ -422,7 +424,7 @@ class Command(BaseCommand):
         aggregate_data = options.get('aggregate_data')
         if aggregate_data:
             if not country:
-                print('ERROR: Country Code is mandatory to aggregate the data.'
+                logger.error('Country code is mandatory to aggregate the data.'
                       ' Please pass required parameters as: -country_code=<COUNTRY-ISO3-FORMAT>')
                 exit(0)
 
@@ -439,26 +441,26 @@ class Command(BaseCommand):
                 date_list_from_versions = qos_queryset.order_by('timestamp__date').values_list(
                     'timestamp__date', flat=True).distinct('timestamp__date')
 
-                print('date_list_from_versions: {0}'.format(date_list_from_versions))
+                logger.debug('Date list from versions: {0}'.format(date_list_from_versions))
 
                 for pull_data_date in date_list_from_versions:
-                    print('\nSyncing the "data_sources_qosdata" data to "connection_statistics_realtimeconnectivity" '
+                    logger.debug('\nSyncing the "data_sources_qosdata" data to "connection_statistics_realtimeconnectivity" '
                           'for date: {0}'.format(pull_data_date))
                     sync_qos_realtime_data(pull_data_date, country)
-                    print('Data synced successfully.\n\n')
+                    logger.debug('Data synced successfully.\n\n')
 
-                    print('Starting finalizing the records to actual proco tables.')
+                    logger.debug('Starting finalizing the records to actual proco tables.')
                     monday_date = pull_data_date - timedelta(days=pull_data_date.weekday())
                     monday_week_no = date_utilities.get_week_from_date(monday_date)
                     monday_year = date_utilities.get_year_from_date(monday_date)
-                    print('Weekly record details. \tWeek No: {0}\tYear: {1}'.format(monday_week_no, monday_year))
+                    logger.debug('Weekly record details. \tWeek No: {0}\tYear: {1}'.format(monday_week_no, monday_year))
 
-                    print('\n\nFinalizing the records for Country ID: {0}'.format(country.id))
+                    logger.debug('\n\nFinalizing the records for country ID: {0}'.format(country.id))
                     finalize_previous_day_data(None, country.id, pull_data_date)
-                    print('Finalized records successfully to actual proco tables.\n\n')
+                    logger.debug('Finalized records successfully to actual proco tables.\n\n')
             else:
-                print('ERROR: Please pass required parameters as:'
+                logger.error('Please pass required parameters as:'
                       ' -pull_start_version=<VERSION-NUMBER> -pull_end_version=<VERSION-NUMBER>')
 
-        print('Completed "data_loss_recovery_for_qos" successfully ....\n')
+        logger.info('Completed data loss recovery for qos successfully.\n')
         exit(0)
