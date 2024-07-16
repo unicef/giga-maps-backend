@@ -1,0 +1,440 @@
+import sys
+
+from django.core.management.base import BaseCommand
+from django.db import transaction
+
+from proco.accounts import models as accounts_models
+from proco.core.utils import get_current_datetime_object
+
+data_source_json = [
+    {
+        'name': 'Daily Check APP and MLab',
+        'description': 'Daily Check APP and MLab',
+        'version': 'V1.0',
+        'data_source_type': 'DAILY_CHECK_APP',
+        'request_config': {},
+        'column_config': [
+            {
+                'name': 'connectivity_speed',
+                'type': 'int',
+                'unit': 'bps',
+                'is_parameter': True,
+                'alias': 'Download Speed',
+                'base_benchmark': 1000000,
+                'display_unit': 'Mbps',
+            }, {
+                'name': 'connectivity_upload_speed',
+                'type': 'int',
+                'unit': 'bps',
+                'is_parameter': True,
+                'alias': 'Upload Speed',
+                'base_benchmark': 1000000,
+                'display_unit': 'Mbps',
+            }, {
+                'name': 'connectivity_latency',
+                'type': 'int',
+                'unit': 'ms',
+                'is_parameter': True,
+                'alias': 'Latency',
+                'base_benchmark': 1,
+                'display_unit': 'ms',
+            }
+        ],
+        'status': 'PUBLISHED'
+    },
+    {
+        'name': 'QoS',
+        'description': 'QoS',
+        'version': 'V1.0',
+        'data_source_type': 'QOS',
+        'request_config': {},
+        'column_config': [
+            {
+                'name': 'connectivity_speed',
+                'type': 'int',
+                'unit': 'bps',
+                'is_parameter': True,
+                'alias': 'Download Speed',
+                'base_benchmark': 1000000,
+                'display_unit': 'Mbps',
+            },
+            {
+                'name': 'connectivity_upload_speed',
+                'type': 'int',
+                'unit': 'bps',
+                'is_parameter': True,
+                'alias': 'Upload Speed',
+                'base_benchmark': 1000000,
+                'display_unit': 'Mbps',
+            },
+            {
+                'name': 'connectivity_latency',
+                'type': 'int',
+                'unit': 'ms',
+                'is_parameter': True,
+                'alias': 'Latency',
+                'base_benchmark': 1,
+                'display_unit': 'ms',
+            },
+            {
+                'name': 'connectivity_speed_probe',
+                'type': 'int',
+                'unit': 'bps',
+                'is_parameter': True,
+                'alias': 'Download Speed Probe',
+                'base_benchmark': 1000000,
+                'display_unit': 'Mbps',
+            },
+            {
+                'name': 'connectivity_upload_speed_probe',
+                'type': 'int',
+                'unit': 'bps',
+                'is_parameter': True,
+                'alias': 'Upload Speed Probe',
+                'base_benchmark': 1000000,
+                'display_unit': 'Mbps',
+            },
+            {
+                'name': 'connectivity_latency_probe',
+                'type': 'int',
+                'unit': 'ms',
+                'is_parameter': True,
+                'alias': 'Latency Probe',
+                'base_benchmark': 1,
+                'display_unit': 'ms',
+            },
+            {
+                'name': 'roundtrip_time',
+                'type': 'int',
+                'unit': 'ms',
+                'is_parameter': True,
+                'alias': 'Roundtrip Time',
+                'base_benchmark': 1,
+                'display_unit': 'ms',
+            },
+            {
+                'name': 'jitter_download',
+                'type': 'int',
+                'unit': 'ms',
+                'is_parameter': True,
+                'alias': 'Jitter Download',
+                'base_benchmark': 1,
+                'display_unit': 'ms',
+            },
+            {
+                'name': 'jitter_upload',
+                'type': 'int',
+                'unit': 'ms',
+                'is_parameter': True,
+                'alias': 'Jitter Upload',
+                'base_benchmark': 1,
+                'display_unit': 'ms',
+            },
+            {
+                'name': 'rtt_packet_loss_pct',
+                'type': 'int',
+                'unit': '',
+                'is_parameter': True,
+                'alias': 'RTT Packet Loss',
+                'base_benchmark': 1,
+                'display_unit': '%',
+            }
+        ],
+        'status': 'PUBLISHED'
+    },
+    {
+        'name': 'School Master',
+        'description': 'School Master',
+        'version': 'V1.0',
+        'data_source_type': 'SCHOOL_MASTER',
+        'request_config': {},
+        'column_config': [
+            {
+                'name': 'coverage_type',
+                'type': 'str',
+                'is_parameter': True,
+                'alias': 'Coverage Type',
+                'unit': '',
+                'display_unit': '',
+                'count_labels': ['good', 'moderate'],
+            },
+            {
+                'name': 'connectivity_type',
+                'type': 'str',
+                'is_parameter': True,
+                'alias': 'Connectivity Type',
+                'unit': '',
+                'display_unit': '',
+                'count_labels': ['good', 'moderate'],
+            },
+            {
+                'name': 'fiber_node_distance',
+                'type': 'float',
+                'is_parameter': True,
+                'alias': 'Fiber Node Distance',
+                'unit': 'km',
+                'display_unit': 'km',
+                'count_labels': ['good', 'moderate', 'bad'],
+            },
+            {
+                'name': 'microwave_node_distance',
+                'type': 'float',
+                'is_parameter': True,
+                'alias': 'Microwave Node Distance',
+                'unit': 'km',
+                'display_unit': 'km',
+                'count_labels': ['good', 'moderate', 'bad'],
+            },
+            {
+                'name': 'nearest_nr_distance',
+                'type': 'float',
+                'is_parameter': True,
+                'alias': 'Nearest NR Distance',
+                'unit': 'km',
+                'display_unit': 'km',
+                'count_labels': ['good', 'moderate', 'bad'],
+            },
+            {
+                'name': 'nearest_lte_distance',
+                'type': 'float',
+                'is_parameter': True,
+                'alias': 'Nearest LTE Distance',
+                'unit': 'km',
+                'display_unit': 'km',
+                'count_labels': ['good', 'moderate', 'bad'],
+            },
+            {
+                'name': 'nearest_umts_distance',
+                'type': 'float',
+                'is_parameter': True,
+                'alias': 'Nearest UMTS Distance',
+                'unit': 'km',
+                'display_unit': 'km',
+                'count_labels': ['good', 'moderate', 'bad'],
+            },
+            {
+                'name': 'nearest_gsm_distance',
+                'type': 'float',
+                'is_parameter': True,
+                'alias': 'Nearest GSM Distance',
+                'unit': 'km',
+                'display_unit': 'km',
+                'count_labels': ['good', 'moderate', 'bad'],
+            }
+        ],
+        'status': 'PUBLISHED'
+    }
+]
+
+download_and_coverage_data_layer_json = [
+    {
+        'name': 'Download',
+        'icon': """<svg id="icon" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><style>.cls-1 {fill: none;}</style></defs><path d="M26,24v4H6V24H4v4H4a2,2,0,0,0,2,2H26a2,2,0,0,0,2-2h0V24Z"/><polygon points="26 14 24.59 12.59 17 20.17 17 2 15 2 15 20.17 7.41 12.59 6 14 16 24 26 14"/><g id="_Transparent_Rectangle_" data-name="&lt;Transparent Rectangle&gt;"><rect class="cls-1" width="32" height="32"/></g></svg>""",
+        'description': 'System Download Layer',
+        'version': 'V 1.0',
+        'type': 'LIVE',
+        'category': 'CONNECTIVITY',
+        'applicable_countries': [],
+        'global_benchmark': {'value': '20000000', 'unit': 'bps', 'convert_unit': 'mbps'},
+        'legend_configs': [],
+        'is_reverse': False,
+        'status': 'PUBLISHED',
+        'data_sources': [
+            {
+                'name': 'Daily Check APP and MLab',
+                'data_source_type': 'DAILY_CHECK_APP',
+                'data_source_column': {
+                    'name': 'connectivity_speed',
+                    'type': 'int',
+                    'unit': 'bps',
+                    'is_parameter': True,
+                    'alias': 'Download Speed',
+                    'base_benchmark': 1000000,
+                    'display_unit': 'Mbps',
+                }
+            }, {
+                'name': 'QoS',
+                'data_source_type': 'QOS',
+                'data_source_column': {
+                    'name': 'connectivity_speed',
+                    'type': 'int',
+                    'unit': 'bps',
+                    'is_parameter': True,
+                    'alias': 'Download Speed',
+                    'base_benchmark': 1000000,
+                    'display_unit': 'Mbps',
+                }
+            }
+        ]
+    },
+    {
+        'name': 'Coverage data',
+        'icon': """<svg id="icon" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><style>.cls-1 {fill: none;}</style></defs><path d="M10.57,30l.9333-2h8.9928l.9333,2h2.2072L17,15.7778V11H15v4.7778L8.3631,30ZM16,18.3647,17.6965,22h-3.393ZM13.37,24h5.26l.9333,2H12.4369Z" transform="translate(0 0)"/><path d="M10.7832,9.3325a7.0007,7.0007,0,0,1,10.4341,0l-1.49,1.334a5,5,0,0,0-7.4537,0Z" transform="translate(0 0)"/><path d="M7.1992,6.3994a11.0019,11.0019,0,0,1,17.6006,0L23.2,7.6a9.0009,9.0009,0,0,0-14.4014,0Z" transform="translate(0 0)"/><rect id="_Transparent_Rectangle_" data-name="&lt;Transparent Rectangle&gt;" class="cls-1" width="32" height="32"/></svg>""",
+        'description': 'Mobile coverage in the area',
+        'version': 'V 1.0',
+        'type': 'STATIC',
+        'category': 'COVERAGE',
+        'applicable_countries': [],
+        'global_benchmark': {},
+        'legend_configs': {
+            'good': {
+                'values': ['5G', '4G'],
+                'labels': '5G/4G'
+            },
+            'moderate': {
+                'values': ['3G', '2G'],
+                'labels': '3G/2G'
+            },
+            'bad': {
+                'values': ['no'],
+                'labels': 'No Coverage'
+            },
+            'unknown': {
+                'values': [],
+                'labels': 'Unknown'
+            }
+        },
+        'is_reverse': False,
+        'status': 'PUBLISHED',
+        'data_sources': [
+            {
+                'name': 'School Master',
+                'data_source_type': 'SCHOOL_MASTER',
+                'data_source_column': {
+                    'name': 'coverage_type',
+                    'type': 'str',
+                    'is_parameter': True,
+                    'alias': 'Coverage Type',
+                    'unit': '',
+                    'display_unit': '',
+                    'count_labels': ['good', 'moderate']
+                }
+            }
+        ]
+    }
+]
+
+
+def load_data_sources_data():
+    for row_data in data_source_json:
+        try:
+            instance, created = accounts_models.DataSource.objects.update_or_create(
+                name=row_data['name'],
+                data_source_type=row_data['data_source_type'],
+                defaults={
+                    'description': row_data['description'],
+                    'request_config': row_data['request_config'],
+                    'column_config': row_data['column_config'],
+                    'version': row_data['version'],
+                    'status': row_data['status'],
+                    'last_modified_at': get_current_datetime_object(),
+                },
+            )
+            if created:
+                sys.stdout.write('\nNew Data Source created: {}'.format(instance.__dict__))
+            else:
+                sys.stdout.write('\nExisting Data Source updated: {}'.format(instance.__dict__))
+        except:
+            pass
+
+
+def load_system_data_layers_data():
+    for row_data in download_and_coverage_data_layer_json:
+        try:
+            layer_instance, created = accounts_models.DataLayer.objects.update_or_create(
+                name=row_data['name'],
+                type=row_data['type'],
+                defaults={
+                    'icon': row_data['icon'],
+                    'description': row_data['description'],
+                    'version': row_data['version'],
+                    'category': row_data['category'],
+                    'applicable_countries': row_data['applicable_countries'],
+                    'global_benchmark': row_data['global_benchmark'],
+                    'legend_configs': row_data['legend_configs'],
+                    'is_reverse': row_data['is_reverse'],
+                    'status': row_data['status'],
+                    'last_modified_at': get_current_datetime_object(),
+                },
+            )
+            if created:
+                sys.stdout.write('\nNew Data Layers created: {}'.format(layer_instance.__dict__))
+            else:
+                sys.stdout.write('\nExisting Data Layers updated: {}'.format(layer_instance.__dict__))
+
+            layer_id = layer_instance.id
+            for data_source in row_data['data_sources']:
+                source_id = accounts_models.DataSource.objects.filter(
+                    name=data_source['name'],
+                    data_source_type=data_source['data_source_type'],
+                    deleted__isnull=True,
+                ).first()
+
+                relationship_instance, created = accounts_models.DataLayerDataSourceRelationship.objects.update_or_create(
+                    data_layer_id=layer_id,
+                    data_source=source_id,
+                    defaults={
+                        'data_source_column': data_source['data_source_column'],
+                        'last_modified_at': get_current_datetime_object(),
+                    },
+                )
+                if created:
+                    sys.stdout.write(
+                        '\nNew Data Source/Data Layer relationship created: {}'.format(relationship_instance.__dict__))
+                else:
+                    sys.stdout.write(
+                        '\nExisting Source/Data Layer relationship updated: {}'.format(relationship_instance.__dict__))
+        except:
+            pass
+
+
+class Command(BaseCommand):
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--delete_data_sources', action='store_true', dest='delete_data_sources', default=False,
+            help='If provided, already created data sources will be deleted from configured endpoint.'
+        )
+
+        parser.add_argument(
+            '--update_data_sources', action='store_true', dest='update_data_sources', default=False,
+            help='If provided, already created data sources data will be updated again.'
+        )
+
+        parser.add_argument(
+            '--delete_data_layers', action='store_true', dest='delete_data_layers', default=False,
+            help='If provided, already created system data layers will be deleted from configured endpoint.'
+        )
+
+        parser.add_argument(
+            '--update_data_layers', action='store_true', dest='update_data_layers', default=False,
+            help='If provided, already created Download/Coverage data layers will be updated again.'
+        )
+
+    def handle(self, **options):
+        sys.stdout.write('\nLoading APIs data....')
+
+        with transaction.atomic():
+            if options.get('delete_data_sources', False):
+                accounts_models.DataLayerDataSourceRelationship.objects.all().update(
+                    deleted=get_current_datetime_object())
+                accounts_models.DataLayer.objects.all().update(deleted=get_current_datetime_object())
+                accounts_models.DataSource.objects.all().update(deleted=get_current_datetime_object())
+
+        with transaction.atomic():
+            if options.get('update_data_sources', False):
+                load_data_sources_data()
+
+        with transaction.atomic():
+            if options.get('delete_data_layers', False):
+                accounts_models.DataLayerDataSourceRelationship.objects.filter(
+                    data_layer__in=list(
+                        accounts_models.DataLayer.objects.filter(created_by__isnull=True).values_list('id', flat=True))
+                ).update(deleted=get_current_datetime_object())
+
+                accounts_models.DataLayer.objects.filter(created_by__isnull=True).update(
+                    deleted=get_current_datetime_object())
+
+        if options.get('update_data_layers', False):
+            load_system_data_layers_data()
+
+        sys.stdout.write('\nData loaded successfully!\n')

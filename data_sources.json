@@ -1,0 +1,153 @@
+[
+	{
+		"name": "Daily Check App Measurements",
+		"description": "Daily Check App Measurements - Description",
+		"version": "V1.0",
+		"data_source_type": "DAILY_CHECK_APP",
+		"request_config": {
+			"url": "https://uni-connect-services-dev.azurewebsites.net/api/v1/measurements",
+			"method": "GET",
+      "data_limit": 1000,
+      "query_params": {
+				"page": "{page_no}",
+        "limit": "{page_size}"
+      },
+			"auth_token_required": true,
+			"headers": {
+				"Content-Type": "application/json"
+			}
+		},
+		"column_config": [
+			{
+				"name": "Timestamp",
+				"type": "DATETIME"
+			},
+			{
+				"name": "BrowserID",
+				"type": "INT"
+			},
+			{
+				"name": "school_id",
+				"type": "INT"
+			},
+			{
+				"name": "giga_id_school",
+				"type": "STR"
+			},
+			{
+				"name": "Download",
+				"type": "FLOAT",
+				"unit": "KB"
+			},
+			{
+				"name": "Upload",
+				"type": "FLOAT",
+				"unit": "KB"
+			},
+			{
+				"name": "Latency",
+				"type": "FLOAT",
+				"unit": "MS"
+			},
+			{
+				"name": "country_code",
+				"type": "STR"
+			},
+			{
+				"name": "ip_address",
+				"type": "STR"
+			},
+			{
+				"name": "app_version",
+				"type": "STR"
+			}
+		],
+		"status": "DRAFT"
+	},
+	{
+		"name": "QoS - Get Schools",
+		"description": "QoS - Schools Description",
+		"version": "V1.0",
+		"data_source_type": "QOS",
+		"request_config": {
+			"url": "https://api.simet.nic.br/school-measures/v1/getSchools",
+			"method": "GET",
+			"auth_token_required": false,
+			"headers": {
+				"Content-Type": "application/json"
+			}
+		},
+		"column_config": [
+			{
+				"name": "school",
+				"type": "FK",
+				"on": "schools.School"
+			},
+			{
+				"name": "date",
+				"type": "DATE"
+			},
+			{
+				"name": "connectivity",
+				"type": "BOOLEAN"
+			},
+			{
+				"name": "computer_lab",
+				"type": "BOOLEAN"
+			},
+			{
+				"name": "num_computers",
+				"type": "INT"
+			},
+			{
+				"name": "connectivity_type",
+				"type": "STR"
+			}
+		],
+		"status": "DRAFT"
+	},
+	{
+		"name": "QoS - Get Measures",
+		"description": "QoS - Measures Description",
+		"version": "V1.0",
+		"data_source_type": "QOS",
+		"request_config": {
+			"url": "https://api.simet.nic.br/school-measures/v1/getMeasuresbyDayofYear",
+			"method": "GET",
+			"query_params": {
+				"dayofyear": "{yesterday}"
+			},
+			"auth_token_required": false,
+			"headers": {
+				"Content-Type": "application/json"
+			}
+		},
+		"column_config": [
+			{
+				"name": "school",
+				"type": "FK",
+				"on": "schools.School"
+			},
+			{
+				"name": "created",
+				"type": "DATETIME"
+			},
+			{
+				"name": "connectivity_speed",
+				"type": "FLOAT",
+				"unit": "bps"
+			},
+			{
+				"name": "upload_speed",
+				"type": "FLOAT",
+				"unit": "bps"
+			},
+			{
+				"name": "connectivity_latency",
+				"type": "FLOAT",
+				"unit": "ms"
+			}
+		],
+		"status": "DRAFT"
+	}
+]

@@ -1,0 +1,13 @@
+[flake8]
+max-line-length = 120
+max-complexity = 30
+exclude = proco_data_migrations, migrations, config/settings, manage.py, Exceptions.py, venv, dailycheckapp_contact, realtime_dailycheckapp, realtime_unicef
+ignore =
+    ; PyFlakes errors
+    ; F405 name may be undefined, or defined from star imports: module
+    F405
+    W503
+    S105
+    E800
+    N400
+

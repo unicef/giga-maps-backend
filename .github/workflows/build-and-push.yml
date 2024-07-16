@@ -1,0 +1,37 @@
+name: Build and Push Docker image
+
+on:
+  push:
+    branches: [ "feature/ci_backend" ]
+env:
+  dockerfilePath: './Dockerfile'
+  app: 'project-connect-api-v2'
+  tag: ${{ github.run_id }}
+  pythonVersion: '3.8'
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+      
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ env.pythonVersion }}
+        
+    - name: 'Docker Login'
+      uses: azure/docker-login@v1
+      with:
+        login-server: ${{ secrets.REGISTRY_LOGIN_SERVER }}
+        username: ${{ secrets.REGISTRY_USERNAME }}
+        password: ${{ secrets.REGISTRY_PASSWORD }}
+ 
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v2
+      with:
+        context: .
+        file: ${{ env.dockerfilePath }}
+        push: true
+        tags:  ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.app }}:${{ env.tag }}

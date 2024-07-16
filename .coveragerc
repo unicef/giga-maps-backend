@@ -1,0 +1,14 @@
+[run]
+source = proco
+omit = *migrations*,*tests*,*proco_data_migrations*,*/proco/*/admin.py,*dailycheckapp_contact*,*realtime_dailycheckapp*,*realtime_unicef*
+
+[report]
+fail_under = 70
+skip_covered = False
+skip_empty = True
+sort = Cover
+
+
+[html]
+skip_covered = False
+skip_empty = True
