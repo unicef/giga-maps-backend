@@ -196,58 +196,6 @@ class SchoolDailyStatsListAPIView(ListAPIView):
         return queryset.filter(school_id=self.kwargs['school_id'])
 
 
-@method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
-class CoverageStatsAPIVIEW(APIView):
-    permission_classes = (AllowAny,)
-
-    CACHE_KEY = 'cache'
-    CACHE_KEY_PREFIX = 'COVERAGE_STATS'
-
-    def get_cache_key(self):
-        params = dict(self.request.query_params)
-        params.pop(self.CACHE_KEY, None)
-        return '{0}_{1}'.format(self.CACHE_KEY_PREFIX,
-                                '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))), )
-
-    def get(self, request, *args, **kwargs):
-        use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
-        request_path = remove_query_param(request.get_full_path(), 'cache')
-        cache_key = self.get_cache_key()
-
-        data = None
-        if use_cached_data:
-            data = cache_manager.get(cache_key)
-
-        if not data:
-            # Query the School table to get the coverage data
-            # Get the total number of schools with coverage data
-            # Get the count of schools falling under different coverage types
-            school_coverage_type_qry = School.objects.all().annotate(
-                dummy_group_by=Value(1)).values('dummy_group_by').annotate(
-                g_4_5=Count(Case(When(coverage_type__in=['5g', '4g'], then='id')), distinct=True),
-                g_2_3=Count(Case(When(coverage_type__in=['3g', '2g'], then='id')), distinct=True),
-                no_coverage=Count(Case(When(coverage_type='no', then='id')), distinct=True),
-                unknown=Count(Case(When(coverage_type__in=['unknown', None], then='id')), distinct=True),
-                total_coverage_schools=Count(Case(When(coverage_type__isnull=False, then='id')), distinct=True),
-            ).values('g_4_5', 'g_2_3', 'no_coverage', 'unknown', 'total_coverage_schools').order_by()
-
-            coverage_data = {
-                '5g_4g': school_coverage_type_qry[0]['g_4_5'],
-                '3g_2g': school_coverage_type_qry[0]['g_2_3'],
-                'no_coverage': school_coverage_type_qry[0]['no_coverage'],
-                'unknown': school_coverage_type_qry[0]['unknown'],
-            }
-
-            data = {
-                'total_coverage_schools': school_coverage_type_qry[0]['total_coverage_schools'],
-                'coverage_schools': coverage_data,
-            }
-
-            cache_manager.set(cache_key, data, request_path=request_path, soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
-
-        return Response(data=data)
-
-
 class SchoolConnectivityStatsListAPIView(ListAPIView):
     model = School
     queryset = model.objects.all().select_related('last_weekly_status')
@@ -445,57 +393,6 @@ class SchoolCoverageStatsListAPIView(ListAPIView):
 
 
 @method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
-class CountryCoverageStatsAPIView(APIView):
-    permission_classes = (AllowAny,)
-
-    CACHE_KEY = 'cache'
-    CACHE_KEY_PREFIX = 'COUNTRY_COVERAGE_STATS'
-
-    def get_cache_key(self):
-        params = dict(self.request.query_params)
-        params.pop(self.CACHE_KEY, None)
-        return '{0}_{1}'.format(self.CACHE_KEY_PREFIX,
-                                '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))), )
-
-    def get(self, request, *args, **kwargs):
-        use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
-        request_path = remove_query_param(request.get_full_path(), self.CACHE_KEY)
-        cache_key = self.get_cache_key()
-
-        data = None
-        if use_cached_data:
-            data = cache_manager.get(cache_key)
-
-        if not data:
-            country_id = self.request.query_params.get('country_id', None)
-
-            school_coverage_type_qry = School.objects.filter(country_id=country_id).annotate(
-                dummy_group_by=Value(1)).values('dummy_group_by').annotate(
-                g_4_5=Count(Case(When(coverage_type__in=['5g', '4g'], then='id')), distinct=True),
-                g_2_3=Count(Case(When(coverage_type__in=['3g', '2g'], then='id')), distinct=True),
-                no_coverage=Count(Case(When(coverage_type='no', then='id')), distinct=True),
-                unknown=Count(Case(When(coverage_type__in=['unknown', None], then='id')), distinct=True),
-                total_coverage_schools=Count(Case(When(coverage_type__isnull=False, then='id')), distinct=True),
-            ).values('g_4_5', 'g_2_3', 'no_coverage', 'unknown', 'total_coverage_schools').order_by()
-
-            coverage_data = {
-                '5g_4g': school_coverage_type_qry[0]['g_4_5'],
-                '3g_2g': school_coverage_type_qry[0]['g_2_3'],
-                'no_coverage': school_coverage_type_qry[0]['no_coverage'],
-                'unknown': school_coverage_type_qry[0]['unknown'],
-            }
-
-            data = {
-                'total_coverage_schools': school_coverage_type_qry[0]['total_coverage_schools'],
-                'coverage_schools': coverage_data,
-            }
-
-            cache_manager.set(cache_key, data, request_path=request_path, soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
-
-        return Response(data=data)
-
-
-@method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
 class ConnectivityAPIView(APIView):
     permission_classes = (AllowAny,)
 
@@ -608,11 +505,12 @@ class ConnectivityAPIView(APIView):
                 'no_of_schools_measure', 'countries_with_realtime_data', 'total_weekly_schools'
             ).extra(where=[school_static_filters])
 
+        weekly_status = list(weekly_queryset)[0]
         real_time_connected_schools = {
-            'good': weekly_queryset[0]['good'],
-            'moderate': weekly_queryset[0]['moderate'],
-            'no_internet': weekly_queryset[0]['bad'],
-            'unknown': weekly_queryset[0]['unknown'],
+            'good': weekly_status['good'],
+            'moderate': weekly_status['moderate'],
+            'no_internet': weekly_status['bad'],
+            'unknown': weekly_status['unknown'],
         }
 
         graph_data, positive_speeds = self.generate_country_graph_data(start_date, end_date)
@@ -651,9 +549,9 @@ class ConnectivityAPIView(APIView):
         return {
             'live_avg': live_avg,
             'live_avg_connectivity': live_avg_connectivity,
-            'no_of_schools_measure': weekly_queryset[0]['no_of_schools_measure'],
-            'school_with_realtime_data': weekly_queryset[0]['school_with_realtime_data'],
-            'countries_with_realtime_data': weekly_queryset[0]['countries_with_realtime_data'],
+            'no_of_schools_measure': weekly_status['no_of_schools_measure'],
+            'school_with_realtime_data': weekly_status['school_with_realtime_data'],
+            'countries_with_realtime_data': weekly_status['countries_with_realtime_data'],
             'real_time_connected_schools': real_time_connected_schools,
             'graph_data': graph_data,
             'is_data_synced': is_data_synced_qs.exists(),
@@ -798,15 +696,16 @@ class CoverageAPIView(APIView):
                     'g_4_5', 'g_2_3', 'no_coverage', 'unknown', 'total_coverage_schools', 'total_weekly_schools'
                 ).extra(where=[self.school_static_filters])
 
+            school_coverage_status = list(school_coverage_type_qry)[0]
             coverage_data = {
-                '5g_4g': school_coverage_type_qry[0]['g_4_5'],
-                '3g_2g': school_coverage_type_qry[0]['g_2_3'],
-                'no_coverage': school_coverage_type_qry[0]['no_coverage'],
-                'unknown': school_coverage_type_qry[0]['unknown'],
+                '5g_4g': school_coverage_status['g_4_5'],
+                '3g_2g': school_coverage_status['g_2_3'],
+                'no_coverage': school_coverage_status['no_coverage'],
+                'unknown': school_coverage_status['unknown'],
             }
 
             data = {
-                'total_schools': school_coverage_type_qry[0]['total_coverage_schools'],
+                'total_schools': school_coverage_status['total_coverage_schools'],
                 'connected_schools': coverage_data,
             }
 

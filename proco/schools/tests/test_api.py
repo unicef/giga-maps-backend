@@ -6,8 +6,8 @@ from rest_framework import status
 from proco.connection_statistics.models import CountryWeeklyStatus
 from proco.connection_statistics.tests.factories import SchoolWeeklyStatusFactory
 from proco.custom_auth.tests import test_utils as test_utilities
-from proco.locations.tests.factories import CountryFactory
-from proco.schools.tests.factories import SchoolFactory, FileImportFactory
+from proco.locations.tests.factories import Admin1Factory, CountryFactory
+from proco.schools.tests.factories import FileImportFactory, SchoolFactory
 from proco.utils.tests import TestAPIViewSetMixin
 
 
@@ -28,9 +28,13 @@ class SchoolsApiTestCase(TestAPIViewSetMixin, TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.country = CountryFactory()
-        cls.school_one = SchoolFactory(country=cls.country, location__country=cls.country)
-        cls.school_two = SchoolFactory(country=cls.country, location__country=cls.country)
-        cls.school_three = SchoolFactory(country=cls.country, location__country=cls.country)
+
+        cls.admin1_one = Admin1Factory(country=cls.country)
+
+        cls.school_one = SchoolFactory(country=cls.country, location__country=cls.country, admin1=cls.admin1_one)
+        cls.school_two = SchoolFactory(country=cls.country, location__country=cls.country, admin1=cls.admin1_one)
+        cls.school_three = SchoolFactory(country=cls.country, location__country=cls.country, admin1=cls.admin1_one)
+
         cls.school_weekly_one = SchoolWeeklyStatusFactory(
             school=cls.school_one,
             connectivity=True, connectivity_speed=3 * (10 ** 6),
