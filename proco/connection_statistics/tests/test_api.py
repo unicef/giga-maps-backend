@@ -349,9 +349,11 @@ class CountryConnectivityStatApiTestCase(TestAPIViewSetMixin, TestCase):
         cls.country = CountryFactory()
         cls.country_two = CountryFactory()
 
-        cls.school_one = SchoolFactory(country=cls.country, location__country=cls.country)
-        cls.school_two = SchoolFactory(country=cls.country, location__country=cls.country)
-        cls.school_three = SchoolFactory(country=cls.country, location__country=cls.country)
+        cls.admin1_one = Admin1Factory(country=cls.country, layer_name='adm1')
+
+        cls.school_one = SchoolFactory(country=cls.country, location__country=cls.country, admin1=cls.admin1_one)
+        cls.school_two = SchoolFactory(country=cls.country, location__country=cls.country, admin1=cls.admin1_one)
+        cls.school_three = SchoolFactory(country=cls.country, location__country=cls.country, admin1=cls.admin1_one)
 
         cls.school_weekly_one = SchoolWeeklyStatusFactory(
             school=cls.school_one,
@@ -399,6 +401,37 @@ class CountryConnectivityStatApiTestCase(TestAPIViewSetMixin, TestCase):
             'end_date': format_date(today),
             'is_weekly': 'true',
         }, view_name='country-connectivity-stat')
+
+        response = self.forced_auth_req('get', url, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+        self.assertIn('live_avg', response_data)
+        self.assertIn('no_of_schools_measure', response_data)
+        self.assertIn('school_with_realtime_data', response_data)
+        self.assertIn('is_data_synced', response_data)
+        self.assertIn('graph_data', response_data)
+        self.assertIn('real_time_connected_schools', response_data)
+
+    def test_admin1_download_connectivity_stat(self):
+        """
+        test_admin1_download_connectivity_stat
+            Positive test case for weekly data.
+
+        Expected: HTTP_200_OK - List of data for all 3 schools
+        """
+        today = datetime.now().date()
+        start_date = get_first_date_of_month(today.year, today.month)
+        end_date = get_last_date_of_month(today.year, today.month)
+
+        url, _, view = statistics_url((), {
+            'country_id': self.country.id,
+            'admin1_id': self.admin1_one.id,
+            'start_date': format_date(start_date),
+            'end_date': format_date(end_date),
+            'is_weekly': 'false',
+        }, view_name='global-connectivity-stat')
 
         response = self.forced_auth_req('get', url, view=view)
 
@@ -580,6 +613,30 @@ class SchoolConnectivityStatApiTestCase(TestAPIViewSetMixin, TestCase):
             'start_date': format_date(date_7_days_back),
             'end_date': format_date(today),
             'is_weekly': 'true',
+        }, view_name='school-connectivity-stat')
+
+        response = self.forced_auth_req('get', url, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 3)
+
+    def test_school_download_connectivity_stat_school_list_for_month(self):
+        """
+        test_school_download_connectivity_stat_school_list
+            Positive test case for weekly data.
+
+        Expected: HTTP_200_OK - List of data for all 3 schools
+        """
+        today = datetime.now().date()
+        start_date = get_first_date_of_month(today.year, today.month)
+        end_date = get_last_date_of_month(today.year, today.month)
+
+        url, _, view = statistics_url((), {
+            'country_id': self.country.id,
+            'school_ids': ','.join([str(self.school_one.id), str(self.school_two.id), str(self.school_three.id)]),
+            'start_date': format_date(start_date),
+            'end_date': format_date(end_date),
+            'is_weekly': 'false',
         }, view_name='school-connectivity-stat')
 
         response = self.forced_auth_req('get', url, view=view)
@@ -1200,7 +1257,7 @@ class ConnectivityConfigurationsAPITestCase(TestAPIViewSetMixin, TestCase):
     def test_country_with_schools_latest_configurations(self):
         url, _, view = statistics_url((), {'country_id': self.country_one.id}, view_name='get-latest-week-and-month')
 
-        with self.assertNumQueries(3):
+        with self.assertNumQueries(2):
             response = self.forced_auth_req('get', url, view=view)
             self.assertEqual(response.status_code, status.HTTP_200_OK)
 
@@ -1215,18 +1272,18 @@ class ConnectivityConfigurationsAPITestCase(TestAPIViewSetMixin, TestCase):
     def test_country_without_schools_latest_configurations(self):
         url, _, view = statistics_url((), {'country_id': self.country_two.id}, view_name='get-latest-week-and-month')
 
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(1):
             response = self.forced_auth_req('get', url, view=view)
             self.assertEqual(response.status_code, status.HTTP_200_OK)
             self.assertEqual(len(response.data), 0)
 
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(1):
             self.forced_auth_req('get', url, view=view)
 
     def test_admin1_latest_configurations(self):
         url, _, view = statistics_url((), {'admin1_id': self.admin1_one.id}, view_name='get-latest-week-and-month')
 
-        with self.assertNumQueries(3):
+        with self.assertNumQueries(2):
             response = self.forced_auth_req('get', url, view=view)
             self.assertEqual(response.status_code, status.HTTP_200_OK)
             response_data = response.data
@@ -1240,7 +1297,7 @@ class ConnectivityConfigurationsAPITestCase(TestAPIViewSetMixin, TestCase):
     def test_school_latest_configurations(self):
         url, _, view = statistics_url((), {'school_id': self.school_one.id}, view_name='get-latest-week-and-month')
 
-        with self.assertNumQueries(3):
+        with self.assertNumQueries(2):
             response = self.forced_auth_req('get', url, view=view)
             self.assertEqual(response.status_code, status.HTTP_200_OK)
 

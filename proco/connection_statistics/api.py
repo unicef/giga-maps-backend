@@ -745,19 +745,14 @@ class ConnectivityConfigurationsViewSet(APIView):
 
             country_id = self.request.query_params.get('country_id', None)
             if country_id:
-                get_object_or_404(Country.objects.defer('geometry', 'geometry_simplified', ), id=country_id)
                 self.queryset = self.queryset.filter(school__country_id=country_id)
 
             admin1_id = self.request.query_params.get('admin1_id', None)
             if admin1_id:
-                get_object_or_404(CountryAdminMetadata.objects.filter(
-                    layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN1,
-                ), id=admin1_id)
                 self.queryset = self.queryset.filter(school__admin1_id=admin1_id)
 
             school_id = self.request.query_params.get('school_id', None)
             if school_id:
-                get_object_or_404(School.objects.all(), id=school_id)
                 self.queryset = self.queryset.filter(school=school_id)
 
             school_ids = self.request.query_params.get('school_ids', '')
