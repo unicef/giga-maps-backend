@@ -597,8 +597,6 @@ class ConnectivityAPIView(APIView):
             current_date += timedelta(days=1)
 
         all_positive_speeds = []
-
-        # Update the graph_data with actual values if they exist
         # Update the graph_data with actual values if they exist
         for daily_avg_data in avg_daily_connectivity_speed:
             formatted_date = date_utilities.format_date(daily_avg_data['daily_status__date'])

@@ -342,7 +342,7 @@ class SchoolCoverageStatApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(response.data[2]['statistics']['connectivity_status'], 'unknown')
 
 
-class CountryConnectivityStatApiTestCase(TestAPIViewSetMixin, TestCase):
+class ConnectivityStatApiTestCase(TestAPIViewSetMixin, TestCase):
 
     @classmethod
     def setUpTestData(cls):
@@ -387,7 +387,7 @@ class CountryConnectivityStatApiTestCase(TestAPIViewSetMixin, TestCase):
 
     def test_country_download_connectivity_stat(self):
         """
-        test_school_download_connectivity_stat_school_list
+        test_country_download_connectivity_stat
             Positive test case for weekly data.
 
         Expected: HTTP_200_OK - List of data for all 3 schools
@@ -414,10 +414,10 @@ class CountryConnectivityStatApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertIn('graph_data', response_data)
         self.assertIn('real_time_connected_schools', response_data)
 
-    def test_admin1_download_connectivity_stat(self):
+    def test_admin1_download_connectivity_stat_monthly(self):
         """
-        test_admin1_download_connectivity_stat
-            Positive test case for weekly data.
+        test_admin1_download_connectivity_stat_monthly
+            Positive test case for monthly data.
 
         Expected: HTTP_200_OK - List of data for all 3 schools
         """
@@ -555,6 +555,95 @@ class CountryConnectivityStatApiTestCase(TestAPIViewSetMixin, TestCase):
         graph_data = response_data['graph_data']
         for data in graph_data:
             self.assertIsNone(data['value'])
+
+    def test_country_download_connectivity_stat_for_global_benchmark(self):
+        """
+        test_country_download_connectivity_stat
+            Positive test case for country weekly data.
+
+        Expected: HTTP_200_OK - List of data for given country id
+        """
+        date = Week(self.school_weekly_one.year, self.school_weekly_one.week).monday()
+        start_date = date - timedelta(days=1)
+        end_date = start_date + timedelta(days=6)
+
+        url, _, view = statistics_url((), {
+            'country_id': self.country.id,
+            'start_date': format_date(start_date),
+            'end_date': format_date(end_date),
+            'is_weekly': 'true',
+            'benchmark': 'global'
+        }, view_name='country-connectivity-stat')
+
+        response = self.forced_auth_req('get', url, view=view)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+        self.assertEqual(type(response_data), dict)
+
+        self.assertIn('live_avg', response_data)
+        self.assertIn('school_with_realtime_data', response_data)
+        self.assertIn('is_data_synced', response_data)
+        self.assertIn('graph_data', response_data)
+        self.assertIn('real_time_connected_schools', response_data)
+
+    def test_country_download_connectivity_stat_for_invalid_date_range(self):
+        date = Week(2023, 56).monday()
+        start_date = date - timedelta(days=1)
+        end_date = start_date + timedelta(days=6)
+
+        url, _, view = statistics_url((), {
+            'country_id': self.country.id,
+            'start_date': format_date(start_date),
+            'end_date': format_date(end_date),
+            'is_weekly': 'true',
+            'benchmark': 'global'
+        }, view_name='country-connectivity-stat')
+
+        response = self.forced_auth_req('get', url, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_country_download_connectivity_stat_for_missing_country_id(self):
+        date = Week(self.school_weekly_one.year, self.school_weekly_one.week).monday()
+        start_date = date - timedelta(days=1)
+        end_date = start_date + timedelta(days=6)
+
+        url, _, view = statistics_url((), {
+            'start_date': format_date(start_date),
+            'end_date': format_date(end_date),
+            'is_weekly': 'true',
+            'benchmark': 'global'
+        }, view_name='country-connectivity-stat')
+
+        response = self.forced_auth_req('get', url, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_country_download_connectivity_stat_for_national_benchmark(self):
+        date = Week(self.school_weekly_one.year, self.school_weekly_one.week).monday()
+        start_date = date - timedelta(days=1)
+        end_date = start_date + timedelta(days=6)
+
+        url, _, view = statistics_url((), {
+            'country_id': self.country.id,
+            'start_date': format_date(start_date),
+            'end_date': format_date(end_date),
+            'is_weekly': 'true',
+            'benchmark': 'national',
+        }, view_name='country-connectivity-stat')
+
+        response = self.forced_auth_req('get', url, view=view)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+        self.assertEqual(type(response_data), dict)
+
+        self.assertIn('live_avg', response_data)
+        self.assertIn('school_with_realtime_data', response_data)
+        self.assertIn('is_data_synced', response_data)
+        self.assertIn('graph_data', response_data)
+        self.assertIn('real_time_connected_schools', response_data)
 
 
 class SchoolConnectivityStatApiTestCase(TestAPIViewSetMixin, TestCase):
@@ -944,232 +1033,6 @@ class SchoolConnectivityStatApiTestCase(TestAPIViewSetMixin, TestCase):
         # self.assertEqual(response.data[2]['statistics']['connectivity_speed'], 0)
 
 
-class CountryWeekStatsApiTestCase(TestAPIViewSetMixin, TestCase):
-
-    @classmethod
-    def setUpTestData(cls):
-        cls.country_one = CountryFactory()
-        cls.country_two = CountryFactory()
-
-        cls.stat_one = CountryWeeklyStatusFactory(country=cls.country_one)
-        cls.stat_two = CountryWeeklyStatusFactory(country=cls.country_two)
-
-        cls.country_one_daily = CountryDailyStatusFactory(country=cls.country_one,
-                                                          date=Week(cls.stat_one.year, cls.stat_one.week).monday())
-
-        cls.user = test_utilities.setup_admin_user_by_role()
-
-    def setUp(self):
-        cache.clear()
-        super().setUp()
-
-    def test_country_download_connectivity_stat(self):
-        """
-        test_country_download_connectivity_stat
-            Positive test case for country weekly data.
-
-        Expected: HTTP_200_OK - List of data for given country id
-        """
-        date = Week(self.stat_one.year, self.stat_one.week).monday()
-        start_date = date - timedelta(days=1)
-        end_date = start_date + timedelta(days=6)
-
-        url, _, view = statistics_url((), {
-            'country_id': self.country_one.id,
-            'start_date': format_date(start_date),
-            'end_date': format_date(end_date),
-            'is_weekly': 'true',
-            'benchmark': 'global'
-        }, view_name='list-create-destroy-countryweeklystatus')
-
-        response = self.forced_auth_req('get', url, user=self.user, view=view)
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-
-        response_data = response.data
-        self.assertEqual(type(response_data), dict)
-
-        # self.assertIn('live_avg', response_data)
-        # self.assertIn('schools_total', response_data['results'])
-        # self.assertIn('school_with_realtime_data', response_data)
-        # self.assertIn('is_data_synced', response_data)
-        # self.assertIn('graph_data', response_data)
-        # self.assertIn('real_time_connected_schools', response_data)
-
-    def test_country_download_connectivity_stat_data(self):
-        date = Week(self.stat_one.year, self.stat_one.week).monday()
-        start_date = date - timedelta(days=1)
-        end_date = start_date + timedelta(days=6)
-
-        url, _, view = statistics_url((), {
-            'country_id': self.country_one.id,
-            'start_date': format_date(start_date),
-            'end_date': format_date(end_date),
-            'is_weekly': 'true',
-            'benchmark': 'global'
-        }, view_name='list-create-destroy-countryweeklystatus')
-
-        response = self.forced_auth_req('get', url, user=self.user, view=view)
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        # self.assertEqual(response.data[0]['schools_total'], self.stat_one.schools_total)
-        # self.assertEqual(response.data[0]['school_with_realtime_data'], self.stat_one.schools_connected)
-
-    def test_country_download_connectivity_stat_for_invalid_country_id(self):
-        date = Week(self.stat_one.year, self.stat_one.week).monday()
-        start_date = date - timedelta(days=1)
-        end_date = start_date + timedelta(days=6)
-
-        url, _, view = statistics_url((), {
-            'country_id': 123456,
-            'start_date': format_date(start_date),
-            'end_date': format_date(end_date),
-            'is_weekly': 'true',
-            'benchmark': 'global'
-        }, view_name='list-create-destroy-countryweeklystatus')
-
-        response = self.forced_auth_req('get', url, user=self.user, view=view)
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_country_download_connectivity_stat_for_invalid_date_range(self):
-        date = Week(2023, 56).monday()
-        start_date = date - timedelta(days=1)
-        end_date = start_date + timedelta(days=6)
-
-        url, _, view = statistics_url((), {
-            'country_id': self.country_one.id,
-            'start_date': format_date(start_date),
-            'end_date': format_date(end_date),
-            'is_weekly': 'true',
-            'benchmark': 'global'
-        }, view_name='list-create-destroy-countryweeklystatus')
-
-        response = self.forced_auth_req('get', url, user=self.user, view=view)
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-
-    def test_country_download_connectivity_stat_for_missing_country_id(self):
-        date = Week(self.stat_one.year, self.stat_one.week).monday()
-        start_date = date - timedelta(days=1)
-        end_date = start_date + timedelta(days=6)
-
-        url, _, view = statistics_url((), {
-            'start_date': format_date(start_date),
-            'end_date': format_date(end_date),
-            'is_weekly': 'true',
-            'benchmark': 'global'
-        }, view_name='list-create-destroy-countryweeklystatus')
-
-        response = self.forced_auth_req('get', url, user=self.user, view=view)
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-
-    def test_country_download_connectivity_stat_for_national_benchmark(self):
-        date = Week(self.stat_one.year, self.stat_one.week).monday()
-        start_date = date - timedelta(days=1)
-        end_date = start_date + timedelta(days=6)
-
-        url, _, view = statistics_url((), {
-            'country_id': self.country_one.id,
-            'start_date': format_date(start_date),
-            'end_date': format_date(end_date),
-            'is_weekly': 'true',
-            'benchmark': 'national',
-        }, view_name='list-create-destroy-countryweeklystatus')
-
-        response = self.forced_auth_req('get', url, user=self.user, view=view)
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        # self.assertEqual(response.data['schools_total'], self.stat_one.schools_total)
-
-        # self.assertEqual(response.data['real_time_connected_schools']['good'],
-        #                  self.stat_one.schools_connectivity_good)
-        # self.assertEqual(response.data['real_time_connected_schools']['moderate'],
-        #                  self.stat_one.schools_connectivity_moderate)
-        # self.assertEqual(response.data['real_time_connected_schools']['no_internet'],
-        #                  self.stat_one.schools_connectivity_no)
-        # self.assertEqual(response.data['real_time_connected_schools']['unknown'],
-        #                  self.stat_one.schools_connectivity_unknown)
-
-    def test_country_uptime_connectivity_stat(self):
-        date = Week(self.stat_one.year, self.stat_one.week).monday()
-        start_date = date - timedelta(days=1)
-        end_date = start_date + timedelta(days=6)
-
-        url, _, view = statistics_url((), {
-            'country_id': self.country_one.id,
-            'start_date': format_date(start_date),
-            'end_date': format_date(end_date),
-            'is_weekly': 'true',
-            'benchmark': 'global'
-        }, view_name='list-create-destroy-countryweeklystatus')
-
-        response = self.forced_auth_req('get', url, user=self.user, view=view)
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-
-        # response_data = response.data
-        # self.assertIn('live_avg', response_data)
-        # self.assertIn('schools_total', response_data['results'])
-        # self.assertIn('school_with_realtime_data', response_data)
-        # self.assertIn('is_data_synced', response_data)
-        # self.assertIn('graph_data', response_data)
-        # self.assertIn('real_time_connected_schools', response_data)
-
-    def test_country_download_connectivity_stat_monthly(self):
-        """
-        test_country_download_connectivity_stat_monthly
-            Positive test case for country weekly data.
-
-        Expected: HTTP_200_OK - List of data for given country id
-        """
-        date = Week(self.stat_one.year, self.stat_one.week).monday()
-        start_date = get_first_date_of_month(date.year, date.month)
-        end_date = get_last_date_of_month(date.year, date.month)
-
-        url, _, view = statistics_url((), {
-            'country_id': self.country_one.id,
-            'start_date': format_date(start_date),
-            'end_date': format_date(end_date),
-            'is_weekly': 'false',
-            'benchmark': 'global'
-        }, view_name='list-create-destroy-countryweeklystatus')
-
-        response = self.forced_auth_req('get', url, user=self.user, view=view)
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-
-        response_data = response.data
-        self.assertEqual(type(response_data), dict)
-
-        # self.assertIn('live_avg', response_data)
-        # self.assertIn('schools_total', response_data['results'])
-        # self.assertIn('school_with_realtime_data', response_data)
-        # self.assertIn('is_data_synced', response_data)
-        # self.assertIn('graph_data', response_data)
-        # self.assertIn('real_time_connected_schools', response_data)
-
-    def test_country_download_connectivity_stat_monthly_invalid_country_id(self):
-        """
-        test_country_download_connectivity_stat
-            Positive test case for country weekly data.
-
-        Expected: HTTP_200_OK - List of data for given country id
-        """
-        date = Week(self.stat_one.year, self.stat_one.week).monday()
-        start_date = get_first_date_of_month(date.year, date.month)
-        end_date = get_last_date_of_month(date.year, date.month)
-
-        url, _, view = statistics_url((), {
-            'country_id': 123456,
-            'start_date': format_date(start_date),
-            'end_date': format_date(end_date),
-            'is_weekly': 'false',
-            'benchmark': 'global'
-        }, view_name='list-create-destroy-countryweeklystatus')
-
-        response = self.forced_auth_req('get', url, user=self.user, view=view)
-
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-
-
 class CountryCoverageStatsAPITestCase(TestAPIViewSetMixin, TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -1325,3 +1188,96 @@ class ConnectivityConfigurationsAPITestCase(TestAPIViewSetMixin, TestCase):
 
         with self.assertNumQueries(0):
             self.forced_auth_req('get', url, view=view)
+
+
+class CountrySummaryAPIViewSetAPITestCase(TestAPIViewSetMixin, TestCase):
+    databases = ['default', ]
+    base_view = 'connection_statistics:list-create-destroy-countryweeklystatus'
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.country_one = CountryFactory()
+        cls.country_two = CountryFactory()
+
+        cls.stat_one = CountryWeeklyStatusFactory(
+            country=cls.country_one,
+            integration_status=CountryWeeklyStatus.REALTIME_MAPPED,
+            year=datetime.now().year - 1,
+            week=12,
+            schools_connectivity_no=1
+        )
+        cls.stat_two = CountryWeeklyStatusFactory(
+            country=cls.country_one,
+            integration_status=CountryWeeklyStatus.REALTIME_MAPPED,
+            year=datetime.now().year - 1,
+            week=13,
+            schools_connectivity_no=1
+        )
+
+        cls.stat_three = CountryWeeklyStatusFactory(
+            country=cls.country_two,
+            integration_status=CountryWeeklyStatus.REALTIME_MAPPED,
+            year=datetime.now().year - 1,
+            week=12,
+            schools_connectivity_no=1
+        )
+
+        cls.user = test_utilities.setup_admin_user_by_role()
+
+    def setUp(self):
+        cache.clear()
+        super().setUp()
+
+    def test_list(self):
+        url, _, view = statistics_url((), {}, view_name='list-create-destroy-countryweeklystatus')
+
+        response = self.forced_auth_req('get', url, user=self.user, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+        self.assertEqual(type(response_data), dict)
+        # 3 records as we created manually in setup, 2 for each country with latest year and latest week
+        self.assertEqual(response_data['count'], 5)
+        self.assertEqual(len(response_data['results']), 5)
+
+    def test_country_id_filter(self):
+        url, _, view = statistics_url((), {'country_id': self.country_one.id},
+                                      view_name='list-create-destroy-countryweeklystatus')
+
+        response = self.forced_auth_req('get', url, user=self.user, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+        self.assertEqual(type(response_data), dict)
+        # 2 records as we created manually in setup, 1 for country with latest year and latest week
+        self.assertEqual(response_data['count'], 3)
+        self.assertEqual(len(response_data['results']), 3)
+
+    def test_year_week_filter(self):
+        url, _, view = statistics_url((), {'year': datetime.now().year - 1, 'week': 12},
+                                      view_name='list-create-destroy-countryweeklystatus')
+
+        response = self.forced_auth_req('get', url, user=self.user, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+        self.assertEqual(type(response_data), dict)
+        # 2 records as we created manually in setup
+        self.assertEqual(response_data['count'], 2)
+        self.assertEqual(len(response_data['results']), 2)
+
+    #
+    # def test_search(self):
+    #     pass
+    #
+    # def test_retrieve(self):
+    #     pass
+    #
+    # def test_update(self):
+    #     pass
+    #
+    # def test_delete(self):
+    #     pass
