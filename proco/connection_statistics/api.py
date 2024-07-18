@@ -35,7 +35,7 @@ from proco.core import db_utils as db_utilities
 from proco.core import permissions as core_permissions
 from proco.core import utils as core_utilities
 from proco.core.viewsets import BaseModelViewSet
-from proco.locations.models import Country, CountryAdminMetadata
+from proco.locations.models import Country
 from proco.schools.models import School
 from proco.utils import dates as date_utilities
 from proco.utils.cache import cache_manager
@@ -990,10 +990,11 @@ class CountryDailyConnectivitySummaryAPIViewSet(BaseModelViewSet):
             try:
                 country_daily_status = CountryDailyStatus.objects.get(id=pk)
                 if country_daily_status:
-                    serializer = statistics_serializers.CountryDailyStatusUpdateRetrieveSerializer(country_daily_status,
-                                                                                                   partial=True,
-                                                                                                   context={
-                                                                                                       'request': request}, )
+                    serializer = statistics_serializers.CountryDailyStatusUpdateRetrieveSerializer(
+                        country_daily_status,
+                        partial=True,
+                        context={'request': request},
+                    )
                     return Response(serializer.data)
                 return Response(status=rest_status.HTTP_404_NOT_FOUND, data=error_mess)
             except CountryDailyStatus.DoesNotExist:
@@ -1214,10 +1215,11 @@ class SchoolDailyConnectivitySummaryAPIViewSet(BaseModelViewSet):
             try:
                 school_daily_status = SchoolDailyStatus.objects.get(id=pk)
                 if school_daily_status:
-                    serializer = statistics_serializers.SchoolDailyStatusUpdateRetriveSerializer(school_daily_status,
-                                                                                                 partial=True,
-                                                                                                 context={
-                                                                                                     'request': request}, )
+                    serializer = statistics_serializers.SchoolDailyStatusUpdateRetriveSerializer(
+                        school_daily_status,
+                        partial=True,
+                        context={'request': request},
+                    )
                     return Response(serializer.data)
                 return Response(status=rest_status.HTTP_404_NOT_FOUND, data=error_mess)
             except SchoolDailyStatus.DoesNotExist:
@@ -1267,7 +1269,8 @@ class TimePlayerViewSet(ListAPIView):
               ELSE 'unknown'
           END AS field_status,
           CASE WHEN rt_status.rt_registered = True
-            AND EXTRACT(YEAR FROM CAST(rt_status.rt_registration_date AS DATE)) <= EXTRACT(YEAR FROM CAST(t.date AS DATE))
+            AND EXTRACT(YEAR FROM CAST(rt_status.rt_registration_date AS DATE)) <=
+                EXTRACT(YEAR FROM CAST(t.date AS DATE))
             THEN True ELSE False END as is_rt_connected
         FROM schools_school AS s
         INNER JOIN connection_statistics_schooldailystatus t ON s.id = t.school_id
