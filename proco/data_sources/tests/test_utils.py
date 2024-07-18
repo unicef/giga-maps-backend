@@ -98,7 +98,7 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
         self.assertFalse(sources_utilities.has_changes_for_review({
             'school_name': school.name,
             'school_id_govt': school.external_id,
-            'admin1_id_giga': None,
+            'admin1_id_giga': school.admin1.giga_id_admin,
             'admin2_id_giga': None,
             'latitude': school.geopoint.y,
             'longitude': school.geopoint.x,

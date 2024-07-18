@@ -61,3 +61,5 @@ AZURE_CONFIG['COGNITIVE_SEARCH'] = {
     'COUNTRY_INDEX_NAME': env('COUNTRY_INDEX_NAME', default='giga_countries'),
     'SCHOOL_INDEX_NAME': env('SCHOOL_INDEX_NAME', default='giga_schools'),
 }
+
+DEFAULT_FILE_STORAGE = 'inmemorystorage.InMemoryStorage'

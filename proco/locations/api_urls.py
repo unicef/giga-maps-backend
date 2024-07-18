@@ -27,11 +27,11 @@ urlpatterns = [
         'get': 'list',
         'post': 'create',
         'delete': 'destroy',
-    }), name='list_or_create_or_destroy_country'),
+    }), name='list-create-destroy-country'),
     path('country/<int:pk>/', api.CountryDataViewSet.as_view({
         'get': 'retrieve',
         'put': 'update',
-    }), name='update_or_retrieve_country'),
+    }), name='update-retrieve-country'),
 
     path('country-admin-metadata/', api.CountryAdminMetadataViewSet.as_view({
         'get': 'list',

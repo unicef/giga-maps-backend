@@ -86,7 +86,7 @@ if USE_COMPRESSOR:
 # Email settings
 # --------------------------------------------------------------------------
 
-EMAIL_CONFIG = env.email()
+EMAIL_CONFIG = env.email(backend=EMAIL_BACKEND)
 vars().update(EMAIL_CONFIG)
 
 SERVER_EMAIL_SIGNATURE = env('SERVER_EMAIL_SIGNATURE', default='proco'.capitalize())

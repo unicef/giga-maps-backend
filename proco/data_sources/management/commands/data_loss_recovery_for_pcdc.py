@@ -132,7 +132,7 @@ class Command(BaseCommand):
             logger.debug('Data synced successfully.\n\n')
 
             logger.debug('Aggregating the pulled data by giga_id_school + country_code and '
-                  'storing in RealTimeConnectivity table.')
+                         'storing in RealTimeConnectivity table.')
             dailycheckapp_measurements = DailyCheckAppMeasurementData.objects.filter(
                 timestamp__date=pull_data_date,
             ).filter(
@@ -149,7 +149,7 @@ class Command(BaseCommand):
 
             if not dailycheckapp_measurements.exists():
                 logger.error('No records to aggregate on provided date: "{0}". '
-                      'Hence stopping the execution here.'.format(pull_data_date))
+                             'Hence stopping the execution here.'.format(pull_data_date))
                 return
 
             realtime = []
@@ -232,7 +232,8 @@ class Command(BaseCommand):
                     ))
 
                     if len(realtime) == 5000:
-                        logger.debug('Loading the data to "RealTimeConnectivity" table as it has reached 5000 benchmark.')
+                        logger.debug(
+                            'Loading the data to "RealTimeConnectivity" table as it has reached 5000 benchmark.')
                         RealTimeConnectivity.objects.bulk_create(realtime)
                         realtime = []
 

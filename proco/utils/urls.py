@@ -14,7 +14,7 @@ def add_url_params(url, params):
     >> add_url_params(url, new_params)
     'http://stackoverflow.com/test?data=some&data=values&answers=false'
     """
-    # Unquoting URL first so we don't loose existing args
+    # Unquoting URL first so we don't lose existing args
     url = unquote(url)
     # Extracting url info
     parsed_url = urlparse(url)
