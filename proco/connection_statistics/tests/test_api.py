@@ -2,12 +2,14 @@ import random
 from datetime import datetime, timedelta
 
 from django.core.cache import cache
+from django.core.management import call_command
 from django.test import TestCase
 from django.urls import resolve, reverse
 from isoweek import Week
 from rest_framework import exceptions as rest_exceptions
 from rest_framework import status
 
+from proco.accounts import models as accounts_models
 from proco.connection_statistics.models import CountryWeeklyStatus
 from proco.connection_statistics.tests.factories import (
     CountryDailyStatusFactory,
@@ -24,6 +26,17 @@ from proco.utils.tests import TestAPIViewSetMixin
 
 def statistics_url(url_params, query_param, view_name='global-stat'):
     url = reverse('connection_statistics:' + view_name, args=url_params)
+    view = resolve(url)
+    view_info = view.func
+
+    if len(query_param) > 0:
+        query_params = '?' + '&'.join([key + '=' + str(val) for key, val in query_param.items()])
+        url += query_params
+    return url, view, view_info
+
+
+def accounts_url(url_params, query_param, view_name='list-or-create-api-keys'):
+    url = reverse('accounts:' + view_name, args=url_params)
     view = resolve(url)
     view_info = view.func
 
@@ -1095,8 +1108,11 @@ class ConnectivityConfigurationsAPITestCase(TestAPIViewSetMixin, TestCase):
         cls.school_two = SchoolFactory(country=cls.country_one)
         cls.school_three = SchoolFactory(country=cls.country_one)
 
-        cls.stat_one = SchoolDailyStatusFactory(school=cls.school_one)
-        cls.stat_two = SchoolDailyStatusFactory(school=cls.school_two)
+        cls.stat_one = SchoolDailyStatusFactory(school=cls.school_one, live_data_source='DAILY_CHECK_APP_MLAB')
+        cls.stat_two = SchoolDailyStatusFactory(school=cls.school_two, live_data_source='QOS')
+
+        args = ['--delete_data_sources', '--update_data_sources', '--update_data_layers']
+        call_command('load_system_data_layers', *args)
 
     def setUp(self):
         cache.clear()
@@ -1131,6 +1147,25 @@ class ConnectivityConfigurationsAPITestCase(TestAPIViewSetMixin, TestCase):
 
         with self.assertNumQueries(0):
             self.forced_auth_req('get', url, view=view)
+
+    def test_country_with_schools_latest_configurations_for_live_layer(self):
+        layer = accounts_models.DataLayer.objects.filter(
+            type=accounts_models.DataLayer.LAYER_TYPE_LIVE,
+            category=accounts_models.DataLayer.LAYER_CATEGORY_CONNECTIVITY,
+            status=accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
+            created_by__isnull=True,
+        ).first()
+        url, _, view = statistics_url((), {'country_id': self.country_one.id, 'layer_id': layer.id},
+                                      view_name='get-latest-week-and-month')
+
+        with self.assertNumQueries(6):
+            response = self.forced_auth_req('get', url, view=view)
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+            response_data = response.data
+            self.assertIn('week', response_data)
+            self.assertIn('month', response_data)
+            self.assertIn('years', response_data)
 
     def test_country_without_schools_latest_configurations(self):
         url, _, view = statistics_url((), {'country_id': self.country_two.id}, view_name='get-latest-week-and-month')
@@ -1192,7 +1227,6 @@ class ConnectivityConfigurationsAPITestCase(TestAPIViewSetMixin, TestCase):
 
 class CountrySummaryAPIViewSetAPITestCase(TestAPIViewSetMixin, TestCase):
     databases = ['default', ]
-    base_view = 'connection_statistics:list-create-destroy-countryweeklystatus'
 
     @classmethod
     def setUpTestData(cls):
@@ -1269,15 +1303,845 @@ class CountrySummaryAPIViewSetAPITestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(response_data['count'], 2)
         self.assertEqual(len(response_data['results']), 2)
 
-    #
-    # def test_search(self):
-    #     pass
-    #
-    # def test_retrieve(self):
-    #     pass
-    #
-    # def test_update(self):
-    #     pass
-    #
-    # def test_delete(self):
-    #     pass
+    def test_search(self):
+        url, _, view = statistics_url((), {'search': self.country_one.name},
+                                      view_name='list-create-destroy-countryweeklystatus')
+
+        response = self.forced_auth_req('get', url, user=self.user, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+        self.assertEqual(type(response_data), dict)
+        # 2 records as we created manually in setup, 1 for country with latest year and latest week
+        self.assertEqual(response_data['count'], 3)
+        self.assertEqual(len(response_data['results']), 3)
+
+    def test_retrieve(self):
+        url, view, view_info = statistics_url((self.stat_one.id,), {},
+                                              view_name='update-retrieve-countryweeklystatus')
+
+        response = self.forced_auth_req('get', url, user=self.user, view=view, view_info=view_info, )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+        self.assertEqual(response_data['id'], self.stat_one.id)
+        self.assertEqual(response_data['connectivity_speed'], self.stat_one.connectivity_speed)
+        self.assertEqual(response_data['year'], self.stat_one.year)
+        self.assertEqual(response_data['week'], self.stat_one.week)
+        self.assertEqual(response_data['integration_status'], self.stat_one.integration_status)
+
+    def test_retrieve_wrong_id(self):
+        url, view, view_info = statistics_url((1234546,), {},
+                                              view_name='update-retrieve-countryweeklystatus')
+
+        response = self.forced_auth_req('get', url, user=self.user, view=view, view_info=view_info, )
+
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+    def test_update(self):
+        url, _, view = statistics_url((self.stat_two.id,), {},
+                                      view_name='update-retrieve-countryweeklystatus')
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.user,
+            data={
+                "id": self.stat_two.id,
+                "created": self.stat_two.created,
+                "modified": self.stat_two.modified,
+                "connectivity_speed": self.stat_two.connectivity_speed,
+                "connectivity_upload_speed": self.stat_two.connectivity_upload_speed,
+                "year": self.stat_two.year,
+                "week": self.stat_two.week,
+                "date": self.stat_two.date,
+                "integration_status": CountryWeeklyStatus.STATIC_MAPPED,
+                "country": self.stat_two.country.id
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+    def test_update_wrong_id(self):
+        url, _, view = statistics_url((123434567,), {},
+                                      view_name='update-retrieve-countryweeklystatus')
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.user,
+            data={
+                "id": self.stat_two.id,
+                "created": self.stat_two.created,
+                "modified": self.stat_two.modified,
+                "connectivity_speed": self.stat_two.connectivity_speed,
+                "connectivity_upload_speed": self.stat_two.connectivity_upload_speed,
+                "year": self.stat_two.year,
+                "week": self.stat_two.week,
+                "date": self.stat_two.date,
+                "integration_status": CountryWeeklyStatus.STATIC_MAPPED,
+                "country": self.stat_two.country.id
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+    def test_update_invalid_data(self):
+        url, _, view = statistics_url((self.stat_two.id,), {},
+                                      view_name='update-retrieve-countryweeklystatus')
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.user,
+            data={
+                "id": self.stat_two.id,
+                "created": self.stat_two.created,
+                "modified": self.stat_two.modified,
+                "connectivity_speed": self.stat_two.connectivity_speed,
+                "connectivity_upload_speed": self.stat_two.connectivity_upload_speed,
+                "year": self.stat_two.year,
+                "week": self.stat_two.week,
+                "date": self.stat_two.date,
+                "integration_status": 8,
+                "country": self.stat_two.country.id
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_delete(self):
+        url, _, view = statistics_url((), {}, view_name='list-create-destroy-countryweeklystatus')
+
+        response = self.forced_auth_req(
+            'delete',
+            url,
+            data={'id': [self.stat_two.id]},
+            user=self.user,
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_delete_without_ids(self):
+        url, _, view = statistics_url((), {}, view_name='list-create-destroy-countryweeklystatus')
+
+        response = self.forced_auth_req(
+            'delete',
+            url,
+            user=self.user,
+        )
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+    def test_delete_wrong_ids(self):
+        url, _, view = statistics_url((), {}, view_name='list-create-destroy-countryweeklystatus')
+
+        response = self.forced_auth_req(
+            'delete',
+            url,
+            data={'id': [12345432]},
+            user=self.user,
+        )
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+
+class CountryDailyConnectivitySummaryAPIViewSetAPITestCase(TestAPIViewSetMixin, TestCase):
+    databases = ['default', ]
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.country_one = CountryFactory()
+        cls.country_two = CountryFactory()
+
+        today = datetime.now().date()
+
+        cls.stat_one = CountryDailyStatusFactory(
+            country=cls.country_one,
+            date=today,
+            live_data_source='DAILY_CHECK_APP_MLAB'
+        )
+        cls.stat_two = CountryDailyStatusFactory(
+            country=cls.country_one,
+            date=today,
+            live_data_source='QOS'
+        )
+
+        cls.stat_three = CountryDailyStatusFactory(
+            country=cls.country_two,
+            date=today,
+            live_data_source='DAILY_CHECK_APP_MLAB'
+        )
+
+        cls.user = test_utilities.setup_admin_user_by_role()
+
+    def setUp(self):
+        cache.clear()
+        super().setUp()
+
+    def test_list(self):
+        url, _, view = statistics_url((), {}, view_name='list-create-destroy-countrydailystatus')
+
+        response = self.forced_auth_req('get', url, user=self.user, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+        self.assertEqual(type(response_data), dict)
+        # 3 records as we created manually in setup
+        self.assertEqual(response_data['count'], 3)
+        self.assertEqual(len(response_data['results']), 3)
+
+    def test_country_id_filter(self):
+        url, _, view = statistics_url((), {'country_id': self.country_one.id},
+                                      view_name='list-create-destroy-countrydailystatus')
+
+        response = self.forced_auth_req('get', url, user=self.user, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+        self.assertEqual(type(response_data), dict)
+        # 2 records as we created manually in setup
+        self.assertEqual(response_data['count'], 2)
+        self.assertEqual(len(response_data['results']), 2)
+
+    def test_search(self):
+        url, _, view = statistics_url((), {'search': self.country_one.name},
+                                      view_name='list-create-destroy-countrydailystatus')
+
+        response = self.forced_auth_req('get', url, user=self.user, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+        self.assertEqual(type(response_data), dict)
+        # 2 records as we created manually in setup
+        self.assertEqual(response_data['count'], 2)
+        self.assertEqual(len(response_data['results']), 2)
+
+    def test_retrieve(self):
+        url, view, view_info = statistics_url((self.stat_one.id,), {},
+                                              view_name='update-retrieve-countrydailystatus')
+
+        response = self.forced_auth_req('get', url, user=self.user, view=view, view_info=view_info, )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+        self.assertEqual(response_data['id'], self.stat_one.id)
+        self.assertEqual(response_data['connectivity_speed'], self.stat_one.connectivity_speed)
+        self.assertEqual(response_data['date'], format_date(self.stat_one.date))
+
+    def test_retrieve_wrong_id(self):
+        url, view, view_info = statistics_url((1234546,), {},
+                                              view_name='update-retrieve-countrydailystatus')
+
+        response = self.forced_auth_req('get', url, user=self.user, view=view, view_info=view_info, )
+
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+    def test_update(self):
+        url, _, view = statistics_url((self.stat_two.id,), {},
+                                      view_name='update-retrieve-countrydailystatus')
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.user,
+            data={
+                "id": self.stat_two.id,
+                "created": self.stat_two.created,
+                "modified": self.stat_two.modified,
+                "connectivity_speed": 10000000,
+                "connectivity_upload_speed": self.stat_two.connectivity_upload_speed,
+                "date": self.stat_two.date,
+                "country": self.stat_two.country.id
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+    def test_update_wrong_id(self):
+        url, _, view = statistics_url((123434567,), {},
+                                      view_name='update-retrieve-countrydailystatus')
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.user,
+            data={
+                "id": self.stat_two.id,
+                "created": self.stat_two.created,
+                "modified": self.stat_two.modified,
+                "connectivity_speed": self.stat_two.connectivity_speed,
+                "connectivity_upload_speed": self.stat_two.connectivity_upload_speed,
+                "date": self.stat_two.date,
+                "country": self.stat_two.country.id
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+    def test_update_invalid_data(self):
+        url, _, view = statistics_url((self.stat_two.id,), {},
+                                      view_name='update-retrieve-countrydailystatus')
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.user,
+            data={
+                "id": self.stat_two.id,
+                "created": self.stat_two.created,
+                "modified": self.stat_two.modified,
+                "connectivity_speed": 234.123,
+                "connectivity_upload_speed": self.stat_two.connectivity_upload_speed,
+                "date": self.stat_two.date,
+                "country": self.stat_two.country.id
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_delete(self):
+        url, _, view = statistics_url((), {}, view_name='list-create-destroy-countrydailystatus')
+
+        response = self.forced_auth_req(
+            'delete',
+            url,
+            data={'id': [self.stat_two.id]},
+            user=self.user,
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_delete_without_ids(self):
+        url, _, view = statistics_url((), {}, view_name='list-create-destroy-countrydailystatus')
+
+        response = self.forced_auth_req(
+            'delete',
+            url,
+            user=self.user,
+        )
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+    def test_delete_wrong_ids(self):
+        url, _, view = statistics_url((), {}, view_name='list-create-destroy-countrydailystatus')
+
+        response = self.forced_auth_req(
+            'delete',
+            url,
+            data={'id': [12345432]},
+            user=self.user,
+        )
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+
+class SchoolSummaryAPIViewSetAPITestCase(TestAPIViewSetMixin, TestCase):
+    databases = ['default', ]
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.country = CountryFactory()
+
+        cls.school_one = SchoolFactory(country=cls.country, location__country=cls.country, geopoint=None)
+        cls.school_two = SchoolFactory(country=cls.country, location__country=cls.country)
+
+        cls.stat_one = SchoolWeeklyStatusFactory(
+            school=cls.school_one,
+            connectivity=True,
+            year=datetime.now().year - 1,
+            week=12,
+        )
+        cls.stat_two = SchoolWeeklyStatusFactory(
+            school=cls.school_one,
+            connectivity=False,
+            year=datetime.now().year - 1,
+            week=13,
+        )
+        cls.stat_three = SchoolWeeklyStatusFactory(
+            school=cls.school_two,
+            connectivity=True,
+            year=datetime.now().year - 1,
+            week=12,
+        )
+
+        cls.user = test_utilities.setup_admin_user_by_role()
+
+    def setUp(self):
+        cache.clear()
+        super().setUp()
+
+    def test_list(self):
+        url, _, view = statistics_url((), {}, view_name='list-create-destroy-schoolweeklystatus')
+
+        response = self.forced_auth_req('get', url, user=self.user, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+        self.assertEqual(type(response_data), dict)
+        # 3 records as we created manually in setup
+        self.assertEqual(response_data['count'], 3)
+        self.assertEqual(len(response_data['results']), 3)
+
+    def test_school_id_filter(self):
+        url, _, view = statistics_url((), {'school_id': self.school_one.id},
+                                      view_name='list-create-destroy-schoolweeklystatus')
+
+        response = self.forced_auth_req('get', url, user=self.user, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+        self.assertEqual(type(response_data), dict)
+        # 2 records as we created manually in setup
+        self.assertEqual(response_data['count'], 2)
+        self.assertEqual(len(response_data['results']), 2)
+
+    def test_year_week_filter(self):
+        url, _, view = statistics_url((), {'year': datetime.now().year - 1, 'week': 12},
+                                      view_name='list-create-destroy-schoolweeklystatus')
+
+        response = self.forced_auth_req('get', url, user=self.user, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+        self.assertEqual(type(response_data), dict)
+        # 2 records as we created manually in setup
+        self.assertEqual(response_data['count'], 2)
+        self.assertEqual(len(response_data['results']), 2)
+
+    def test_search(self):
+        url, _, view = statistics_url((), {'search': self.school_one.name},
+                                      view_name='list-create-destroy-schoolweeklystatus')
+
+        response = self.forced_auth_req('get', url, user=self.user, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+        self.assertEqual(type(response_data), dict)
+        # 2 records as we created manually in setup
+        self.assertEqual(response_data['count'], 2)
+        self.assertEqual(len(response_data['results']), 2)
+
+    def test_retrieve(self):
+        url, view, view_info = statistics_url((self.stat_one.id,), {},
+                                              view_name='update-retrieve-schoolweeklystatus')
+
+        response = self.forced_auth_req('get', url, user=self.user, view=view, view_info=view_info, )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+        self.assertEqual(response_data['id'], self.stat_one.id)
+        self.assertEqual(response_data['connectivity_speed'], self.stat_one.connectivity_speed)
+        self.assertEqual(response_data['year'], self.stat_one.year)
+        self.assertEqual(response_data['week'], self.stat_one.week)
+
+    def test_retrieve_wrong_id(self):
+        url, view, view_info = statistics_url((1234546,), {},
+                                              view_name='update-retrieve-schoolweeklystatus')
+
+        response = self.forced_auth_req('get', url, user=self.user, view=view, view_info=view_info, )
+
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+    def test_update(self):
+        url, _, view = statistics_url((self.stat_two.id,), {},
+                                      view_name='update-retrieve-schoolweeklystatus')
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.user,
+            data={
+                "id": self.stat_two.id,
+                "created": self.stat_two.created,
+                "modified": self.stat_two.modified,
+                "connectivity_speed": self.stat_two.connectivity_speed,
+                "connectivity_upload_speed": self.stat_two.connectivity_upload_speed,
+                "year": self.stat_two.year,
+                "week": self.stat_two.week,
+                "date": self.stat_two.date,
+                "school": self.school_one.id
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+    def test_update_wrong_id(self):
+        url, _, view = statistics_url((123434567,), {},
+                                      view_name='update-retrieve-schoolweeklystatus')
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.user,
+            data={
+                "id": self.stat_two.id,
+                "created": self.stat_two.created,
+                "modified": self.stat_two.modified,
+                "connectivity_speed": self.stat_two.connectivity_speed,
+                "connectivity_upload_speed": self.stat_two.connectivity_upload_speed,
+                "year": self.stat_two.year,
+                "week": self.stat_two.week,
+                "date": self.stat_two.date,
+                "school": self.school_two.id
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+    def test_update_invalid_data(self):
+        url, _, view = statistics_url((self.stat_two.id,), {},
+                                      view_name='update-retrieve-schoolweeklystatus')
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.user,
+            data={
+                "id": self.stat_two.id,
+                "created": self.stat_two.created,
+                "modified": self.stat_two.modified,
+                "connectivity_speed": self.stat_two.connectivity_speed,
+                "connectivity_upload_speed": self.stat_two.connectivity_upload_speed,
+                "year": self.stat_two.year,
+                "week": self.stat_two.week,
+                "date": self.stat_two.date,
+                'coverage_type': '7g',
+                "school": self.school_one.id
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_delete(self):
+        url, _, view = statistics_url((), {}, view_name='list-create-destroy-schoolweeklystatus')
+
+        response = self.forced_auth_req(
+            'delete',
+            url,
+            data={'id': [self.stat_two.id]},
+            user=self.user,
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_delete_without_ids(self):
+        url, _, view = statistics_url((), {}, view_name='list-create-destroy-schoolweeklystatus')
+
+        response = self.forced_auth_req(
+            'delete',
+            url,
+            user=self.user,
+        )
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+    def test_delete_wrong_ids(self):
+        url, _, view = statistics_url((), {}, view_name='list-create-destroy-schoolweeklystatus')
+
+        response = self.forced_auth_req(
+            'delete',
+            url,
+            data={'id': [12345432]},
+            user=self.user,
+        )
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+
+class SchoolDailyConnectivitySummaryAPIViewSetAPITestCase(TestAPIViewSetMixin, TestCase):
+    databases = ['default', ]
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.country = CountryFactory()
+
+        cls.school_one = SchoolFactory(country=cls.country, location__country=cls.country, geopoint=None)
+        cls.school_two = SchoolFactory(country=cls.country, location__country=cls.country)
+
+        today = datetime.now().date()
+
+        cls.stat_one = SchoolDailyStatusFactory(
+            school=cls.school_one,
+            date=today,
+            live_data_source='DAILY_CHECK_APP_MLAB'
+        )
+        cls.stat_two = SchoolDailyStatusFactory(
+            school=cls.school_one,
+            date=today,
+            live_data_source='QOS'
+        )
+
+        cls.stat_three = SchoolDailyStatusFactory(
+            school=cls.school_two,
+            date=today,
+            live_data_source='DAILY_CHECK_APP_MLAB'
+        )
+
+        cls.user = test_utilities.setup_admin_user_by_role()
+
+    def setUp(self):
+        cache.clear()
+        super().setUp()
+
+    def test_list(self):
+        url, _, view = statistics_url((), {}, view_name='list-create-destroy-schooldailystatus')
+
+        response = self.forced_auth_req('get', url, user=self.user, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+        self.assertEqual(type(response_data), dict)
+        # 3 records as we created manually in setup
+        self.assertEqual(response_data['count'], 3)
+        self.assertEqual(len(response_data['results']), 3)
+
+    def test_school_id_filter(self):
+        url, _, view = statistics_url((), {'school_id': self.school_one.id},
+                                      view_name='list-create-destroy-schooldailystatus')
+
+        response = self.forced_auth_req('get', url, user=self.user, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+        self.assertEqual(type(response_data), dict)
+        # 2 records as we created manually in setup
+        self.assertEqual(response_data['count'], 2)
+        self.assertEqual(len(response_data['results']), 2)
+
+    def test_search(self):
+        url, _, view = statistics_url((), {'search': self.school_one.name},
+                                      view_name='list-create-destroy-schooldailystatus')
+
+        response = self.forced_auth_req('get', url, user=self.user, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+        self.assertEqual(type(response_data), dict)
+        # 2 records as we created manually in setup
+        self.assertEqual(response_data['count'], 2)
+        self.assertEqual(len(response_data['results']), 2)
+
+    def test_retrieve(self):
+        url, view, view_info = statistics_url((self.stat_one.id,), {},
+                                              view_name='update-retrieve-schooldailystatus')
+
+        response = self.forced_auth_req('get', url, user=self.user, view=view, view_info=view_info, )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+        self.assertEqual(response_data['id'], self.stat_one.id)
+        self.assertEqual(response_data['connectivity_speed'], self.stat_one.connectivity_speed)
+        self.assertEqual(response_data['date'], format_date(self.stat_one.date))
+
+    def test_retrieve_wrong_id(self):
+        url, view, view_info = statistics_url((1234546,), {},
+                                              view_name='update-retrieve-schooldailystatus')
+
+        response = self.forced_auth_req('get', url, user=self.user, view=view, view_info=view_info, )
+
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+    def test_update(self):
+        url, _, view = statistics_url((self.stat_two.id,), {},
+                                      view_name='update-retrieve-schooldailystatus')
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.user,
+            data={
+                "id": self.stat_two.id,
+                "created": self.stat_two.created,
+                "modified": self.stat_two.modified,
+                "connectivity_speed": 10000000,
+                "connectivity_upload_speed": self.stat_two.connectivity_upload_speed,
+                "date": self.stat_two.date,
+                "school": self.stat_two.school.id
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+    def test_update_wrong_id(self):
+        url, _, view = statistics_url((123434567,), {},
+                                      view_name='update-retrieve-schooldailystatus')
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.user,
+            data={
+                "id": self.stat_two.id,
+                "created": self.stat_two.created,
+                "modified": self.stat_two.modified,
+                "connectivity_speed": self.stat_two.connectivity_speed,
+                "connectivity_upload_speed": self.stat_two.connectivity_upload_speed,
+                "date": self.stat_two.date,
+                "school": self.stat_two.school.id
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+    def test_update_invalid_data(self):
+        url, _, view = statistics_url((self.stat_two.id,), {},
+                                      view_name='update-retrieve-schooldailystatus')
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.user,
+            data={
+                "id": self.stat_two.id,
+                "created": self.stat_two.created,
+                "modified": self.stat_two.modified,
+                "connectivity_speed": 234.123,
+                "connectivity_upload_speed": self.stat_two.connectivity_upload_speed,
+                "date": self.stat_two.date,
+                "school": self.stat_two.school.id
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_delete(self):
+        url, _, view = statistics_url((), {}, view_name='list-create-destroy-schooldailystatus')
+
+        response = self.forced_auth_req(
+            'delete',
+            url,
+            data={'id': [self.stat_two.id]},
+            user=self.user,
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_delete_without_ids(self):
+        url, _, view = statistics_url((), {}, view_name='list-create-destroy-schooldailystatus')
+
+        response = self.forced_auth_req(
+            'delete',
+            url,
+            user=self.user,
+        )
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+    def test_delete_wrong_ids(self):
+        url, _, view = statistics_url((), {}, view_name='list-create-destroy-schooldailystatus')
+
+        response = self.forced_auth_req(
+            'delete',
+            url,
+            data={'id': [12345432]},
+            user=self.user,
+        )
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+
+class TimePlayerApiTestCase(TestAPIViewSetMixin, TestCase):
+    databases = ['default', ]
+
+    @classmethod
+    def setUpTestData(cls):
+        args = ['--delete_data_sources', '--update_data_sources', '--update_data_layers']
+        call_command('load_system_data_layers', *args)
+
+        cls.admin_user = test_utilities.setup_admin_user_by_role()
+        cls.read_only_user = test_utilities.setup_read_only_user_by_role()
+
+    def test_get_invalid_layer_id(self):
+        url, _, view = statistics_url((), {
+            'layer_id': 123,
+            'country_id': 123,
+        }, view_name='get-time-player-data')
+
+        response = self.forced_auth_req('get', url, _, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_for_live_layer(self):
+        pcdc_data_source = accounts_models.DataSource.objects.filter(
+            data_source_type=accounts_models.DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP,
+        ).first()
+
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.admin_user,
+            view=view,
+            data={
+                'icon': '<icon>',
+                'name': 'Test data layer 3',
+                'description': 'Test data layer 3 description',
+                'version': '1.0.0',
+                'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
+                'data_sources_list': [pcdc_data_source.id, ],
+                'data_source_column': pcdc_data_source.column_config[0],
+                'global_benchmark': {
+                    'value': '20000000',
+                    'unit': 'bps',
+                    'convert_unit': 'mbps'
+                },
+                'is_reverse': False,
+                'legend_configs': {
+                    'good': {
+                        'values': [],
+                        'labels': 'Good'
+                    },
+                    'moderate': {
+                        'values': [],
+                        'labels': 'Moderate'
+                    },
+                    'bad': {
+                        'values': [],
+                        'labels': 'Bad'
+                    },
+                    'unknown': {
+                        'values': [],
+                        'labels': 'Unknown'
+                    }
+                }
+            }
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        response_data = response.data
+
+        layer_id = response_data['id']
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='update-or-delete-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_READY_TO_PUBLISH,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='publish-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, _, view = statistics_url((), {
+            'layer_id': layer_id,
+            'country_id': 123,
+            'z': '2',
+            'x': '1',
+            'y': '2.mvt',
+        }, view_name='get-time-player-data')
+
+        response = self.forced_auth_req('get', url, _, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
