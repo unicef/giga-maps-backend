@@ -14,10 +14,6 @@ urlpatterns = [
         'get': 'list',
     }), name='download-countries'),
 
-    # DB Table based searching
-    path('search/', api.SearchListAPIView.as_view({
-        'get': 'list',
-    }), name='search-countries-schools'),
     # DB table based listing only for Country, Admin1 and Admin2
     path('search-countries/', api.CountrySearchStatListAPIView.as_view(), name='search-countries-admin-schools'),
     # Cognitive Search Index based searching for Schools
@@ -31,6 +27,7 @@ urlpatterns = [
     path('country/<int:pk>/', api.CountryDataViewSet.as_view({
         'get': 'retrieve',
         'put': 'update',
+        'delete': 'destroy',
     }), name='update-retrieve-country'),
 
     path('country-admin-metadata/', api.CountryAdminMetadataViewSet.as_view({

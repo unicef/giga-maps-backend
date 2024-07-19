@@ -26,6 +26,7 @@ from proco.schools.serializers import ExpandCountrySerializer
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
+
 class ExpandCountryAdminMetadataSerializer(FlexFieldsModelSerializer):
     """
     ExpandCountryAdminMetadataSerializer
@@ -208,7 +209,8 @@ class CountryUpdateRetriveSerializer(serializers.ModelSerializer):
                     api_key__valid_to__gte=core_utilities.get_current_datetime_object().date(),
                     deleted__isnull=True,
                 ).exists():
-                    logger.debug('Warning: api key for country ({0}) already exists.'.format(country_instance.iso3_format))
+                    logger.debug(
+                        'Warning: api key for country ({0}) already exists.'.format(country_instance.iso3_format))
                 else:
                     country_api_key_relationship_obj.update(deleted=None, last_modified_by=request_user)
                     logger.info('Api key restored.')
@@ -467,7 +469,6 @@ class CountryStatusSerializer(FlexFieldsModelSerializer):
 
 class CountryCSVSerializer(CountryStatusSerializer, DownloadSerializerMixin):
     class Meta(CountryStatusSerializer.Meta):
-
         report_fields = OrderedDict([
             ('id', 'ID'),
             ('name', 'Name'),

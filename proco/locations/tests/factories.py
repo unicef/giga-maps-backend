@@ -10,6 +10,7 @@ from proco.locations.models import Country, CountryAdminMetadata, Location
 class CountryFactory(django_factory.DjangoModelFactory):
     name = fuzzy.FuzzyText(length=20)
     code = fuzzy.FuzzyText(length=20)
+    iso3_format = fuzzy.FuzzyText(length=20)
     description = fuzzy.FuzzyText(length=40)
     data_source = fuzzy.FuzzyText(length=40)
 

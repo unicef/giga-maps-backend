@@ -179,7 +179,7 @@ class CountryDataViewSet(BaseModelViewSet):
     def create(self, request, *args, **kwargs):
         try:
             data = CountryUpdateRetriveSerializer(data=request.data)
-            if data.is_valid():
+            if data.is_valid(raise_exception=True):
                 data.save()
                 action_log(request, [data.data], 1, '', self.model, field_name='name')
                 update_country_related_cache.delay(data.data.get('code'))
@@ -195,11 +195,9 @@ class CountryDataViewSet(BaseModelViewSet):
                 copy_request_data = copy.deepcopy(request.data)
                 if copy_request_data.get('flag') is None:
                     copy_request_data['flag'] = country.flag
-                # if copy_request_data.get('map_preview') is None:
-                #     copy_request_data['map_preview'] = country.map_preview
 
                 data = CountryUpdateRetriveSerializer(instance=country, data=copy_request_data)
-                if data.is_valid():
+                if data.is_valid(raise_exception=True):
                     change_message = changed_fields(country, copy_request_data)
                     action_log(request, [country], 2, change_message, self.model, field_name='name')
                     data.save()
@@ -213,9 +211,8 @@ class CountryDataViewSet(BaseModelViewSet):
     def destroy(self, request, *args, **kwargs):
         request_user = core_utilities.get_current_user(request=request)
         if 'pk' in kwargs:
-            response = super().destroy(request, *args, **kwargs)
-
             instance = self.get_object()
+            response = super().destroy(request, *args, **kwargs)
 
             accounts_models.DataLayerCountryRelationship.objects.filter(country=instance).update(
                 deleted=core_utilities.get_current_datetime_object(),
@@ -301,8 +298,6 @@ class DownloadCountriesViewSet(BaseModelViewSet, core_mixins.DownloadAPIDataToCS
         'id': ['exact', 'in'],
     }
 
-    # permit_list_expands = ['last_weekly_status']
-
     def list(self, request, *args, **kwargs):
         if core_utilities.is_export(request, self.action):
             return self.list_export(request, *args, **kwargs)
@@ -310,162 +305,6 @@ class DownloadCountriesViewSet(BaseModelViewSet, core_mixins.DownloadAPIDataToCS
             self.perform_pre_checks(request, *args, **kwargs)
             self.serializer_class = CountryStatusSerializer
             return super().list(request, *args, **kwargs)
-
-
-class SearchListAPIView(BaseModelViewSet):
-    """
-    SearchListAPIView
-        This class is used to list all Download APIs.
-        Inherits: ListAPIView
-    """
-    model = School
-    serializer_class = SearchListSerializer
-
-    base_auth_permissions = (
-        permissions.AllowAny,
-    )
-
-    filter_backends = (
-        DjangoFilterBackend,
-        # NullsAlwaysLastOrderingFilter,
-    )
-
-    fields = (
-        'id', 'name',
-        'admin1_id', 'admin1_name', 'admin1_description', 'admin2_id', 'admin2_name', 'admin2_description',
-        'country_id', 'country_name', 'country_code',
-    )
-
-    ordering_fields = ('country_name', 'admin1_name', 'admin2_name', 'name')
-
-    filterset_fields = {
-        'id': ['exact', 'in'],
-        'name': ['iexact', 'contains'],
-        'country_id': ['exact', 'in'],
-        'country__name': ['iexact', 'contains'],
-        'admin1_id': ['exact', 'in'],
-        'admin2_id': ['exact', 'in'],
-    }
-
-    def get_queryset(self):
-        queryset = self.model.objects.all()
-
-        qry_fields = self.fields
-        query_param_fields = self.request.query_params.get('fields')
-        # Select only requested fields
-        if query_param_fields:
-            qry_fields = query_param_fields.split(',')
-
-        qry_ordering = self.ordering_fields
-        query_param_ordering = self.request.query_params.get('ordering')
-        # Apply the ordering as asked
-        if query_param_ordering:
-            qry_ordering = query_param_ordering.split(',')
-
-        qs = queryset.annotate(
-            country_name=F('country__name'),
-            country_code=F('country__code'),
-            admin1_name=F('admin1__name'),
-            admin1_description=F('admin1__description'),
-            admin2_name=F('admin2__name'),
-            admin2_description=F('admin2__description'),
-        ).filter(country_id=222).values(*qry_fields).order_by(*qry_ordering).distinct(*qry_fields)
-
-        return self.apply_queryset_filters(qs)
-
-    def list(self, request, *args, **kwargs):
-        queryset = self.filter_queryset(self.get_queryset())
-
-        page_size = request.query_params.get('page_size')
-        if page_size:
-            page = self.paginate_queryset(queryset)
-            if page is not None:
-                return self.get_paginated_response(page)
-        return Response(list(queryset))
-
-    def finalize_response(self, request, response, *args, **kwargs):
-        data = OrderedDict()
-        response = super().finalize_response(request, response, *args, **kwargs)
-        if response.status_code == rest_status.HTTP_200_OK:
-            response_data = []
-            if isinstance(response.data, dict):
-                # If its paginated request then dict
-                response_data = response.data.get('results', [])
-            elif isinstance(response.data, list):
-                # If its normal request then lis
-                response_data = response.data
-
-            for resp_data in response_data:
-                country_id = resp_data.get('country_id')
-                if country_id:
-                    # Country ID exists
-                    country_data = data.get(country_id, {
-                        'country_id': country_id,
-                        'country_name': resp_data.get('country_name'),
-                        'country_code': resp_data.get('country_code'),
-                        'admin1_data': OrderedDict(),
-                    })
-
-                    if 'admin1_name' in resp_data:
-                        admin1_name = 'Unknown' if core_utilities.is_blank_string(resp_data['admin1_name']) \
-                            else resp_data['admin1_name']
-                        # If admin 1 name exist in response
-                        admin1_data = country_data.get('admin1_data')
-                        admin1_name_data = admin1_data.get(admin1_name, {
-                            'admin1_name': admin1_name,
-                            'admin1_id': resp_data.get('admin1_id'),
-                            'admin1_description': resp_data.get('admin1_description'),
-                            'admin2_data': OrderedDict(),
-                        })
-
-                        if 'admin2_name' in resp_data:
-                            admin2_name = 'Unknown' if core_utilities.is_blank_string(resp_data['admin2_name']) \
-                                else resp_data['admin2_name']
-                            # If admin 2 name exist in response
-                            admin2_data = admin1_name_data.get('admin2_data')
-                            admin2_name_data = admin2_data.get(admin2_name, {
-                                'admin2_name': admin2_name,
-                                'admin2_id': resp_data.get('admin2_id'),
-                                'admin2_description': resp_data.get('admin2_description'),
-                                'school_data': OrderedDict(),
-                            })
-
-                            if 'id' in resp_data:
-                                school_id = resp_data['id']
-                                # If admin 2 name exist in response
-                                school_data = admin2_name_data.get('school_data')
-
-                                school_id_data = school_data.get(school_id, {
-                                    'id': school_id,
-                                    'name': resp_data.get('name', 'Unknown'),
-                                })
-
-                                school_data[school_id] = school_id_data
-                                admin2_name_data['school_data'] = school_data
-                            else:
-                                pass
-
-                            admin2_data[admin2_name] = admin2_name_data
-                        else:
-                            # No admin2 name in response
-                            pass
-
-                        admin1_data[admin1_name] = admin1_name_data
-                        country_data['admin1_data'] = admin1_data
-                    else:
-                        # No admin1 name in response
-                        pass
-
-                    data[country_id] = country_data
-                else:
-                    # No country ID in response
-                    pass
-
-            if isinstance(response.data, list):
-                response.data = OrderedDict()
-
-            response.data['results'] = data
-        return response
 
 
 class CountrySearchStatListAPIView(CachedListMixin, ListAPIView):
@@ -766,7 +605,7 @@ class BaseSearchMixin:
             query_type=self.get_query_type,
         )
 
-        logger.debug('Total Documents Matching Query:', results.get_count())
+        logger.debug('Total Documents Matching Query: {}'.format(results.get_count()))
         return results
 
 
