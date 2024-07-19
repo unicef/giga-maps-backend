@@ -169,3 +169,7 @@ class InvalidAPIKeyError(BaseInvalidValidationError):
 
     message = _('Invalid API Key provided')
     code = 'invalid_api_key_provided'
+
+
+class BareException(Exception):
+    pass

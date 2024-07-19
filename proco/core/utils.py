@@ -1,9 +1,8 @@
 import gc
-import hashlib
 import locale
-import random
-import re
 import logging
+import re
+import secrets
 from decimal import Decimal
 
 import pytz
@@ -11,8 +10,10 @@ from django.conf import settings
 from django.utils import timezone
 
 from proco.core.config import app_config as core_config
+from proco.core.exceptions import BareException
 
 logger = logging.getLogger('gigamaps.' + __name__)
+
 
 def get_timezone_converted_value(value, tz=settings.TIME_ZONE):
     """
@@ -20,7 +21,7 @@ def get_timezone_converted_value(value, tz=settings.TIME_ZONE):
         Method to convert the timezone of the datetime field value
     :param tz: timezone
     :param value: DateTime instance
-    :return: DateTime instance
+    :return:
     """
     response_timezone = pytz.timezone(tz)
     return value.astimezone(response_timezone)
@@ -90,11 +91,10 @@ def is_blank_string(val):
     """Check if the given string is empty."""
     if val is None:
         return True
-    elif type(val) != str:
-        return False
-    else:
+    elif isinstance(val, str):
         attr = val.strip().lower()
         return len(attr) == 0
+    return False
 
 
 def sanitize_str(val):
@@ -116,16 +116,8 @@ def normalize_str(val):
 def get_random_string(length=264, allowed_chars='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._*#'):
     """
     Return a securely generated random string.
-
-    The default length of 12 with the a-z, A-Z, 0-9 character set returns
-    a 71-bit value. log_2((26+26+10)^12) =~ 71 bits
     """
-    random.seed(
-        hashlib.sha256(
-            ('%s%s%s' % (random.getstate(), get_current_datetime_object, settings.SECRET_KEY)).encode()
-        ).digest()
-    )
-    return ''.join(random.choice(allowed_chars) for i in range(length))
+    return ''.join(secrets.choice(allowed_chars) for _ in range(length))
 
 
 def format_decimal_data(value):
@@ -158,7 +150,7 @@ def convert_to_int(val, default=0, orig=False):
     """Parse to integer value from string. In case of failure to do so, assign default value."""
     try:
         return int(val)
-    except:
+    except BareException:
         if orig:
             return val
         else:
@@ -169,7 +161,7 @@ def convert_to_float(val, default=0, orig=False):
     """Parse to float value from string. In case of failure to do so, assign default value."""
     try:
         return float(val)
-    except:
+    except BareException:
         if orig:
             return val
         else:
@@ -185,7 +177,7 @@ def get_footer_copyright():
 
 def get_random_choice(choices):
     """ Accepts a list of choices and return the randomly chosen choice. """
-    return random.choice(choices)
+    return secrets.choice(choices)
 
 
 def get_support_email():
@@ -250,7 +242,7 @@ def column_normalize(data_df, valid_columns=None):
     :param data_df: data frame
     :param valid_columns: list - list of supported normalized column names,
     if empty/None keep all columns otherwise remove missing columns from data frame
-    :return: data frame
+    :return:
     """
     _columns = dict()
     _to_delete = []
@@ -285,7 +277,7 @@ def bulk_create_or_update(records, model, unique_fields, batch_size=1000):
 
     # This is where we delegate our records to our split lists:
     # - if the record already exists in the DB (the 'id' primary key), add it to the update list.
-    # - Otherwise, add it to the create list.
+    # - Otherwise, add it to the creation list.
     [
         records_to_update.append(record)
         if record['id'] is not None

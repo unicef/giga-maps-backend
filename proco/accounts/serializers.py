@@ -845,9 +845,6 @@ class SendNotificationSerializer(serializers.ModelSerializer):
                 data['template'] = data['template'] \
                     if 'template' in data \
                     else account_config.standard_email_template_name
-            # For SMS notification
-            elif message_type == accounts_models.Message.TYPE_SMS:
-                pass
         return super().to_internal_value(data)
 
     def create(self, validated_data):
@@ -861,10 +858,6 @@ class SendNotificationSerializer(serializers.ModelSerializer):
 
             if isinstance(response, int):
                 validated_data['is_sent'] = True
-
-        # if its SMS notification, send the SMS over <> service and update the status
-        elif message_type == accounts_models.Message.TYPE_SMS:
-            pass
 
         # if it's just an application level notification, create the message instance
         else:
