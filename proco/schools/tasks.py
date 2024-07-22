@@ -1,7 +1,7 @@
+import logging
 import random
 import traceback
 import uuid
-import logging
 from collections import Counter
 from copy import copy
 from random import randint  # noqa
@@ -24,6 +24,7 @@ from proco.utils.dates import format_date
 from proco.utils.tasks import update_country_related_cache
 
 logger = logging.getLogger('gigamaps.' + __name__)
+
 
 class FailedImportError(Exception):
     pass
@@ -145,7 +146,7 @@ def update_school_records():
         SchoolWeekly or CountryWeekly tables.
     """
     task_key = 'update_school_records_status_{current_time}'.format(
-            current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
+        current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
 
     task_id = current_task.request.id or str(uuid.uuid4())
     task_instance = background_task_utilities.task_on_start(
@@ -157,4 +158,3 @@ def update_school_records():
         background_task_utilities.task_on_complete(task_instance)
     else:
         logger.debug('Found running job with "{0}" name so skipping current iteration.'.format(task_key))
-

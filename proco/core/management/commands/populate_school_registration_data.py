@@ -60,7 +60,7 @@ def populate_school_registration_data(country_id, school_id):
     query = """
     SELECT DISTINCT dailystat.school_id as school_id,
         true rt_registered,
-        FIRST_VALUE(dailystat.created) OVER (PARTITION BY dailystat.school_id ORDER BY dailystat.created)
+        FIRST_VALUE(dailystat.date) OVER (PARTITION BY dailystat.school_id ORDER BY dailystat.date)
         rt_registration_date,
         NULL rt_source
     FROM connection_statistics_schooldailystatus dailystat

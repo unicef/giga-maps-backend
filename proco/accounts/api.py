@@ -669,7 +669,6 @@ class DataLayerPreviewViewSet(APIView):
         for title, values_and_label in legend_configs.items():
             values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
                                  values_and_label.get('values', [])))
-            # label = values_and_label.get('labels', title).strip()
 
             if len(values) > 0:
                 is_sql_value = 'SQL:' in values[0]
@@ -725,7 +724,6 @@ class DataLayerPreviewViewSet(APIView):
             }
 
             global_benchmark = data_layer_instance.global_benchmark.get('value')
-            # benchmark_unit = data_layer_instance.global_benchmark.get('unit')
             benchmark_base = str(parameter_col.get('base_benchmark', 1))
 
             data_layer_qs = statistics_models.SchoolDailyStatus.objects.all()
@@ -1224,7 +1222,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 all_positive_speeds_per_school[school_id] = []
 
             # Update the graph_data with actual values if they exist
-            # Update the graph_data with actual values if they exist
             for daily_avg_data in data:
                 school_id = str(daily_avg_data['id'])
                 formatted_date = date_utilities.format_date(daily_avg_data['date'])
@@ -1246,7 +1243,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
         all_positive_speeds = []
         # Update the graph_data with actual values if they exist
-        # Update the graph_data with actual values if they exist
         for daily_avg_data in data:
             formatted_date = date_utilities.format_date(daily_avg_data['date'])
             for entry in graph_data:
@@ -1264,7 +1260,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
     def get_static_info_query(self, query_labels):
         query = """
         SELECT {label_case_statements}
-            COUNT(DISTINCT CASE WHEN sws."{col_name}" IS NOT NULL THEN "schools_school"."id" ELSE NULL END) AS "total_schools"
+            COUNT(DISTINCT CASE WHEN sws."{col_name}" IS NOT NULL THEN "schools_school"."id" ELSE NULL END)
+            AS "total_schools"
         FROM "schools_school"
         {school_weekly_join}
         LEFT JOIN connection_statistics_schoolweeklystatus sws ON "schools_school"."last_weekly_status_id" = sws."id"
@@ -1533,17 +1530,16 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
                     if len(info_panel_school_list) > 0:
                         for info_panel_school in info_panel_school_list:
-                            school_id = info_panel_school['id']
                             info_panel_school['geopoint'] = json.loads(info_panel_school['geopoint'])
                             info_panel_school['statistics'] = list(filter(
-                                lambda s: s['school_id'] == school_id, statistics))[-1]
+                                lambda s: s['school_id'] == info_panel_school['id'], statistics))[-1]
 
-                            live_avg = (round(sum(positive_speeds[str(school_id)]) / len(
-                                positive_speeds[str(school_id)]), 2) if len(
-                                positive_speeds[str(school_id)]) > 0 else 0)
+                            live_avg = (round(sum(positive_speeds[str(info_panel_school['id'])]) / len(
+                                positive_speeds[str(info_panel_school['id'])]), 2) if len(
+                                positive_speeds[str(info_panel_school['id'])]) > 0 else 0)
 
                             info_panel_school['live_avg'] = live_avg
-                            info_panel_school['graph_data'] = graph_data[str(school_id)]
+                            info_panel_school['graph_data'] = graph_data[str(info_panel_school['id'])]
 
                     response = info_panel_school_list
                 else:
@@ -1883,7 +1879,6 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         for title, values_and_label in legend_configs.items():
             values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
                                  values_and_label.get('values', [])))
-            # label = values_and_label.get('labels', title).strip()
 
             if len(values) > 0:
                 is_sql_value = 'SQL:' in values[0]
@@ -1941,7 +1936,6 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         parameter_col = data_sources.first().data_source_column
 
         parameter_column_name = str(parameter_col['name'])
-        # parameter_column_unit = str(parameter_col.get('unit', '')).lower()
         base_benchmark = str(parameter_col.get('base_benchmark', 1))
 
         self.update_kwargs(country_ids, data_layer_instance)

@@ -2,7 +2,6 @@ import itertools
 
 from rest_framework import status as rest_status
 from rest_framework import viewsets
-from rest_framework.decorators import permission_classes
 from rest_framework.filters import SearchFilter
 from rest_framework.response import Response
 
@@ -73,7 +72,7 @@ class SlideImageAPIView(BaseModelViewSet):
                 if SliderImage.objects.filter(id__in=request.data['id']).exists():
                     image_data = SliderImage.objects.filter(id__in=request.data['id'])
                     if image_data:
-                        action_log(request, image_data, 3, "image deleted", self.model,
+                        action_log(request, image_data, 3, 'image deleted', self.model,
                                    field_name='title')
                         image_data.delete()
                         return Response(status=rest_status.HTTP_200_OK, data=delete_succ_mess)
@@ -92,7 +91,6 @@ class AboutUsAPIView(viewsets.ViewSet):
     )
 
     def list(self, request, *args, **kwargs):
-        # queryset = super(AboutUsAPIView, self).get_queryset()
         try:
             about_us = AboutUs.objects.filter(status=True).values()
             list_data = []
@@ -146,8 +144,10 @@ class AboutUsAPIView(viewsets.ViewSet):
         try:
             list_data = []
             change_data = []
+            about_us_obj_list = []
             for item in request.data:
                 about_us = AboutUs.objects.get(pk=item['id'])
+                about_us_obj_list.append(about_us)
                 data = AboutUsSerializer(instance=about_us, data=item, partial=True,
                                          context={'request': request})
 
@@ -162,11 +162,11 @@ class AboutUsAPIView(viewsets.ViewSet):
             if len(change_data) > 0:
                 change_data = list(itertools.chain(*change_data))
                 change_data = list(set(change_data))
-                remove_item = ["created", "modified"]
+                remove_item = ['created', 'modified']
                 for field in remove_item:
                     if field in change_data:
                         change_data.remove(field)
-                action_log(request, [about_us], 2, change_data, self.model, field_name='title')
+                action_log(request, about_us_obj_list, 2, change_data, self.model, field_name='title')
             return Response(list_data)
         except AboutUs.DoesNotExist:
             return Response(data=error_mess, status=rest_status.HTTP_502_BAD_GATEWAY)
@@ -177,7 +177,7 @@ class AboutUsAPIView(viewsets.ViewSet):
                 if AboutUs.objects.filter(id__in=request.data['id']).exists():
                     about_us = AboutUs.objects.filter(id__in=request.data['id'])
                     if about_us:
-                        action_log(request, about_us, 3, "About Us deleted", self.model,
+                        action_log(request, about_us, 3, 'About Us deleted', self.model,
                                    field_name='title')
                         about_us.delete()
                         return Response(status=rest_status.HTTP_200_OK, data=delete_succ_mess)

@@ -845,10 +845,6 @@ class SendNotificationSerializer(serializers.ModelSerializer):
                 data['template'] = data['template'] \
                     if 'template' in data \
                     else account_config.standard_email_template_name
-            # For SMS notification
-            elif message_type == accounts_models.Message.TYPE_SMS:
-                # TODO: Implement SMS notification
-                pass
         return super().to_internal_value(data)
 
     def create(self, validated_data):
@@ -862,11 +858,6 @@ class SendNotificationSerializer(serializers.ModelSerializer):
 
             if isinstance(response, int):
                 validated_data['is_sent'] = True
-
-        # if its SMS notification, send the SMS over <> service and update the status
-        elif message_type == accounts_models.Message.TYPE_SMS:
-            # TODO: Implement SMS notification
-            pass
 
         # if it's just an application level notification, create the message instance
         else:
@@ -1338,8 +1329,7 @@ class BaseDataLayerCRUDSerializer(serializers.ModelSerializer):
         applicable_cols = [col['name'] for col in data_source_column_configs if col.get('is_parameter', False)]
 
         if isinstance(data_source_column, list):
-            # TODO: Remove this dependency
-            # message='Can not have 2 column for 1 data source'
+            # Remove this dependency
             raise accounts_exceptions.InvalidDataSourceColumnForDataLayerError()
         elif isinstance(data_source_column, dict) and len(data_source_column) > 0:
             name = data_source_column.get('name')
@@ -1534,14 +1524,11 @@ class UpdateDataLayerSerializer(BaseDataLayerCRUDSerializer):
         # else: check
         # 3. If necessary, the Publisher can edit the details and then approve the changes to the data layer.
 
-        if request_user == instance.created_by:
-            return True
-        user_is_publisher = len(get_user_emails_for_permissions(
-            [auth_models.RolePermission.CAN_PUBLISH_DATA_LAYER],
-            ids_to_filter=[request_user.id]
-        )) > 0
-
-        if user_is_publisher:
+        if (
+            request_user == instance.created_by or
+            len(get_user_emails_for_permissions([auth_models.RolePermission.CAN_PUBLISH_DATA_LAYER],
+                                                ids_to_filter=[request_user.id])) > 0
+        ):
             return True
         raise accounts_exceptions.InvalidUserOnDataLayerUpdateError()
 
@@ -1637,14 +1624,11 @@ class PublishDataLayerSerializer(BaseDataLayerCRUDSerializer):
             status == accounts_models.DataLayer.LAYER_STATUS_PUBLISHED and
             self.instance.status in [accounts_models.DataLayer.LAYER_STATUS_READY_TO_PUBLISH,
                                      accounts_models.DataLayer.LAYER_STATUS_DISABLED]
-        ):
-            return status
-        elif (
+        ) or (
             status == accounts_models.DataLayer.LAYER_STATUS_DISABLED and
             self.instance.status == accounts_models.DataLayer.LAYER_STATUS_PUBLISHED
         ):
             return status
-
         raise accounts_exceptions.InvalidDataLayerStatusUpdateError()
 
     def update(self, instance, validated_data):

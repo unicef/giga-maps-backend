@@ -480,6 +480,7 @@ class ConnectivityAPIView(APIView):
         ).filter(
             realtime_registration_status__rt_registered=True,
             realtime_registration_status__rt_registration_date__date__lte=end_date,
+            realtime_registration_status__deleted__isnull=True,
         ).annotate(
             dummy_group_by=Value(1)).values('dummy_group_by').annotate(
             good=Count(Case(When(t__connectivity_speed__gt=speed_benchmark, then='id')), distinct=True),
@@ -597,8 +598,6 @@ class ConnectivityAPIView(APIView):
             current_date += timedelta(days=1)
 
         all_positive_speeds = []
-
-        # Update the graph_data with actual values if they exist
         # Update the graph_data with actual values if they exist
         for daily_avg_data in avg_daily_connectivity_speed:
             formatted_date = date_utilities.format_date(daily_avg_data['daily_status__date'])

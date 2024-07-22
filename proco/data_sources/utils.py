@@ -213,7 +213,6 @@ def sync_school_master_data(profile_file, share_name, schema_name, table_name, c
     table_meta_data = delta_sharing.get_table_metadata(table_url)
     logger.debug('Table Metadata: {0}'.format(table_meta_data.__dict__))
 
-    # loaded_data_df = delta_sharing.load_as_pandas(table_url, None, table_current_version)
     loaded_data_df = delta_sharing.load_table_changes_as_pandas(
         table_url,
         table_last_data_version,
@@ -405,9 +404,6 @@ def load_daily_check_app_data_source_response_to_model(model, request_configs):
             has_more_data = False
         else:
             for data in response_data:
-                # created_at = data.pop('created_at', None)
-                # if created_at:
-                #     data['timestamp'] = created_at
                 insert_entries.append(model(**data))
 
         if len(insert_entries) >= 5000:
@@ -645,7 +641,6 @@ def load_qos_data_source_response_to_model():
 
                     version_list = list(range(table_last_data_version + 1, table_current_version + 1))
                     for version in version_list:
-                        # loaded_data_df = delta_sharing.load_as_pandas(table_url, None, version, None)
                         loaded_data_df = delta_sharing.load_table_changes_as_pandas(
                             table_url,
                             version,
@@ -689,9 +684,9 @@ def load_qos_data_source_response_to_model():
                                 ).first()
 
                                 if not school:
-                                    logger.warning('School with Giga ID ({0}) not found in PROCO DB. '
-                                                   'Hence skipping the load for current school.'.format(
-                                        row['school_id_giga']))
+                                    logger.warning(
+                                        'School with Giga ID ({0}) not found in PROCO DB. '
+                                        'Hence skipping the load for current school.'.format(row['school_id_giga']))
                                     continue
 
                                 row['school'] = school

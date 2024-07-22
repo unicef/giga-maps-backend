@@ -182,7 +182,7 @@ class BaseTileGenerator:
                 if not cur:
                     return Response({"error": f"sql query failed: {sql}"}, status=404)
                 return cur.fetchone()[0]
-        except Exception as error:
+        except Exception:
             return Response({"error": "An error occurred while executing SQL query"}, status=500)
 
     def generate_tile(self, request):

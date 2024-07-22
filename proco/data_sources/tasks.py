@@ -40,7 +40,7 @@ def finalize_task():
     return 'Done'
 
 
-def load_data_from_school_master_apis(*args, country_iso3_format=None):
+def load_data_from_school_master_apis(country_iso3_format=None):
     """
     Background task which handles School Master Data source changes from APIs to PROCO DB
 
@@ -213,7 +213,7 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
         task_id, task_key, task_description)
 
     if task_instance:
-        logger.debug('Not found running job: {}'.format(task_key))
+        logger.debug('Not found running job for published rows handler task: {}'.format(task_key))
         updated_school_ids = []
         new_published_records = sources_models.SchoolMasterData.objects.filter(
             status=sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED, is_read=False,
@@ -226,10 +226,8 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
             new_published_records = new_published_records.filter(country_id__in=country_ids)
 
         task_instance.info('Total published records to update: {}'.format(new_published_records.count()))
-        count = 0
 
         for data_chunk in core_utilities.queryset_iterator(new_published_records, chunk_size=100, print_msg=False):
-            count += 1
             for row in data_chunk:
                 try:
                     environment = row.school_area_type.lower() if not core_utilities.is_blank_string(
@@ -252,7 +250,7 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                             layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN2,
                         ).first()
 
-                    school, created = School.objects.update_or_create(
+                    school, _ = School.objects.update_or_create(
                         giga_id_school=row.school_id_giga,
                         country=row.country,
                         defaults={
@@ -440,7 +438,7 @@ def handle_deleted_school_master_data_row(deleted_row=None, country_ids=None):
     task_instance = background_task_utilities.task_on_start(task_id, task_key, task_description)
 
     if task_instance:
-        logger.debug('Not found running job: {}'.format(task_key))
+        logger.debug('Not found running job for deleted rows handler: {}'.format(task_key))
         new_deleted_records = sources_models.SchoolMasterData.objects.filter(
             status=sources_models.SchoolMasterData.ROW_STATUS_DELETED_PUBLISHED,
             is_read=False,
@@ -498,7 +496,7 @@ def email_reminder_to_editor_and_publisher_for_review_waiting_records():
         task_id, task_key, 'Send reminder email to Editor and Publisher to review the school master rows')
 
     if task_instance:
-        logger.debug('Not found running job: {}'.format(task_key))
+        logger.debug('Not found running job for reminder email task: {}'.format(task_key))
 
         ds_settings = settings.DATA_SOURCE_CONFIG.get('SCHOOL_MASTER')
         review_grace_period = core_utilities.convert_to_int(ds_settings['REVIEW_GRACE_PERIOD_IN_HRS'], default='48')
@@ -642,7 +640,7 @@ def cleanup_school_master_rows():
     task_instance = background_task_utilities.task_on_start(task_id, task_key, 'Cleanup school master rows')
 
     if task_instance:
-        logger.debug('Not found running job: {}'.format(task_key))
+        logger.debug('Not found running job for school master cleanup task: {}'.format(task_key))
         # Delete all the old records where more than 1 record are in DRAFT/UPDATED_IN_DRAFT or
         # ROW_STATUS_DRAFT_LOCKED/ROW_STATUS_UPDATED_IN_DRAFT_LOCKED for same School GIGA ID
         rows_with_more_than_1_record_in_draft = sources_models.SchoolMasterData.objects.filter(
@@ -709,7 +707,7 @@ def update_static_data(*args, country_iso3_format=None):
         task_id, task_key, 'Sync Static Data from School Master sources', check_previous=True)
 
     if task_instance:
-        logger.debug('Not found running job: {}'.format(task_key))
+        logger.debug('Not found running job for static data pull handler: {}'.format(task_key))
         load_data_from_school_master_apis(country_iso3_format=country_iso3_format)
         task_instance.info('Completed the load data from School Master API call')
         cleanup_school_master_rows.s()
@@ -773,8 +771,6 @@ def update_live_data(*args, today=True):
             chain(
                 load_data_from_daily_check_app_api.s(),
                 load_data_from_qos_apis.s(),
-                # load_data_from_unicef_db.s(), - Need to check with Brian for deletion
-                # load_brasil_daily_statistics.s(), - QoS
                 chord(
                     group([
                         finalize_previous_day_data.s(country_id, yesterday_date)
@@ -800,7 +796,7 @@ def clean_old_live_data():
     task_instance = background_task_utilities.task_on_start(task_id, task_key, 'Clean live data older than 30 days')
 
     if task_instance:
-        logger.debug('Not found running job: {}'.format(task_key))
+        logger.debug('Not found running job for live data cleanup handler: {}'.format(task_key))
         older_then_date = current_datetime - timedelta(days=30)
 
         logger.debug('Deleting all the rows from "RealTimeConnectivity" Data Table which is older than: {0}'.format(
