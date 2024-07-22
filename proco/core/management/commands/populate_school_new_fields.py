@@ -34,7 +34,7 @@ def populate_school_new_fields(school_id, start_school_id, end_school_id, countr
     if school_ids and len(school_ids) > 0:
         schools_qry = schools_qry.filter(id__in=school_ids.split(','))
 
-    logger.debug('Starting the process: ', schools_qry.query)
+    logger.debug('Starting the process: {}'.format(schools_qry.query))
     count = 1
     for data_chunk in core_utilities.queryset_iterator(schools_qry, chunk_size=20000):
         with transaction.atomic():
@@ -83,6 +83,6 @@ class Command(BaseCommand):
         end_school_id = options.get('end_school_id')
         country_id = options.get('country_id')
 
-        logger.debug('School update operation started ({0})'.format(school_id))
+        logger.debug('School update operation started ({0})'.format(options))
 
         populate_school_new_fields(school_id, start_school_id, end_school_id, country_id, school_ids)

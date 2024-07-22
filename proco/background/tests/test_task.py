@@ -1,13 +1,13 @@
-from typing import List
+import uuid
+from datetime import datetime
+
+import pytz
+from django.core.cache import cache
+from django.test import TestCase
 from django.utils import timezone
-from celery import current_task
+
 from proco.background.models import BackgroundTask
 from proco.locations.models import Country
-from datetime import datetime
-import pytz
-import uuid, random
-from django.test import TestCase
-from django.core.cache import cache
 
 
 class BackgroundCeleryTaskTestCase(TestCase):

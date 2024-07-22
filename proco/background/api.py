@@ -34,7 +34,7 @@ class BackgroundTaskViewSet(BaseModelViewSet):
     ordering_field_names = ['-created_at', '-completed_at']
     apply_query_pagination = True
 
-    search_fields = ('task_id', 'log',)
+    search_fields = ('task_id', 'log', 'name', 'description', 'status')
     filterset_fields = {
         'task_id': ['exact', 'in'],
         'log': ['exact', 'in'],
