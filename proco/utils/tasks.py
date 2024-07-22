@@ -107,7 +107,7 @@ def update_country_related_cache(country_code):
 
     country = Country.objects.annotate(
         code_lower=Lower('code'),
-    ).filter(code_lower=country_code.lower())
+    ).filter(code_lower=country_code.lower()).first()
     if country:
         update_cached_value.delay(
             url=reverse('connection_statistics:global-stat'),
@@ -262,10 +262,3 @@ def populate_school_new_fields_task(start_school_id, end_school_id, country_id, 
         background_task_utilities.task_on_complete(task_instance)
     else:
         logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
-
-
-@app.task(soft_time_limit=10 * 60 * 60, time_limit=10 * 60 * 60)
-def duplicate_task_test():
-    logger.info('Inside duplicate_task_test task {}'.format(core_utilities.get_current_datetime_object()))
-    time.sleep(180.0)
-    logger.info('Exiting from duplicate_task_test task {}'.format(core_utilities.get_current_datetime_object()))
