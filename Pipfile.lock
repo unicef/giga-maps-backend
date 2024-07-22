@@ -154,6 +154,13 @@
             "index": "pypi",
             "version": "==5.3.6"
         },
+        "celery-redbeat": {
+            "hashes": [
+                "sha256:71104729380d4eaefd91a9b7d270ba7851bfff9ad55a43ac8365acbb0c608b77"
+            ],
+            "index": "pypi",
+            "version": "==2.2.0"
+        },
         "certifi": {
             "hashes": [
                 "sha256:9b469f3a900bf28dc19b8cfbf8019bf47f7fdd1a65a1d4ffb98fc14166beb4d1",
@@ -1327,6 +1334,14 @@
             ],
             "version": "==0.6.3"
         },
+        "tenacity": {
+            "hashes": [
+                "sha256:9e6f7cf7da729125c7437222f8a522279751cdfbe6b67bfe64f75d3a348661b2",
+                "sha256:cd80a53a79336edba8489e767f729e4f391c896956b57140b5d7511a64bbd3ef"
+            ],
+            "markers": "python_version >= '3.8'",
+            "version": "==8.4.2"
+        },
         "text-unidecode": {
             "hashes": [
                 "sha256:1311f10e8b895935241623731c2ba64f4c455287888b18189350b67134a822e8",
@@ -2327,6 +2342,14 @@
             ],
             "markers": "python_full_version >= '3.7.0'",
             "version": "==13.7.0"
+        },
+        "setuptools": {
+            "hashes": [
+                "sha256:b8b8060bb426838fbe942479c90296ce976249451118ef566a5a0b7d8b78fb05",
+                "sha256:bd63e505105011b25c3c11f753f7e3b8465ea739efddaccef8f0efac2137bac1"
+            ],
+            "markers": "python_version >= '3.8'",
+            "version": "==70.2.0"
         },
         "six": {
             "hashes": [

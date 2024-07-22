@@ -251,7 +251,7 @@ if CELERY_ENABLED:
 
 if CELERY_ENABLED:
     TEMPLATED_EMAIL_BACKEND = 'proco.mailing.backends.AsyncTemplateBackend'
-    MAILING_USE_CELERY = True
+    MAILING_USE_CELERY = env.bool('MAILING_USE_CELERY', default=False)
 
 TEMPLATED_EMAIL_TEMPLATE_DIR = 'email'
 TEMPLATED_EMAIL_FILE_EXTENSION = 'html'
@@ -360,7 +360,7 @@ CONSTANCE_ADDITIONAL_FIELDS = {
     }],
 }
 CONSTANCE_CONFIG = {
-    'CONTACT_EMAIL': ('', 'Email to receive contact messages', 'email_input'),
+    'CONTACT_EMAIL': (env('CONTACT_EMAIL', default=''), 'Email to receive contact messages', 'email_input'),
     'DAILYCHECKAPP_CONTACT_EMAIL': ('', 'Email to receive dailycheckapp_contact messages', 'email_input'),
 }
 
