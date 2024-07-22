@@ -20,7 +20,6 @@ app.conf.redbeat_lock_key = None
 
 @app.on_after_finalize.connect
 def finalize_setup(sender, **kwargs):
-    # from drf_secure_token.tasks import DELETE_OLD_TOKENS
 
     app.conf.beat_schedule.update({
         'proco.utils.tasks.update_all_cached_values': {

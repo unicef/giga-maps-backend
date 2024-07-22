@@ -1,5 +1,5 @@
-import re
 import logging
+import re
 from collections import OrderedDict
 
 from django.db.models.functions.text import Lower
@@ -278,15 +278,6 @@ class CountryUpdateRetriveSerializer(serializers.ModelSerializer):
         return super().to_representation(instance)
 
 
-# class BoundaryListCountrySerializer(serializers.ModelSerializer):
-#     class Meta:
-#         model = Country
-#         fields = (
-#             'id', 'code', 'geometry_simplified',
-#         )
-#         read_only_fields = fields
-
-
 class ListCountrySerializer(BaseCountrySerializer):
     integration_status = serializers.SerializerMethodField()
     schools_with_data_percentage = serializers.SerializerMethodField()
@@ -412,8 +403,6 @@ class ExpandCountryWeeklyStatusSerializer(FlexFieldsModelSerializer):
             'schools_connectivity_good',
             'integration_status',
             'avg_distance_school',
-            # 'created',
-            # 'modified',
             'schools_with_data_percentage',
             'connectivity_speed',
             'connectivity_latency',
@@ -431,40 +420,17 @@ class ExpandCountryWeeklyStatusSerializer(FlexFieldsModelSerializer):
 
 
 class CountryStatusSerializer(FlexFieldsModelSerializer):
-    # map_preview = serializers.SerializerMethodField()
-    #
-    # benchmark_metadata = serializers.JSONField()
-
     class Meta:
         model = Country
         read_only_fields = fields = (
             'id',
-            # 'created',
-            # 'modified',
             'name',
-            # 'code',
             'iso3_format',
-            # 'flag',
-            # 'map_preview',
-            # 'description',
-            # 'data_source',
-            # 'date_of_join',
-            # 'date_schools_mapped',
-            # 'last_weekly_status_id',
-            # 'benchmark_metadata',
         )
 
         expandable_fields = {
             'last_weekly_status': (ExpandCountryWeeklyStatusSerializer, {'source': 'last_weekly_status'}),
         }
-
-    # def get_map_preview(self, instance):
-    #     if not instance.map_preview:
-    #         return ''
-    #
-    #     request = self.context.get('request')
-    #     photo_url = instance.map_preview.url
-    #     return request.build_absolute_uri(photo_url)
 
 
 class CountryCSVSerializer(CountryStatusSerializer, DownloadSerializerMixin):
@@ -472,37 +438,8 @@ class CountryCSVSerializer(CountryStatusSerializer, DownloadSerializerMixin):
         report_fields = OrderedDict([
             ('id', 'ID'),
             ('name', 'Name'),
-            # ('code', 'Code'),
             ('iso3_format', 'Country ISO3 Code'),
-            # ('map_preview', 'Map Preview'),
-            # ('description', 'Description'),
-            # ('data_source', 'Data Source'),
-            # ('date_of_join', 'Date of Joining'),
-            # ('date_schools_mapped', 'Date School Mapped'),
-            # ('live_layer_benchmark', {'name': 'Live Layer Benchmarks', 'is_computed': True}),
-            # ('last_weekly_status', {'name': 'Last Weekly Status', 'is_computed': True}),
         ])
-
-    # def get_last_weekly_status(self, data):
-    #     last_week_data = data.get('last_weekly_status', None)
-    #     values = []
-    #     if last_week_data:
-    #         for key, value in last_week_data.items():
-    #             if isinstance(value, bool):
-    #                 value = self.boolean_flags.get(value)
-    #             values.append('{0}:{1}'.format(key, value))
-    #     return '\t'.join(values)
-
-    # def get_live_layer_benchmark(self, data):
-    #     values = []
-    #     layers_data = data.get('benchmark_metadata', {}).get('live_layer', {})
-    #     if len(layers_data) > 0:
-    #         id_names = dict(DataLayer.objects.filter(id__in=list(layers_data.keys())).values_list('id', 'name'))
-    #         for layer_id, benchmark_value in layers_data.items():
-    #             values.append(
-    #                 '{0}:{1}'.format(id_names.get(core_utilities.convert_to_int(layer_id, orig=True), layer_id),
-    #                                  benchmark_value))
-    #     return '\t'.join(values)
 
     def to_representation(self, data):
         data = super().to_representation(data)

@@ -9,7 +9,7 @@ from azure.search.documents.indexes import SearchIndexClient
 from azure.search.documents.indexes.models import SearchFieldDataType
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db.models import Case, Count, F, IntegerField, Value, When
+from django.db.models import Case, Count, IntegerField, Value, When
 from django.db.models.functions.text import Lower
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
@@ -41,7 +41,6 @@ from proco.locations.serializers import (
     DetailCountrySerializer,
     ExpandCountryAdminMetadataSerializer,
     ListCountrySerializer,
-    SearchListSerializer,
 )
 from proco.schools.models import School
 from proco.utils.cache import cache_manager

@@ -61,12 +61,7 @@ class DownloadAPIDataToCSVMixin(object):
         if core_utilities.is_blank_string(api_key):
             raise core_exceptions.RequiredAPIKeyFilterError()
 
-        # api = headers.get('Api')
-        # if core_utilities.is_blank_string(api):
-        #     raise core_exceptions.RequiredAPIFilterError()
-
         valid_api_key = accounts_models.APIKey.objects.filter(
-            # api=api,
             user=request.user,  # Check if API key is created by the current user
             api_key=api_key,  # Check the API key in database table
             status=accounts_models.APIKey.APPROVED,  # API Key must be APPROVED to enable the download/documentation
