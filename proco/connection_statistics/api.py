@@ -480,6 +480,7 @@ class ConnectivityAPIView(APIView):
         ).filter(
             realtime_registration_status__rt_registered=True,
             realtime_registration_status__rt_registration_date__date__lte=end_date,
+            realtime_registration_status__deleted__isnull=True,
         ).annotate(
             dummy_group_by=Value(1)).values('dummy_group_by').annotate(
             good=Count(Case(When(t__connectivity_speed__gt=speed_benchmark, then='id')), distinct=True),

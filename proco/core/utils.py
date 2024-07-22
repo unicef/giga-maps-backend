@@ -10,7 +10,6 @@ from django.conf import settings
 from django.utils import timezone
 
 from proco.core.config import app_config as core_config
-from proco.core.exceptions import BareException
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -150,7 +149,7 @@ def convert_to_int(val, default=0, orig=False):
     """Parse to integer value from string. In case of failure to do so, assign default value."""
     try:
         return int(val)
-    except BareException:
+    except:
         if orig:
             return val
         else:
@@ -161,7 +160,7 @@ def convert_to_float(val, default=0, orig=False):
     """Parse to float value from string. In case of failure to do so, assign default value."""
     try:
         return float(val)
-    except BareException:
+    except:
         if orig:
             return val
         else:
@@ -311,7 +310,7 @@ def bulk_create_or_update(records, model, unique_fields, batch_size=1000):
 
 
 def get_filter_sql(request, filter_key, table_name):
-    filter_fields = core_config.get_giga_filter_fields[filter_key]
+    filter_fields = core_config.get_giga_filter_fields.get(filter_key, [])
     query_params = request.query_params.dict()
 
     advance_filters = set(filter_fields) & set(query_params.keys())
