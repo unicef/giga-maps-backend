@@ -171,8 +171,8 @@ class ListSchoolMasterDataSerializer(FlexFieldsModelSerializer):
                 }
 
             old_education_level = None \
-                if core_utilities.is_blank_string(row.school.education_level) else str(
-                row.school.education_level).lower()
+                if core_utilities.is_blank_string(row.school.education_level) \
+                else str(row.school.education_level).lower()
             new_education_level = None \
                 if core_utilities.is_blank_string(row.education_level) else str(row.education_level).lower()
 

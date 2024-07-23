@@ -46,4 +46,3 @@ class ZeroSchoolMasterDataRowError(BaseInvalidValidationError):
     message = _('Zero School Master Data row to update.')
     description = _('Zero rows to update.')
     code = 'invalid_school_master_data_row_count'
-

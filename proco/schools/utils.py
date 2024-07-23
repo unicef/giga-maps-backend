@@ -151,7 +151,7 @@ def update_school_from_country_or_school_weekly_update(start_time=None, end_time
     logger.debug('Query to select schools where SchoolWeeklyStatus updated between ({0} - {1}): {2}'.format(
         start_time, end_time, school_updated_in_last_12_hours.query))
 
-    for data_chunk in core_utilities.queryset_iterator(school_updated_in_last_12_hours, chunk_size=20000):
+    for data_chunk in core_utilities.queryset_iterator(school_updated_in_last_12_hours, chunk_size=100):
         with transaction.atomic():
             for school in data_chunk:
                 school.coverage_type = get_coverage_type(school)

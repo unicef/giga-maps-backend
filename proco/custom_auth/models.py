@@ -95,9 +95,6 @@ class ApplicationUser(core_models.BaseModelMixin, AbstractBaseUser):
             :type user: custom_auth.models.User
             :returns perms: Dictionary of permissions
         """
-        # attr = USER_PERMISSIONS_KEY.format(user.id)
-        # perms = cache_utils.get_or_set_cache(attr, lambda: self.calculate_user_permissions(user))
-        # return perms
         return self.calculate_user_permissions(user)
 
     def calculate_user_permissions(self, user):

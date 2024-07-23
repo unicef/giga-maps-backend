@@ -183,7 +183,6 @@ class Message(core_models.BaseModel):
     retry_count = models.IntegerField(default=0)
     is_sent = models.BooleanField(default=False)
     is_read = models.BooleanField(default=False)
-    # external_email = models.EmailField(null=True)
 
     subject_text = models.TextField(null=True)
     message_text = models.TextField()
