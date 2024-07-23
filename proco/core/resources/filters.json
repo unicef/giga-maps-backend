@@ -1,8 +1,8 @@
 [
   {
-    "name": "School Region",
+    "name": "School Area Type",
     "type": "drop-down",
-    "description": "",
+    "description": "School area type description",
     "choices": [
       {
         "label": "None",
@@ -27,9 +27,9 @@
     "active_countries_list": null
   },
   {
-    "name": "School Type",
+    "name": "School Funding Type",
     "type": "drop-down",
-    "description": "",
+    "description": "School funding type description",
     "choices": [
       {
         "label": "None",
@@ -56,7 +56,7 @@
   {
     "name": "Education Level",
     "type": "drop-down",
-    "description": "",
+    "description": "School education level description",
     "choices": [
       {
         "label": "None",
@@ -78,6 +78,19 @@
       "filter": "iexact"
     },
     "active_countries_filter": "LOWER(education_level) IN ('primary', 'secondary')",
+    "active_countries_list": null
+  },
+  {
+    "name": "Connectivity Type",
+    "type": "input",
+    "description": "School connectivity type description",
+    "parameter": {
+      "label": "Connectivity Type",
+      "table": "school_static",
+      "field": "connectivity_type",
+      "filter": "in"
+    },
+    "active_countries_filter": "connectivity_type IS NOT NULL",
     "active_countries_list": null
   }
 ]

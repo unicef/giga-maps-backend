@@ -13,9 +13,6 @@ logger = logging.getLogger('gigamaps.' + __name__)
 jwt_decode_handler = api_settings.JWT_DECODE_HANDLER
 
 
-# jwt_get_username_from_payload = api_settings.JWT_PAYLOAD_GET_USERNAME_HANDLER
-
-
 class JSONWebTokenAuthentication(jwt_authentication.JSONWebTokenAuthentication):
     """
     Token based authentication using the JSON Web Token standard.
@@ -23,13 +20,6 @@ class JSONWebTokenAuthentication(jwt_authentication.JSONWebTokenAuthentication):
 
     def authenticate(self, request):
         user_model = get_user_model()
-        # user = user_model.objects.filter(email='admin@test.com').first()
-        # payload = jwt_serializers.jwt_payload_handler(user)
-        # token = jwt_serializers.jwt_encode_handler(payload)
-        # payload2 = jwt_decode_handler(token)
-        # header_token_decoded = jwt_decode_handler(jwt_token)
-        # username_from_token = jwt_get_username_from_payload(header_token_decoded)
-
         try:
             return super().authenticate(request)
         except exceptions.AuthenticationFailed as ex:

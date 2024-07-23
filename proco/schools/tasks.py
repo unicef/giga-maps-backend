@@ -60,11 +60,11 @@ def _find_country(loaded: List[dict]) -> [Country]:
     else:
         countries_counter = Counter()
         for country in countries:
-            instersections = country.geometry.intersection(points)
-            if isinstance(instersections, Point):
+            intersections = country.geometry.intersection(points)
+            if isinstance(intersections, Point):
                 countries_counter[country] = 1
             else:
-                countries_counter[country] = len(instersections)
+                countries_counter[country] = len(intersections)
         return countries_counter.most_common()[0][0]
 
 
@@ -153,7 +153,7 @@ def update_school_records():
         task_id, task_key, 'Update the school fields based on changes in SchoolWeekly or CountryWeekly tables')
 
     if task_instance:
-        logger.debug('Not found running job.')
+        logger.debug('Not found running job for school connectivity status update task.')
         school_utilities.update_school_from_country_or_school_weekly_update()
         background_task_utilities.task_on_complete(task_instance)
     else:

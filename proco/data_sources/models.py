@@ -98,8 +98,6 @@ class SchoolMasterData(TimeStampedModel, models.Model):
     # connectivity_govt_collection_year
     connectivity_govt_collection_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
     disputed_region = models.CharField(blank=True, null=True, max_length=255)  # disputed_region
-    # nearest_NR_id = models.CharField(blank=True, null=True, max_length=255)
-    # connectivity_static = models.CharField(blank=True, null=True, max_length=255)
 
     # SchoolRealTimeRegistration
     connectivity_RT = models.CharField(blank=True, null=True, max_length=255)  # rt_registered
