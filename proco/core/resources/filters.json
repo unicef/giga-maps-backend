@@ -1,13 +1,9 @@
 [
   {
-    "name": "School Area Type",
+    "name": "School area type",
     "type": "drop-down",
-    "description": "School area type description",
+    "description": "Urban or rural region in which school is located",
     "choices": [
-      {
-        "label": "None",
-        "value": "none"
-      },
       {
         "label": "Urban",
         "value": "urban"
@@ -15,6 +11,10 @@
       {
         "label": "Rural",
         "value": "rural"
+      },
+      {
+        "label": "None",
+        "value": "none"
       }
     ],
     "parameter": {
@@ -27,14 +27,10 @@
     "active_countries_list": null
   },
   {
-    "name": "School Funding Type",
+    "name": "School funding source",
     "type": "drop-down",
-    "description": "School funding type description",
+    "description": "",
     "choices": [
-      {
-        "label": "None",
-        "value": "none"
-      },
       {
         "label": "Private",
         "value": "private"
@@ -42,6 +38,10 @@
       {
         "label": "Public",
         "value": "public"
+      },
+      {
+        "label": "None",
+        "value": "none"
       }
     ],
     "parameter": {
@@ -54,14 +54,10 @@
     "active_countries_list": null
   },
   {
-    "name": "Education Level",
+    "name": "Education level",
     "type": "drop-down",
-    "description": "School education level description",
+    "description": "Highest level of education taught at the school",
     "choices": [
-      {
-        "label": "None",
-        "value": "none"
-      },
       {
         "label": "Primary",
         "value": "primary"
@@ -69,6 +65,10 @@
       {
         "label": "Secondary",
         "value": "secondary"
+      },
+      {
+        "label": "None",
+        "value": "none"
       }
     ],
     "parameter": {
@@ -78,19 +78,6 @@
       "filter": "iexact"
     },
     "active_countries_filter": "LOWER(education_level) IN ('primary', 'secondary')",
-    "active_countries_list": null
-  },
-  {
-    "name": "Connectivity Type",
-    "type": "input",
-    "description": "School connectivity type description",
-    "parameter": {
-      "label": "Connectivity Type",
-      "table": "school_static",
-      "field": "connectivity_type",
-      "filter": "in"
-    },
-    "active_countries_filter": "connectivity_type IS NOT NULL",
     "active_countries_list": null
   }
 ]
