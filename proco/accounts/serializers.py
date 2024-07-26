@@ -1756,3 +1756,31 @@ class DataLayerCountryRelationshipSerializer(serializers.ModelSerializer):
 
             instance = super().create(validated_data)
         return instance
+
+
+class ColumnConfigurationListSerializer(FlexFieldsModelSerializer):
+    options = serializers.JSONField()
+
+    class Meta:
+        model = accounts_models.ColumnConfiguration
+        read_only_fields = fields = (
+            'id',
+            'name',
+            'label',
+            'type',
+            'description',
+            'table_name',
+            'table_alias',
+            'table_label',
+            'is_filter_applicable',
+            'options',
+            'last_modified_at',
+            'last_modified_by',
+            'created',
+            'created_by',
+        )
+
+        expandable_fields = {
+            'last_modified_by': (ExpandUserSerializer, {'source': 'last_modified_by'}),
+            'created_by': (ExpandUserSerializer, {'source': 'created_by'}),
+        }

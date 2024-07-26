@@ -69,4 +69,20 @@ urlpatterns = [
     path('recent_action_log/', api.LogActionViewSet.as_view({'get': 'list', }), name='list-recent-action-log'),
 
     path('time-players/v2/', api.TimePlayerViewSet.as_view(), name='get-time-player-data-v2'),
+
+    path('column_configurations/', api.ColumnConfigurationViewSet.as_view({
+        'get': 'list',
+    }), name='list-column-configurations'),
+
+    # path('layers/', api.DataLayersViewSet.as_view({
+    #     'get': 'list',
+    #     'post': 'create',
+    # }), name='list-or-create-data-layers'),
+    # path('layers/<int:pk>/', api.DataLayersViewSet.as_view({
+    #     'put': 'partial_update',
+    #     'delete': 'destroy',
+    # }), name='update-or-delete-data-layer'),
+    # path('layers/<int:pk>/publish/', api.DataLayerPublishViewSet.as_view({
+    #     'put': 'partial_update',
+    # }), name='publish-data-layer'),
 ]

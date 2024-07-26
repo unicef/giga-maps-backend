@@ -294,6 +294,9 @@ class AppStaticConfigurationsViewSet(APIView):
             'MESSAGE_MODE_CHOICES': dict(accounts_models.Message.MESSAGE_MODE_CHOICES),
             'PERMISSION_CHOICES': dict(auth_models.RolePermission.PERMISSION_CHOICES),
             'COVERAGE_TYPES': dict(statistics_models.SchoolWeeklyStatus.COVERAGE_TYPES),
+            'FILTER_TYPE_CHOICES': dict(accounts_models.AdvanceFilter.FILTER_TYPE_CHOICES),
+            'FILTER_QUERY_PARAM_CHOICES': dict(accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_CHOICES),
+            'FILTER_STATUS_CHOICES': dict(accounts_models.AdvanceFilter.STATUS_CHOICES),
         }
 
         return Response(data=static_data)
@@ -2122,3 +2125,31 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
         except Exception as ex:
             logger.error('Exception occurred for school connectivity tiles endpoint: {0}'.format(ex))
             return Response({'error': 'An error occurred while processing the request'}, status=500)
+
+
+class ColumnConfigurationViewSet(BaseModelViewSet):
+    model = accounts_models.ColumnConfiguration
+    serializer_class = serializers.ColumnConfigurationListSerializer
+
+    permission_classes = (
+        core_permissions.IsUserAuthenticated,
+        core_permissions.CanViewAdvanceFilters,
+    )
+
+    filter_backends = (
+        DjangoFilterBackend,
+        NullsAlwaysLastOrderingFilter,
+    )
+
+    ordering_field_names = ['label', 'name']
+    apply_query_pagination = True
+
+    filterset_fields = {
+        'id': ['exact', 'in'],
+        'type': ['iexact', 'in', 'exact'],
+        'name': ['iexact', 'in', 'exact'],
+        'table_name': ['iexact', 'in', 'exact'],
+        'is_filter_applicable': ['exact'],
+    }
+
+    permit_list_expands = ['created_by', 'last_modified_by']
