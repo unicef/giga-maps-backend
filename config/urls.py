@@ -46,7 +46,6 @@ urlpatterns = [
     path('test/', TestView.as_view()),
     path('health/', PingAPIView.as_view()),
     path('sentry-debug/', trigger_error),
-    path('', include('django_prometheus.urls')),
 ]
 
 if settings.DEBUG:
@@ -55,4 +54,10 @@ if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
     urlpatterns += [
         path('__debug__/', include(debug_toolbar.urls)),
+    ]
+
+
+if settings.ENABLED_BACKEND_PROMETHEUS_METRICS:
+    urlpatterns += [
+        path('', include('django_prometheus.urls')),
     ]

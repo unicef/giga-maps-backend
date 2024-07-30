@@ -17,6 +17,7 @@ from proco.accounts import exceptions as accounts_exceptions
 from proco.accounts import models as accounts_models
 from proco.accounts import utils as account_utilities
 from proco.accounts.config import app_config as account_config
+from proco.core import db_utils as db_utilities
 from proco.core import utils as core_utilities
 from proco.custom_auth import models as auth_models
 from proco.custom_auth.serializers import ExpandUserSerializer
@@ -1758,6 +1759,37 @@ class DataLayerCountryRelationshipSerializer(serializers.ModelSerializer):
         return instance
 
 
+class AdvanceFilterCountryRelationshipSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = accounts_models.AdvanceFilterCountryRelationship
+
+        read_only_fields = (
+            'id',
+            'created',
+            'last_modified_at',
+        )
+
+        fields = read_only_fields + (
+            'advance_filter',
+            'country',
+        )
+
+        extra_kwargs = {
+            'advance_filter': {'required': True},
+            'country': {'required': True},
+        }
+
+    def create(self, validated_data):
+        request_user = core_utilities.get_current_user(context=self.context)
+        # set created_by and last_modified_by value
+        if request_user is not None:
+            validated_data['created_by'] = validated_data.get('created_by') or request_user
+            validated_data['last_modified_by'] = validated_data.get('last_modified_by') or request_user
+
+        instance = super().create(validated_data)
+        return instance
+
+
 class ColumnConfigurationListSerializer(FlexFieldsModelSerializer):
     options = serializers.JSONField()
 
@@ -1784,3 +1816,121 @@ class ColumnConfigurationListSerializer(FlexFieldsModelSerializer):
             'last_modified_by': (ExpandUserSerializer, {'source': 'last_modified_by'}),
             'created_by': (ExpandUserSerializer, {'source': 'created_by'}),
         }
+
+
+class ExpandColumnConfigurationSerializer(FlexFieldsModelSerializer):
+    class Meta:
+        model = accounts_models.ColumnConfiguration
+        read_only_fields = fields = (
+            'name',
+            'label',
+            'type',
+            'table_name',
+            'table_alias',
+            'table_label',
+        )
+
+
+class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
+    options = serializers.SerializerMethodField()
+
+    class Meta:
+        model = accounts_models.AdvanceFilter
+        read_only_fields = fields = (
+            'name',
+            'type',
+            'description',
+            'column_configuration',
+            'options',
+            'query_param_filter'
+        )
+
+        expandable_fields = {
+            'column_configuration': (ExpandColumnConfigurationSerializer, {'source': 'column_configuration'}),
+        }
+
+    def get_options(self, instance):
+        options = instance.options
+        if isinstance(options, dict):
+            if options.get('live_choices', False):
+                parameter_details = instance.column_configuration
+                field = parameter_details.name
+                field_type = parameter_details.type
+                table = parameter_details.table_alias
+
+                join_condition = ''
+                filter_condition = ''
+
+                select_qry = """
+                SELECT DISTINCT {col} AS {col_name}
+                FROM schools_school AS schools
+                {join_condition}
+                WHERE schools.deleted IS NULL
+                    AND schools.country_id = {c_id}
+                    {filter_condition}
+                ORDER BY {col_name} ASC NULLS LAST
+                """
+
+                if table == 'school_static':
+                    join_condition = ('INNER JOIN connection_statistics_schoolweeklystatus AS school_static '
+                                      'ON schools.last_weekly_status_id = school_static.id')
+                    filter_condition = 'AND school_static.deleted IS NULL'
+
+                sql_qry = select_qry.format(
+                    col_name=field,
+                    col=f"LOWER(NULLIF({field}, ''))" if field_type == 'str' else field,
+                    c_id=self.context['country_id'],
+                    join_condition=join_condition,
+                    filter_condition=filter_condition)
+                choices = []
+                data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__)
+                for value in data:
+                    field_value = value[field]
+                    if core_utilities.is_blank_string(field_value):
+                        choices.append({
+                            'label': 'None',
+                            'value': 'none'
+                        })
+                    else:
+                        choices.append({
+                            'label': field_value.title()
+                            if field_type == accounts_models.ColumnConfiguration.TYPE_STR else field_value,
+                            'value': field_value
+                        })
+                options['choices'] = choices
+
+        return options
+
+
+class AdvanceFiltersListSerializer(FlexFieldsModelSerializer):
+    active_countries_list = serializers.JSONField()
+    options = serializers.JSONField()
+
+    class Meta:
+        model = accounts_models.AdvanceFilter
+        read_only_fields = fields = (
+            'id',
+            'code',
+            'name',
+            'description',
+            'type',
+            'options',
+            'query_param_filter',
+            'column_configuration',
+            'status',
+            'published_by',
+            'active_countries_list',
+        )
+
+        expandable_fields = {
+            'column_configuration': (ExpandColumnConfigurationSerializer, {'source': 'column_configuration'}),
+            'published_by': (ExpandUserSerializer, {'source': 'published_by'}),
+            'last_modified_by': (ExpandUserSerializer, {'source': 'last_modified_by'}),
+            'created_by': (ExpandUserSerializer, {'source': 'created_by'}),
+        }
+
+    def to_representation(self, instance):
+        active_countries_list = list(instance.active_countries.all().order_by(
+            'country_id').values_list('country_id', flat=True).distinct('country_id'))
+        setattr(instance, 'active_countries_list', active_countries_list)
+        return super().to_representation(instance)

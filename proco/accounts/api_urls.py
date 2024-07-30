@@ -74,15 +74,18 @@ urlpatterns = [
         'get': 'list',
     }), name='list-column-configurations'),
 
-    # path('layers/', api.DataLayersViewSet.as_view({
-    #     'get': 'list',
-    #     'post': 'create',
-    # }), name='list-or-create-data-layers'),
-    # path('layers/<int:pk>/', api.DataLayersViewSet.as_view({
-    #     'put': 'partial_update',
-    #     'delete': 'destroy',
-    # }), name='update-or-delete-data-layer'),
-    # path('layers/<int:pk>/publish/', api.DataLayerPublishViewSet.as_view({
-    #     'put': 'partial_update',
-    # }), name='publish-data-layer'),
+    path('adv_filters/', api.AdvanceFiltersViewSet.as_view({
+        'get': 'list',
+        'post': 'create',
+    }), name='list-or-create-advance-filters'),
+    path('adv_filters/<int:pk>/', api.AdvanceFiltersViewSet.as_view({
+        'put': 'partial_update',
+        'delete': 'destroy',
+    }), name='update-or-delete-advance-filter'),
+    path('adv_filters/<int:pk>/publish/', api.AdvanceFiltersPublishViewSet.as_view({
+        'put': 'partial_update',
+    }), name='publish-advance-filter'),
+    path('adv_filters/<str:status>/<int:country_id>/', api.PublishedAdvanceFiltersViewSet.as_view({
+        'get': 'list',
+    }), name='list-published-advance-filters'),
 ]

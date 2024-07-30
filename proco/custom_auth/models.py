@@ -238,6 +238,12 @@ class RolePermission(core_models.BaseModelMixin):
         (CAN_PREVIEW_DATA_LAYER, 'Can Preview Data Layer'),
     )
 
+    CAN_VIEW_COLUMN_CONFIGURATIONS = 'can_view_column_configurations'
+
+    COLUMN_CONFIGURATIONS_MANAGEMENT_PERMISSION_CHOICES = (
+        (CAN_VIEW_COLUMN_CONFIGURATIONS, 'Can View Columns Configurations'),
+    )
+
     CAN_VIEW_ADVANCE_FILTER = 'can_view_advance_filter'
     CAN_ADD_ADVANCE_FILTER = 'can_add_advance_filter'
     CAN_UPDATE_ADVANCE_FILTER = 'can_update_advance_filter'
@@ -343,6 +349,7 @@ class RolePermission(core_models.BaseModelMixin):
     PERMISSION_CHOICES = (
         USER_MANAGEMENT_PERMISSION_CHOICES
         + DATA_LAYER_MANAGEMENT_PERMISSION_CHOICES
+        + COLUMN_CONFIGURATIONS_MANAGEMENT_PERMISSION_CHOICES
         + ADVANCE_FILTER_MANAGEMENT_PERMISSION_CHOICES
         + SCHOOL_MASTER_DATA_MANAGEMENT_PERMISSION_CHOICES
         + API_KEY_MANAGEMENT_PERMISSION_CHOICES

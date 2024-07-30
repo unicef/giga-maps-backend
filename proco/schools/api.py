@@ -34,7 +34,7 @@ from proco.schools.serializers import (
     SchoolListSerializer,
     SchoolStatusSerializer,
     SchoolCSVSerializer,
-    SchoolUpdateRetriveSerializer,
+    SchoolUpdateRetrieveSerializer,
     ListSchoolSerializer,
     DetailSchoolSerializer,
     ImportCSVSerializer,
@@ -547,7 +547,7 @@ class AdminViewSchoolAPIViewSet(BaseModelViewSet):
         if self.action == 'list':
             ser_class = SchoolListSerializer
         elif self.action in ['create', 'update', 'destroy']:
-            ser_class = SchoolUpdateRetriveSerializer
+            ser_class = SchoolUpdateRetrieveSerializer
         else:
             ser_class = DetailSchoolSerializer
         return (ser_class)
@@ -568,7 +568,7 @@ class AdminViewSchoolAPIViewSet(BaseModelViewSet):
 
     def create(self, request, *args, **kwargs):
         try:
-            data = SchoolUpdateRetriveSerializer(data=request.data)
+            data = SchoolUpdateRetrieveSerializer(data=request.data)
             if data.is_valid():
                 data.save()
                 action_log(request, [data.data], 1, '', self.model, field_name='name')
@@ -581,7 +581,7 @@ class AdminViewSchoolAPIViewSet(BaseModelViewSet):
         if pk is not None:
             try:
                 school = School.objects.get(id=pk)
-                data = SchoolUpdateRetriveSerializer(instance=school, data=request.data)
+                data = SchoolUpdateRetrieveSerializer(instance=school, data=request.data)
                 if data.is_valid():
                     change_message = changed_fields(school, request.data)
                     action_log(request, [school], 2, change_message, self.model, field_name='name')
@@ -597,7 +597,7 @@ class AdminViewSchoolAPIViewSet(BaseModelViewSet):
             try:
                 school = School.objects.get(id=pk)
                 if school:
-                    serializer = SchoolUpdateRetriveSerializer(school, partial=True,
+                    serializer = SchoolUpdateRetrieveSerializer(school, partial=True,
                                                                context={'request': request}, )
                     return Response(serializer.data)
                 return Response(status=rest_status.HTTP_404_NOT_FOUND, data=error_mess)

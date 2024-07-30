@@ -14,7 +14,8 @@ configuration_json = [
         'table_name': 'schools_school',
         'table_alias': 'schools',
         'table_label': 'School',
-        'is_filter_applicable': True
+        'is_filter_applicable': True,
+        'options': {'active_countries_filter': "LOWER(environment) IN ('urban', 'rural')"},
     },
     {
         'name': 'school_type',
@@ -24,7 +25,8 @@ configuration_json = [
         'table_name': 'schools_school',
         'table_alias': 'schools',
         'table_label': 'School',
-        'is_filter_applicable': True
+        'is_filter_applicable': True,
+        'options': {'active_countries_filter': "LOWER(school_type) IN ('private', 'public')"}
     },
     {
         'name': 'education_level',
@@ -34,7 +36,8 @@ configuration_json = [
         'table_name': 'schools_school',
         'table_alias': 'schools',
         'table_label': 'School',
-        'is_filter_applicable': True
+        'is_filter_applicable': True,
+        'options': {'active_countries_filter': "LOWER(education_level) IN ('primary', 'secondary')"}
     },
     {
         'name': 'num_computers',
@@ -44,7 +47,8 @@ configuration_json = [
         'table_name': 'connection_statistics_schoolweeklystatus',
         'table_alias': 'school_static',
         'table_label': 'Static Data',
-        'is_filter_applicable': True
+        'is_filter_applicable': True,
+        'options': None,
     },
     {
         'name': 'num_students',
@@ -54,7 +58,8 @@ configuration_json = [
         'table_name': 'connection_statistics_schoolweeklystatus',
         'table_alias': 'school_static',
         'table_label': 'Static Data',
-        'is_filter_applicable': True
+        'is_filter_applicable': True,
+        'options': None,
     },
     {
         'name': 'num_teachers',
@@ -64,7 +69,8 @@ configuration_json = [
         'table_name': 'connection_statistics_schoolweeklystatus',
         'table_alias': 'school_static',
         'table_label': 'Static Data',
-        'is_filter_applicable': True
+        'is_filter_applicable': True,
+        'options': None,
     },
     {
         'name': 'connectivity_speed',
@@ -74,7 +80,8 @@ configuration_json = [
         'table_name': 'connection_statistics_schoolweeklystatus',
         'table_alias': 'school_static',
         'table_label': 'Static Data',
-        'is_filter_applicable': True
+        'is_filter_applicable': True,
+        'options': None,
     },
     {
         'name': 'computer_lab',
@@ -84,7 +91,8 @@ configuration_json = [
         'table_name': 'connection_statistics_schoolweeklystatus',
         'table_alias': 'school_static',
         'table_label': 'Static Data',
-        'is_filter_applicable': True
+        'is_filter_applicable': True,
+        'options': None,
     }
 ]
 
@@ -102,6 +110,7 @@ def update_configurations_data():
                     'table_alias': row_data['table_alias'],
                     'table_label': row_data['table_label'],
                     'is_filter_applicable': row_data['is_filter_applicable'],
+                    'options': row_data['options'],
                     'last_modified_at': get_current_datetime_object(),
                 },
             )

@@ -527,8 +527,6 @@ class AdvanceFilter(core_models.BaseModel):
         (FILTER_STATUS_DISABLED, 'Disabled'),
     )
 
-    icon = models.TextField(null=True, blank=True)
-
     # Unique
     code = models.CharField(
         max_length=255,
@@ -551,8 +549,6 @@ class AdvanceFilter(core_models.BaseModel):
         choices=FILTER_TYPE_CHOICES,
         db_index=True,
     )
-
-    applicable_countries = JSONField(null=True, default=list)
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=FILTER_STATUS_DRAFT, db_index=True)
     published_by = models.ForeignKey(

@@ -14,6 +14,7 @@ from django.views.decorators.cache import cache_control
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import permissions
 from rest_framework import status as rest_status
+from rest_framework.filters import SearchFilter
 from rest_framework.response import Response
 from rest_framework.utils.urls import remove_query_param
 from rest_framework.views import APIView
@@ -2133,7 +2134,7 @@ class ColumnConfigurationViewSet(BaseModelViewSet):
 
     permission_classes = (
         core_permissions.IsUserAuthenticated,
-        core_permissions.CanViewAdvanceFilters,
+        core_permissions.CanViewColumnConfigurations,
     )
 
     filter_backends = (
@@ -2153,3 +2154,138 @@ class ColumnConfigurationViewSet(BaseModelViewSet):
     }
 
     permit_list_expands = ['created_by', 'last_modified_by']
+
+
+class AdvanceFiltersViewSet(BaseModelViewSet):
+    model = accounts_models.AdvanceFilter
+    serializer_class = serializers.AdvanceFiltersListSerializer
+
+    # action_serializers = {
+    #     'create': serializers.CreateDataLayersSerializer,
+    #     'partial_update': serializers.UpdateDataLayerSerializer,
+    # }
+
+    permission_classes = (
+        core_permissions.IsUserAuthenticated,
+        core_permissions.CanViewAdvanceFilters,
+        core_permissions.CanAddAdvanceFilter,
+        core_permissions.CanUpdateAdvanceFilter,
+    )
+
+    filter_backends = (
+        DjangoFilterBackend,
+        NullsAlwaysLastOrderingFilter,
+        SearchFilter,
+    )
+
+    ordering_field_names = ['-last_modified_at', 'name']
+    apply_query_pagination = True
+    search_fields = ('=code', '=status', 'name', 'description', 'type')
+
+    filterset_fields = {
+        'id': ['exact', 'in'],
+        'status': ['iexact', 'in', 'exact'],
+        'published_by_id': ['exact', 'in'],
+        'name': ['iexact', 'in', 'exact'],
+    }
+
+    permit_list_expands = ['created_by', 'published_by', 'last_modified_by', 'column_configuration']
+
+    def apply_queryset_filters(self, queryset):
+        """
+        Override if applying more complex filters to queryset.
+        :param queryset:
+        :return queryset:
+        """
+
+        query_params = self.request.query_params.dict()
+        query_param_keys = query_params.keys()
+
+        if 'country_id' in query_param_keys:
+            queryset = queryset.filter(
+                active_countries__country=query_params['country_id'],
+                active_countries__deleted__isnull=True,
+            )
+        elif 'country_id__in' in query_param_keys:
+            queryset = queryset.filter(
+                active_countries__country_id__in=[c_id.strip() for c_id in query_params['country_id__in'].split(',')],
+                active_countries__deleted__isnull=True,
+            )
+
+        return super().apply_queryset_filters(queryset)
+
+    def perform_destroy(self, instance):
+        """
+        perform_destroy
+        :param instance:
+        :return:
+        """
+        instance.deleted = core_utilities.get_current_datetime_object()
+        instance.last_modified_at = core_utilities.get_current_datetime_object()
+        instance.last_modified_by = core_utilities.get_current_user(request=self.request)
+        return super().perform_destroy(instance)
+
+
+class AdvanceFiltersPublishViewSet(BaseModelViewSet):
+    model = accounts_models.AdvanceFilter
+    serializer_class = serializers.PublishDataLayerSerializer
+
+    permission_classes = (
+        core_permissions.IsUserAuthenticated,
+        core_permissions.CanPublishAdvanceFilter,
+    )
+
+
+class PublishedAdvanceFiltersViewSet(CachedListMixin, BaseModelViewSet):
+    """
+    PublishedAdvanceFiltersViewSet
+    Cache Attr:
+        Auto Cache: Not required
+        Call Cache: Yes
+    """
+    LIST_CACHE_KEY_PREFIX = 'PUBLISHED_FILTERS_LIST'
+
+    model = accounts_models.AdvanceFilter
+    serializer_class = serializers.PublishedAdvanceFiltersListSerializer
+
+    base_auth_permissions = (
+        permissions.AllowAny,
+    )
+
+    filter_backends = (
+        DjangoFilterBackend,
+        NullsAlwaysLastOrderingFilter,
+    )
+
+    ordering_field_names = ['-last_modified_at', 'name']
+    apply_query_pagination = True
+
+    filterset_fields = {
+        'id': ['exact', 'in'],
+        'published_by_id': ['exact', 'in'],
+        'name': ['iexact', 'in', 'exact'],
+    }
+
+    permit_list_expands = ['column_configuration', ]
+
+    def apply_queryset_filters(self, queryset):
+        """
+        Override if applying more complex filters to queryset.
+        :param queryset:
+        :return queryset:
+        """
+
+        country_id = self.kwargs.get('country_id')
+        status = self.kwargs.get('status', 'PUBLISHED')
+
+        queryset = queryset.filter(
+            status=status,
+            active_countries__country=country_id,
+            active_countries__deleted__isnull=True,
+        )
+
+        return super().apply_queryset_filters(queryset)
+
+    def update_serializer_context(self, context):
+        context['country_id'] = self.kwargs.get('country_id')
+        return context

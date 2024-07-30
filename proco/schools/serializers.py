@@ -215,9 +215,9 @@ class SchoolCSVSerializer(SchoolStatusSerializer, DownloadSerializerMixin):
         return self.to_record_representation(data)
 
 
-class SchoolUpdateRetriveSerializer(serializers.ModelSerializer):
+class SchoolUpdateRetrieveSerializer(serializers.ModelSerializer):
     """
-    CountryUpdateRetriveSerializer
+    CountryUpdateRetrieveSerializer
         Serializer to create Country.
     """
     timezone = serializers.CharField()
@@ -291,7 +291,7 @@ class SchoolListSerializer(BaseSchoolSerializer):
 
 class DetailSchoolSerializer(BaseSchoolSerializer):
     class Meta(BaseSchoolSerializer.Meta):
-        fields = SchoolUpdateRetriveSerializer.Meta.fields
+        fields = SchoolUpdateRetrieveSerializer.Meta.fields
 
 
 class ImportCSVSerializer(serializers.ModelSerializer):
