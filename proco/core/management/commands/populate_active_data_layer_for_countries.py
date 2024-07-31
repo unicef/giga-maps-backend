@@ -13,7 +13,7 @@ from proco.locations.models import Country
 logger = logging.getLogger('gigamaps.' + __name__)
 
 
-def delete_relationships(country_id, layer_id):
+def delete_relationships(country_id, layer_id, excluded_ids):
     relationships = accounts_models.DataLayerCountryRelationship.objects.all()
 
     if country_id:
@@ -21,6 +21,9 @@ def delete_relationships(country_id, layer_id):
 
     if layer_id:
         relationships = relationships.filter(data_layer_id=layer_id)
+
+    if len(excluded_ids) > 0:
+        relationships = relationships.exclude(id__in=excluded_ids)
 
     relationships.update(deleted=get_current_datetime_object())
 
@@ -49,11 +52,7 @@ class Command(BaseCommand):
 
         country_id = options.get('country_id', None)
         layer_id = options.get('layer_id', None)
-
-        if options.get('reset_mapping', False):
-            logger.info('Delete old records - start')
-            delete_relationships(country_id, layer_id)
-            logger.info('Delete old records - end')
+        ids_to_keep = []
 
         all_published_layers = accounts_models.DataLayer.objects.all()
         if layer_id:
@@ -109,11 +108,12 @@ class Command(BaseCommand):
                                 data_layer=data_layer_instance,
                                 country_id=country_id_has_layer_data['country_id'],
                                 defaults={
-                                    'is_default': not data_layer_instance.created_by,
+                                    # 'is_default': not data_layer_instance.created_by,
                                     'last_modified_at': get_current_datetime_object(),
                                 },
                             )
                         )
+                        ids_to_keep.append(relationship_instance.id)
                         if created:
                             logger.debug('New dataLayers + country relationship created for live layer: {0}'.format(
                                 relationship_instance.__dict__))
@@ -155,6 +155,7 @@ class Command(BaseCommand):
                                 },
                             )
                         )
+                        ids_to_keep.append(relationship_instance.id)
                         if created:
                             logger.debug('New dataLayers + country relationship created for static layer: {0}'.format(
                                 relationship_instance.__dict__))
@@ -162,5 +163,10 @@ class Command(BaseCommand):
                             logger.debug(
                                 'Existing dataLayers + country relationship updated for static layer: {0}'.format(
                                     relationship_instance.__dict__))
+
+        if options.get('reset_mapping', False):
+            logger.info('Delete records which are not active now - start')
+            delete_relationships(country_id, layer_id, ids_to_keep)
+            logger.info('Delete records which are not active now - end')
 
         logger.info('Active data layer for country mapping operations.')
