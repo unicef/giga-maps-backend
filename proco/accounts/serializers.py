@@ -1976,11 +1976,8 @@ class CreateAdvanceFilterSerializer(BaseAdvanceFilterListCRUDSerializer):
         extra_kwargs = {
             'name': {'required': True},
             'type': {'required': True},
-            'column_configuration': {'required': True},
+            'column_configuration': {'required': True}
         }
-
-    def validate_status(self, status):
-        return accounts_models.AdvanceFilter.FILTER_STATUS_DRAFT
 
     def to_internal_value(self, data):
         if not data.get('code') and data.get('name'):
@@ -2003,3 +2000,44 @@ class CreateAdvanceFilterSerializer(BaseAdvanceFilterListCRUDSerializer):
         advance_filter_instance = super().create(validated_data)
 
         return advance_filter_instance
+
+class UpdateAdvanceFilterSerializer(BaseAdvanceFilterListCRUDSerializer):
+    options = serializers.JSONField(required=False)
+
+    class Meta:
+        model = accounts_models.AdvanceFilter
+        read_only_fields = (
+            'id',
+            'created',
+            'last_modified_at',
+            'published_by',
+            'published_at'
+        )
+
+        fields = read_only_fields + (
+            'code',
+            'name',
+            'description',
+            'type',
+            'status',
+            'column_configuration',
+            'options',
+            'query_param_filter',
+        )
+
+        extra_kwargs = {
+            'status': {'required': True},
+        }
+
+    def update(self, instance, validated_data):
+        """
+        update
+            This method is used to update Advance Filter
+        :param instance:
+        :param validated_data:
+        :return:
+        """
+        with transaction.atomic():
+            advance_filter_instance = super().update(instance, validated_data)
+            return advance_filter_instance
+

@@ -2162,7 +2162,7 @@ class AdvanceFiltersViewSet(BaseModelViewSet):
 
     action_serializers = {
         'create': serializers.CreateAdvanceFilterSerializer,
-        # 'partial_update': serializers.UpdateAdvanceFilterSerializer,
+        'partial_update': serializers.UpdateAdvanceFilterSerializer,
     }
 
     permission_classes = (
@@ -2218,12 +2218,15 @@ class AdvanceFiltersViewSet(BaseModelViewSet):
         """
         perform_destroy
         :param instance:
+from proco.utils.error_message import error_mess
         :return:
         """
-        instance.deleted = core_utilities.get_current_datetime_object()
-        instance.last_modified_at = core_utilities.get_current_datetime_object()
-        instance.last_modified_by = core_utilities.get_current_user(request=self.request)
-        return super().perform_destroy(instance)
+        allowed_status = [accounts_models.AdvanceFilter.FILTER_STATUS_DRAFT, accounts_models.AdvanceFilter.FILTER_STATUS_DISABLED]
+        if instance.status in allowed_status:
+            instance.deleted = core_utilities.get_current_datetime_object()
+            instance.last_modified_at = core_utilities.get_current_datetime_object()
+            instance.last_modified_by = core_utilities.get_current_user(request=self.request)
+            return super().perform_destroy(instance)
 
 
 class AdvanceFiltersPublishViewSet(BaseModelViewSet):
