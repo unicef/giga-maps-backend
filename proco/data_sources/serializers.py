@@ -361,7 +361,7 @@ class PublishSchoolMasterDataSerializer(serializers.ModelSerializer):
 
         list_serializer_class = UpdateListSerializer
 
-    def _validate_status(self, instance, validated_data):
+    def _validate_status(self, instance):
         if instance.status in [
             sources_models.SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT,
             sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED,
@@ -399,7 +399,7 @@ class PublishSchoolMasterDataSerializer(serializers.ModelSerializer):
             validated_data['status'] = sources_models.SchoolMasterData.ROW_STATUS_DELETED_PUBLISHED
         else:
             validated_data['status'] = sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED
-        self._validate_status(instance, validated_data)
+        self._validate_status(instance)
         validated_data['published_at'] = core_utilities.get_current_datetime_object()
 
         request_user = core_utilities.get_current_user(context=self.context)
