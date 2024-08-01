@@ -28,7 +28,7 @@ class ApplicationUser(core_models.BaseModelMixin, AbstractBaseUser):
         validators=[
             validators.RegexValidator(
                 r'^[\w.@+-]+$',
-                _('Enter a valid username. This value may contain only letters, numbers ' 'and @/./+/-/_ characters.'),
+                _('Enter a valid username. This value may contain only letters, numbers and @/./+/-/_ characters.'),
             ),
         ],
         error_messages={
