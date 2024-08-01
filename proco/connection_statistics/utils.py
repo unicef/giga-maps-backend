@@ -336,7 +336,8 @@ def update_country_weekly_status(country: Country, date):
     country_status.schools_coverage_moderate = coverage_stats[ColorMapSchema.MODERATE]
     country_status.schools_coverage_no = coverage_stats[ColorMapSchema.NO]
 
-    schools_coverage_known = country_status.schools_coverage_good + country_status.schools_coverage_moderate + country_status.schools_coverage_no
+    schools_coverage_known = (country_status.schools_coverage_good + country_status.schools_coverage_moderate +
+                              country_status.schools_coverage_no)
     country_status.schools_coverage_unknown = country_status.schools_total - schools_coverage_known
 
     # calculate speed & latency where available
@@ -384,8 +385,10 @@ def update_country_weekly_status(country: Country, date):
     ]):
         country_status.integration_status = CountryWeeklyStatus.STATIC_MAPPED
 
-    if country_status.integration_status == CountryWeeklyStatus.STATIC_MAPPED \
-        and country_status.connectivity_availability == connectivity_types.realtime_speed:
+    if (
+        country_status.integration_status == CountryWeeklyStatus.STATIC_MAPPED and
+        country_status.connectivity_availability == connectivity_types.realtime_speed
+    ):
         country_status.integration_status = CountryWeeklyStatus.REALTIME_MAPPED
 
     country_status.avg_distance_school = country.calculate_avg_distance_school()

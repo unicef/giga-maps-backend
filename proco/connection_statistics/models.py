@@ -24,7 +24,8 @@ class ConnectivityStatistics(models.Model):
     connectivity_latency = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
 
     connectivity_speed_probe = models.PositiveIntegerField(help_text=_('bps'), blank=True, null=True, default=None)
-    connectivity_upload_speed_probe = models.PositiveIntegerField(help_text=_('bps'), blank=True, null=True, default=None)
+    connectivity_upload_speed_probe = models.PositiveIntegerField(help_text=_('bps'),
+                                                                  blank=True, null=True, default=None)
 
     connectivity_latency_probe = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
 
@@ -159,7 +160,7 @@ class CountryWeeklyStatus(ConnectivityStatistics, TimeStampedModel, models.Model
 
 
 class SchoolWeeklyStatus(ConnectivityStatistics, TimeStampedModel, models.Model):
-    # unable to use choives as should be (COVERAGE_TYPES.4g), because digit goes first
+    # unable to use choices as should be (COVERAGE_TYPES.4g), because digit goes first
     COVERAGE_UNKNOWN = 'unknown'
     COVERAGE_NO = 'no'
     COVERAGE_2G = '2g'
