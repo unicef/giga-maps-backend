@@ -223,6 +223,26 @@ class InvalidDataLayerNameError(BaseInvalidValidationError):
     description = _('Provide valid data layer name')
     code = 'invalid_data_layer_name'
 
+class InvalidAdvanceFilterNameError(BaseInvalidValidationError):
+    message = _('Invalid Advance Filter name.')
+    description = _('Provide valid advance filter name')
+    code = 'invalid_advance_filter_name'
+
+class InvalidAdvanceFilterStatusError(BaseInvalidValidationError):
+    message = _('Invalid Advance Filter Status at creation.')
+    description = _('Only "DRAFT" or "READY_TO_PUBLISH" status is allowed at creation.')
+    code = 'invalid_advance_filter_status'
+
+class DuplicateAdvanceFilterCodeError(BaseInvalidValidationError):
+    message = _("Advance Filter with code '{code}' already exists.")
+    code = 'duplicate_advance_filter_code'
+
+
+class InvalidAdvanceFilterCodeError(BaseInvalidValidationError):
+    message = _('Invalid Advance Filter code.')
+    description = _('Provide valid advance filter code')
+    code = 'invalid_advance_filter_code'
+
 
 class InvalidDataLayerCodeError(BaseInvalidValidationError):
     message = _('Invalid Data Layer code.')

@@ -1934,3 +1934,72 @@ class AdvanceFiltersListSerializer(FlexFieldsModelSerializer):
             'country_id').values_list('country_id', flat=True).distinct('country_id'))
         setattr(instance, 'active_countries_list', active_countries_list)
         return super().to_representation(instance)
+
+class BaseAdvanceFilterListCRUDSerializer(serializers.ModelSerializer):
+    def validate_name(self, name):
+        if re.match(account_config.valid_name_pattern, name):
+            return name
+        raise accounts_exceptions.InvalidAdvanceFilterNameError()
+
+    def validate_code(self, code):
+        if re.match(r'[A-Z0-9-\' _]*$', code):
+            if(
+                (self.instance and code != self.instance.code) or
+                (not self.instance and accounts_models.AdvanceFilter.objects.filter(code=code).exists())
+            ):
+                raise accounts_exceptions.DuplicateAdvanceFilterCodeError(message_kwargs={'code': code})
+            return code
+        raise accounts_exceptions.InvalidAdvanceFilterCodeError()
+
+class CreateAdvanceFilterSerializer(BaseAdvanceFilterListCRUDSerializer):
+    options = serializers.JSONField(required=False)
+    class Meta:
+        model = accounts_models.AdvanceFilter
+
+        read_only_fields = (
+            'id',
+            'created',
+            'last_modified_at',
+        )
+
+        fields = read_only_fields + (
+            'code',
+            'name',
+            'description',
+            'type',
+            'status',
+            'options',
+            'query_param_filter',
+            'column_configuration',
+        )
+
+        extra_kwargs = {
+            'name': {'required': True},
+            'type': {'required': True},
+            'column_configuration': {'required': True},
+        }
+
+    def validate_status(self, status):
+        return accounts_models.AdvanceFilter.FILTER_STATUS_DRAFT
+
+    def to_internal_value(self, data):
+        if not data.get('code') and data.get('name'):
+            data['code'] = core_utilities.normalize_str(str(data.get('name'))).upper()
+        return super().to_internal_value(data)
+
+    def create(self, validated_data):
+        """
+        create
+            This method is used to create Advance Filter
+        :param validated_data:
+        :return:
+        """
+        request_user = core_utilities.get_current_user(context=self.context)
+
+        if request_user is not None:
+            validated_data['created_by'] = validated_data.get('created_by') or request_user
+            validated_data['last_modified_by'] = validated_data.get('last_modified_by') or request_user
+
+        advance_filter_instance = super().create(validated_data)
+
+        return advance_filter_instance

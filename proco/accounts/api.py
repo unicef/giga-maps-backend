@@ -2160,10 +2160,10 @@ class AdvanceFiltersViewSet(BaseModelViewSet):
     model = accounts_models.AdvanceFilter
     serializer_class = serializers.AdvanceFiltersListSerializer
 
-    # action_serializers = {
-    #     'create': serializers.CreateDataLayersSerializer,
-    #     'partial_update': serializers.UpdateDataLayerSerializer,
-    # }
+    action_serializers = {
+        'create': serializers.CreateAdvanceFilterSerializer,
+        # 'partial_update': serializers.UpdateAdvanceFilterSerializer,
+    }
 
     permission_classes = (
         core_permissions.IsUserAuthenticated,
