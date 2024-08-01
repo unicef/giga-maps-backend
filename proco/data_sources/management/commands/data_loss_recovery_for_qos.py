@@ -72,11 +72,12 @@ def load_qos_data_source_response_to_model(version_number, country):
                         version=version_number,
                     ).exists():
                         logger.debug('WARNING: QoSData table has given version data already in the table. '
-                              'To re collect, please clean this version data first then retry again.'
-                              'Country code: {0}, \t\tVersion: {1}'.format(table_name, version_number))
+                                     'To re collect, please clean this version data first then retry again.'
+                                     'Country code: {0}, \t\tVersion: {1}'.format(table_name, version_number))
                         continue
 
-                    logger.info('Current version data not available in the table. Hence fetching the data from QoS api.')
+                    logger.info(
+                        'Current version data not available in the table. Hence fetching the data from QoS api.')
 
                     # Create an url to access a shared table.
                     # A table path is the profile file path following with `#` and the fully qualified name of a table
@@ -92,7 +93,7 @@ def load_qos_data_source_response_to_model(version_number, country):
 
                     if version_number > api_current_version:
                         logger.error('Given version must not be higher then latest api version. '
-                              'Hence skipping current data pull.')
+                                     'Hence skipping current data pull.')
                         exit(0)
 
                     loaded_data_df = delta_sharing.load_table_changes_as_pandas(
@@ -108,7 +109,7 @@ def load_qos_data_source_response_to_model(version_number, country):
                     loaded_data_df = loaded_data_df[loaded_data_df[DeltaSharingReader._change_type_col_name()].isin(
                         ['insert', 'update_postimage'])]
                     logger.info('Total count of rows after filtering only ["insert", "update_postimage"] in the "{0}" '
-                          'version data: {1}'.format(version_number, len(loaded_data_df)))
+                                'version data: {1}'.format(version_number, len(loaded_data_df)))
 
                     if len(loaded_data_df) > 0:
                         insert_entries = []
@@ -137,8 +138,8 @@ def load_qos_data_source_response_to_model(version_number, country):
                             ).first()
 
                             if not school:
-                                logger.error('School with giga ID ({0}) not found in proco db. '
-                                      'Hence skipping the load for current school.'.format(row['school_id_giga']))
+                                logger.error('School with giga ID ({0}) not found in proco db. Hence skipping the '
+                                             'load for current school.'.format(row['school_id_giga']))
                                 continue
 
                             row['school'] = school
@@ -151,11 +152,12 @@ def load_qos_data_source_response_to_model(version_number, country):
                             )
                             if duplicate_higher_version_records.exists():
                                 logger.error('Higher version for same school ID and timestamp already exists. '
-                                      'Hence skipping the update for current row.')
+                                             'Hence skipping the update for current row.')
                                 qos_instance = duplicate_higher_version_records.first()
                                 logger.debug('School ID: {0},\tTimestamp: {1},\tCurrent Version: {2},\t'
-                                      'Higher Version: {3}'.format(qos_instance.school_id, qos_instance.timestamp,
-                                                                   version_number, qos_instance.version))
+                                             'Higher Version: {3}'.format(qos_instance.school_id,
+                                                                          qos_instance.timestamp,
+                                                                          version_number, qos_instance.version))
                                 continue
 
                             insert_entries.append(row_as_dict)
@@ -286,7 +288,8 @@ def get_latest_api_version(country_code=None):
                     )
 
                     table_current_version = delta_sharing.get_table_version(table_url)
-                    logger.debug('Country "{0}" current version from API: {1}\n'.format(table_name, table_current_version))
+                    logger.debug(
+                        'Country "{0}" current version from API: {1}\n'.format(table_name, table_current_version))
 
                     version_for_countries[table_name] = table_current_version
                 except Exception as ex:
@@ -323,8 +326,9 @@ def check_missing_versions_from_table(country_code=None):
         missing_version_list = list(set(must_version_list) - set(versions_list))
 
         logger.debug('Missing versions details for country "{0}" are: \n\tStart version from DB: {1}'
-              '\n\tEnd version from API: {2}'
-              '\n\tMissing versions: {3}\n'.format(country_iso_code, start_version, end_version, missing_version_list))
+                     '\n\tEnd version from API: {2}'
+                     '\n\tMissing versions: {3}\n'.format(country_iso_code, start_version, end_version,
+                                                          missing_version_list))
 
 
 class Command(BaseCommand):
@@ -388,7 +392,7 @@ class Command(BaseCommand):
 
             if not country:
                 logger.error('Country with ISO3 format ({0}) not found in proco db. '
-                      'Hence stopping the load.'.format(country_iso3_format))
+                             'Hence stopping the load.'.format(country_iso3_format))
                 exit(0)
 
         if check_missing_versions:
@@ -400,7 +404,7 @@ class Command(BaseCommand):
         if pull_data:
             if not country:
                 logger.error('Country code is mandatory to pull the data.'
-                      ' Please pass required parameters as: -country_code=<COUNTRY-ISO3-FORMAT>\n')
+                             ' Please pass required parameters as: -country_code=<COUNTRY-ISO3-FORMAT>\n')
                 exit(0)
 
             pull_start_version = options.get('pull_start_version')
@@ -413,7 +417,7 @@ class Command(BaseCommand):
                 logger.info('\nData load completed successfully.\n')
             else:
                 logger.error('Please provide valid required parameters as:'
-                      ' -pull_start_version=<VERSION-NUMBER> -pull_end_version=<VERSION-NUMBER>\n')
+                             ' -pull_start_version=<VERSION-NUMBER> -pull_end_version=<VERSION-NUMBER>\n')
                 exit(0)
 
         try:
@@ -425,7 +429,7 @@ class Command(BaseCommand):
         if aggregate_data:
             if not country:
                 logger.error('Country code is mandatory to aggregate the data.'
-                      ' Please pass required parameters as: -country_code=<COUNTRY-ISO3-FORMAT>')
+                             ' Please pass required parameters as: -country_code=<COUNTRY-ISO3-FORMAT>')
                 exit(0)
 
             aggregate_start_version = options.get('aggregate_start_version')
@@ -444,8 +448,9 @@ class Command(BaseCommand):
                 logger.debug('Date list from versions: {0}'.format(date_list_from_versions))
 
                 for pull_data_date in date_list_from_versions:
-                    logger.debug('\nSyncing the "data_sources_qosdata" data to "connection_statistics_realtimeconnectivity" '
-                          'for date: {0}'.format(pull_data_date))
+                    logger.debug(
+                        '\nSyncing the "data_sources_qosdata" data to "connection_statistics_realtimeconnectivity" '
+                        'for date: {0}'.format(pull_data_date))
                     sync_qos_realtime_data(pull_data_date, country)
                     logger.debug('Data synced successfully.\n\n')
 
@@ -460,7 +465,7 @@ class Command(BaseCommand):
                     logger.debug('Finalized records successfully to actual proco tables.\n\n')
             else:
                 logger.error('Please pass required parameters as:'
-                      ' -pull_start_version=<VERSION-NUMBER> -pull_end_version=<VERSION-NUMBER>')
+                             ' -pull_start_version=<VERSION-NUMBER> -pull_end_version=<VERSION-NUMBER>')
 
         logger.info('Completed data loss recovery for qos successfully.\n')
         exit(0)
