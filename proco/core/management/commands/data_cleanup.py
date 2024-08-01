@@ -112,8 +112,8 @@ def delete_duplicate_school_weekly_records():
                 row_to_delete.delete(force=True)
         else:
             logger.debug('School Last Weekly Status id ({0}) is NOT IN the deletion list. '
-                         'Hence skipping first record and deleting all remaining based on ID DESC.'.format(
-                last_weekly_id))
+                         'Hence skipping first record and deleting all remaining based on ID DESC.'
+                         ''.format(last_weekly_id))
             for row_to_delete in statistics_models.SchoolWeeklyStatus.objects.filter(
                 school_id=row['school_id'],
                 week=row['week'],
@@ -220,8 +220,8 @@ def delete_duplicate_country_weekly_records():
                 row_to_delete.delete(force=True)
         else:
             logger.debug('Country Last Weekly Status id ({0}) is NOT IN the deletion list. '
-                         'Hence skipping first record and deleting all remaining based on ID DESC.'.format(
-                last_weekly_id))
+                         'Hence skipping first record and deleting all remaining based on ID DESC.'
+                         ''.format(last_weekly_id))
             for row_to_delete in statistics_models.CountryWeeklyStatus.objects.filter(
                 country_id=row['country_id'],
                 week=row['week'],
@@ -507,7 +507,7 @@ class Command(BaseCommand):
             logger.info('Completed school daily duplicate record cleanup.\n\n')
 
         if options.get('clean_duplicate_country_weekly'):
-            logger.info('Performing country weekly wuplicate record cleanup.')
+            logger.info('Performing country weekly duplicate record cleanup.')
             delete_duplicate_country_weekly_records()
             logger.info('Completed country weekly duplicate record cleanup.\n\n')
 
@@ -522,7 +522,7 @@ class Command(BaseCommand):
             logger.info('Completed QoS data model duplicate record cleanup.\n\n')
 
         if options.get('cleanup_school_master_rows'):
-            logger.debinfoug('Performing school master data source duplicate record cleanup.')
+            logger.info('Performing school master data source duplicate record cleanup.')
             sources_tasks.cleanup_school_master_rows()
             logger.info('Completed school master data source duplicate record cleanup.\n\n')
 
