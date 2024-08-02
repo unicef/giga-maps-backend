@@ -243,6 +243,10 @@ class InvalidAdvanceFilterCodeError(BaseInvalidValidationError):
     description = _('Provide valid advance filter code')
     code = 'invalid_advance_filter_code'
 
+class InvalidAdvanceFilterStatusUpdateError(BaseInvalidValidationError):
+    message = _('Invalid Advance Filter Status at update.')
+    code = 'invalid_advance_filter_status'
+
 
 class InvalidDataLayerCodeError(BaseInvalidValidationError):
     message = _('Invalid Data Layer code.')

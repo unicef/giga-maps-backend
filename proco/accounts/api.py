@@ -2218,7 +2218,6 @@ class AdvanceFiltersViewSet(BaseModelViewSet):
         """
         perform_destroy
         :param instance:
-from proco.utils.error_message import error_mess
         :return:
         """
         allowed_status = [accounts_models.AdvanceFilter.FILTER_STATUS_DRAFT, accounts_models.AdvanceFilter.FILTER_STATUS_DISABLED]
@@ -2231,7 +2230,7 @@ from proco.utils.error_message import error_mess
 
 class AdvanceFiltersPublishViewSet(BaseModelViewSet):
     model = accounts_models.AdvanceFilter
-    serializer_class = serializers.PublishDataLayerSerializer
+    serializer_class = serializers.PublishAdvanceFilterSerializer
 
     permission_classes = (
         core_permissions.IsUserAuthenticated,
