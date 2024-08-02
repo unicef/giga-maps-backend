@@ -48,7 +48,7 @@ configuration_json = [
         'table_alias': 'school_static',
         'table_label': 'Static Data',
         'is_filter_applicable': True,
-        'options': None,
+        'options': {'active_countries_filter': "num_computers IS NOT NULL AND num_computers > 0"},
     },
     {
         'name': 'num_students',
@@ -59,7 +59,7 @@ configuration_json = [
         'table_alias': 'school_static',
         'table_label': 'Static Data',
         'is_filter_applicable': True,
-        'options': None,
+        'options': {'active_countries_filter': "num_students IS NOT NULL AND num_students > 0"},
     },
     {
         'name': 'num_teachers',
@@ -70,7 +70,7 @@ configuration_json = [
         'table_alias': 'school_static',
         'table_label': 'Static Data',
         'is_filter_applicable': True,
-        'options': None,
+        'options': {'active_countries_filter': "num_teachers IS NOT NULL AND num_teachers > 0"},
     },
     {
         'name': 'connectivity_speed',
@@ -81,7 +81,11 @@ configuration_json = [
         'table_alias': 'school_static',
         'table_label': 'Static Data',
         'is_filter_applicable': True,
-        'options': None,
+        'options': {
+            'active_countries_filter': "connectivity_speed IS NOT NULL",
+            'downcast_aggr_str': '{val} / (1000 * 1000)',
+            'upcast_aggr_str': '{val} * 1000 * 1000',
+        },
     },
     {
         'name': 'computer_lab',
@@ -92,7 +96,21 @@ configuration_json = [
         'table_alias': 'school_static',
         'table_label': 'Static Data',
         'is_filter_applicable': True,
-        'options': None,
+        'options': {'active_countries_filter': "computer_lab = true"},
+    },
+    {
+        'name': 'coverage_type',
+        'label': 'Coverage Type',
+        'type': accounts_models.ColumnConfiguration.TYPE_STR,
+        'description': None,
+        'table_name': 'connection_statistics_schoolweeklystatus',
+        'table_alias': 'school_static',
+        'table_label': 'Static Data',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter':
+                """LOWER("connection_statistics_schoolweeklystatus"."coverage_type") != 'unknown'"""
+        },
     }
 ]
 

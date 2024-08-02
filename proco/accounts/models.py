@@ -486,12 +486,14 @@ class AdvanceFilter(core_models.BaseModel):
     """
 
     TYPE_DROPDOWN = 'DROPDOWN'
+    TYPE_DROPDOWN_MULTISELECT = 'DROPDOWN_MULTISELECT'
     TYPE_RANGE = 'RANGE'
     TYPE_INPUT = 'INPUT'
     TYPE_BOOLEAN = 'BOOLEAN'
 
     FILTER_TYPE_CHOICES = (
         (TYPE_DROPDOWN, 'Dropdown'),
+        (TYPE_DROPDOWN_MULTISELECT, 'Dropdown with multi select'),
         (TYPE_RANGE, 'Range'),
         (TYPE_INPUT, 'Input'),
         (TYPE_BOOLEAN, 'Boolean'),
@@ -516,15 +518,13 @@ class AdvanceFilter(core_models.BaseModel):
     )
 
     FILTER_STATUS_DRAFT = 'DRAFT'
-    FILTER_STATUS_READY_TO_PUBLISH = 'READY_TO_PUBLISH'
     FILTER_STATUS_PUBLISHED = 'PUBLISHED'
     FILTER_STATUS_DISABLED = 'DISABLED'
 
     STATUS_CHOICES = (
         (FILTER_STATUS_DRAFT, 'In Draft'),
-        (FILTER_STATUS_READY_TO_PUBLISH, 'Ready to Publish'),
-        (FILTER_STATUS_PUBLISHED, 'Published'),
-        (FILTER_STATUS_DISABLED, 'Disabled'),
+        (FILTER_STATUS_PUBLISHED, 'Activated'),
+        (FILTER_STATUS_DISABLED, 'De-activated'),
     )
 
     # Unique

@@ -1,13 +1,16 @@
 import copy
 import re
 from datetime import timedelta
+from math import floor, ceil
 
 from django.apps import apps
 from django.conf import settings
 from django.contrib.admin.models import LogEntry
 from django.core.management import call_command
 from django.core.validators import validate_email
+from django.db import connection
 from django.db import transaction
+from django.db.models import F, Min, Max
 from django.db.models import Q
 from django.db.models.functions.text import Lower
 from rest_flex_fields.serializers import FlexFieldsModelSerializer
@@ -17,12 +20,14 @@ from proco.accounts import exceptions as accounts_exceptions
 from proco.accounts import models as accounts_models
 from proco.accounts import utils as account_utilities
 from proco.accounts.config import app_config as account_config
+from proco.connection_statistics.models import SchoolWeeklyStatus
 from proco.core import db_utils as db_utilities
 from proco.core import utils as core_utilities
 from proco.custom_auth import models as auth_models
 from proco.custom_auth.serializers import ExpandUserSerializer
 from proco.custom_auth.utils import get_user_emails_for_permissions
 from proco.locations import models as locations_models
+from proco.schools.models import School
 from proco.utils import dates as date_utilities
 
 
@@ -1852,12 +1857,16 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
     def get_options(self, instance):
         options = instance.options
         if isinstance(options, dict):
-            if options.get('live_choices', False):
-                parameter_details = instance.column_configuration
-                field = parameter_details.name
-                field_type = parameter_details.type
-                table = parameter_details.table_alias
+            parameter_details = instance.column_configuration
+            parameter_field = parameter_details.name
+            field_type = parameter_details.type
+            parameter_table = parameter_details.table_alias
 
+            parameter_options = parameter_details.options
+
+            last_weekly_status_field = 'last_weekly_status__{}'.format(parameter_field)
+
+            if options.get('live_choices', False):
                 join_condition = ''
                 filter_condition = ''
 
@@ -1871,21 +1880,21 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
                 ORDER BY {col_name} ASC NULLS LAST
                 """
 
-                if table == 'school_static':
+                if parameter_table == 'school_static':
                     join_condition = ('INNER JOIN connection_statistics_schoolweeklystatus AS school_static '
                                       'ON schools.last_weekly_status_id = school_static.id')
                     filter_condition = 'AND school_static.deleted IS NULL'
 
                 sql_qry = select_qry.format(
-                    col_name=field,
-                    col=f"LOWER(NULLIF({field}, ''))" if field_type == 'str' else field,
+                    col_name=parameter_field,
+                    col=f"LOWER(NULLIF({parameter_field}, ''))" if field_type == 'str' else parameter_field,
                     c_id=self.context['country_id'],
                     join_condition=join_condition,
                     filter_condition=filter_condition)
                 choices = []
                 data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__)
                 for value in data:
-                    field_value = value[field]
+                    field_value = value[parameter_field]
                     if core_utilities.is_blank_string(field_value):
                         choices.append({
                             'label': 'None',
@@ -1898,6 +1907,53 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
                             'value': field_value
                         })
                 options['choices'] = choices
+
+            if instance.type == accounts_models.AdvanceFilter.TYPE_RANGE:
+                select_qs = School.objects.filter(country_id=self.context['country_id'])
+                if parameter_table == 'school_static':
+                    parameter_field_props = SchoolWeeklyStatus._meta.get_field(parameter_field)
+
+                    select_qs = select_qs.select_related('last_weekly_status').values('country_id').annotate(
+                        min_value=Min(F(last_weekly_status_field)),
+                        max_value=Max(F(last_weekly_status_field)),
+                    )
+                else:
+                    parameter_field_props = School._meta.get_field(parameter_field)
+
+                    select_qs = select_qs.values('country_id').annotate(
+                        min_value=Min(parameter_field),
+                        max_value=Max(parameter_field),
+                    )
+
+                country_range_json = list(
+                    select_qs.values('country_id', 'min_value', 'max_value').order_by('country_id').distinct())[-1]
+
+                if country_range_json:
+                    del country_range_json['country_id']
+
+                    country_range_json['min_value'] = floor(country_range_json['min_value'])
+                    country_range_json['max_value'] = ceil(country_range_json['max_value'])
+
+                    if 'downcast_aggr_str' in parameter_options:
+                        downcast_eval = parameter_options['downcast_aggr_str']
+                        country_range_json['min_value'] = floor(
+                            eval(downcast_eval.format(val=country_range_json['min_value'])))
+                        country_range_json['max_value'] = ceil(
+                            eval(downcast_eval.format(val=country_range_json['max_value'])))
+
+                    country_range_json['min_place_holder'] = 'Min ({})'.format(country_range_json['min_value'])
+                    country_range_json['max_place_holder'] = 'Max ({})'.format(country_range_json['max_value'])
+                else:
+                    internal_type = parameter_field_props.get_internal_type()
+                    min_value, max_value = connection.ops.integer_field_range(internal_type)
+                    country_range_json = {
+                        'min_place_holder': 'Min',
+                        'max_place_holder': 'Max',
+                        'min_value': min_value,
+                        'max_value': max_value
+                    }
+
+                options['active_range'] = country_range_json
 
         return options
 
@@ -1935,24 +1991,27 @@ class AdvanceFiltersListSerializer(FlexFieldsModelSerializer):
         setattr(instance, 'active_countries_list', active_countries_list)
         return super().to_representation(instance)
 
+
 class BaseAdvanceFilterListCRUDSerializer(serializers.ModelSerializer):
     def validate_name(self, name):
-        if re.match(account_config.valid_name_pattern, name):
+        if re.match(account_config.valid_filter_name_pattern, name):
             return name
         raise accounts_exceptions.InvalidAdvanceFilterNameError()
 
     def validate_code(self, code):
-        if re.match(r'[A-Z0-9-\' _]*$', code):
-            if(
+        if re.match(r'[a-zA-Z0-9-\' _]*$', code):
+            if (
                 (self.instance and code != self.instance.code) or
                 (not self.instance and accounts_models.AdvanceFilter.objects.filter(code=code).exists())
             ):
                 raise accounts_exceptions.DuplicateAdvanceFilterCodeError(message_kwargs={'code': code})
-            return code
+            return code.upper()
         raise accounts_exceptions.InvalidAdvanceFilterCodeError()
+
 
 class CreateAdvanceFilterSerializer(BaseAdvanceFilterListCRUDSerializer):
     options = serializers.JSONField(required=False)
+
     class Meta:
         model = accounts_models.AdvanceFilter
 
@@ -1997,9 +2056,8 @@ class CreateAdvanceFilterSerializer(BaseAdvanceFilterListCRUDSerializer):
             validated_data['created_by'] = validated_data.get('created_by') or request_user
             validated_data['last_modified_by'] = validated_data.get('last_modified_by') or request_user
 
-        advance_filter_instance = super().create(validated_data)
+        return super().create(validated_data)
 
-        return advance_filter_instance
 
 class UpdateAdvanceFilterSerializer(BaseAdvanceFilterListCRUDSerializer):
     options = serializers.JSONField(required=False)
@@ -2040,4 +2098,3 @@ class UpdateAdvanceFilterSerializer(BaseAdvanceFilterListCRUDSerializer):
         with transaction.atomic():
             advance_filter_instance = super().update(instance, validated_data)
             return advance_filter_instance
-
