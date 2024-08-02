@@ -70,7 +70,7 @@ class BaseRoleCRUDSerializer(serializers.ModelSerializer):
             return name
         raise auth_exceptions.InvalidRoleNameError()
 
-    def _validate_custom_role_count_error(self, data):
+    def _validate_custom_role_count_error(self):
         max_role_count = auth_config.custom_role_count_limit
 
         custom_role = auth_models.Role.objects.filter(category='custom')
@@ -105,7 +105,7 @@ class BaseRoleCRUDSerializer(serializers.ModelSerializer):
             # If reference role is provided then copy all the permissions as well
             data['permissions'] = reference_role.permissions
 
-        self._validate_custom_role_count_error(data)
+        self._validate_custom_role_count_error()
         self._validate_unique_role_name(data)
         return data
 

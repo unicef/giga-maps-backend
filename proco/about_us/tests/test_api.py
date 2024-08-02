@@ -10,7 +10,7 @@ from proco.utils.tests import TestAPIViewSetMixin
 
 class SlideImageAPITestCase(TestAPIViewSetMixin, TestCase):
     base_view = 'about_us:'
-    databases = {'default',}
+    databases = {'default', }
 
     @classmethod
     def setUpTestData(cls):
@@ -69,7 +69,7 @@ class SlideImageAPITestCase(TestAPIViewSetMixin, TestCase):
 
 class AboutUsAPITestCase(TestAPIViewSetMixin, TestCase):
     base_view = 'about_us:'
-    databases = {'default',}
+    databases = {'default', }
 
     def setUp(self):
         self.email = 'test@test.com'
