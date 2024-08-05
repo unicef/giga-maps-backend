@@ -31,9 +31,11 @@ def aggregate_connectivity_by_availability(qs):
 def aggregate_coverage_by_types(qs):
     return qs.aggregate(**{
         ColorMapSchema.GOOD: Count('school', filter=Q(
-            coverage_type__in=[SchoolWeeklyStatus.COVERAGE_4G, SchoolWeeklyStatus.COVERAGE_3G],
+            coverage_type__in=[SchoolWeeklyStatus.COVERAGE_5G, SchoolWeeklyStatus.COVERAGE_4G],
         )),
-        ColorMapSchema.MODERATE: Count('school', filter=Q(coverage_type=SchoolWeeklyStatus.COVERAGE_2G)),
+        ColorMapSchema.MODERATE: Count('school', filter=Q(
+            coverage_type__in=[SchoolWeeklyStatus.COVERAGE_3G, SchoolWeeklyStatus.COVERAGE_2G],
+        )),
         ColorMapSchema.NO: Count('school', filter=Q(coverage_type=SchoolWeeklyStatus.COVERAGE_NO)),
         ColorMapSchema.UNKNOWN: Count('school', filter=Q(coverage_type=SchoolWeeklyStatus.COVERAGE_UNKNOWN)),
     })

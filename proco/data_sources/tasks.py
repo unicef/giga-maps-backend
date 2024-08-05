@@ -1,16 +1,18 @@
 import json
+import logging
 import os
+import uuid
 from datetime import timedelta
 
-from celery import chain, chord, group
+from celery import chain, chord, group, current_task
 from django.conf import settings
 from django.contrib.gis.geos import Point
-from django.core.cache import cache
 from django.db.models import Count
 from django.db.utils import DataError
 from requests.exceptions import HTTPError
 
 from proco.accounts import utils as account_utilities
+from proco.background import utils as background_task_utilities
 from proco.connection_statistics import models as statistics_models
 from proco.connection_statistics.utils import (
     aggregate_real_time_data_to_school_daily_status,
@@ -28,6 +30,9 @@ from proco.locations.models import Country, CountryAdminMetadata
 from proco.schools.models import School
 from proco.taskapp import app
 from proco.utils.dates import format_date
+from proco.utils.tasks import populate_school_new_fields_task
+
+logger = logging.getLogger('gigamaps.' + __name__)
 
 
 @app.task
@@ -35,13 +40,13 @@ def finalize_task():
     return 'Done'
 
 
-def load_data_from_school_master_apis(*args, country_iso3_format=None):
+def load_data_from_school_master_apis(country_iso3_format=None):
     """
     Background task which handles School Master Data source changes from APIs to PROCO DB
 
     Execution Frequency: Once in a week
     """
-    print('***** Loading the School Master Data to PROCO DB *****')
+    logger.info('Starting loading the school master data from API to DB.')
 
     errors = []
     ds_settings = settings.DATA_SOURCE_CONFIG.get('SCHOOL_MASTER')
@@ -77,20 +82,20 @@ def load_data_from_school_master_apis(*args, country_iso3_format=None):
         if school_master_schema:
             schema_tables = client.list_tables(school_master_schema)
 
-            print('All tables ready to access: {0}'.format(schema_tables))
+            logger.debug('All tables ready to access: {0}'.format(schema_tables))
 
             school_master_fields = [f.name for f in sources_models.SchoolMasterData._meta.get_fields()]
 
             for schema_table in schema_tables:
-                print('#' * 10)
-                print('Table: %s', schema_table)
+                logger.debug('#' * 10)
+                logger.debug('Table: %s', schema_table)
 
                 if country_iso3_format and country_iso3_format != schema_table.name:
                     continue
 
                 if len(country_codes_for_exclusion) > 0 and schema_table.name in country_codes_for_exclusion:
-                    print('WARNING: Country with ISO3 Format ({0}) configured to exclude from School Master data pull. '
-                          'Hence skipping the load for this country code.'.format(schema_table.name))
+                    logger.warning('Country with ISO3 Format ({0}) configured to exclude from School Master data pull. '
+                                   'Hence skipping the load for this country code.'.format(schema_table.name))
                     continue
 
                 try:
@@ -98,17 +103,17 @@ def load_data_from_school_master_apis(*args, country_iso3_format=None):
                         profile_file, share_name, schema_name, schema_table.name, changes_for_countries,
                         deleted_schools, school_master_fields)
                 except (HTTPError, DataError, ValueError) as ex:
-                    print('ERROR: Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
+                    logger.error('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
                     errors.append('{0} : {1} - {2}'.format(schema_table.name, type(ex).__name__, str(ex)))
                 except Exception as ex:
-                    print('ERROR: Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
+                    logger.error('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
                     errors.append('{0} : {1} - {2}'.format(schema_table.name, type(ex).__name__, str(ex)))
 
         else:
-            print('ERROR: School Master schema ({0}) does not exist to use for share ({1}).'.format(schema_name,
+            logger.error('School Master schema ({0}) does not exist to use for share ({1}).'.format(schema_name,
                                                                                                     share_name))
     else:
-        print('ERROR: School Master share ({0}) does not exist to use.'.format(share_name))
+        logger.error('School Master share ({0}) does not exist to use.'.format(share_name))
 
     try:
         os.remove(profile_file)
@@ -175,7 +180,7 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
 
     Execution Frequency: Every 12 hours
     """
-    print('***** Handling the School Master Data row publish *****')
+    logger.info('Handling the published school master data rows.')
 
     environment_map = {
         'urban': 'urban',
@@ -187,27 +192,29 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
     true_choices = ['true', 'yes', '1']
 
     if country_ids and len(country_ids) > 0:
-        task_cache_key = 'handle_published_school_master_data_row_status_{current_time}_country_ids_{ids}'.format(
+        task_key = 'handle_published_school_master_data_row_status_{current_time}_country_ids_{ids}'.format(
             current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'),
             ids='_'.join([str(c_id) for c_id in country_ids]),
         )
+        task_description = 'Handle published school master data rows for countries'
     elif published_row:
-        task_cache_key = 'handle_published_school_master_data_row_status_{current_time}_row_id_{ids}'.format(
+        task_key = 'handle_published_school_master_data_row_status_{current_time}_row_id_{ids}'.format(
             current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'),
             ids=published_row.id,
         )
+        task_description = 'Handle published school master data row for single record'
     else:
-        task_cache_key = 'handle_published_school_master_data_row_status_{current_time}'.format(
+        task_key = 'handle_published_school_master_data_row_status_{current_time}'.format(
             current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
-    running_task = cache.get(task_cache_key, None)
+        task_description = 'Handle published school master data rows'
 
-    print('***** Before checking the task status in Redis *****')
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(
+        task_id, task_key, task_description)
 
-    if running_task in [None, b'completed', 'completed'] or published_row:
-        print('***** Not found running Job *****')
-        cache.set(task_cache_key, 'running', None)
-        print('***** After checking the task status in Redis *****')
-
+    if task_instance:
+        logger.debug('Not found running job for published rows handler task: {}'.format(task_key))
+        updated_school_ids = []
         new_published_records = sources_models.SchoolMasterData.objects.filter(
             status=sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED, is_read=False,
         )
@@ -218,11 +225,9 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
         if country_ids and len(country_ids) > 0:
             new_published_records = new_published_records.filter(country_id__in=country_ids)
 
-        count = 0
-        print('***** Before starting the iteration *****')
-        for data_chunk in core_utilities.queryset_iterator(new_published_records, chunk_size=10, print_msg=False):
-            count += 1
-            print('***** Iteration No: {} *****'.format(count))
+        task_instance.info('Total published records to update: {}'.format(new_published_records.count()))
+
+        for data_chunk in core_utilities.queryset_iterator(new_published_records, chunk_size=100, print_msg=False):
             for row in data_chunk:
                 try:
                     environment = row.school_area_type.lower() if not core_utilities.is_blank_string(
@@ -245,7 +250,7 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                             layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN2,
                         ).first()
 
-                    school, created = School.objects.update_or_create(
+                    school, _ = School.objects.update_or_create(
                         giga_id_school=row.school_id_giga,
                         country=row.country,
                         defaults={
@@ -388,14 +393,20 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                     row.is_read = True
                     row.school = school
                     row.save()
-                except Exception as ex:
-                    print('Error reported on publishing: {0}'.format(ex))
-                    print('Record: {0}'.format(row.__dict__))
 
-        cache.set(task_cache_key, 'completed', None)
+                    updated_school_ids.append(school.id)
+                except Exception as ex:
+                    logger.error('Error reported on publishing: {0}'.format(ex))
+                    logger.error('Record: {0}'.format(row.__dict__))
+                    task_instance.info('Error reported for ID ({0}) on publishing: {1}'.format(row.id, ex))
+
+        if len(updated_school_ids) > 0:
+            for i in range(0, len(updated_school_ids), 20):
+                populate_school_new_fields_task.delay(None, None, None, school_ids=updated_school_ids[i:i + 20])
+
+        background_task_utilities.task_on_complete(task_instance)
     else:
-        print('***** Found running Job with "{0}" name so skipping current iteration *****'.format(task_cache_key))
-    # TODO: Handle cache clean
+        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=2 * 55 * 60, time_limit=2 * 55 * 60)
@@ -405,27 +416,29 @@ def handle_deleted_school_master_data_row(deleted_row=None, country_ids=None):
 
     Execution Frequency: Every day
     """
-    print('***** Handling the School Master Data row deletion *****')
+    logger.info('Handling the deleted school master data rows.')
     if country_ids and len(country_ids) > 0:
-        task_cache_key = 'handle_deleted_school_master_data_row_status_{current_time}_country_ids_{ids}'.format(
+        task_key = 'handle_deleted_school_master_data_row_status_{current_time}_country_ids_{ids}'.format(
             current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'),
             ids='_'.join([str(c_id) for c_id in country_ids]),
         )
+        task_description = 'Handle deleted school master data rows for countries'
     elif deleted_row:
-        task_cache_key = 'handle_deleted_school_master_data_row_status_{current_time}_row_id_{ids}'.format(
+        task_key = 'handle_deleted_school_master_data_row_status_{current_time}_row_id_{ids}'.format(
             current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'),
             ids=deleted_row.id,
         )
+        task_description = 'Handle deleted school master data row for single record'
     else:
-        task_cache_key = 'handle_deleted_school_master_data_row_status_{current_time}'.format(
+        task_key = 'handle_deleted_school_master_data_row_status_{current_time}'.format(
             current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
+        task_description = 'Handle deleted school master data rows'
 
-    running_task = cache.get(task_cache_key, None)
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(task_id, task_key, task_description)
 
-    if running_task in [None, b'completed', 'completed'] or deleted_row:
-        print('***** Not found running Job *****')
-        cache.set(task_cache_key, 'running', None)
-
+    if task_instance:
+        logger.debug('Not found running job for deleted rows handler: {}'.format(task_key))
         new_deleted_records = sources_models.SchoolMasterData.objects.filter(
             status=sources_models.SchoolMasterData.ROW_STATUS_DELETED_PUBLISHED,
             is_read=False,
@@ -439,6 +452,7 @@ def handle_deleted_school_master_data_row(deleted_row=None, country_ids=None):
             new_deleted_records = new_deleted_records.filter(country_id__in=country_ids)
 
         current_date = core_utilities.get_current_datetime_object()
+        task_instance.info('Total records to update: {}'.format(new_deleted_records.count()))
 
         for data_chunk in core_utilities.queryset_iterator(new_deleted_records, chunk_size=1000):
             for row in data_chunk:
@@ -456,13 +470,14 @@ def handle_deleted_school_master_data_row(deleted_row=None, country_ids=None):
                     row.save()
 
                 except Exception as ex:
-                    print('Error reported on deletion: {0}'.format(ex))
-                    print('Record: {0}'.format(row.__dict__))
+                    logger.error('Error reported on deletion: {0}'.format(ex))
+                    logger.error('Record: {0}'.format(row.__dict__))
+                    task_instance.info('Error reported for ID ({0}) on deletion: {1}'.format(row.id, ex))
 
-        cache.set(task_cache_key, 'completed', None)
+        task_instance.info('Remaining records: {}'.format(new_deleted_records.count()))
+        background_task_utilities.task_on_complete(task_instance)
     else:
-        print('***** Found running Job with "{0}" name so skipping current iteration *****'.format(task_cache_key))
-    # TODO: Handle cache clean
+        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task
@@ -474,138 +489,158 @@ def email_reminder_to_editor_and_publisher_for_review_waiting_records():
 
     Execution Frequency: Every day only once
     """
-    task_cache_key = 'email_reminder_to_editor_and_publisher_for_review_waiting_records_status_{current_time}'.format(
+    task_key = 'email_reminder_to_editor_and_publisher_for_review_waiting_records_status_{current_time}'.format(
         current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y'))
-    running_task = cache.get(task_cache_key, None)
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(
+        task_id, task_key, 'Send reminder email to Editor and Publisher to review the school master rows')
 
-    if running_task in [None, b'completed', 'completed']:
-        print('***** Not found running Job *****')
-        cache.set(task_cache_key, 'running', None)
+    if task_instance:
+        logger.debug('Not found running job for reminder email task: {}'.format(task_key))
+
         ds_settings = settings.DATA_SOURCE_CONFIG.get('SCHOOL_MASTER')
         review_grace_period = core_utilities.convert_to_int(ds_settings['REVIEW_GRACE_PERIOD_IN_HRS'], default='48')
 
-        print('***** Sending email reminder to Editor/Publisher if records are waiting for more '
-              'than {0} hrs *****'.format(review_grace_period))
+        logger.info('Sending email reminder to Editor/Publisher if records are waiting for more '
+                    'than {0} hrs'.format(review_grace_period))
+        task_instance.info('Sending email reminder to Editor/Publisher if records are waiting for '
+                           'more than {0} hrs'.format(review_grace_period))
 
-        current_time = core_utilities.get_current_datetime_object()
-        check_time = current_time - timedelta(hours=review_grace_period)
-        email_user_list = []
-
-        # If there are records for all editor to review which collected date is more than 48 hrs
-        has_records_to_review_for_all_editors = sources_models.SchoolMasterData.objects.filter(
-            status=sources_models.SchoolMasterData.ROW_STATUS_DRAFT,
-            modified__lt=check_time,
-        ).exists()
-
-        # If there are records for all publishers to review which are sent to publishers
-        # to publish more than 48 hrs back
-        has_records_to_review_for_all_publishers = sources_models.SchoolMasterData.objects.filter(
-            status__in=[
-                sources_models.SchoolMasterData.ROW_STATUS_DRAFT_LOCKED,
-                sources_models.SchoolMasterData.ROW_STATUS_DELETED,
-            ],
-            is_read=False,
-            modified__lt=check_time,
-        ).exists()
-
-        # If it has records for all editors and publishers to review than send the reminder email to all
-        if has_records_to_review_for_all_editors and has_records_to_review_for_all_publishers:
-            print('All Editors and Publishers has records to review')
-            email_user_list.extend(get_user_emails_for_permissions([
-                auth_models.RolePermission.CAN_UPDATE_SCHOOL_MASTER_DATA,
-                auth_models.RolePermission.CAN_PUBLISH_SCHOOL_MASTER_DATA,
-            ]))
+        if (
+            core_utilities.is_blank_string(settings.ANYMAIL.get('MAILJET_API_KEY')) or
+            core_utilities.is_blank_string(settings.ANYMAIL.get('MAILJET_SECRET_KEY'))
+        ):
+            logger.error('MailJet creds are not configured to send the email. Hence email notification is disabled.')
+            task_instance.info('ERROR: MailJet creds are not configured to send the email. Hence email notification is '
+                               'disabled.')
         else:
-            # If all editors have records to review, then send reminder email
-            if has_records_to_review_for_all_editors:
-                print('All Editors has records to review')
-                email_user_list.extend(
-                    get_user_emails_for_permissions([auth_models.RolePermission.CAN_UPDATE_SCHOOL_MASTER_DATA]))
+            current_time = core_utilities.get_current_datetime_object()
+            check_time = current_time - timedelta(hours=review_grace_period)
+            email_user_list = []
+
+            # If there are records for all editor to review which collected date is more than 48 hrs
+            has_records_to_review_for_all_editors = sources_models.SchoolMasterData.objects.filter(
+                status=sources_models.SchoolMasterData.ROW_STATUS_DRAFT,
+                modified__lt=check_time,
+            ).exists()
+
+            # If there are records for all publishers to review which are sent to publishers
+            # to publish more than 48 hrs back
+            has_records_to_review_for_all_publishers = sources_models.SchoolMasterData.objects.filter(
+                status__in=[
+                    sources_models.SchoolMasterData.ROW_STATUS_DRAFT_LOCKED,
+                    sources_models.SchoolMasterData.ROW_STATUS_DELETED,
+                ],
+                is_read=False,
+                modified__lt=check_time,
+            ).exists()
+
+            # If it has records for all editors and publishers to review than send the reminder email to all
+            if has_records_to_review_for_all_editors and has_records_to_review_for_all_publishers:
+                logger.info('All Editors and Publishers has records to review')
+                task_instance.info('All Editors and Publishers has records to review')
+                email_user_list.extend(get_user_emails_for_permissions([
+                    auth_models.RolePermission.CAN_UPDATE_SCHOOL_MASTER_DATA,
+                    auth_models.RolePermission.CAN_PUBLISH_SCHOOL_MASTER_DATA,
+                ]))
             else:
-                # Else send the email to those editors who have updated the DRAFT records but not touched
-                # it in last 48 hrs
-                editor_ids_who_has_old_updated_records = list(sources_models.SchoolMasterData.objects.filter(
-                    status=sources_models.SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT,
-                    modified__lt=check_time,
-                ).values_list('modified_by_id', flat=True).order_by('modified_by_id').distinct('modified_by_id'))
-
-                if len(editor_ids_who_has_old_updated_records) > 0:
-                    print('Only few Editors has records to review')
+                # If all editors have records to review, then send reminder email
+                if has_records_to_review_for_all_editors:
+                    logger.info('All Editors has records to review')
+                    task_instance.info('All Editors has records to review')
                     email_user_list.extend(
-                        get_user_emails_for_permissions(
-                            [auth_models.RolePermission.CAN_UPDATE_SCHOOL_MASTER_DATA],
-                            ids_to_filter=editor_ids_who_has_old_updated_records)
-                    )
+                        get_user_emails_for_permissions([auth_models.RolePermission.CAN_UPDATE_SCHOOL_MASTER_DATA]))
+                else:
+                    # Else send the email to those editors who have updated the DRAFT records but not touched
+                    # it in last 48 hrs
+                    editor_ids_who_has_old_updated_records = list(sources_models.SchoolMasterData.objects.filter(
+                        status=sources_models.SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT,
+                        modified__lt=check_time,
+                    ).values_list('modified_by_id', flat=True).order_by('modified_by_id').distinct('modified_by_id'))
 
-            # If all publishers have records to review, then send reminder email to all
-            if has_records_to_review_for_all_publishers:
-                print('All Publishers has records to review')
-                email_user_list.extend(
-                    get_user_emails_for_permissions([auth_models.RolePermission.CAN_PUBLISH_SCHOOL_MASTER_DATA]))
-            else:
-                # Else send the email to those publishers who have updated the records but not touched it in last 48 hrs
-                publisher_ids_who_has_old_updated_records = list(sources_models.SchoolMasterData.objects.filter(
-                    status=sources_models.SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT_LOCKED,
-                    modified__lt=check_time,
-                ).values_list('modified_by_id', flat=True).order_by('modified_by_id').distinct('modified_by_id'))
+                    if len(editor_ids_who_has_old_updated_records) > 0:
+                        logger.info('Only few Editors has records to review')
+                        task_instance.info('Only few Editors has records to review')
+                        email_user_list.extend(
+                            get_user_emails_for_permissions(
+                                [auth_models.RolePermission.CAN_UPDATE_SCHOOL_MASTER_DATA],
+                                ids_to_filter=editor_ids_who_has_old_updated_records)
+                        )
 
-                if len(publisher_ids_who_has_old_updated_records) > 0:
-                    print('Only few Publishers has records to review')
+                # If all publishers have records to review, then send reminder email to all
+                if has_records_to_review_for_all_publishers:
+                    logger.info('All Publishers has records to review')
+                    task_instance.info('All Publishers has records to review')
                     email_user_list.extend(
-                        get_user_emails_for_permissions(
-                            [auth_models.RolePermission.CAN_PUBLISH_SCHOOL_MASTER_DATA],
-                            ids_to_filter=publisher_ids_who_has_old_updated_records)
-                    )
+                        get_user_emails_for_permissions([auth_models.RolePermission.CAN_PUBLISH_SCHOOL_MASTER_DATA]))
+                else:
+                    # Else send the email to those publishers who have updated the records
+                    # but not touched it in last 48 hrs
+                    publisher_ids_who_has_old_updated_records = list(sources_models.SchoolMasterData.objects.filter(
+                        status=sources_models.SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT_LOCKED,
+                        modified__lt=check_time,
+                    ).values_list('modified_by_id', flat=True).order_by('modified_by_id').distinct('modified_by_id'))
 
-        if len(email_user_list) > 0:
-            # Get the unique email IDs so it sends only 1 email
-            unique_email_ids = set(email_user_list)
+                    if len(publisher_ids_who_has_old_updated_records) > 0:
+                        logger.info('Only few Publishers has records to review')
+                        task_instance.info('Only few Publishers has records to review')
+                        email_user_list.extend(
+                            get_user_emails_for_permissions(
+                                [auth_models.RolePermission.CAN_PUBLISH_SCHOOL_MASTER_DATA],
+                                ids_to_filter=publisher_ids_who_has_old_updated_records)
+                        )
 
-            email_subject = sources_config.school_master_records_to_review_email_subject_format % (
-                core_utilities.get_project_title()
-            )
+            if len(email_user_list) > 0:
+                # Get the unique email IDs so it sends only 1 email
+                unique_email_ids = set(email_user_list)
 
-            dashboard_url = ds_settings['DASHBOARD_URL']
-            email_message = sources_config.school_master_records_to_review_email_message_format.format(
-                dashboard_url='Dashboard url: {}'.format(dashboard_url) if dashboard_url else '',
-            )
+                email_subject = sources_config.school_master_records_to_review_email_subject_format % (
+                    core_utilities.get_project_title()
+                )
 
-            email_content = {'subject': email_subject, 'message': email_message}
-            print('Sending the below emails:\n'
-                  'To: {0}\n'
-                  'Subject: {1}\n'
-                  'Body: {2}'.format(unique_email_ids, email_subject, email_message))
-            account_utilities.send_email_over_mailjet_service(unique_email_ids, **email_content)
-        cache.set(task_cache_key, 'completed', None)
+                dashboard_url = ds_settings['DASHBOARD_URL']
+                email_message = sources_config.school_master_records_to_review_email_message_format.format(
+                    dashboard_url='Dashboard url: {}'.format(dashboard_url) if dashboard_url else '',
+                )
+
+                email_content = {'subject': email_subject, 'message': email_message}
+                logger.info('Sending the below emails:\n'
+                            'To: {0}\n'
+                            'Subject: {1}\n'
+                            'Body: {2}'.format(unique_email_ids, email_subject, email_message))
+                task_instance.info('Sending the below emails:\tTo: {0}\tSubject: {1}\tBody: {2}'.format(
+                    unique_email_ids, email_subject, email_message))
+                account_utilities.send_email_over_mailjet_service(unique_email_ids, **email_content)
+
+        background_task_utilities.task_on_complete(task_instance)
     else:
-        print('***** Found running Job with "{0}" name so skipping current iteration *****'.format(task_cache_key))
+        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=60 * 60, time_limit=60 * 60)
 def load_data_from_daily_check_app_api(*args):
-    print('***** Loading the DailyCheckApp Data to PROCO DB *****')
+    logger.info('Loading the DailyCheckApp data to DB.')
     source_utilities.sync_dailycheckapp_realtime_data()
-    print('***** Loaded the DailyCheckApp Data to PROCO DB - SUCCESS *****')
+    logger.info('Loaded the DailyCheckApp data to DB successfully.')
 
 
 @app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)
 def load_data_from_qos_apis(*args):
-    print('***** Loading the QoS Data to PROCO DB *****')
+    logger.info('Loading the QoS data to DB.')
     source_utilities.load_qos_data_source_response_to_model()
     source_utilities.sync_qos_realtime_data()
-    print('***** Loaded the QoS Data to PROCO DB - SUCCESS *****')
+    logger.info('Loaded the QoS data to DB successfully.')
 
 
 @app.task(soft_time_limit=2 * 60 * 60, time_limit=2 * 60 * 60)
 def cleanup_school_master_rows():
-    task_cache_key = 'cleanup_school_master_rows_status_{current_time}'.format(
+    task_key = 'cleanup_school_master_rows_status_{current_time}'.format(
         current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
-    running_task = cache.get(task_cache_key, None)
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(task_id, task_key, 'Cleanup school master rows')
 
-    if running_task in [None, b'completed', 'completed']:
-        print('***** Not found running Job *****')
-        cache.set(task_cache_key, 'running', None)
-
+    if task_instance:
+        logger.debug('Not found running job for school master cleanup task: {}'.format(task_key))
         # Delete all the old records where more than 1 record are in DRAFT/UPDATED_IN_DRAFT or
         # ROW_STATUS_DRAFT_LOCKED/ROW_STATUS_UPDATED_IN_DRAFT_LOCKED for same School GIGA ID
         rows_with_more_than_1_record_in_draft = sources_models.SchoolMasterData.objects.filter(
@@ -618,9 +653,10 @@ def cleanup_school_master_rows():
         ).values('school_id_giga', 'country_id').annotate(
             total_records=Count('school_id_giga', distinct=False),
         ).order_by('-total_records', 'school_id_giga', 'country_id').filter(total_records__gt=1)
-        print('Queryset to get all the old records to delete where more than 1 record are in DRAFT/'
-              'UPDATED_IN_DRAFT/ROW_STATUS_DRAFT_LOCKED/ROW_STATUS_UPDATED_IN_DRAFT_LOCKED '
-              'for same School GIGA ID: {0}'.format(rows_with_more_than_1_record_in_draft.query))
+
+        logger.debug('Queryset to get all the old records to delete where more than 1 record are in DRAFT/'
+                     'UPDATED_IN_DRAFT/ROW_STATUS_DRAFT_LOCKED/ROW_STATUS_UPDATED_IN_DRAFT_LOCKED '
+                     'for same School GIGA ID: {0}'.format(rows_with_more_than_1_record_in_draft.query))
 
         for row in rows_with_more_than_1_record_in_draft:
             for row_to_delete in sources_models.SchoolMasterData.objects.filter(
@@ -628,14 +664,19 @@ def cleanup_school_master_rows():
                 country_id=row['country_id'],
             ).order_by('-created')[1:]:
                 row_to_delete.delete()
+        task_instance.info('Deleted rows where more than 1 record are in DRAFT/'
+                           'UPDATED_IN_DRAFT/ROW_STATUS_DRAFT_LOCKED/ROW_STATUS_UPDATED_IN_DRAFT_LOCKED '
+                           'for same School GIGA ID')
 
+        # Delete all the old records where more than 1 record are in is_read=True for same School GIGA ID
         rows_with_more_than_1_record_in_read = sources_models.SchoolMasterData.objects.filter(
             is_read=True,
         ).values('school_id_giga', 'country_id').annotate(
             total_records=Count('school_id_giga', distinct=False),
         ).order_by('-total_records').filter(total_records__gt=1)
-        print('Queryset to get all the old records to delete where more than 1 record are in is_read=True '
-              'for same School GIGA ID: {0}'.format(rows_with_more_than_1_record_in_read.query))
+
+        logger.debug('Queryset to get all the old records to delete where more than 1 record are in is_read=True '
+                     'for same School GIGA ID: {0}'.format(rows_with_more_than_1_record_in_read.query))
 
         for row in rows_with_more_than_1_record_in_read:
             for row_to_delete in sources_models.SchoolMasterData.objects.filter(
@@ -643,10 +684,11 @@ def cleanup_school_master_rows():
                 country_id=row['country_id'],
             ).order_by('-published_at')[1:]:
                 row_to_delete.delete()
+        task_instance.info('Deleted rows where more than 1 record are in is_read=True for same School GIGA ID')
 
-        cache.set(task_cache_key, 'completed', None)
+        background_task_utilities.task_on_complete(task_instance)
     else:
-        print('***** Found running Job with "{0}" name so skipping current iteration *****'.format(task_cache_key))
+        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=6 * 60 * 60, time_limit=6 * 60 * 60)
@@ -658,25 +700,25 @@ def update_static_data(*args, country_iso3_format=None):
 
     Execution Frequency: Once in a week/once in 2 weeks
     """
-    task_cache_key = 'update_static_data_status_{current_time}'.format(
-        current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y'))
-    running_task = cache.get(task_cache_key, None)
+    task_key = 'update_static_data_status_{current_time}'.format(
+        current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(
+        task_id, task_key, 'Sync Static Data from School Master sources', check_previous=True)
 
-    if running_task in [None, b'completed', 'completed']:
-        print('***** Not found running Job *****')
-        cache.set(task_cache_key, 'running', None)
-
+    if task_instance:
+        logger.debug('Not found running job for static data pull handler: {}'.format(task_key))
         load_data_from_school_master_apis(country_iso3_format=country_iso3_format)
+        task_instance.info('Completed the load data from School Master API call')
         cleanup_school_master_rows.s()
-
-        cache.set(task_cache_key, 'completed', None)
+        task_instance.info('Scheduled cleanup school master rows')
+        background_task_utilities.task_on_complete(task_instance)
     else:
-        print('***** Found running Job with "{0}" name so skipping current iteration *****'.format(task_cache_key))
+        logger.error('Found Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=60 * 60, time_limit=60 * 60)
 def finalize_previous_day_data(_prev_result, country_id, date, *args):
-    print('Inside finalize_previous_day_data() *** ', country_id)
     country = Country.objects.get(id=country_id)
 
     aggregate_real_time_data_to_school_daily_status(country, date)
@@ -699,17 +741,15 @@ def update_live_data(*args, today=True):
 
     Execution Frequency: 4-5 times a day
     """
-
-    task_cache_key = 'update_live_data_status_{current_time}_{today}'.format(
+    task_key = 'update_live_data_status_{current_time}_{today}'.format(
         current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'),
         today=today,
     )
-    running_task = cache.get(task_cache_key, None)
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(task_id, task_key, 'Sync Realtime Data from Live sources')
 
-    if running_task in [None, b'completed', 'completed']:
-        print('***** Not found running Job *****')
-        cache.set(task_cache_key, 'running', None)
-
+    if task_instance:
+        logger.debug('Not found running job: {}'.format(task_key))
         countries_ids = Country.objects.values_list('id', flat=True)
 
         if today:
@@ -731,8 +771,6 @@ def update_live_data(*args, today=True):
             chain(
                 load_data_from_daily_check_app_api.s(),
                 load_data_from_qos_apis.s(),
-                # load_data_from_unicef_db.s(), - Need to check with Brian for deletion
-                # load_brasil_daily_statistics.s(), - QoS
                 chord(
                     group([
                         finalize_previous_day_data.s(country_id, yesterday_date)
@@ -743,38 +781,41 @@ def update_live_data(*args, today=True):
 
             ).delay()
 
-        cache.set(task_cache_key, 'completed', None)
+        background_task_utilities.task_on_complete(task_instance)
     else:
-        print('***** Found running Job with "{0}" name so skipping current iteration *****'.format(task_cache_key))
+        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=1 * 60 * 60, time_limit=1 * 60 * 60)
 def clean_old_live_data():
     current_datetime = core_utilities.get_current_datetime_object()
-    task_cache_key = 'clean_old_live_data_status_{current_time}'.format(
-        current_time=format_date(current_datetime, frmt='%d%m%Y'),
+    task_key = 'clean_old_live_data_status_{current_time}'.format(
+        current_time=format_date(current_datetime, frmt='%d%m%Y_%H'),
     )
-    running_task = cache.get(task_cache_key, None)
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(task_id, task_key, 'Clean live data older than 30 days')
 
-    if running_task in [None, b'completed', 'completed']:
-        print('***** Not found running Job *****')
-        cache.set(task_cache_key, 'running', None)
-
+    if task_instance:
+        logger.debug('Not found running job for live data cleanup handler: {}'.format(task_key))
         older_then_date = current_datetime - timedelta(days=30)
 
-        print('Deleting all the rows from "RealTimeConnectivity" Data Table which is older than: {0}'.format(
+        logger.debug('Deleting all the rows from "RealTimeConnectivity" Data Table which is older than: {0}'.format(
             older_then_date))
         statistics_models.RealTimeConnectivity.objects.filter(created__lt=older_then_date).delete()
+        task_instance.info('"RealTimeConnectivity" data table completed')
 
-        print('Deleting all the rows from "DailyCheckAppMeasurementData" Data Table which is older than: {0}'.format(
-            older_then_date))
+        logger.debug(
+            'Deleting all the rows from "DailyCheckAppMeasurementData" Data Table which is older than: {0}'.format(
+                older_then_date))
         # Delete all entries from DailyCheckApp Data Table which is older than 7 days
         sources_models.DailyCheckAppMeasurementData.objects.filter(created_at__lt=older_then_date).delete()
+        task_instance.info('"DailyCheckAppMeasurementData" data table completed')
 
-        print('Deleting all the rows from "QoSData" Data Table which is older than: {0}'.format(older_then_date))
+        logger.debug('Deleting all the rows from "QoSData" Data Table which is older than: {0}'.format(older_then_date))
         # Delete all entries from QoS Data Table which is older than 7 days
         sources_models.QoSData.objects.filter(timestamp__lt=older_then_date).delete()
+        task_instance.info('"QoSData" data table completed')
 
-        cache.set(task_cache_key, 'completed', None)
+        background_task_utilities.task_on_complete(task_instance)
     else:
-        print('***** Found running Job with "{0}" name so skipping current iteration *****'.format(task_cache_key))
+        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))

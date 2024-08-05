@@ -1,3 +1,5 @@
+import logging
+
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.db.models import Prefetch
@@ -7,8 +9,10 @@ from proco.locations.models import Country
 from proco.schools import utils as school_utilities
 from proco.schools.models import School
 
+logger = logging.getLogger('gigamaps.' + __name__)
 
-def populate_school_new_fields(school_id, start_school_id, end_school_id, country_id):
+
+def populate_school_new_fields(school_id, start_school_id, end_school_id, country_id, school_ids):
     """ """
     schools_qry = School.objects.all()
 
@@ -16,18 +20,21 @@ def populate_school_new_fields(school_id, start_school_id, end_school_id, countr
         Prefetch('country', Country.objects.defer('geometry', 'geometry_simplified')),
     )
     if school_id and isinstance(school_id, int):
-        schools_qry = schools_qry.filter(id=school_id,)
+        schools_qry = schools_qry.filter(id=school_id, )
 
     if start_school_id:
-        schools_qry = schools_qry.filter(id__gte=start_school_id,)
+        schools_qry = schools_qry.filter(id__gte=start_school_id, )
 
     if end_school_id:
-        schools_qry = schools_qry.filter(id__lte=end_school_id,)
+        schools_qry = schools_qry.filter(id__lte=end_school_id, )
 
     if country_id:
-        schools_qry = schools_qry.filter(country_id=country_id,)
+        schools_qry = schools_qry.filter(country_id=country_id, )
 
-    print('Starting the process: ', schools_qry.query)
+    if school_ids and len(school_ids) > 0:
+        schools_qry = schools_qry.filter(id__in=school_ids.split(','))
+
+    logger.debug('Starting the process: {}'.format(schools_qry.query))
     count = 1
     for data_chunk in core_utilities.queryset_iterator(schools_qry, chunk_size=20000):
         with transaction.atomic():
@@ -37,9 +44,9 @@ def populate_school_new_fields(school_id, start_school_id, end_school_id, countr
                 school.connectivity_status = school_utilities.get_connectivity_status_by_master_api(school)
                 school.save(update_fields=['coverage_type', 'coverage_status', 'connectivity_status'])
 
-        print("Update on school records SUCCEEDED for count '{0}'".format(count))
+        logger.debug("Update on school records succeeded for count '{0}'".format(count))
         count += 1
-    print('Completed the process.')
+    logger.info('Completed the process.')
 
 
 class Command(BaseCommand):
@@ -64,13 +71,18 @@ class Command(BaseCommand):
             '-country_id', dest='country_id', required=False, type=int,
             help='Pass the Country ID in case want to control the update.'
         )
+        parser.add_argument(
+            '-school_ids', dest='school_ids', required=False, type=str,
+            help='Pass the School IDs in case want to control the update.'
+        )
 
     def handle(self, **options):
         school_id = options.get('school_id')
+        school_ids = options.get('school_ids')
         start_school_id = options.get('start_school_id')
         end_school_id = options.get('end_school_id')
         country_id = options.get('country_id')
 
-        print('*** School update operation STARTED ({0}) ***'.format(school_id))
+        logger.debug('School update operation started ({0})'.format(options))
 
-        populate_school_new_fields(school_id, start_school_id, end_school_id, country_id)
+        populate_school_new_fields(school_id, start_school_id, end_school_id, country_id, school_ids)

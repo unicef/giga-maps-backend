@@ -14,7 +14,7 @@ def add_url_params(url, params):
     >> add_url_params(url, new_params)
     'http://stackoverflow.com/test?data=some&data=values&answers=false'
     """
-    # Unquoting URL first so we don't loose existing args
+    # Unquoting URL first so we don't lose existing args
     url = unquote(url)
     # Extracting url info
     parsed_url = urlparse(url)
@@ -37,7 +37,7 @@ def add_url_params(url, params):
     # Converting URL argument to proper query string
     encoded_get_args = urlencode(parsed_get_args, doseq=True)
     # Creating new parsed result object based on provided with new
-    # URL arguments. Same thing happens inside of urlparse.
+    # URL arguments. Same thing happens inside urlparse.
     new_url = ParseResult(
         parsed_url.scheme, parsed_url.netloc, parsed_url.path,
         parsed_url.params, encoded_get_args, parsed_url.fragment,

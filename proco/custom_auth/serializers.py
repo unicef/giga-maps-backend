@@ -1,17 +1,17 @@
 import re
+import logging
 
-from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.utils.translation import ugettext as _
 from rest_flex_fields.serializers import FlexFieldsModelSerializer
 from rest_framework import serializers
-from rest_framework_jwt import serializers as jwt_serializers
 
 from proco.core import utils as core_utilities
 from proco.custom_auth import exceptions as auth_exceptions
 from proco.custom_auth import models as auth_models
 from proco.custom_auth import utils as auth_utilities
 from proco.custom_auth.config import app_config as auth_config
+
+logger = logging.getLogger('gigamaps.' + __name__)
 
 
 class RoleSerializer(serializers.ModelSerializer):
@@ -70,7 +70,7 @@ class BaseRoleCRUDSerializer(serializers.ModelSerializer):
             return name
         raise auth_exceptions.InvalidRoleNameError()
 
-    def _validate_custom_role_count_error(self, data):
+    def _validate_custom_role_count_error(self):
         max_role_count = auth_config.custom_role_count_limit
 
         custom_role = auth_models.Role.objects.filter(category='custom')
@@ -105,7 +105,7 @@ class BaseRoleCRUDSerializer(serializers.ModelSerializer):
             # If reference role is provided then copy all the permissions as well
             data['permissions'] = reference_role.permissions
 
-        self._validate_custom_role_count_error(data)
+        self._validate_custom_role_count_error()
         self._validate_unique_role_name(data)
         return data
 
@@ -262,11 +262,11 @@ class BaseUserSerializer(serializers.ModelSerializer):
         email_lower = email.lower()
         if auth_models.ApplicationUser.objects.filter(email=email_lower).exists():
             e = auth_exceptions.EmailAlreadyExistsError()
-            print(e.message)
-            print('Details: {0}'.format(email_lower))
+            logger.error(e.message)
+            logger.debug('Details: {0}'.format(email_lower))
             raise e
-        print('Email validated')
-        print('Details: {0}'.format(email_lower))
+        logger.info('Email validated.')
+        logger.debug('Details: {0}'.format(email_lower))
         return email_lower
 
     def get_role_fields(self):
@@ -288,7 +288,6 @@ class BaseUserSerializer(serializers.ModelSerializer):
 
     def to_representation(self, user):
         user_role = user.get_roles()
-        # role_fields = self.get_role_fields()
         role_serializer = RoleSerializer(instance=user_role)
         setattr(user, 'role', role_serializer.data)
         return super().to_representation(user)
@@ -307,29 +306,16 @@ class UserRoleRelationshipSerializer(serializers.ModelSerializer):
             'role',
         )
 
-    # def _check_for_custom_role(self, role):
-    #
-    #     if role.category == auth_models.Role.ROLE_CATEGORY_CUSTOM:
-    #
-    #         is_super_user = self.instance and self.instance.user.is_superuser
-    #
-    #         # Cannot assign custom role to a superuser.
-    #         if is_super_user:
-    #             raise auth_exceptions.CannotAssignCustomRoleToSuperuserUser()
-
     def validate_role(self, role):
         """
             Method to validate new role of the user.
         """
-        if role:
-            # self._check_for_custom_role(role)
-            # In case of create user role relationship.
-            if self.instance:
-                # In case of updating the user role relationship, the new role should not be same
-                # as that of the existing role.
-                if self.instance.role.id != role.id:
-                    return role
-                raise auth_exceptions.InvalidRoleError()
+        if role and self.instance:
+            # In case of updating the user role relationship, the new role should not be same
+            # as that of the existing role.
+            if self.instance.role.id != role.id:
+                return role
+            raise auth_exceptions.InvalidRoleError()
 
         return role
 
@@ -437,23 +423,11 @@ class UpdateUserSerializer(BaseUserSerializer):
             'role',
         )
 
-    # def _check_for_custom_role(self, role):
-    #
-    #     if role.category == auth_models.Role.ROLE_CATEGORY_CUSTOM:
-    #
-    #         is_super_user = self.instance and self.instance.is_superuser
-    #
-    #         # Cannot assign custom role to a superuser.
-    #         if is_super_user:
-    #             raise auth_exceptions.CannotAssignCustomRoleToSuperuserUser()
-
     def validate_role(self, new_role):
         """
             Method to validate new role of the user.
         """
         if new_role and self.instance:
-            # self._check_for_custom_role(role)
-
             # In case of updating the user role relationship, the new role should not be same
             # as that of the existing role.
             user_existing_role = self.instance.get_roles()

@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta
 
 import jwt
@@ -8,6 +9,8 @@ from rest_framework import exceptions
 
 from proco.core import utils as core_utilities
 from proco.custom_auth import models as auth_models
+
+logger = logging.getLogger('gigamaps.' + __name__)
 
 
 def jwt_get_username_from_payload_handler(payload):
@@ -84,7 +87,7 @@ def jwt_decode_handler(token):
     """
     try:
         token_header = jwt.get_unverified_header(token)
-        print('Token header: {0}'.format(token_header))
+        logger.debug('Token header: {0}'.format(token_header))
 
         payload = jwt.decode(
             token,
@@ -93,7 +96,7 @@ def jwt_decode_handler(token):
             algorithms=[token_header.get('alg')],
             options={'verify_signature': False}
         )
-        print('Token as decoded payload: {0}'.format(payload))
+        logger.debug('Token as decoded payload: {0}'.format(payload))
         validate_azure_ad_b2c_token(payload)
     except jwt.ExpiredSignature:
         msg = _('Signature has expired.')

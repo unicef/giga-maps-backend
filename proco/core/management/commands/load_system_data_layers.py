@@ -4,7 +4,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from proco.accounts import models as accounts_models
-from proco.core.utils import get_current_datetime_object
+from proco.core.utils import get_current_datetime_object, normalize_str
 
 data_source_json = [
     {
@@ -228,6 +228,7 @@ data_source_json = [
 
 download_and_coverage_data_layer_json = [
     {
+        'code': 'DEFAULT_DOWNLOAD',
         'name': 'Download',
         'icon': """<svg id="icon" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><style>.cls-1 {fill: none;}</style></defs><path d="M26,24v4H6V24H4v4H4a2,2,0,0,0,2,2H26a2,2,0,0,0,2-2h0V24Z"/><polygon points="26 14 24.59 12.59 17 20.17 17 2 15 2 15 20.17 7.41 12.59 6 14 16 24 26 14"/><g id="_Transparent_Rectangle_" data-name="&lt;Transparent Rectangle&gt;"><rect class="cls-1" width="32" height="32"/></g></svg>""",
         'description': 'System Download Layer',
@@ -268,6 +269,7 @@ download_and_coverage_data_layer_json = [
         ]
     },
     {
+        'code': 'DEFAULT_COVERAGE',
         'name': 'Coverage data',
         'icon': """<svg id="icon" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><style>.cls-1 {fill: none;}</style></defs><path d="M10.57,30l.9333-2h8.9928l.9333,2h2.2072L17,15.7778V11H15v4.7778L8.3631,30ZM16,18.3647,17.6965,22h-3.393ZM13.37,24h5.26l.9333,2H12.4369Z" transform="translate(0 0)"/><path d="M10.7832,9.3325a7.0007,7.0007,0,0,1,10.4341,0l-1.49,1.334a5,5,0,0,0-7.4537,0Z" transform="translate(0 0)"/><path d="M7.1992,6.3994a11.0019,11.0019,0,0,1,17.6006,0L23.2,7.6a9.0009,9.0009,0,0,0-14.4014,0Z" transform="translate(0 0)"/><rect id="_Transparent_Rectangle_" data-name="&lt;Transparent Rectangle&gt;" class="cls-1" width="32" height="32"/></svg>""",
         'description': 'Mobile coverage in the area',
@@ -388,6 +390,17 @@ def load_system_data_layers_data():
             pass
 
 
+def populate_data_layer_codes():
+    for data_layer_instance in accounts_models.DataLayer.objects.all_records():
+        if data_layer_instance.code == 'UNKNOWN':
+            possible_code = normalize_str(str(data_layer_instance.name)).upper()
+            count = 1
+            while accounts_models.DataLayer.objects.all_records().filter(code=possible_code).exists():
+                possible_code = possible_code + '_' + str(count)
+            data_layer_instance.code = possible_code
+            data_layer_instance.save(update_fields=('code',))
+
+
 class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument(
@@ -408,6 +421,11 @@ class Command(BaseCommand):
         parser.add_argument(
             '--update_data_layers', action='store_true', dest='update_data_layers', default=False,
             help='If provided, already created Download/Coverage data layers will be updated again.'
+        )
+
+        parser.add_argument(
+            '--update_data_layers_code', action='store_true', dest='update_data_layers_code', default=False,
+            help='If provided, already created data layers will be updated with code picked from name field.'
         )
 
     def handle(self, **options):
@@ -436,5 +454,8 @@ class Command(BaseCommand):
 
         if options.get('update_data_layers', False):
             load_system_data_layers_data()
+
+        if options.get('update_data_layers_code', False):
+            populate_data_layer_codes()
 
         sys.stdout.write('\nData loaded successfully!\n')

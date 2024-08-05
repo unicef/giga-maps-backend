@@ -1,16 +1,16 @@
+import logging
+
 from django.contrib.auth import get_user_model
 from django.utils.translation import ugettext as _
 from rest_framework import exceptions
 from rest_framework_jwt import authentication as jwt_authentication
 from rest_framework_jwt.settings import api_settings
 
-from proco.custom_auth.models import Role
 from proco.core.utils import is_blank_string
+from proco.custom_auth.models import Role
 
+logger = logging.getLogger('gigamaps.' + __name__)
 jwt_decode_handler = api_settings.JWT_DECODE_HANDLER
-
-
-# jwt_get_username_from_payload = api_settings.JWT_PAYLOAD_GET_USERNAME_HANDLER
 
 
 class JSONWebTokenAuthentication(jwt_authentication.JSONWebTokenAuthentication):
@@ -20,13 +20,6 @@ class JSONWebTokenAuthentication(jwt_authentication.JSONWebTokenAuthentication):
 
     def authenticate(self, request):
         user_model = get_user_model()
-        # user = user_model.objects.filter(email='admin@test.com').first()
-        # payload = jwt_serializers.jwt_payload_handler(user)
-        # token = jwt_serializers.jwt_encode_handler(payload)
-        # payload2 = jwt_decode_handler(token)
-        # header_token_decoded = jwt_decode_handler(jwt_token)
-        # username_from_token = jwt_get_username_from_payload(header_token_decoded)
-
         try:
             return super().authenticate(request)
         except exceptions.AuthenticationFailed as ex:
@@ -59,5 +52,5 @@ class JSONWebTokenAuthentication(jwt_authentication.JSONWebTokenAuthentication):
         except user_model.DoesNotExist:
             msg = _('Invalid signatures.')
             e = exceptions.AuthenticationFailed(msg)
-            print(str(e))
+            logger.debug(str(e))
             raise e

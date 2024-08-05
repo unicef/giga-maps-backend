@@ -171,8 +171,8 @@ class ListSchoolMasterDataSerializer(FlexFieldsModelSerializer):
                 }
 
             old_education_level = None \
-                if core_utilities.is_blank_string(row.school.education_level) else str(
-                row.school.education_level).lower()
+                if core_utilities.is_blank_string(row.school.education_level) \
+                else str(row.school.education_level).lower()
             new_education_level = None \
                 if core_utilities.is_blank_string(row.education_level) else str(row.education_level).lower()
 
@@ -361,7 +361,7 @@ class PublishSchoolMasterDataSerializer(serializers.ModelSerializer):
 
         list_serializer_class = UpdateListSerializer
 
-    def _validate_status(self, instance, validated_data):
+    def _validate_status(self, instance):
         if instance.status in [
             sources_models.SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT,
             sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED,
@@ -375,7 +375,6 @@ class PublishSchoolMasterDataSerializer(serializers.ModelSerializer):
             raise source_exceptions.InvalidSchoolMasterDataRowStatusError(message_kwargs=message_kwargs)
 
     def delete_all_related_rows(self, instance):
-        print('Deleting all the row for same school giga id: {0}'.format(instance.school_id_giga))
         sources_models.SchoolMasterData.objects.filter(
             school_id_giga=instance.school_id_giga,
         ).exclude(
@@ -400,7 +399,7 @@ class PublishSchoolMasterDataSerializer(serializers.ModelSerializer):
             validated_data['status'] = sources_models.SchoolMasterData.ROW_STATUS_DELETED_PUBLISHED
         else:
             validated_data['status'] = sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED
-        self._validate_status(instance, validated_data)
+        self._validate_status(instance)
         validated_data['published_at'] = core_utilities.get_current_datetime_object()
 
         request_user = core_utilities.get_current_user(context=self.context)

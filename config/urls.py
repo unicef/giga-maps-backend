@@ -40,7 +40,6 @@ urlpatterns = [
         path('statistics/', include('proco.connection_statistics.api_urls')),
         path('contact/', include('proco.contact.api_urls')),
         path('about_us/', include('proco.about_us.api_urls')),
-        path('dailycheckapp_contact/', include('proco.dailycheckapp_contact.api_urls')),
         path('accounts/', include('proco.accounts.api_urls')),
         path('sources/', include('proco.data_sources.api_urls')),
     ])),

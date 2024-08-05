@@ -1,6 +1,7 @@
 # encoding: utf-8
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import logging
 from django.core.management.base import BaseCommand
 
 from proco.accounts import models as accounts_models
@@ -9,8 +10,10 @@ from proco.core import db_utils as db_utilities
 from proco.core.utils import get_current_datetime_object
 from proco.locations.models import Country
 
+logger = logging.getLogger('gigamaps.' + __name__)
 
-def delete_relationships(country_id, layer_id):
+
+def delete_relationships(country_id, layer_id, excluded_ids):
     relationships = accounts_models.DataLayerCountryRelationship.objects.all()
 
     if country_id:
@@ -18,6 +21,9 @@ def delete_relationships(country_id, layer_id):
 
     if layer_id:
         relationships = relationships.filter(data_layer_id=layer_id)
+
+    if len(excluded_ids) > 0:
+        relationships = relationships.exclude(id__in=excluded_ids)
 
     relationships.update(deleted=get_current_datetime_object())
 
@@ -42,15 +48,11 @@ class Command(BaseCommand):
         )
 
     def handle(self, **options):
-        print('*** Active Data Layer for Country Mapping operations STARTED ***')
+        logger.info('Active data layer for country mapping operations started.')
 
         country_id = options.get('country_id', None)
         layer_id = options.get('layer_id', None)
-
-        if options.get('reset_mapping', False):
-            print('DELETE_OLD_RECORDS - START')
-            delete_relationships(country_id, layer_id)
-            print('DELETE_OLD_RECORDS - END')
+        ids_to_keep = []
 
         all_published_layers = accounts_models.DataLayer.objects.all()
         if layer_id:
@@ -62,7 +64,7 @@ class Command(BaseCommand):
             all_country_ids = list(Country.objects.all().values_list('id', flat=True).order_by('id'))
 
         if all_published_layers.count() > 0 and len(all_country_ids) > 0:
-            print('RELATIONSHIP_CREATION - START')
+            logger.info('Relationship creation - start')
             for data_layer_instance in all_published_layers:
                 data_sources = data_layer_instance.data_sources.all()
 
@@ -101,20 +103,24 @@ class Command(BaseCommand):
                                                                                   label='DataLayerCountryRelationship')
 
                     for country_id_has_layer_data in all_country_ids_has_layer_data:
-                        relationship_instance, created = accounts_models.DataLayerCountryRelationship.objects.update_or_create(
-                            data_layer=data_layer_instance,
-                            country_id=country_id_has_layer_data['country_id'],
-                            defaults={
-                                'is_default': not data_layer_instance.created_by,
-                                'last_modified_at': get_current_datetime_object(),
-                            },
+                        relationship_instance, created = (
+                            accounts_models.DataLayerCountryRelationship.objects.update_or_create(
+                                data_layer=data_layer_instance,
+                                country_id=country_id_has_layer_data['country_id'],
+                                defaults={
+                                    # 'is_default': not data_layer_instance.created_by,
+                                    'last_modified_at': get_current_datetime_object(),
+                                },
+                            )
                         )
+                        ids_to_keep.append(relationship_instance.id)
                         if created:
-                            print('New DataLayers + Country Relationship created for LIVE LAYER: {0}'.format(
+                            logger.debug('New dataLayers + country relationship created for live layer: {0}'.format(
                                 relationship_instance.__dict__))
                         else:
-                            print('Existing DataLayers + Country Relationship updated for LIVE LAYER: {0}'.format(
-                                relationship_instance.__dict__))
+                            logger.debug(
+                                'Existing dataLayers + country relationship updated for live layer: {0}'.format(
+                                    relationship_instance.__dict__))
                 elif data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_STATIC:
                     unknown_condition = ''
                     if parameter_column_type == 'str':
@@ -139,19 +145,28 @@ class Command(BaseCommand):
                                                                                   label='DataLayerCountryRelationship')
 
                     for country_id_has_layer_data in all_country_ids_has_layer_data:
-                        relationship_instance, created = accounts_models.DataLayerCountryRelationship.objects.update_or_create(
-                            data_layer=data_layer_instance,
-                            country_id=country_id_has_layer_data['country_id'],
-                            defaults={
-                                'is_default': False,
-                                'last_modified_at': get_current_datetime_object(),
-                            },
+                        relationship_instance, created = (
+                            accounts_models.DataLayerCountryRelationship.objects.update_or_create(
+                                data_layer=data_layer_instance,
+                                country_id=country_id_has_layer_data['country_id'],
+                                defaults={
+                                    'is_default': False,
+                                    'last_modified_at': get_current_datetime_object(),
+                                },
+                            )
                         )
+                        ids_to_keep.append(relationship_instance.id)
                         if created:
-                            print('New DataLayers + Country Relationship created for STATIC LAYER: {0}'.format(
+                            logger.debug('New dataLayers + country relationship created for static layer: {0}'.format(
                                 relationship_instance.__dict__))
                         else:
-                            print('Existing DataLayers + Country Relationship updated for STATIC LAYER: {0}'.format(
-                                relationship_instance.__dict__))
+                            logger.debug(
+                                'Existing dataLayers + country relationship updated for static layer: {0}'.format(
+                                    relationship_instance.__dict__))
 
-        print('*** Active Data Layer for Country Mapping operations ***')
+        if options.get('reset_mapping', False):
+            logger.info('Delete records which are not active now - start')
+            delete_relationships(country_id, layer_id, ids_to_keep)
+            logger.info('Delete records which are not active now - end')
+
+        logger.info('Active data layer for country mapping operations.')

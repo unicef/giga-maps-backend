@@ -1,3 +1,5 @@
+import logging
+
 from collections import OrderedDict
 
 from django.core.management.base import BaseCommand
@@ -5,10 +7,12 @@ from django.db import connection
 from django.db import transaction
 from django.utils import timezone
 
+logger = logging.getLogger('gigamaps.' + __name__)
+
 
 @transaction.atomic
 def create_and_execute_update_query(value, data_dict_list):
-    print('Executing update statement for: {0} records'.format(len(data_dict_list)))
+    logger.debug('Executing update statement for: {0} records'.format(len(data_dict_list)))
 
     # create update query
     stmt = ("UPDATE public.connection_statistics_schooldailystatus "
@@ -16,13 +20,13 @@ def create_and_execute_update_query(value, data_dict_list):
     with connection.cursor() as cursor:
         for data_dict in data_dict_list:
             update_query = stmt.format(value=value, school_id=data_dict['school_id'])
-            print('Current Update Query: {}'.format(update_query))
+            logger.debug('Current update query: {}'.format(update_query))
             cursor.execute(update_query)
 
 
 @transaction.atomic
 def create_and_execute_update_query_v2(stmt):
-    print('Current Update Query: {}'.format(stmt))
+    logger.debug('Current update query: {}'.format(stmt))
     with connection.cursor() as cursor:
         cursor.execute(stmt)
 
@@ -40,7 +44,7 @@ def populate_live_data_source_as_qos(start_school_id, end_school_id):
 
     create_and_execute_update_query_v2(query)
     te = timezone.now()
-    print('Executed the function in {} seconds'.format((te - ts).seconds))
+    logger.debug('Executed the function in {} seconds'.format((te - ts).seconds))
 
     query = """
     SELECT DISTINCT s.id AS school_id
@@ -63,8 +67,8 @@ def populate_live_data_source_as_qos(start_school_id, end_school_id):
 
     query = query.format(where_condition=where_condition)
 
-    print('Getting select statement query result from "schools_school" table for live_data_source records.')
-    print('Query: {}'.format(query))
+    logger.info('Getting select statement query result from "schools_school" table for live_data_source records.')
+    logger.debug('Query: {}'.format(query))
     data_list = []
 
     with connection.cursor() as cursor:
@@ -79,7 +83,7 @@ def populate_live_data_source_as_qos(start_school_id, end_school_id):
     create_and_execute_update_query('QOS', data_list)
 
     te2 = timezone.now()
-    print('Executed the function in {} seconds'.format((te2 - te).seconds))
+    logger.debug('Executed the function in {} seconds'.format((te2 - te).seconds))
 
 
 def populate_live_data_source_as_daily_check_app(start_school_id, end_school_id):
@@ -95,7 +99,7 @@ def populate_live_data_source_as_daily_check_app(start_school_id, end_school_id)
 
     create_and_execute_update_query_v2(query)
     te = timezone.now()
-    print('Executed the function in {} seconds'.format((te - ts).seconds))
+    logger.debug('Executed the function in {} seconds'.format((te - ts).seconds))
 
     query = """
     SELECT DISTINCT s.id AS school_id
@@ -118,8 +122,8 @@ def populate_live_data_source_as_daily_check_app(start_school_id, end_school_id)
 
     query = query.format(where_condition=where_condition)
 
-    print('Getting select statement query result from "schools_school" table for live_data_source records.')
-    print('Query: {}'.format(query))
+    logger.info('Getting select statement query result from "schools_school" table for live_data_source records.')
+    logger.debug('Query: {}'.format(query))
     data_list = []
 
     with connection.cursor() as cursor:
@@ -134,7 +138,7 @@ def populate_live_data_source_as_daily_check_app(start_school_id, end_school_id)
     create_and_execute_update_query('DAILY_CHECK_APP_MLAB', data_list)
 
     te2 = timezone.now()
-    print('Executed the function in {} seconds'.format((te2 - te).seconds))
+    logger.debug('Executed the function in {} seconds'.format((te2 - te).seconds))
 
 
 class Command(BaseCommand):
@@ -168,11 +172,11 @@ class Command(BaseCommand):
         end_school_id = options.get('end_school_id')
 
         if options.get('update_brasil_live_data_source', False):
-            print('update_brasil_live_data_source - START')
+            logger.info('Update brasil live data source - start')
             populate_live_data_source_as_qos(start_school_id, end_school_id)
 
         if options.get('update_non_brasil_live_data_source_name', False):
-            print('update_non_brasil_live_data_source_name - START')
+            logger.info('Update non brasil live data source name - start')
             populate_live_data_source_as_daily_check_app(start_school_id, end_school_id)
 
-        print('Data updated successfully!\n')
+        logger.info('Data updated successfully!\n')

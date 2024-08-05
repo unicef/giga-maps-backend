@@ -1,10 +1,13 @@
 import sys
 import traceback
+import logging
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from proco.about_us.models import AboutUs
+
+logger = logging.getLogger('gigamaps.' + __name__)
 
 about_us_content_json = [
     {
@@ -595,7 +598,7 @@ def load_data_sources_data():
         AboutUs.objects.all().delete()
         sys.stdout.write('\nDelete all old record')
     except:
-        print(traceback.format_exc())
+        logger.error(traceback.format_exc())
 
     for row_data in about_us_content_json:
         try:
@@ -605,7 +608,7 @@ def load_data_sources_data():
             else:
                 sys.stdout.write('\nExisting About Us content updated: {}'.format(instance.__dict__))
         except:
-            print(traceback.format_exc())
+            logger.error(traceback.format_exc())
 
 
 class Command(BaseCommand):

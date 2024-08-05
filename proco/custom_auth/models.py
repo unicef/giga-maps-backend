@@ -28,7 +28,7 @@ class ApplicationUser(core_models.BaseModelMixin, AbstractBaseUser):
         validators=[
             validators.RegexValidator(
                 r'^[\w.@+-]+$',
-                _('Enter a valid username. This value may contain only letters, numbers ' 'and @/./+/-/_ characters.'),
+                _('Enter a valid username. This value may contain only letters, numbers and @/./+/-/_ characters.'),
             ),
         ],
         error_messages={
@@ -95,9 +95,6 @@ class ApplicationUser(core_models.BaseModelMixin, AbstractBaseUser):
             :type user: custom_auth.models.User
             :returns perms: Dictionary of permissions
         """
-        # attr = USER_PERMISSIONS_KEY.format(user.id)
-        # perms = cache_utils.get_or_set_cache(attr, lambda: self.calculate_user_permissions(user))
-        # return perms
         return self.calculate_user_permissions(user)
 
     def calculate_user_permissions(self, user):
@@ -175,7 +172,7 @@ class Role(core_models.BaseModel):
         return self.permissions.all().values_list('slug', flat=True)
 
 
-class UserRoleRelationship(core_models.BaseModel):
+class UserRoleRelationship(core_models.BaseModelMixin):
     """
     UserRoleRelationship
         This model is used to store the user roles.
@@ -192,7 +189,7 @@ class UserRoleRelationship(core_models.BaseModel):
         return role_perms
 
 
-class RolePermission(core_models.BaseModel):
+class RolePermission(core_models.BaseModelMixin):
     """
     RolePermission
 

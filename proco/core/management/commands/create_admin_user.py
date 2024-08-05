@@ -1,11 +1,15 @@
-# encoding: utf-8
 from __future__ import absolute_import, division, print_function, unicode_literals
+
+import logging
+# encoding: utf-8
 
 from django.core.management.base import BaseCommand
 from django.core.validators import validate_email
 from django.utils import timezone
 
 from proco.custom_auth.models import Role, ApplicationUser, UserRoleRelationship
+
+logger = logging.getLogger('gigamaps.' + __name__)
 
 
 def create_user_role_relationship(user, role_name):
@@ -15,7 +19,7 @@ def create_user_role_relationship(user, role_name):
 
 
 def valid_email(value):
-    print('Validating: {0}'.format(value))
+    logger.debug('Validating email: {0}'.format(value))
     validate_email(value)
     return value
 
@@ -43,7 +47,7 @@ class Command(BaseCommand):
 
     def handle(self, **options):
         user_email = options.get('user_email')
-        print('*** User create/update operation STARTED ({0}) ***'.format(user_email))
+        logger.debug('User create/update operation started ({0})'.format(user_email))
 
         user_instance, created = ApplicationUser.objects.update_or_create(
             username=user_email,
@@ -58,6 +62,6 @@ class Command(BaseCommand):
             },
         )
 
-        print(user_instance.__dict__)
+        logger.debug(user_instance.__dict__)
         create_user_role_relationship(user_instance, Role.SYSTEM_ROLE_NAME_ADMIN)
-        print('*** User create/update operation ENDED ({0}) ***'.format(user_email))
+        logger.debug('User create/update operation ended ({0})'.format(user_email))

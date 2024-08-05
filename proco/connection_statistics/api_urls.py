@@ -15,6 +15,7 @@ urlpatterns = [
     path('coverage/', api.CoverageAPIView.as_view(), name='global-coverage-stat'),
     path('countrycoverage/', api.CoverageAPIView.as_view(), name='country-coverage-stat'),
     path('schoolcoverage/', api.SchoolCoverageStatsListAPIView.as_view(), name='school-coverage-stat'),
+
     path(
         'country/<str:country_code>/daily-stat/',
         api.CountryDailyStatsListAPIView.as_view(),
@@ -26,38 +27,38 @@ urlpatterns = [
         'get': 'list',
         'post': 'create',
         'delete': 'destroy',
-    }), name='list_or_create_destroy_countryweeklystatus'),
+    }), name='list-create-destroy-countryweeklystatus'),
     path('countryweeklystatus/<int:pk>/', api.CountrySummaryAPIViewSet.as_view({
         'put': 'update',
         'get': 'retrieve',
-    }), name='update_or_retrieve_countryweeklystatus'),
+    }), name='update-retrieve-countryweeklystatus'),
     path('countrydailystatus/', api.CountryDailyConnectivitySummaryAPIViewSet.as_view({
         'get': 'list',
         'post': 'create',
         'delete': 'destroy',
-    }), name='list_or_create_destroy_countrydailystatus'),
+    }), name='list-create-destroy-countrydailystatus'),
     path('countrydailystatus/<int:pk>/',
          api.CountryDailyConnectivitySummaryAPIViewSet.as_view({
              'put': 'update',
              'get': 'retrieve',
-         }), name='update_or_retrieve_countrydailystatus'),
+         }), name='update-retrieve-countrydailystatus'),
     path('schoolweeklystatus/', api.SchoolSummaryAPIViewSet.as_view({
         'get': 'list',
         'post': 'create',
         'delete': 'destroy',
-    }), name='list_or_create_destroy_schoolweeklystatus'),
+    }), name='list-create-destroy-schoolweeklystatus'),
     path('schoolweeklystatus/<int:pk>/', api.SchoolSummaryAPIViewSet.as_view({
         'put': 'update',
         'get': 'retrieve',
-    }), name='update_or_retrieve_schoolweeklystatus'),
+    }), name='update-retrieve-schoolweeklystatus'),
     path('schooldailystatus/', api.SchoolDailyConnectivitySummaryAPIViewSet.as_view({
         'get': 'list',
         'post': 'create',
         'delete': 'destroy',
-    }), name='list_or_create_destroy_schooldailystatus'),
+    }), name='list-create-destroy-schooldailystatus'),
     path('schooldailystatus/<int:pk>/',
          api.SchoolDailyConnectivitySummaryAPIViewSet.as_view({
              'put': 'update',
              'get': 'retrieve',
-         }), name='update_or_retrieve_schooldailystatus'),
+         }), name='update-retrieve-schooldailystatus'),
 ]

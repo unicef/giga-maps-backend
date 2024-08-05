@@ -19,8 +19,9 @@ class ColorMapSchema:
         'unknown': 'unknown',
         'no': 'no',
         '2g': 'moderate',
-        '3g': 'good',
+        '3g': 'moderate',
         '4g': 'good',
+        '5g': 'good',
     }
     CONNECTIVITY_SPEED_FOR_GOOD_CONNECTIVITY_STATUS = 5 * (10 ** 6)
 

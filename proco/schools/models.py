@@ -122,6 +122,8 @@ class FileImport(TimeStampedModel):
     errors = models.TextField(blank=True)
     statistic = models.TextField(blank=True)
 
+    objects = models.Manager()
+
     def __str__(self):
         return self.uploaded_file.name
 

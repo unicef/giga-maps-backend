@@ -33,7 +33,6 @@ class BaseInvalidValidationError(BaseValidationError, metaclass=ABCMeta):
 
 class InvalidSchoolMasterDataRowStatusAtUpdateError(BaseInvalidValidationError):
     message = _('Invalid School Master Data row status at update: DB status: "{old}", Requested status: "{new}"')
-    # description = _('"PUBLISHED" school master data row can not be updated.')
     code = 'invalid_school_master_data_row_status'
 
 
@@ -47,4 +46,3 @@ class ZeroSchoolMasterDataRowError(BaseInvalidValidationError):
     message = _('Zero School Master Data row to update.')
     description = _('Zero rows to update.')
     code = 'invalid_school_master_data_row_count'
-

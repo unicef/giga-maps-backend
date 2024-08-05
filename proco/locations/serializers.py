@@ -1,3 +1,4 @@
+import logging
 import re
 from collections import OrderedDict
 
@@ -22,6 +23,8 @@ from proco.locations import exceptions as locations_exceptions
 from proco.locations.models import Country, CountryAdminMetadata
 from proco.schools.models import School
 from proco.schools.serializers import ExpandCountrySerializer
+
+logger = logging.getLogger('gigamaps.' + __name__)
 
 
 class ExpandCountryAdminMetadataSerializer(FlexFieldsModelSerializer):
@@ -168,26 +171,26 @@ class CountryUpdateRetriveSerializer(serializers.ModelSerializer):
         if deleted_country_with_same_code_iso3_format:
             validated_data['deleted'] = None
             country_instance = super().update(deleted_country_with_same_code_iso3_format, validated_data)
-            print('Country restored')
+            logger.info('Country restored.')
 
             CountryDailyStatus.objects.all_deleted().filter(country=country_instance).update(deleted=None)
-            print('Country Daily restored')
+            logger.info('Country daily restored.')
 
             CountryWeeklyStatus.objects.all_deleted().filter(country=country_instance).update(deleted=None)
-            print('Country Weekly restored')
+            logger.info('Country weekly restored.')
 
             School.objects.all_deleted().filter(country=country_instance).update(deleted=None)
-            print('Schools restored')
+            logger.info('Schools restored.')
 
             SchoolDailyStatus.objects.all_deleted().filter(school__country=country_instance).update(deleted=None)
-            print('School Daily restored')
+            logger.info('School daily restored.')
 
             SchoolWeeklyStatus.objects.all_deleted().filter(school__country=country_instance).update(deleted=None)
-            print('School Weekly restored')
+            logger.info('School weekly restored.')
 
             SchoolRealTimeRegistration.objects.all_deleted().filter(school__country=country_instance).update(
                 deleted=None)
-            print('School Real Time Registration restored')
+            logger.info('School real time registration restored.')
 
             request_user = core_utilities.get_current_user(context=self.context)
             DataLayerCountryRelationship.objects.filter(country=country_instance).update(
@@ -206,10 +209,11 @@ class CountryUpdateRetriveSerializer(serializers.ModelSerializer):
                     api_key__valid_to__gte=core_utilities.get_current_datetime_object().date(),
                     deleted__isnull=True,
                 ).exists():
-                    print('WARNING: API Key for country ({0}) already exists.'.format(country_instance.iso3_format))
+                    logger.debug(
+                        'Warning: api key for country ({0}) already exists.'.format(country_instance.iso3_format))
                 else:
                     country_api_key_relationship_obj.update(deleted=None, last_modified_by=request_user)
-                    print('API Key restored.')
+                    logger.info('Api key restored.')
 
         else:
             country_instance = super().create(validated_data)
@@ -272,15 +276,6 @@ class CountryUpdateRetriveSerializer(serializers.ModelSerializer):
             })
         setattr(instance, 'active_layers_list', active_layers_list)
         return super().to_representation(instance)
-
-
-# class BoundaryListCountrySerializer(serializers.ModelSerializer):
-#     class Meta:
-#         model = Country
-#         fields = (
-#             'id', 'code', 'geometry_simplified',
-#         )
-#         read_only_fields = fields
 
 
 class ListCountrySerializer(BaseCountrySerializer):
@@ -408,8 +403,6 @@ class ExpandCountryWeeklyStatusSerializer(FlexFieldsModelSerializer):
             'schools_connectivity_good',
             'integration_status',
             'avg_distance_school',
-            # 'created',
-            # 'modified',
             'schools_with_data_percentage',
             'connectivity_speed',
             'connectivity_latency',
@@ -427,79 +420,26 @@ class ExpandCountryWeeklyStatusSerializer(FlexFieldsModelSerializer):
 
 
 class CountryStatusSerializer(FlexFieldsModelSerializer):
-    # map_preview = serializers.SerializerMethodField()
-    #
-    # benchmark_metadata = serializers.JSONField()
-
     class Meta:
         model = Country
         read_only_fields = fields = (
             'id',
-            # 'created',
-            # 'modified',
             'name',
-            # 'code',
             'iso3_format',
-            # 'flag',
-            # 'map_preview',
-            # 'description',
-            # 'data_source',
-            # 'date_of_join',
-            # 'date_schools_mapped',
-            # 'last_weekly_status_id',
-            # 'benchmark_metadata',
         )
 
         expandable_fields = {
             'last_weekly_status': (ExpandCountryWeeklyStatusSerializer, {'source': 'last_weekly_status'}),
         }
 
-    # def get_map_preview(self, instance):
-    #     if not instance.map_preview:
-    #         return ''
-    #
-    #     request = self.context.get('request')
-    #     photo_url = instance.map_preview.url
-    #     return request.build_absolute_uri(photo_url)
-
 
 class CountryCSVSerializer(CountryStatusSerializer, DownloadSerializerMixin):
     class Meta(CountryStatusSerializer.Meta):
-
         report_fields = OrderedDict([
             ('id', 'ID'),
             ('name', 'Name'),
-            # ('code', 'Code'),
             ('iso3_format', 'Country ISO3 Code'),
-            # ('map_preview', 'Map Preview'),
-            # ('description', 'Description'),
-            # ('data_source', 'Data Source'),
-            # ('date_of_join', 'Date of Joining'),
-            # ('date_schools_mapped', 'Date School Mapped'),
-            # ('live_layer_benchmark', {'name': 'Live Layer Benchmarks', 'is_computed': True}),
-            # ('last_weekly_status', {'name': 'Last Weekly Status', 'is_computed': True}),
         ])
-
-    # def get_last_weekly_status(self, data):
-    #     last_week_data = data.get('last_weekly_status', None)
-    #     values = []
-    #     if last_week_data:
-    #         for key, value in last_week_data.items():
-    #             if isinstance(value, bool):
-    #                 value = self.boolean_flags.get(value)
-    #             values.append('{0}:{1}'.format(key, value))
-    #     return '\t'.join(values)
-
-    # def get_live_layer_benchmark(self, data):
-    #     values = []
-    #     layers_data = data.get('benchmark_metadata', {}).get('live_layer', {})
-    #     if len(layers_data) > 0:
-    #         id_names = dict(DataLayer.objects.filter(id__in=list(layers_data.keys())).values_list('id', 'name'))
-    #         for layer_id, benchmark_value in layers_data.items():
-    #             values.append(
-    #                 '{0}:{1}'.format(id_names.get(core_utilities.convert_to_int(layer_id, orig=True), layer_id),
-    #                                  benchmark_value))
-    #     return '\t'.join(values)
 
     def to_representation(self, data):
         data = super().to_representation(data)

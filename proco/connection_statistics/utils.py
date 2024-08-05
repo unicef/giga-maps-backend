@@ -336,7 +336,8 @@ def update_country_weekly_status(country: Country, date):
     country_status.schools_coverage_moderate = coverage_stats[ColorMapSchema.MODERATE]
     country_status.schools_coverage_no = coverage_stats[ColorMapSchema.NO]
 
-    schools_coverage_known = country_status.schools_coverage_good + country_status.schools_coverage_moderate + country_status.schools_coverage_no
+    schools_coverage_known = (country_status.schools_coverage_good + country_status.schools_coverage_moderate +
+                              country_status.schools_coverage_no)
     country_status.schools_coverage_unknown = country_status.schools_total - schools_coverage_known
 
     # calculate speed & latency where available
@@ -384,8 +385,10 @@ def update_country_weekly_status(country: Country, date):
     ]):
         country_status.integration_status = CountryWeeklyStatus.STATIC_MAPPED
 
-    if country_status.integration_status == CountryWeeklyStatus.STATIC_MAPPED \
-        and country_status.connectivity_availability == connectivity_types.realtime_speed:
+    if (
+        country_status.integration_status == CountryWeeklyStatus.STATIC_MAPPED and
+        country_status.connectivity_availability == connectivity_types.realtime_speed
+    ):
         country_status.integration_status = CountryWeeklyStatus.REALTIME_MAPPED
 
     country_status.avg_distance_school = country.calculate_avg_distance_school()
@@ -411,7 +414,6 @@ def update_country_data_source_by_csv_filename(imported_file):
 
 def get_benchmark_value_for_default_download_layer(benchmark, country_id):
     data_layer_instance = DataLayer.objects.filter(
-        # name__icontains='download',
         type=DataLayer.LAYER_TYPE_LIVE,
         category=DataLayer.LAYER_CATEGORY_CONNECTIVITY,
         status=DataLayer.LAYER_STATUS_PUBLISHED,
@@ -427,17 +429,16 @@ def get_benchmark_value_for_default_download_layer(benchmark, country_id):
         benchmark_val = data_layer_instance.global_benchmark.get('value')
         benchmark_unit = data_layer_instance.global_benchmark.get('unit')
 
-        if benchmark == 'national':
-            if country_id:
-                benchmark_metadata = Country.objects.all().filter(
-                    id=country_id,
-                    benchmark_metadata__isnull=False,
-                ).order_by('id').values_list('benchmark_metadata', flat=True).first()
+        if benchmark == 'national' and country_id:
+            benchmark_metadata = Country.objects.all().filter(
+                id=country_id,
+                benchmark_metadata__isnull=False,
+            ).order_by('id').values_list('benchmark_metadata', flat=True).first()
 
-                if benchmark_metadata and len(benchmark_metadata) > 0:
-                    benchmark_metadata = json.loads(benchmark_metadata)
-                    all_live_layers = benchmark_metadata.get('live_layer', {})
-                    if len(all_live_layers) > 0 and str(data_layer_instance.id) in (all_live_layers.keys()):
-                        benchmark_val = all_live_layers[str(data_layer_instance.id)]
+            if benchmark_metadata and len(benchmark_metadata) > 0:
+                benchmark_metadata = json.loads(benchmark_metadata)
+                all_live_layers = benchmark_metadata.get('live_layer', {})
+                if len(all_live_layers) > 0 and str(data_layer_instance.id) in (all_live_layers.keys()):
+                    benchmark_val = all_live_layers[str(data_layer_instance.id)]
 
     return convert_to_int(str(benchmark_val), default='20000000'), benchmark_unit

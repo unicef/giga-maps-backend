@@ -10,11 +10,10 @@ from proco.utils.tests import TestAPIViewSetMixin
 
 class SlideImageAPITestCase(TestAPIViewSetMixin, TestCase):
     base_view = 'about_us:'
-    databases = {'read_only_database', 'default'}
+    databases = {'default', }
 
     @classmethod
     def setUpTestData(cls):
-        # self.databases = 'default'
         cls.email = 'test@test.com'
         cls.password = 'SomeRandomPass96'
         cls.user = test_utilities.setup_admin_user_by_role()
@@ -70,7 +69,7 @@ class SlideImageAPITestCase(TestAPIViewSetMixin, TestCase):
 
 class AboutUsAPITestCase(TestAPIViewSetMixin, TestCase):
     base_view = 'about_us:'
-    databases = {'default', 'read_only_database'}
+    databases = {'default', }
 
     def setUp(self):
         self.email = 'test@test.com'

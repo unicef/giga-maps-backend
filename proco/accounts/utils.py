@@ -1,3 +1,4 @@
+import logging
 import re
 
 from anymail.message import AnymailMessage
@@ -9,6 +10,8 @@ from rest_framework.response import Response
 
 from proco.accounts.config import app_config as config
 from proco.core import utils as core_utilities
+
+logger = logging.getLogger('gigamaps.' + __name__)
 
 
 def send_standard_email(user, data):
@@ -22,7 +25,7 @@ def send_standard_email(user, data):
         core_utilities.is_blank_string(settings.ANYMAIL.get('MAILJET_API_KEY')) or
         core_utilities.is_blank_string(settings.ANYMAIL.get('MAILJET_SECRET_KEY'))
     ):
-        print('ERROR: MailJet creds are not configured to send the email. Hence email notification is disabled.')
+        logger.error('MailJet creds are not configured to send the email. Hence email notification is disabled.')
         return
 
     data.update({
@@ -40,7 +43,7 @@ def send_standard_email(user, data):
         to=[user.email],
     )
     mail.content_subtype = 'html'
-    print('Sending standard message over email')
+    logger.debug('Sending standard message over email')
     mail.send()
 
 
@@ -50,7 +53,7 @@ def send_email_over_mailjet_service(recipient_list, cc=None, bcc=None, fail_sile
         core_utilities.is_blank_string(settings.ANYMAIL.get('MAILJET_API_KEY')) or
         core_utilities.is_blank_string(settings.ANYMAIL.get('MAILJET_SECRET_KEY'))
     ):
-        print('ERROR: MailJet creds are not configured to send the email. Hence email notification is disabled.')
+        logger.error('MailJet creds are not configured to send the email. Hence email notification is disabled.')
         return
 
     kwargs.update({
@@ -70,15 +73,12 @@ def send_email_over_mailjet_service(recipient_list, cc=None, bcc=None, fail_sile
         bcc=bcc
     )
     mail.content_subtype = 'html'
-    print('Sending message over email')
+    logger.debug('Sending message over email')
     response = mail.send(fail_silently=fail_silently)
     return response
 
 
 class BaseTileGenerator:
-    # def __init__(self,  table_config):
-    #     self.table_config = table_config
-
     def path_to_tile(self, request):
         path = "/" + request.query_params.get('z') + "/" + request.query_params.get(
             'x') + "/" + request.query_params.get('y')
@@ -133,11 +133,10 @@ class BaseTileGenerator:
                 if not cur:
                     return Response({"error": f"sql query failed: {sql}"}, status=404)
                 return cur.fetchone()[0]
-        except Exception as error:
+        except Exception:
             return Response({"error": "An error occurred while executing SQL query"}, status=500)
 
     def generate_tile(self, request):
-        # start_time = time.time()
         tile = self.path_to_tile(request)
         if not (tile and self.tile_is_valid(tile)):
             return Response({"error": "Invalid tile path"}, status=400)
@@ -146,7 +145,7 @@ class BaseTileGenerator:
 
         sql = self.envelope_to_sql(env, request)
 
-        print(sql.replace('\n', ''))
+        logger.debug(sql.replace('\n', ''))
 
         pbf = self.sql_to_pbf(sql)
         if isinstance(pbf, memoryview):

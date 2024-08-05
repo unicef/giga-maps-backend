@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from proco.background.models import BackgroundTask
 from proco.background.serializers import BackgroundTaskSerializer, BackgroundTaskHistorySerializer
 from proco.core import permissions as core_permissions
+from proco.core import utils as core_utilities
 from proco.core.viewsets import BaseModelViewSet
 from proco.utils.error_message import delete_succ_mess
 from proco.utils.filters import NullsAlwaysLastOrderingFilter
@@ -33,7 +34,7 @@ class BackgroundTaskViewSet(BaseModelViewSet):
     ordering_field_names = ['-created_at', '-completed_at']
     apply_query_pagination = True
 
-    search_fields = ('task_id', 'log',)
+    search_fields = ('task_id', 'log', 'name', 'description', 'status')
     filterset_fields = {
         'task_id': ['exact', 'in'],
         'log': ['exact', 'in'],
@@ -45,12 +46,15 @@ class BackgroundTaskViewSet(BaseModelViewSet):
         try:
             ids = request.data['task_id']
             if isinstance(ids, list) and len(ids) > 0:
-                queryset = self.model.objects.filter(task_id__in=ids, )
-                if queryset.exists():
-                    action_log(request, queryset, 3, 'Background task deleted', self.model, 'task_id')
-                    queryset.delete()
+                task_qs = self.model.objects.filter(task_id__in=ids, )
+                if task_qs.exists():
+                    action_log(request, task_qs, 3, 'Background task deleted', self.model, 'name')
+                    task_qs.update(
+                        deleted=core_utilities.get_current_datetime_object(),
+                        deleted_by=core_utilities.get_current_user(request=request),
+                    )
                     return Response(status=rest_status.HTTP_200_OK, data=delete_succ_mess)
-            raise ValidationError('{0} value missing in database: {1}'.format('id', ids))
+            raise ValidationError('{0} value missing in database: {1}'.format('task_id', ids))
         except KeyError as ex:
             return Response(['Required key {0} missing in the request body'.format(ex)],
                             status=status.HTTP_400_BAD_REQUEST)

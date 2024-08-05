@@ -14,4 +14,14 @@ pipenv run python -m flask run --host 0.0.0.0 --port 8000 &
 
 # pipenv run celery -A proco.taskapp worker $*
 # --logfile=/code/celeryd-%n.log --loglevel=DEBUG
-pipenv run celery --app=proco.taskapp worker --concurrency=3 --time-limit=300 --soft-time-limit=60 $*
+
+if $ENABLED_FLOWER_METRICS; then
+    echo "Starting worker ..."
+    pipenv run celery --app=proco.taskapp worker --concurrency=3 --time-limit=300 --soft-time-limit=60 $* &
+
+    echo "Starting flower ..."
+    pipenv run celery --app=proco.taskapp flower
+else
+    echo "Starting worker ..."
+    pipenv run celery --app=proco.taskapp worker --concurrency=3 --time-limit=300 --soft-time-limit=60 $*
+fi

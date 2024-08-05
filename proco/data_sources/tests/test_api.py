@@ -21,7 +21,7 @@ def sources_url(url_params, query_param, view_name='list-school-master-rows'):
 
 
 class SchoolMasterApiTestCase(TestAPIViewSetMixin, TestCase):
-    databases = ['default']
+    databases = ['default',]
 
     @classmethod
     def setUpTestData(cls):

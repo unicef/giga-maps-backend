@@ -1,0 +1,83 @@
+[
+  {
+    "name": "School area type",
+    "type": "drop-down",
+    "description": "Urban or rural region in which school is located",
+    "choices": [
+      {
+        "label": "Urban",
+        "value": "urban"
+      },
+      {
+        "label": "Rural",
+        "value": "rural"
+      },
+      {
+        "label": "None",
+        "value": "none"
+      }
+    ],
+    "parameter": {
+      "label": "Region",
+      "table": "schools",
+      "field": "environment",
+      "filter": "iexact"
+    },
+    "active_countries_filter": "LOWER(environment) IN ('urban', 'rural')",
+    "active_countries_list": null
+  },
+  {
+    "name": "School funding source",
+    "type": "drop-down",
+    "description": "",
+    "choices": [
+      {
+        "label": "Private",
+        "value": "private"
+      },
+      {
+        "label": "Public",
+        "value": "public"
+      },
+      {
+        "label": "None",
+        "value": "none"
+      }
+    ],
+    "parameter": {
+      "label": "School Type",
+      "table": "schools",
+      "field": "school_type",
+      "filter": "iexact"
+    },
+    "active_countries_filter": "LOWER(school_type) IN ('private', 'public')",
+    "active_countries_list": null
+  },
+  {
+    "name": "Education level",
+    "type": "drop-down",
+    "description": "Highest level of education taught at the school",
+    "choices": [
+      {
+        "label": "Primary",
+        "value": "primary"
+      },
+      {
+        "label": "Secondary",
+        "value": "secondary"
+      },
+      {
+        "label": "None",
+        "value": "none"
+      }
+    ],
+    "parameter": {
+      "label": "Education Level",
+      "table": "schools",
+      "field": "education_level",
+      "filter": "iexact"
+    },
+    "active_countries_filter": "LOWER(education_level) IN ('primary', 'secondary')",
+    "active_countries_list": null
+  }
+]

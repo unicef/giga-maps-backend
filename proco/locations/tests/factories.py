@@ -4,12 +4,13 @@ from factory import SubFactory
 from factory import django as django_factory
 from factory import fuzzy
 
-from proco.locations.models import Country, Location
+from proco.locations.models import Country, CountryAdminMetadata, Location
 
 
 class CountryFactory(django_factory.DjangoModelFactory):
     name = fuzzy.FuzzyText(length=20)
     code = fuzzy.FuzzyText(length=20)
+    iso3_format = fuzzy.FuzzyText(length=20)
     description = fuzzy.FuzzyText(length=40)
     data_source = fuzzy.FuzzyText(length=40)
 
@@ -27,3 +28,15 @@ class LocationFactory(django_factory.DjangoModelFactory):
 
     class Meta:
         model = Location
+
+
+class Admin1Factory(django_factory.DjangoModelFactory):
+    name = fuzzy.FuzzyText(length=20)
+    giga_id_admin = fuzzy.FuzzyText(length=20)
+    description = fuzzy.FuzzyText(length=40)
+    layer_name = fuzzy.FuzzyChoice(dict(CountryAdminMetadata.LAYER_NAME_CHOICES).keys())
+
+    country = SubFactory(CountryFactory)
+
+    class Meta:
+        model = CountryAdminMetadata

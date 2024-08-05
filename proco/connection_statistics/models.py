@@ -1,7 +1,6 @@
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
-# from proco.utils.models import ApproxQuerySet
 from django.db.models.constraints import UniqueConstraint
 from django.utils import timezone
 from django.utils.translation import ugettext as _
@@ -12,7 +11,6 @@ from model_utils.models import TimeStampedModel
 from proco.connection_statistics.config import app_config as statistics_configs
 from proco.core import models as core_models
 from proco.core.managers import BaseManager
-from proco.core.models import CustomDateTimeField
 from proco.locations.models import Country
 from proco.schools.constants import statuses_schema
 from proco.schools.models import School
@@ -26,7 +24,8 @@ class ConnectivityStatistics(models.Model):
     connectivity_latency = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
 
     connectivity_speed_probe = models.PositiveIntegerField(help_text=_('bps'), blank=True, null=True, default=None)
-    connectivity_upload_speed_probe = models.PositiveIntegerField(help_text=_('bps'), blank=True, null=True, default=None)
+    connectivity_upload_speed_probe = models.PositiveIntegerField(help_text=_('bps'),
+                                                                  blank=True, null=True, default=None)
 
     connectivity_latency_probe = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
 
@@ -41,7 +40,7 @@ class ConnectivityStatistics(models.Model):
         default=statistics_configs.UNKNOWN_SOURCE,
     )
 
-    deleted = CustomDateTimeField(db_index=True, null=True, blank=True)
+    deleted = core_models.CustomDateTimeField(db_index=True, null=True, blank=True)
 
     class Meta:
         abstract = True
@@ -161,18 +160,20 @@ class CountryWeeklyStatus(ConnectivityStatistics, TimeStampedModel, models.Model
 
 
 class SchoolWeeklyStatus(ConnectivityStatistics, TimeStampedModel, models.Model):
-    # unable to use choives as should be (COVERAGE_TYPES.4g), because digit goes first
+    # unable to use choices as should be (COVERAGE_TYPES.4g), because digit goes first
     COVERAGE_UNKNOWN = 'unknown'
     COVERAGE_NO = 'no'
     COVERAGE_2G = '2g'
     COVERAGE_3G = '3g'
     COVERAGE_4G = '4g'
+    COVERAGE_5G = '5g'
     COVERAGE_TYPES = Choices(
         (COVERAGE_UNKNOWN, _('Unknown')),
         (COVERAGE_NO, _('No')),
         (COVERAGE_2G, _('2G')),
         (COVERAGE_3G, _('3G')),
         (COVERAGE_4G, _('4G')),
+        (COVERAGE_5G, _('5G')),
     )
 
     school = models.ForeignKey(School, related_name='weekly_status', on_delete=models.CASCADE)
@@ -307,7 +308,6 @@ class SchoolDailyStatus(ConnectivityStatistics, TimeStampedModel, models.Model):
     school = models.ForeignKey(School, related_name='daily_status', on_delete=models.CASCADE)
     date = models.DateField()
 
-    # objects = ApproxQuerySet.as_manager()
     objects = BaseManager()
 
     class Meta:
@@ -339,7 +339,6 @@ class SchoolDailyStatus(ConnectivityStatistics, TimeStampedModel, models.Model):
 class RealTimeConnectivity(ConnectivityStatistics, TimeStampedModel, models.Model):
     school = models.ForeignKey(School, related_name='realtime_status', on_delete=models.CASCADE)
 
-    # objects = ApproxQuerySet.as_manager()
     objects = BaseManager()
 
     class Meta:

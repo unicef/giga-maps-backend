@@ -1,5 +1,6 @@
 import os
 import sys
+import logging
 
 import pandas as pd
 from django.core.management.base import BaseCommand, CommandError
@@ -7,6 +8,8 @@ from django.db import transaction
 
 from proco.core.utils import is_blank_string
 from proco.locations.models import Country
+
+logger = logging.getLogger('gigamaps.' + __name__)
 
 
 def is_file(fp):
@@ -28,10 +31,10 @@ def load_data(input_file):
                 Country.objects.filter(code=str(country_code).strip()).update(
                     iso3_format=str(country_iso3_code).strip(), )
             else:
-                print('ERROR: Invalid Country Code/ISO3 Format submitted.')
-                print(country_code, '\t', country_iso3_code)
+                logger.error('Invalid country code ISO3 format submitted.')
+                logger.error(country_code, '\t', country_iso3_code)
         except Exception as ex:
-            print('Error raised for creation: {0}'.format(ex))
+            logger.error('Error raised for creation: {0}'.format(ex))
 
 
 class Command(BaseCommand):

@@ -224,9 +224,15 @@ class InvalidDataLayerNameError(BaseInvalidValidationError):
     code = 'invalid_data_layer_name'
 
 
-class DuplicateDataLayerNameError(BaseInvalidValidationError):
-    message = _("Data Layer with name '{name}' already exists.")
-    code = 'duplicate_data_layer_name'
+class InvalidDataLayerCodeError(BaseInvalidValidationError):
+    message = _('Invalid Data Layer code.')
+    description = _('Provide valid data layer code')
+    code = 'invalid_data_layer_code'
+
+
+class DuplicateDataLayerCodeError(BaseInvalidValidationError):
+    message = _("Data Layer with code '{code}' already exists.")
+    code = 'duplicate_data_layer_code'
 
 
 class InvalidCountryNameOrCodeError(BaseInvalidValidationError):

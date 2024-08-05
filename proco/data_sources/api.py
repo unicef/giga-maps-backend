@@ -66,7 +66,6 @@ class QoSLoaderViewSet(APIView):
         sources_tasks.load_data_from_qos_apis()
 
         date = QoSData.objects.all().values_list('date', flat=True).order_by('-date').first()
-        print('Latest date from QoSData: {}'.format(date))
 
         countries_ids = QoSData.objects.all().values_list('country_id', flat=True).order_by('country_id').distinct(
             'country_id')

@@ -85,11 +85,6 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
 
         self.assertIn(core_utilities.get_random_choice(['aa', 'bb', 'cc', 'dd']), ['aa', 'bb', 'cc', 'dd'])
 
-    def test_get_sender_email_utility(self):
-        self.assertEqual(type(core_utilities.get_sender_email()), str)
-
-        self.assertIsNotNone(core_utilities.get_sender_email())
-
     def test_get_support_email_utility(self):
         self.assertEqual(type(core_utilities.get_support_email()), str)
 

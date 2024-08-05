@@ -1,4 +1,8 @@
+import logging
+
 from django.db import connection
+
+logger = logging.getLogger('gigamaps.' + __name__)
 
 
 def dictfetchall(cursor):
@@ -11,7 +15,7 @@ def dictfetchall(cursor):
 
 
 def sql_to_response(sql, label=''):
-    print('Query to execute for "{0}": {1}'.format(label, sql.replace('\n', '')))
+    logger.debug('Query to execute for "{0}": {1}'.format(label, sql.replace('\n', '')))
     try:
         with connection.cursor() as cur:
             cur.execute(sql)
@@ -19,5 +23,5 @@ def sql_to_response(sql, label=''):
                 return
             return dictfetchall(cur)
     except Exception as ex:
-        print('ERROR: Exception on query execution - {0}'.format(str(ex)))
+        logger.error('Exception on query execution - {0}'.format(str(ex)))
         return

@@ -356,9 +356,6 @@ class ListCountryDailyStatusSerializer(CountryDailyStatusSerializer):
         model = CountryDailyStatus
         fields = ('id', 'country_name', 'date', 'connectivity_speed', 'connectivity_latency',)
 
-    # def get_country_name(self, instance):
-    #     return instance.country.name
-
 
 class DetailCountryDailyStatusSerializer(CountryDailyStatusSerializer):
     class Meta(CountryWeeklyStatus.Meta):
@@ -416,9 +413,6 @@ class ListSchoolDailyStatusSerializer(SchoolDailyStatusSerializer):
     class Meta(SchoolDailyStatus.Meta):
         model = SchoolDailyStatus
         fields = ('id', 'school_name', 'date', 'connectivity_speed', 'connectivity_latency',)
-
-    # def get_school_name(self, instance):
-    #     return instance.school.name
 
 
 class DetailSchoolDailyStatusSerializer(SchoolDailyStatusSerializer):

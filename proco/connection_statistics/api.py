@@ -33,9 +33,9 @@ from proco.connection_statistics.models import (
 from proco.connection_statistics.utils import get_benchmark_value_for_default_download_layer
 from proco.core import db_utils as db_utilities
 from proco.core import permissions as core_permissions
-from proco.core.utils import is_blank_string, get_current_datetime_object
+from proco.core import utils as core_utilities
 from proco.core.viewsets import BaseModelViewSet
-from proco.locations.models import Country, CountryAdminMetadata
+from proco.locations.models import Country
 from proco.schools.models import School
 from proco.utils import dates as date_utilities
 from proco.utils.cache import cache_manager
@@ -117,6 +117,20 @@ class GlobalStatsAPIView(APIView):
                  'all_countries', 'schools_with_connectivity_status_mapped',
                  'countries_with_connectivity_status_mapped').order_by()
 
+        school_filters = core_utilities.get_filter_sql(self.request, 'schools', 'schools_school')
+        if len(school_filters) > 0:
+            school_connectivity_status_qry = school_connectivity_status_qry.extra(where=[school_filters])
+
+        school_static_filters = core_utilities.get_filter_sql(self.request, 'school_static',
+                                                              'connection_statistics_schoolweeklystatus')
+        if len(school_static_filters) > 0:
+            school_connectivity_status_qry = school_connectivity_status_qry.annotate(
+                total_weekly_schools=Count('last_weekly_status__school_id', distinct=True),
+            ).values('connected', 'not_connected', 'unknown', 'total_schools',
+                     'all_countries', 'schools_with_connectivity_status_mapped',
+                     'countries_with_connectivity_status_mapped', 'total_weekly_schools')
+            school_connectivity_status_qry = school_connectivity_status_qry.extra(where=[school_static_filters])
+
         giga_connectivity_benchmark, giga_connectivity_benchmark_unit = get_benchmark_value_for_default_download_layer(
             'global', None)
 
@@ -139,338 +153,6 @@ class GlobalStatsAPIView(APIView):
                 'unknown': school_connectivity_status['unknown'],
             }
         }
-
-
-# @method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
-# class ConnectivityStatsAPIVIEW(APIView):
-#     permission_classes = (AllowAny,)
-#     model = SchoolWeeklyStatus
-#     queryset = model.objects.all()
-#     serializer_class = statistics_serializers.SchoolWeeklyStatusSerializer
-#     schools_daily_status_qs = SchoolDailyStatus.objects.all()
-#     global_giga_benchmark = 20000000  # this will be a dynamic value from the admin panel
-#
-#     def get(self, request, *args, **kwargs):
-#
-#         request_path = remove_query_param(request.get_full_path(), 'cache')
-#         is_weekly = request.query_params.get('is_weekly', 'true') == 'true'
-#
-#         start_date = date_utilities.to_date(self.request.query_params.get('start_date'),
-#                                             default=datetime.combine(datetime.now(), time.min))
-#         end_date = date_utilities.to_date(self.request.query_params.get('end_date'),
-#                                           default=datetime.combine(datetime.now(), time.min))
-#
-#         month_number = date_utilities.get_month_from_date(start_date)
-#         year_number = date_utilities.get_year_from_date(start_date)
-#
-#         if is_weekly:
-#             # If is_weekly == True, then pick the week number based on start_date
-#             week_number = date_utilities.get_week_from_date(start_date)
-#         else:
-#             # If is_weekly == False, then:
-#             # 1. Collect dates on all sundays of the given month and year
-#             # 2. Get the week numbers for all sundays and look into SchoolWeeklyStatus table for which last week number
-#             # data was created in the given month of the year. And pick this week number
-#             dates_on_all_sundays = date_utilities.all_days_of_a_month(year_number, month_number,
-#                                                                       day_name='sunday').keys()
-#             week_numbers_for_month = [date_utilities.get_week_from_date(date) for date in dates_on_all_sundays]
-#             week_number = self.queryset.filter(year=year_number, week__in=week_numbers_for_month
-#                                                ).order_by('-week').values_list('week', flat=True).first()
-#
-#             if not week_number:
-#                 # If for any week of the month data is not available then pick last week number
-#                 week_number = week_numbers_for_month[-1]
-#
-#         indicator = request.query_params.get('indicator', '').lower()
-#
-#         if indicator == 'download':
-#             cache_key = f'{week_number}{year_number}WEEKLY_DOWNLOAD_CONNECTIVITY_STATS' \
-#                 if is_weekly else f'{month_number}{year_number}MONTHLY_DOWNLOAD_CONNECTIVITY_STATS'
-#
-#             data = None  # cache_manager.get(cache_key)
-#
-#             if not data:
-#                 data = self.calculate_download_connectivity_statistic(start_date, end_date, week_number, year_number)
-#                 cache_manager.set(cache_key, data, request_path=request_path)
-#
-#         elif indicator == 'uptime':
-#             cache_key = f'{week_number}{year_number}WEEKLY_UPTIME_CONNECTIVITY_STATS' \
-#                 if is_weekly else f'{month_number}{year_number}MONTHLY_UPTIME_CONNECTIVITY_STATS'
-#
-#             data = None  # cache_manager.get(cache_key)
-#
-#             if not data:
-#                 data = {
-#                     'live_avg': 28,
-#                     'no_of_schools_measure': 60000,
-#                     'school_with_realtime_data': 16000,
-#                     'real_time_connected_schools': {
-#                         'good': 4000,
-#                         'moderate': 4000,
-#                         'no_internet': 4000,
-#                         'unknown': 4000
-#                     },
-#                     'graph_data': generate_static_graph_data(start_date, end_date, indicator)
-#                 }
-#
-#                 cache_manager.set(cache_key, data, request_path=request_path)
-#
-#         else:
-#             cache_key = f'{week_number}{year_number}WEEKLY_LATENCY_CONNECTIVITY_STATS' \
-#                 if is_weekly else f'{month_number}{year_number}MONTHLY_LATENCY_CONNECTIVITY_STATS'
-#
-#             data = None  # cache_manager.get(cache_key)
-#             if not data:
-#                 data = {
-#                     'live_avg': 28,
-#                     'no_of_schools_measure': 60000,
-#                     'school_with_realtime_data': 16000,
-#                     'real_time_connected_schools': {
-#                         'good': 4000,
-#                         'moderate': 4000,
-#                         'no_internet': 4000,
-#                         'unknown': 4000
-#                     },
-#                     'graph_data': generate_static_graph_data(start_date, end_date, indicator)
-#                 }
-#
-#                 cache_manager.set(cache_key, data, request_path=request_path)
-#
-#         return Response(data=data)
-#
-#     def calculate_download_connectivity_statistic(self, start_date, end_date, week_number, year_number):
-#
-#         benchmark = self.request.query_params.get('benchmark', 'global')
-#         speed_benchmark = GigaGlobalBenchmark.connectivity_speed.value.get(
-#             'value', statuses_schema.CONNECTIVITY_SPEED_FOR_GOOD_CONNECTIVITY_STATUS
-#         )
-#         if benchmark == 'national':
-#             speed_benchmark = statuses_schema.CONNECTIVITY_SPEED_FOR_GOOD_CONNECTIVITY_STATUS
-#
-#         weekly_queryset = self.queryset.filter(week=week_number, year=year_number).annotate(
-#             dummy_group_by=Value(1)).values('dummy_group_by').annotate(
-#             good=Count(Case(When(connectivity_speed__gt=speed_benchmark, then='school')), distinct=True),
-#             moderate=Count(Case(When(connectivity_speed__lte=speed_benchmark, connectivity_speed__gt=1000000,
-#                                      then='school')), distinct=True),
-#             bad=Count(Case(When(connectivity_speed__lte=1000000, then='school')), distinct=True),
-#             unknown=Count(Case(When(connectivity_speed__isnull=True, then='school')), distinct=True),
-#             school_with_realtime_data=Count(Case(When(connectivity_speed__isnull=False, then='school')), distinct=True),
-#             no_of_schools_measure=Count('school', distinct=True),
-#         ).values('good', 'moderate', 'bad', 'unknown', 'school_with_realtime_data', 'no_of_schools_measure').order_by()
-#
-#         real_time_connected_schools = {
-#             'good': weekly_queryset[0]['good'],
-#             'moderate': weekly_queryset[0]['moderate'],
-#             'no_internet': weekly_queryset[0]['bad'],
-#             'unknown': weekly_queryset[0]['unknown'],
-#         }
-#
-#         graph_data, positive_speeds = self.generate_graph_data(start_date, end_date)
-#         live_avg = round(sum(positive_speeds) / len(positive_speeds), 2) if len(positive_speeds) > 0 else 0
-#
-#         data = {
-#             'live_avg': live_avg,
-#             'no_of_schools_measure': weekly_queryset[0]['no_of_schools_measure'],
-#             'school_with_realtime_data': weekly_queryset[0]['school_with_realtime_data'],
-#             'real_time_connected_schools': real_time_connected_schools,
-#             'graph_data': graph_data
-#         }
-#
-#         return data
-#
-#     def generate_graph_data(self, start_date, end_date):
-#         # Get all the school ids from SchoolWeeklyStatus model for the given start_date and end_date
-#         # school_ids = self.queryset.filter(date__range=[start_date, end_date]).values('school').distinct()
-#         # Get the daily connectivity_speed for the given school ids from SchoolDailyStatus model
-#         avg_daily_connectivity_speed = self.schools_daily_status_qs.filter(date__range=[start_date, end_date]).values(
-#             'date').annotate(avg_speed=Avg('connectivity_speed')).order_by('date')
-#
-#         # Generate the graph data in the desired format
-#         graph_data = []
-#         current_date = start_date
-#
-#         while current_date <= end_date:
-#             graph_data.append({
-#                 'group': 'Download speed',
-#                 'key': date_utilities.format_date(current_date),
-#                 'value': None  # Default value, will be updated later if data exists for the date
-#             })
-#             current_date += timedelta(days=1)
-#
-#         all_positive_speeds = []
-#
-#         # Update the graph_data with actual values if they exist
-#         for daily_avg_data in avg_daily_connectivity_speed:
-#             formatted_date = date_utilities.format_date(daily_avg_data['date'])
-#             for entry in graph_data:
-#                 if entry['key'] == formatted_date:
-#                     try:
-#                         rounded_speed = 0
-#                         if daily_avg_data['avg_speed'] is not None:
-#                             rounded_speed = round(daily_avg_data['avg_speed'] / 1000000, 2)
-#                         entry['value'] = rounded_speed
-#                         all_positive_speeds.append(rounded_speed)
-#                     except (KeyError, TypeError):
-#                         pass
-#
-#         return graph_data, all_positive_speeds
-
-
-# def generate_static_graph_data(current_date, end_date, indicator):
-#     data = []
-#
-#     while current_date <= end_date:
-#         data.append({
-#             'group': indicator,
-#             'key': date_utilities.format_date(current_date),
-#             'value': random.randint(2, 50)
-#         })
-#
-#         current_date += timedelta(days=1)
-#
-#     return data
-
-
-# class CountryWeekStatsAPIView(RetrieveAPIView):
-#     permission_classes = (AllowAny,)
-#
-#     model = SchoolWeeklyStatus
-#     queryset = model.objects.all()
-#
-#     country_daily_status_qs = CountryDailyStatus.objects.all()
-#
-#     def get(self, *args, **kwargs):
-#         country_id = self.request.query_params.get('country_id', None)
-#         get_object_or_404(Country.objects.defer('geometry', 'geometry_simplified', ), id=country_id, )
-#
-#         is_weekly = self.request.query_params.get('is_weekly', 'true') == 'true'
-#         start_date = date_utilities.to_date(self.request.query_params.get('start_date'),
-#                                             default=datetime.combine(datetime.now(), time.min))
-#         end_date = date_utilities.to_date(self.request.query_params.get('end_date'),
-#                                           default=datetime.combine(datetime.now(), time.min))
-#
-#         month_number = date_utilities.get_month_from_date(start_date)
-#         year_number = date_utilities.get_year_from_date(start_date)
-#
-#         if is_weekly:
-#             # If is_weekly == True, then pick the week number based on start_date
-#             week_number = date_utilities.get_week_from_date(start_date)
-#         else:
-#             # If is_weekly == False, then:
-#             # 1. Collect dates on all sundays of the given month and year
-#             # 2. Get the week numbers for all sundays and look into SchoolWeeklyStatus table for which last week number
-#             # data was created in the given month of the year. And pick this week number
-#             dates_on_all_sundays = date_utilities.all_days_of_a_month(year_number, month_number,
-#                                                                       day_name='sunday').keys()
-#             week_numbers_for_month = [date_utilities.get_week_from_date(date) for date in dates_on_all_sundays]
-#             week_number = self.queryset.filter(year=year_number, week__in=week_numbers_for_month,
-#                                                ).order_by('-week').values_list('week', flat=True).first()
-#
-#             if not week_number:
-#                 # If for any week of the month data is not available then pick last week number
-#                 week_number = week_numbers_for_month[-1]
-#
-#         indicator = self.request.query_params.get('indicator', '').lower()
-#
-#         if indicator == 'download':
-#             data = self.calculate_country_download_indicator(start_date, end_date, week_number, year_number, country_id)
-#         else:
-#             data = {
-#                 'live_avg': 28,
-#                 'no_of_schools_measure': 60000,
-#                 'school_with_realtime_data': 1600000,
-#                 'real_time_connected_schools': {
-#                     'good': 400000,
-#                     'moderate': 400000,
-#                     'no_internet': 300000,
-#                     'unknown': 500000
-#                 },
-#                 'graph_data': generate_static_graph_data(start_date, end_date, indicator),
-#                 'is_data_synced': True,
-#             }
-#
-#         return Response(data=data)
-#
-#     def calculate_country_download_indicator(self, start_date, end_date, week_number, year_number, country_id):
-#         benchmark = self.request.query_params.get('benchmark', 'global')
-#         speed_benchmark = GigaGlobalBenchmark.connectivity_speed.value.get(
-#             'value', statuses_schema.CONNECTIVITY_SPEED_FOR_GOOD_CONNECTIVITY_STATUS
-#         )
-#         if benchmark == 'national':
-#             speed_benchmark = statuses_schema.CONNECTIVITY_SPEED_FOR_GOOD_CONNECTIVITY_STATUS
-#
-#         weekly_queryset = self.queryset.filter(
-#             school__country_id=country_id, week=week_number, year=year_number).annotate(
-#             dummy_group_by=Value(1)).values('dummy_group_by').annotate(
-#             good=Count(Case(When(connectivity_speed__gt=speed_benchmark, then='school')), distinct=True),
-#             moderate=Count(Case(When(connectivity_speed__lte=speed_benchmark, connectivity_speed__gt=1000000,
-#                                      then='school')), distinct=True),
-#             bad=Count(Case(When(connectivity_speed__lte=1000000, then='school')), distinct=True),
-#             unknown=Count(Case(When(connectivity_speed__isnull=True, then='school')), distinct=True),
-#             school_with_realtime_data=Count(Case(When(connectivity_speed__isnull=False, then='school')), distinct=True),
-#             no_of_schools_measure=Count('school', distinct=True),
-#         ).values('good', 'moderate', 'bad', 'unknown', 'school_with_realtime_data', 'no_of_schools_measure').order_by()
-#
-#         real_time_connected_schools = {
-#             'good': weekly_queryset[0]['good'],
-#             'moderate': weekly_queryset[0]['moderate'],
-#             'no_internet': weekly_queryset[0]['bad'],
-#             'unknown': weekly_queryset[0]['unknown'],
-#         }
-#
-#         graph_data, positive_speeds = self.generate_country_graph_data(start_date, end_date, country_id)
-#
-#         # live_avg = country_instance.get('connectivity_speed', 0)
-#         live_avg = round(sum(positive_speeds) / len(positive_speeds), 2) if len(positive_speeds) > 0 else 0
-#
-#         is_data_synced = self.queryset.filter(
-#             school__country_id=country_id,
-#             school__realtime_registration_status__rt_registered=True,
-#         ).exists()
-#
-#         return {
-#             'live_avg': live_avg,
-#             'no_of_schools_measure': weekly_queryset[0]['no_of_schools_measure'],
-#             'school_with_realtime_data': weekly_queryset[0]['school_with_realtime_data'],
-#             'real_time_connected_schools': real_time_connected_schools,
-#             'graph_data': graph_data,
-#             'is_data_synced': is_data_synced,
-#         }
-#
-#     def generate_country_graph_data(self, start_date, end_date, country_id):
-#         # Get the daily connectivity_speed for the given country from CountryDailyStatus model
-#         daily_connectivity_speed = self.country_daily_status_qs.filter(country_id=country_id,
-#                                                                        date__range=[start_date, end_date])
-#
-#         # Generate the graph data in the desired format
-#         graph_data = []
-#         current_date = start_date
-#
-#         while current_date <= end_date:
-#             graph_data.append({
-#                 'group': 'Download speed',
-#                 'key': date_utilities.format_date(current_date),
-#                 'value': None  # Default value, will be updated later if data exists for the date
-#             })
-#             current_date += timedelta(days=1)
-#
-#         all_positive_speeds = []
-#
-#         # Update the graph_data with actual values if they exist
-#         for daily_data in daily_connectivity_speed:
-#             formatted_date = date_utilities.format_date(daily_data.date)
-#             for entry in graph_data:
-#                 if entry['key'] == formatted_date:
-#                     try:
-#                         rounded_speed = 0
-#                         if daily_data.connectivity_speed is not None:
-#                             rounded_speed = round(daily_data.connectivity_speed / 1000000, 2)
-#                         entry['value'] = rounded_speed
-#                         all_positive_speeds.append(rounded_speed)
-#                     except (KeyError, TypeError):
-#                         pass
-#
-#         return graph_data, all_positive_speeds
 
 
 class CountryDailyStatsListAPIView(ListAPIView):
@@ -514,58 +196,6 @@ class SchoolDailyStatsListAPIView(ListAPIView):
         return queryset.filter(school_id=self.kwargs['school_id'])
 
 
-@method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
-class CoverageStatsAPIVIEW(APIView):
-    permission_classes = (AllowAny,)
-
-    CACHE_KEY = 'cache'
-    CACHE_KEY_PREFIX = 'COVERAGE_STATS'
-
-    def get_cache_key(self):
-        params = dict(self.request.query_params)
-        params.pop(self.CACHE_KEY, None)
-        return '{0}_{1}'.format(self.CACHE_KEY_PREFIX,
-                                '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))), )
-
-    def get(self, request, *args, **kwargs):
-        use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
-        request_path = remove_query_param(request.get_full_path(), 'cache')
-        cache_key = self.get_cache_key()
-
-        data = None
-        if use_cached_data:
-            data = cache_manager.get(cache_key)
-
-        if not data:
-            # Query the School table to get the coverage data
-            # Get the total number of schools with coverage data
-            # Get the count of schools falling under different coverage types
-            school_coverage_type_qry = School.objects.all().annotate(
-                dummy_group_by=Value(1)).values('dummy_group_by').annotate(
-                g_4_5=Count(Case(When(coverage_type__in=['5g', '4g'], then='id')), distinct=True),
-                g_2_3=Count(Case(When(coverage_type__in=['3g', '2g'], then='id')), distinct=True),
-                no_coverage=Count(Case(When(coverage_type='no', then='id')), distinct=True),
-                unknown=Count(Case(When(coverage_type__in=['unknown', None], then='id')), distinct=True),
-                total_coverage_schools=Count(Case(When(coverage_type__isnull=False, then='id')), distinct=True),
-            ).values('g_4_5', 'g_2_3', 'no_coverage', 'unknown', 'total_coverage_schools').order_by()
-
-            coverage_data = {
-                '5g_4g': school_coverage_type_qry[0]['g_4_5'],
-                '3g_2g': school_coverage_type_qry[0]['g_2_3'],
-                'no_coverage': school_coverage_type_qry[0]['no_coverage'],
-                'unknown': school_coverage_type_qry[0]['unknown'],
-            }
-
-            data = {
-                'total_coverage_schools': school_coverage_type_qry[0]['total_coverage_schools'],
-                'coverage_schools': coverage_data,
-            }
-
-            cache_manager.set(cache_key, data, request_path=request_path, soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
-
-        return Response(data=data)
-
-
 class SchoolConnectivityStatsListAPIView(ListAPIView):
     model = School
     queryset = model.objects.all().select_related('last_weekly_status')
@@ -600,10 +230,9 @@ class SchoolConnectivityStatsListAPIView(ListAPIView):
                                                                    time.min))
 
         school_ids = self.request.query_params.get('school_ids', '')
-        if not is_blank_string(school_ids):
+        if not core_utilities.is_blank_string(school_ids):
             school_ids = [int(school_id.strip()) for school_id in school_ids.split(',')]
         else:
-            # TODO: If School_ID not provided, then limit the output rows to 3 schools (P3 - Low priority)
             school_ids = [34554]
 
         self.kwargs.update({
@@ -658,7 +287,7 @@ class SchoolConnectivityStatsListAPIView(ListAPIView):
         benchmark = self.request.query_params.get('benchmark', 'global')
         country_id = self.kwargs['country_id']
 
-        speed_benchmark, speed_benchmark_unit = get_benchmark_value_for_default_download_layer(benchmark, country_id)
+        speed_benchmark, _ = get_benchmark_value_for_default_download_layer(benchmark, country_id)
         self.kwargs['speed_benchmark'] = speed_benchmark
 
         school_status_in_given_week_qry = SchoolWeeklyStatus.objects.filter(
@@ -735,10 +364,9 @@ class SchoolCoverageStatsListAPIView(ListAPIView):
 
     def update_kwargs(self):
         school_ids = self.request.query_params.get('school_ids', '')
-        if not is_blank_string(school_ids):
+        if not core_utilities.is_blank_string(school_ids):
             school_ids = [int(school_id.strip()) for school_id in school_ids.split(',')]
         else:
-            # TODO: If School_ID not provided, then limit the output rows to 3 schools (P3 - Low priority)
             school_ids = [34554]
 
         self.kwargs.update({
@@ -765,57 +393,6 @@ class SchoolCoverageStatsListAPIView(ListAPIView):
 
 
 @method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
-class CountryCoverageStatsAPIView(APIView):
-    permission_classes = (AllowAny,)
-
-    CACHE_KEY = 'cache'
-    CACHE_KEY_PREFIX = 'COUNTRY_COVERAGE_STATS'
-
-    def get_cache_key(self):
-        params = dict(self.request.query_params)
-        params.pop(self.CACHE_KEY, None)
-        return '{0}_{1}'.format(self.CACHE_KEY_PREFIX,
-                                '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))), )
-
-    def get(self, request, *args, **kwargs):
-        use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
-        request_path = remove_query_param(request.get_full_path(), self.CACHE_KEY)
-        cache_key = self.get_cache_key()
-
-        data = None
-        if use_cached_data:
-            data = cache_manager.get(cache_key)
-
-        if not data:
-            country_id = self.request.query_params.get('country_id', None)
-
-            school_coverage_type_qry = School.objects.filter(country_id=country_id).annotate(
-                dummy_group_by=Value(1)).values('dummy_group_by').annotate(
-                g_4_5=Count(Case(When(coverage_type__in=['5g', '4g'], then='id')), distinct=True),
-                g_2_3=Count(Case(When(coverage_type__in=['3g', '2g'], then='id')), distinct=True),
-                no_coverage=Count(Case(When(coverage_type='no', then='id')), distinct=True),
-                unknown=Count(Case(When(coverage_type__in=['unknown', None], then='id')), distinct=True),
-                total_coverage_schools=Count(Case(When(coverage_type__isnull=False, then='id')), distinct=True),
-            ).values('g_4_5', 'g_2_3', 'no_coverage', 'unknown', 'total_coverage_schools').order_by()
-
-            coverage_data = {
-                '5g_4g': school_coverage_type_qry[0]['g_4_5'],
-                '3g_2g': school_coverage_type_qry[0]['g_2_3'],
-                'no_coverage': school_coverage_type_qry[0]['no_coverage'],
-                'unknown': school_coverage_type_qry[0]['unknown'],
-            }
-
-            data = {
-                'total_coverage_schools': school_coverage_type_qry[0]['total_coverage_schools'],
-                'coverage_schools': coverage_data,
-            }
-
-            cache_manager.set(cache_key, data, request_path=request_path, soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
-
-        return Response(data=data)
-
-
-@method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
 class ConnectivityAPIView(APIView):
     permission_classes = (AllowAny,)
 
@@ -824,6 +401,9 @@ class ConnectivityAPIView(APIView):
 
     CACHE_KEY = 'cache'
     CACHE_KEY_PREFIX = 'CONNECTIVITY_STATS'
+
+    school_filters = []
+    school_static_filters = []
 
     def get_cache_key(self):
         params = dict(self.request.query_params)
@@ -841,16 +421,16 @@ class ConnectivityAPIView(APIView):
             data = cache_manager.get(cache_key)
 
         if not data:
+            self.school_filters = core_utilities.get_filter_sql(self.request, 'schools', 'schools_school')
+            self.school_static_filters = core_utilities.get_filter_sql(self.request, 'school_static',
+                                                                       'connection_statistics_schoolweeklystatus')
+
             country_id = self.request.query_params.get('country_id', None)
             if country_id:
-                get_object_or_404(Country.objects.defer('geometry', 'geometry_simplified', ), id=country_id)
                 self.queryset = self.queryset.filter(country_id=country_id)
 
             admin1_id = self.request.query_params.get('admin1_id', None)
             if admin1_id:
-                get_object_or_404(CountryAdminMetadata.objects.filter(
-                    layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN1,
-                ), id=admin1_id)
                 self.queryset = self.queryset.filter(admin1_id=admin1_id)
 
             is_weekly = self.request.query_params.get('is_weekly', 'true') == 'true'
@@ -890,7 +470,7 @@ class ConnectivityAPIView(APIView):
         benchmark = self.request.query_params.get('benchmark', 'global')
         country_id = self.request.query_params.get('country_id', None)
 
-        speed_benchmark, speed_benchmark_unit = get_benchmark_value_for_default_download_layer(benchmark, country_id)
+        speed_benchmark, _ = get_benchmark_value_for_default_download_layer(benchmark, country_id)
 
         weekly_queryset = self.queryset.annotate(
             t=FilteredRelation(
@@ -914,16 +494,28 @@ class ConnectivityAPIView(APIView):
         ).values('good', 'moderate', 'bad', 'unknown', 'school_with_realtime_data',
                  'no_of_schools_measure', 'countries_with_realtime_data').order_by()
 
+        if len(self.school_filters) > 0:
+            weekly_queryset = weekly_queryset.extra(where=[self.school_filters])
+
+        if len(self.school_static_filters) > 0:
+            school_static_filters = core_utilities.get_filter_sql(self.request, 'school_static', 'T5')
+            weekly_queryset = weekly_queryset.annotate(
+                total_weekly_schools=Count('last_weekly_status__school_id', distinct=True),
+            ).values(
+                'good', 'moderate', 'bad', 'unknown', 'school_with_realtime_data',
+                'no_of_schools_measure', 'countries_with_realtime_data', 'total_weekly_schools'
+            ).extra(where=[school_static_filters])
+
+        weekly_status = list(weekly_queryset)[0]
         real_time_connected_schools = {
-            'good': weekly_queryset[0]['good'],
-            'moderate': weekly_queryset[0]['moderate'],
-            'no_internet': weekly_queryset[0]['bad'],
-            'unknown': weekly_queryset[0]['unknown'],
+            'good': weekly_status['good'],
+            'moderate': weekly_status['moderate'],
+            'no_internet': weekly_status['bad'],
+            'unknown': weekly_status['unknown'],
         }
 
         graph_data, positive_speeds = self.generate_country_graph_data(start_date, end_date)
 
-        # live_avg = country_instance.get('connectivity_speed', 0)
         live_avg = round(sum(positive_speeds) / len(positive_speeds), 2) if len(positive_speeds) > 0 else 0
 
         live_avg_connectivity = 'unknown'
@@ -940,30 +532,30 @@ class ConnectivityAPIView(APIView):
         country_id = self.request.query_params.get('country_id', None)
         admin1_id = self.request.query_params.get('admin1_id', None)
 
+        is_data_synced_qs = SchoolWeeklyStatus.objects.filter(
+            school__realtime_registration_status__rt_registered=True,
+        )
+
+        if len(self.school_filters) > 0:
+            is_data_synced_qs = is_data_synced_qs.extra(where=[self.school_filters])
+
+        if len(self.school_static_filters) > 0:
+            is_data_synced_qs = is_data_synced_qs.extra(where=[self.school_static_filters])
+
         if admin1_id:
-            is_data_synced = SchoolWeeklyStatus.objects.filter(
-                school__admin1_id=admin1_id,
-                school__realtime_registration_status__rt_registered=True,
-            ).exists()
-        elif country_id:
-            is_data_synced = SchoolWeeklyStatus.objects.filter(
-                school__country_id=country_id,
-                school__realtime_registration_status__rt_registered=True,
-            ).exists()
-        else:
-            is_data_synced = SchoolWeeklyStatus.objects.filter(
-                school__realtime_registration_status__rt_registered=True,
-            ).exists()
+            is_data_synced_qs = is_data_synced_qs.filter(school__admin1_id=admin1_id)
+        if country_id:
+            is_data_synced_qs = is_data_synced_qs.filter(school__country_id=country_id)
 
         return {
             'live_avg': live_avg,
             'live_avg_connectivity': live_avg_connectivity,
-            'no_of_schools_measure': weekly_queryset[0]['no_of_schools_measure'],
-            'school_with_realtime_data': weekly_queryset[0]['school_with_realtime_data'],
-            'countries_with_realtime_data': weekly_queryset[0]['countries_with_realtime_data'],
+            'no_of_schools_measure': weekly_status['no_of_schools_measure'],
+            'school_with_realtime_data': weekly_status['school_with_realtime_data'],
+            'countries_with_realtime_data': weekly_status['countries_with_realtime_data'],
             'real_time_connected_schools': real_time_connected_schools,
             'graph_data': graph_data,
-            'is_data_synced': is_data_synced,
+            'is_data_synced': is_data_synced_qs.exists(),
             'benchmark_metadata': {
                 'benchmark_value': str(speed_benchmark),
                 'benchmark_unit': "bps",
@@ -984,6 +576,15 @@ class ConnectivityAPIView(APIView):
             avg_speed=Avg('daily_status__connectivity_speed'),
         ).order_by('daily_status__date')
 
+        if len(self.school_filters) > 0:
+            avg_daily_connectivity_speed = avg_daily_connectivity_speed.extra(where=[self.school_filters])
+
+        if len(self.school_static_filters) > 0:
+            avg_daily_connectivity_speed = avg_daily_connectivity_speed.annotate(
+                total_weekly_schools=Count('last_weekly_status__school_id', distinct=True),
+            )
+            avg_daily_connectivity_speed = avg_daily_connectivity_speed.extra(where=[self.school_static_filters])
+
         # Generate the graph data in the desired format
         graph_data = []
         current_date = start_date
@@ -997,8 +598,6 @@ class ConnectivityAPIView(APIView):
             current_date += timedelta(days=1)
 
         all_positive_speeds = []
-
-        # Update the graph_data with actual values if they exist
         # Update the graph_data with actual values if they exist
         for daily_avg_data in avg_daily_connectivity_speed:
             formatted_date = date_utilities.format_date(daily_avg_data['daily_status__date'])
@@ -1036,6 +635,9 @@ class CoverageAPIView(APIView):
         'id': ['exact', 'in'],
     }
 
+    school_filters = []
+    school_static_filters = []
+
     def get_cache_key(self):
         params = dict(self.request.query_params)
         params.pop(self.CACHE_KEY, None)
@@ -1065,6 +667,10 @@ class CoverageAPIView(APIView):
             data = cache_manager.get(cache_key)
 
         if not data:
+            self.school_filters = core_utilities.get_filter_sql(self.request, 'schools', 'schools_school')
+            self.school_static_filters = core_utilities.get_filter_sql(self.request, 'school_static',
+                                                                       'connection_statistics_schoolweeklystatus')
+
             # Query the School table to get the coverage data
             # Get the total number of schools with coverage data
             # Get the count of schools falling under different coverage types
@@ -1079,15 +685,26 @@ class CoverageAPIView(APIView):
                 total_coverage_schools=Count(Case(When(coverage_type__isnull=False, then='id')), distinct=True),
             ).values('g_4_5', 'g_2_3', 'no_coverage', 'unknown', 'total_coverage_schools').order_by()
 
+            if len(self.school_filters) > 0:
+                school_coverage_type_qry = school_coverage_type_qry.extra(where=[self.school_filters])
+
+            if len(self.school_static_filters) > 0:
+                school_coverage_type_qry = school_coverage_type_qry.annotate(
+                    total_weekly_schools=Count('last_weekly_status__school_id', distinct=True),
+                ).values(
+                    'g_4_5', 'g_2_3', 'no_coverage', 'unknown', 'total_coverage_schools', 'total_weekly_schools'
+                ).extra(where=[self.school_static_filters])
+
+            school_coverage_status = list(school_coverage_type_qry)[0]
             coverage_data = {
-                '5g_4g': school_coverage_type_qry[0]['g_4_5'],
-                '3g_2g': school_coverage_type_qry[0]['g_2_3'],
-                'no_coverage': school_coverage_type_qry[0]['no_coverage'],
-                'unknown': school_coverage_type_qry[0]['unknown'],
+                '5g_4g': school_coverage_status['g_4_5'],
+                '3g_2g': school_coverage_status['g_2_3'],
+                'no_coverage': school_coverage_status['no_coverage'],
+                'unknown': school_coverage_status['unknown'],
             }
 
             data = {
-                'total_schools': school_coverage_type_qry[0]['total_coverage_schools'],
+                'total_schools': school_coverage_status['total_coverage_schools'],
                 'connected_schools': coverage_data,
             }
 
@@ -1127,23 +744,18 @@ class ConnectivityConfigurationsViewSet(APIView):
 
             country_id = self.request.query_params.get('country_id', None)
             if country_id:
-                get_object_or_404(Country.objects.defer('geometry', 'geometry_simplified', ), id=country_id)
                 self.queryset = self.queryset.filter(school__country_id=country_id)
 
             admin1_id = self.request.query_params.get('admin1_id', None)
             if admin1_id:
-                get_object_or_404(CountryAdminMetadata.objects.filter(
-                    layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN1,
-                ), id=admin1_id)
                 self.queryset = self.queryset.filter(school__admin1_id=admin1_id)
 
             school_id = self.request.query_params.get('school_id', None)
             if school_id:
-                get_object_or_404(School.objects.all(), id=school_id)
                 self.queryset = self.queryset.filter(school=school_id)
 
             school_ids = self.request.query_params.get('school_ids', '')
-            if not is_blank_string(school_ids):
+            if not core_utilities.is_blank_string(school_ids):
                 school_ids = [int(school_id.strip()) for school_id in school_ids.split(',')]
                 self.queryset = self.queryset.filter(school__in=school_ids)
 
@@ -1174,7 +786,7 @@ class ConnectivityConfigurationsViewSet(APIView):
                     live_data_source__in=live_data_sources,
                 ).filter(**{parameter_column_name + '__isnull': False})
 
-            today_date = get_current_datetime_object().date()
+            today_date = core_utilities.get_current_datetime_object().date()
             monday_date = today_date - timedelta(days=today_date.weekday())
 
             latest_daily_entry = self.queryset.filter(
@@ -1207,7 +819,6 @@ class ConnectivityConfigurationsViewSet(APIView):
         return Response(data=static_data)
 
 
-# @method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
 class CountrySummaryAPIViewSet(BaseModelViewSet):
     model = CountryWeeklyStatus
     serializer_class = statistics_serializers.CountryWeeklyStatusSerializer
@@ -1378,10 +989,11 @@ class CountryDailyConnectivitySummaryAPIViewSet(BaseModelViewSet):
             try:
                 country_daily_status = CountryDailyStatus.objects.get(id=pk)
                 if country_daily_status:
-                    serializer = statistics_serializers.CountryDailyStatusUpdateRetrieveSerializer(country_daily_status,
-                                                                                                   partial=True,
-                                                                                                   context={
-                                                                                                       'request': request}, )
+                    serializer = statistics_serializers.CountryDailyStatusUpdateRetrieveSerializer(
+                        country_daily_status,
+                        partial=True,
+                        context={'request': request},
+                    )
                     return Response(serializer.data)
                 return Response(status=rest_status.HTTP_404_NOT_FOUND, data=error_mess)
             except CountryDailyStatus.DoesNotExist:
@@ -1424,7 +1036,10 @@ class SchoolSummaryAPIViewSet(BaseModelViewSet):
 
     ordering_field_names = ['-year', '-week', 'school__name']
     apply_query_pagination = True
-    search_fields = ('=school__id', 'school__name', 'year', 'week',)
+    search_fields = (
+        '=school__id', 'school__name', '=school__giga_id_school', '=school__external_id',
+        'year', 'week',
+    )
     filterset_fields = {
         'school_id': ['exact', 'in'],
         'year': ['exact', 'in'],
@@ -1535,7 +1150,9 @@ class SchoolDailyConnectivitySummaryAPIViewSet(BaseModelViewSet):
     ordering_field_names = ['-date', 'school__name', ]
     apply_query_pagination = True
 
-    search_fields = ('=school__id', 'school__name',)
+    search_fields = (
+        '=school__id', 'school__name', '=school__giga_id_school', '=school__external_id',
+    )
     filterset_fields = {
         'school_id': ['exact', 'in'],
     }
@@ -1562,11 +1179,6 @@ class SchoolDailyConnectivitySummaryAPIViewSet(BaseModelViewSet):
             if len(countries_ids) > 0:
                 school_data = School.objects.filter(country_id__in=countries_ids).values_list('id',
                                                                                               flat=True).distinct()
-                # limit = len(school_data) - 1
-                # if Country.objects.filter(code='BR').exists():
-                #     if Country.objects.get(code='BR').id in countries_ids:
-                #         limit = 10000
-                # print([school_data[i:i + 2] for i in range(0, len(school_data), 2)])
                 queryset = queryset.filter(school_id__in=school_data)
         return queryset
 
@@ -1602,10 +1214,11 @@ class SchoolDailyConnectivitySummaryAPIViewSet(BaseModelViewSet):
             try:
                 school_daily_status = SchoolDailyStatus.objects.get(id=pk)
                 if school_daily_status:
-                    serializer = statistics_serializers.SchoolDailyStatusUpdateRetriveSerializer(school_daily_status,
-                                                                                                 partial=True,
-                                                                                                 context={
-                                                                                                     'request': request}, )
+                    serializer = statistics_serializers.SchoolDailyStatusUpdateRetriveSerializer(
+                        school_daily_status,
+                        partial=True,
+                        context={'request': request},
+                    )
                     return Response(serializer.data)
                 return Response(status=rest_status.HTTP_404_NOT_FOUND, data=error_mess)
             except SchoolDailyStatus.DoesNotExist:
@@ -1655,7 +1268,8 @@ class TimePlayerViewSet(ListAPIView):
               ELSE 'unknown'
           END AS field_status,
           CASE WHEN rt_status.rt_registered = True
-            AND EXTRACT(YEAR FROM CAST(rt_status.rt_registration_date AS DATE)) <= EXTRACT(YEAR FROM CAST(t.date AS DATE))
+            AND EXTRACT(YEAR FROM CAST(rt_status.rt_registration_date AS DATE)) <=
+                EXTRACT(YEAR FROM CAST(t.date AS DATE))
             THEN True ELSE False END as is_rt_connected
         FROM schools_school AS s
         INNER JOIN connection_statistics_schooldailystatus t ON s.id = t.school_id
