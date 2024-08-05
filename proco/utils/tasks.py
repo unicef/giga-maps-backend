@@ -77,6 +77,11 @@ def update_all_cached_values():
                     url=reverse('connection_statistics:global-stat'),
                     query_params={'country_id': country.id},
                 ),
+                update_cached_value.s(
+                    url=reverse('accounts:list-published-advance-filters'),
+                    kwargs={'status': 'PUBLISHED', 'country_id': country.id},
+                    query_params={'expand': 'column_configuration'},
+                ),
             ]
 
             if country_wise_default_layers.get(country.id, None):
@@ -113,6 +118,11 @@ def update_country_related_cache(country_code):
             url=reverse('connection_statistics:global-stat'),
             query_params={'country_id': country.id},
         )
+        update_cached_value.delay(
+            url=reverse('accounts:list-published-advance-filters'),
+            kwargs={'status': 'PUBLISHED', 'country_id': country.id},
+            query_params={'expand': 'column_configuration'},
+        ),
 
 
 @app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)

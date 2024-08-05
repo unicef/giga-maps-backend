@@ -1811,16 +1811,7 @@ class ColumnConfigurationListSerializer(FlexFieldsModelSerializer):
             'table_label',
             'is_filter_applicable',
             'options',
-            'last_modified_at',
-            'last_modified_by',
-            'created',
-            'created_by',
         )
-
-        expandable_fields = {
-            'last_modified_by': (ExpandUserSerializer, {'source': 'last_modified_by'}),
-            'created_by': (ExpandUserSerializer, {'source': 'created_by'}),
-        }
 
 
 class ExpandColumnConfigurationSerializer(FlexFieldsModelSerializer):
@@ -2002,9 +1993,9 @@ class BaseAdvanceFilterListCRUDSerializer(serializers.ModelSerializer):
         if re.match(r'[a-zA-Z0-9-\' _]*$', code):
             if (
                 (self.instance and code != self.instance.code) or
-                (not self.instance and accounts_models.AdvanceFilter.objects.filter(code=code).exists())
+                (not self.instance and accounts_models.AdvanceFilter.objects.filter(code__iexact=code).exists())
             ):
-                raise accounts_exceptions.DuplicateAdvanceFilterCodeError(message_kwargs={'code': code})
+                raise accounts_exceptions.DuplicateAdvanceFilterCodeError(message_kwargs={'code': code.upper()})
             return code.upper()
         raise accounts_exceptions.InvalidAdvanceFilterCodeError()
 
@@ -2039,8 +2030,7 @@ class CreateAdvanceFilterSerializer(BaseAdvanceFilterListCRUDSerializer):
         }
 
     def validate_status(self, status):
-        if status in [accounts_models.AdvanceFilter.FILTER_STATUS_DRAFT]:
-            return status
+        return accounts_models.AdvanceFilter.FILTER_STATUS_DRAFT
 
     def to_internal_value(self, data):
         if not data.get('code') and data.get('name'):
@@ -2070,7 +2060,6 @@ class UpdateAdvanceFilterSerializer(BaseAdvanceFilterListCRUDSerializer):
         model = accounts_models.AdvanceFilter
         read_only_fields = (
             'id',
-            'created',
             'last_modified_at',
             'published_by',
             'published_at'
@@ -2092,22 +2081,43 @@ class UpdateAdvanceFilterSerializer(BaseAdvanceFilterListCRUDSerializer):
         }
 
     def validate_status(self, status):
-        if status in [accounts_models.AdvanceFilter.FILTER_STATUS_DRAFT]:
+        # If new status is DRAFT, then existing status must be in DRAFT
+        # If new status is DISABLED, then existing status must be as PUBLISHED
+        if (
+            status == accounts_models.AdvanceFilter.FILTER_STATUS_DRAFT and
+            self.instance.status == accounts_models.AdvanceFilter.FILTER_STATUS_DRAFT
+        ) or (
+            status == accounts_models.AdvanceFilter.FILTER_STATUS_DISABLED and
+            self.instance.status == accounts_models.AdvanceFilter.FILTER_STATUS_PUBLISHED
+        ):
             return status
 
-    def update(self, instance, validated_data):
-        """
-        update
-            This method is used to update Advance Filter
-        :param instance:
-        :param validated_data:
-        :return:
-        """
-        with transaction.atomic():
-            advance_filter_instance = super().update(instance, validated_data)
-            return advance_filter_instance
+        # The publisher can update the filter at any status but won't be able to change the status value
+        if self.instance.status in [accounts_models.AdvanceFilter.FILTER_STATUS_DISABLED,
+                                    accounts_models.AdvanceFilter.FILTER_STATUS_PUBLISHED]:
+            request_user = core_utilities.get_current_user(context=self.context)
+            user_is_publisher = len(get_user_emails_for_permissions(
+                [auth_models.RolePermission.CAN_PUBLISH_ADVANCE_FILTER],
+                ids_to_filter=[request_user.id]
+            )) > 0
 
-class PublishAdvanceFilterSerializer(BaseAdvanceFilterListCRUDSerializer):
+            if user_is_publisher:
+                return self.instance.status
+
+        raise accounts_exceptions.InvalidAdvanceFilterUpdateError()
+
+    def validate_code(self, code):
+        if re.match(r'[a-zA-Z0-9-\' _]*$', code):
+            # Check if filter exist with same code excluding current filter
+            if accounts_models.AdvanceFilter.objects.filter(code__iexact=code).exclude(pk=self.instance.id).exists():
+                raise accounts_exceptions.DuplicateAdvanceFilterCodeError(message_kwargs={'code': code.upper()})
+            return code.upper()
+        raise accounts_exceptions.InvalidAdvanceFilterCodeError()
+
+
+class PublishAdvanceFilterSerializer(serializers.ModelSerializer):
+    options = serializers.JSONField(required=False)
+
     class Meta:
         model = accounts_models.AdvanceFilter
         read_only_fields = (
@@ -2129,36 +2139,21 @@ class PublishAdvanceFilterSerializer(BaseAdvanceFilterListCRUDSerializer):
             'status',
         )
 
-        extra_kwargs = {
-            'status': { 'required': True },
-        }
-
-    def validate_status(self, status):
-        if status == accounts_models.AdvanceFilter.FILTER_STATUS_PUBLISHED:
-            return status
-
-        raise accounts_exceptions.InvalidAdvanceFilterStatusUpdateError
-
     def update(self, instance, validated_data):
-        print("validated_data", validated_data)
         """
         update
-            This method is used to update Advance Filter
+            This method is used to publish the Advance Filter instance
         :param instance:
         :param validated_data:
         :return:
         """
-        with transaction.atomic():
-            request_user = core_utilities.get_current_user(context=self.context)
-            if(
-                request_user is not None and
-                validated_data['status'] == accounts_models.AdvanceFilter.FILTER_STATUS_PUBLISHED
-            ):
-                validated_data['published_by'] = request_user
-                validated_data['published_at'] = core_utilities.get_current_datetime_object()
+        validated_data['status'] = accounts_models.AdvanceFilter.FILTER_STATUS_PUBLISHED
+        validated_data['published_at'] = core_utilities.get_current_datetime_object()
+        validated_data['published_by'] = core_utilities.get_current_user(context=self.context)
 
-            instance = super().update(instance, validated_data)
-            args = ['--reset', '-filter_id={0}'.format(instance.id)]
-            call_command('populate_active_filters_for_countries', *args)
+        instance = super().update(instance, validated_data)
+
+        args = ['--reset', '-filter_id={0}'.format(instance.id)]
+        call_command('populate_active_filters_for_countries', *args)
 
         return instance

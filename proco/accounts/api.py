@@ -19,6 +19,7 @@ from rest_framework.response import Response
 from rest_framework.utils.urls import remove_query_param
 from rest_framework.views import APIView
 
+from proco.accounts import exceptions as accounts_exceptions
 from proco.accounts import models as accounts_models
 from proco.accounts import serializers
 from proco.accounts import utils as account_utilities
@@ -2153,8 +2154,6 @@ class ColumnConfigurationViewSet(BaseModelViewSet):
         'is_filter_applicable': ['exact'],
     }
 
-    permit_list_expands = ['created_by', 'last_modified_by']
-
 
 class AdvanceFiltersViewSet(BaseModelViewSet):
     model = accounts_models.AdvanceFilter
@@ -2216,16 +2215,18 @@ class AdvanceFiltersViewSet(BaseModelViewSet):
 
     def perform_destroy(self, instance):
         """
-        perform_destroy
-        :param instance:
-        :return:
+        Delete the filter from Admin portal listing only if its in Draft or Disabled mode.
+        Published filter can not be deleted.
         """
-        allowed_status = [accounts_models.AdvanceFilter.FILTER_STATUS_DRAFT, accounts_models.AdvanceFilter.FILTER_STATUS_DISABLED]
-        if instance.status in allowed_status:
+        if instance.status in [accounts_models.AdvanceFilter.FILTER_STATUS_DRAFT,
+                               accounts_models.AdvanceFilter.FILTER_STATUS_DISABLED]:
             instance.deleted = core_utilities.get_current_datetime_object()
             instance.last_modified_at = core_utilities.get_current_datetime_object()
             instance.last_modified_by = core_utilities.get_current_user(request=self.request)
             return super().perform_destroy(instance)
+        raise accounts_exceptions.InvalidAdvanceFilterDeleteError(
+            message_kwargs={'filter': instance.name, 'status': instance.status},
+        )
 
 
 class AdvanceFiltersPublishViewSet(BaseModelViewSet):
@@ -2236,6 +2237,16 @@ class AdvanceFiltersPublishViewSet(BaseModelViewSet):
         core_permissions.IsUserAuthenticated,
         core_permissions.CanPublishAdvanceFilter,
     )
+
+    def apply_queryset_filters(self, queryset):
+        """
+        Filter only in Draft or Disabled status can be Published.
+        """
+        queryset = queryset.filter(
+            status__in=[accounts_models.AdvanceFilter.FILTER_STATUS_DRAFT,
+                        accounts_models.AdvanceFilter.FILTER_STATUS_DISABLED],
+        )
+        return super().apply_queryset_filters(queryset)
 
 
 class PublishedAdvanceFiltersViewSet(CachedListMixin, BaseModelViewSet):

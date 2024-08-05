@@ -223,25 +223,34 @@ class InvalidDataLayerNameError(BaseInvalidValidationError):
     description = _('Provide valid data layer name')
     code = 'invalid_data_layer_name'
 
+
 class InvalidAdvanceFilterNameError(BaseInvalidValidationError):
     message = _('Invalid Advance Filter name.')
     description = _('Provide valid advance filter name')
     code = 'invalid_advance_filter_name'
+
 
 class InvalidAdvanceFilterStatusError(BaseInvalidValidationError):
     message = _('Invalid Advance Filter Status at creation.')
     description = _('Only "DRAFT" or "READY_TO_PUBLISH" status is allowed at creation.')
     code = 'invalid_advance_filter_status'
 
+
 class DuplicateAdvanceFilterCodeError(BaseInvalidValidationError):
     message = _("Advance Filter with code '{code}' already exists.")
     code = 'duplicate_advance_filter_code'
+
+
+class InvalidAdvanceFilterUpdateError(BaseInvalidValidationError):
+    message = _('Invalid Advance Filter Status at update.')
+    code = 'invalid_advance_filter_status'
 
 
 class InvalidAdvanceFilterCodeError(BaseInvalidValidationError):
     message = _('Invalid Advance Filter code.')
     description = _('Provide valid advance filter code')
     code = 'invalid_advance_filter_code'
+
 
 class InvalidAdvanceFilterStatusUpdateError(BaseInvalidValidationError):
     message = _('Invalid Advance Filter Status at update.')
@@ -287,3 +296,14 @@ class InvalidUserOnDataLayerUpdateError(BaseInvalidValidationError):
 class DummyDataLayerError(BaseInvalidValidationError):
     message = _("Dummy Error.")
     code = 'dummy_data_layer_error'
+
+
+class InvalidAdvanceFilterDeleteError(BaseInvalidValidationError):
+    """
+    An exception class that extends BaseInvalidValidationError. This exception should
+    be raised when advance filter instance can't be deleted.
+
+    This class overrides both 'message' and 'code' variables.
+    """
+    message = _("Advance filter '{filter}' can't be deleted in current status '{status}'.")
+    code = 'invalid_filter_delete'
