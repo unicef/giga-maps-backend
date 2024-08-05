@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "cb2d38abf27bdcce05377ed1be8efb5c556559d7242ae3cdd105c93a0bfbb983"
+            "sha256": "d6737d1b948af0c1a4907854ee797786298e917e2c38bd705adadb8807d3ba46"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -526,11 +526,11 @@
         },
         "django-prometheus": {
             "hashes": [
-                "sha256:240378a1307c408bd5fc85614a3a57f1ce633d4a222c9e291e2bbf325173b801",
-                "sha256:e6616770d8820b8834762764bf1b76ec08e1b98e72a6f359d488a2e15fe3537c"
+                "sha256:cf9b26f7ba2e4568f08f8f91480a2882023f5908579681bcf06a4d2465f12168",
+                "sha256:f9c8b6c780c9419ea01043c63a437d79db2c33353451347894408184ad9c3e1e"
             ],
             "index": "pypi",
-            "version": "==2.2.0"
+            "version": "==2.3.1"
         },
         "django-redis": {
             "hashes": [
