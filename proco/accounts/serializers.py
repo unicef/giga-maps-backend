@@ -1899,7 +1899,7 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
                         })
                 options['choices'] = choices
 
-            if instance.type == accounts_models.AdvanceFilter.TYPE_RANGE:
+            if instance.type == accounts_models.AdvanceFilter.TYPE_RANGE and options.get('range_auto_compute', False):
                 select_qs = School.objects.filter(country_id=self.context['country_id'])
                 if parameter_table == 'school_static':
                     parameter_field_props = SchoolWeeklyStatus._meta.get_field(parameter_field)
