@@ -2,11 +2,10 @@ import copy
 import json
 import logging
 from datetime import timedelta
-from math import floor, ceil
 
 from django.conf import settings
 from django.contrib.admin.models import LogEntry
-from django.db.models import Case, F, IntegerField, Value, When, Min, Max
+from django.db.models import Case, IntegerField, Value, When
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
@@ -33,7 +32,6 @@ from proco.core import utils as core_utilities
 from proco.core.viewsets import BaseModelViewSet
 from proco.custom_auth import models as auth_models
 from proco.locations.models import Country
-from proco.schools.models import School
 from proco.utils import dates as date_utilities
 from proco.utils.cache import cache_manager
 from proco.utils.filters import NullsAlwaysLastOrderingFilter
@@ -302,111 +300,6 @@ class AppStaticConfigurationsViewSet(APIView):
         }
 
         return Response(data=static_data)
-
-
-class AdvancedFiltersViewSet(APIView):
-    base_auth_permissions = (
-        permissions.AllowAny,
-    )
-
-    CACHE_KEY = 'cache'
-    CACHE_KEY_PREFIX = 'ADVANCE_FILTERS_JSON'
-
-    def get_cache_key(self):
-        params = dict(self.request.query_params)
-        params.pop(self.CACHE_KEY, None)
-        return '{0}_{1}'.format(self.CACHE_KEY_PREFIX,
-                                '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))), )
-
-    def get(self, request, *args, **kwargs):
-        use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
-        cache_key = self.get_cache_key()
-
-        response_data = None
-        if use_cached_data:
-            response_data = cache_manager.get(cache_key)
-
-        if not response_data:
-            filters = copy.deepcopy(settings.FILTERS_DATA)
-
-            for filter_json in filters:
-                parameter_table = filter_json['parameter']['table']
-                parameter_field = filter_json['parameter']['field']
-
-                last_weekly_status_field = 'last_weekly_status__{}'.format(parameter_field)
-
-                active_countries_list = []
-
-                # Populate the active countries list
-                active_countries_sql_filter = filter_json.get('active_countries_filter', None)
-                if active_countries_sql_filter:
-                    country_qs = School.objects.all()
-                    if parameter_table == 'school_static':
-                        country_qs = country_qs.select_related('last_weekly_status').annotate(**{
-                            parameter_table + '_' + parameter_field: F(last_weekly_status_field)
-                        })
-
-                    active_countries_list = list(country_qs.extra(
-                        where=[active_countries_sql_filter],
-                    ).order_by('country_id').values_list('country_id', flat=True).distinct('country_id'))
-
-                    if len(active_countries_list) > 0:
-                        filter_json['active_countries_list'] = active_countries_list
-
-                    del filter_json['active_countries_filter']
-
-                if filter_json['type'] == 'range':
-                    select_qs = School.objects.all()
-                    if len(active_countries_list) > 0:
-                        select_qs = select_qs.filter(country_id__in=active_countries_list)
-
-                    if parameter_table == 'school_static':
-                        select_qs = select_qs.select_related('last_weekly_status').values('country_id').annotate(
-                            min_value=Min(F(last_weekly_status_field)),
-                            max_value=Max(F(last_weekly_status_field)),
-                        )
-                    else:
-                        select_qs = select_qs.values('country_id').annotate(
-                            min_value=Min(parameter_field),
-                            max_value=Max(parameter_field),
-                        )
-
-                    min_max_result_country_wise = list(
-                        select_qs.values('country_id', 'min_value', 'max_value').order_by('country_id').distinct())
-
-                    active_countries_range = filter_json['active_countries_range']
-
-                    for min_max_result in min_max_result_country_wise:
-                        country_id = min_max_result.pop('country_id')
-                        country_range_json = active_countries_range.get(country_id, copy.deepcopy(
-                            active_countries_range['default']))
-                        min_max_result['min_value'] = floor(min_max_result['min_value'])
-                        min_max_result['max_value'] = ceil(min_max_result['max_value'])
-
-                        if 'downcast_aggr_str' in filter_json:
-                            downcast_eval = filter_json['downcast_aggr_str']
-                            min_max_result['min_value'] = floor(
-                                eval(downcast_eval.format(val=min_max_result['min_value'])))
-                            min_max_result['max_value'] = ceil(
-                                eval(downcast_eval.format(val=min_max_result['max_value'])))
-
-                        country_range_json.update(**min_max_result)
-
-                        country_range_json['min_place_holder'] = 'Min ({})'.format(min_max_result['min_value'])
-                        country_range_json['max_place_holder'] = 'Max ({})'.format(min_max_result['max_value'])
-                        active_countries_range[country_id] = country_range_json
-
-                    filter_json['active_countries_range'] = active_countries_range
-
-            response_data = {
-                'count': len(settings.FILTERS_DATA),
-                'results': filters,
-            }
-            request_path = remove_query_param(request.get_full_path(), 'cache')
-            cache_manager.set(cache_key, response_data, request_path=request_path,
-                              soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
-
-        return Response(data=response_data)
 
 
 class DataSourceViewSet(BaseModelViewSet):

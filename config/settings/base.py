@@ -1,5 +1,3 @@
-import json
-import os
 import sys
 import warnings
 
@@ -435,9 +433,6 @@ DATA_SOURCE_CONFIG = {
 }
 
 INVALIDATE_CACHE_HARD = env('INVALIDATE_CACHE_HARD', default='false')
-
-with open(os.path.join(BASE_DIR, 'proco', 'core', 'resources', 'filters.json')) as filters_json_file:
-    FILTERS_DATA = json.load(filters_json_file)
 
 # DATABASE_ROUTERS = ["proco.utils.read_db_router.StandbyRouter"]
 

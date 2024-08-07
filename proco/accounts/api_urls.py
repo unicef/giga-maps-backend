@@ -30,7 +30,6 @@ urlpatterns = [
     path('invalidate-cache/', api.InvalidateCache.as_view(), name='admin-invalidate-cache'),
 
     path('app_configs/', api.AppStaticConfigurationsViewSet.as_view(), name='get-app-static-configurations'),
-    path('advanced_filters/', api.AdvancedFiltersViewSet.as_view(), name='list-advanced-filters'),
     path('data_sources/', api.DataSourceViewSet.as_view({
         'get': 'list',
         'post': 'create',

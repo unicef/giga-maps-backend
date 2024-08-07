@@ -46,7 +46,6 @@ def update_all_cached_values():
         logger.debug('Not found running job: {}'.format(task_key))
         update_cached_value.delay(url=reverse('locations:search-countries-admin-schools'))
         update_cached_value.delay(url=reverse('locations:countries-list'))
-        update_cached_value.delay(url=reverse('accounts:list-advanced-filters'))
         update_cached_value.delay(url=reverse('connection_statistics:global-stat'))
 
         # Get countries which has at least has 1 school
@@ -106,7 +105,6 @@ def update_country_related_cache(country_code):
 
     update_cached_value.delay(url=reverse('locations:search-countries-admin-schools'))
     update_cached_value.delay(url=reverse('locations:countries-list'))
-    update_cached_value.delay(url=reverse('accounts:list-advanced-filters'))
     update_cached_value.delay(url=reverse('connection_statistics:global-stat'))
     update_cached_value.delay(url=reverse('locations:countries-detail', kwargs={'pk': country_code.lower()}))
 
