@@ -7,6 +7,7 @@ from rest_flex_fields.serializers import FlexFieldsModelSerializer
 from rest_framework import serializers
 
 from proco.accounts.models import (
+    AdvanceFilter,
     APIKeyCountryRelationship,
     AdvanceFilterCountryRelationship,
     DataLayerCountryRelationship,
@@ -431,7 +432,7 @@ class DetailCountrySerializer(BaseCountrySerializer):
 
     def get_active_filters_list(self, instance):
         active_filters_list = []
-        linked_filters = instance.active_filters.all()
+        linked_filters = instance.active_filters.all().filter(advance_filter__status=AdvanceFilter.FILTER_STATUS_PUBLISHED)
         for relationship_instance in linked_filters:
             active_filters_list.append({
                 'advance_filter_id': relationship_instance.advance_filter_id,

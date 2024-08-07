@@ -545,7 +545,7 @@ class AdvanceFilter(core_models.BaseModel):
     description = models.CharField(max_length=500, null=True, blank=True)
 
     type = models.CharField(
-        max_length=10,
+        max_length=50,
         choices=FILTER_TYPE_CHOICES,
         db_index=True,
     )

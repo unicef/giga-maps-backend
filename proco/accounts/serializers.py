@@ -1878,7 +1878,7 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
 
                 sql_qry = select_qry.format(
                     col_name=parameter_field,
-                    col=f"LOWER(NULLIF({parameter_field}, ''))" if field_type == 'str' else parameter_field,
+                    col=f"LOWER(NULLIF({parameter_table + '.'+ parameter_field}, ''))" if field_type == 'str' else parameter_table + '.'+ parameter_field,
                     c_id=self.context['country_id'],
                     join_condition=join_condition,
                     filter_condition=filter_condition)
@@ -1888,7 +1888,7 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
                     field_value = value[parameter_field]
                     if core_utilities.is_blank_string(field_value):
                         choices.append({
-                            'label': 'None',
+                            'label': 'Unknown',
                             'value': 'none'
                         })
                     else:

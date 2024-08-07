@@ -1063,7 +1063,9 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             schools_school."education_level",
             ROUND(AVG(sds."{col_name}"::numeric), 2) AS "live_avg",
             CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
-                   WHEN schools_school.connectivity_status = 'no' THEN 'not_connected' ELSE 'unknown' END as connectivity_status,
+                WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
+                ELSE 'unknown'
+            END as connectivity_status,
             CASE WHEN srr."rt_registered" = True AND srr."rt_registration_date"::date <= '{end_date}' THEN true
             ELSE false END AS is_rt_connected,
             {case_conditions}
@@ -1332,16 +1334,16 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     values_l.extend(values)
                     if parameter_col_type == 'str':
                         label_cases.append(
-                            'COUNT(DISTINCT CASE WHEN LOWER(sws."{col_name}") IN ({value}) THEN schools_school."id" ELSE NULL END) '
-                            'AS "{label}",'.format(
+                            'COUNT(DISTINCT CASE WHEN LOWER(sws."{col_name}") IN ({value}) '
+                            'THEN schools_school."id" ELSE NULL END) AS "{label}",'.format(
                                 col_name=kwargs['col_name'],
                                 label=label,
                                 value=','.join(["'" + str(v).lower() + "'" for v in values])
                             ))
                     elif parameter_col_type == 'int':
                         label_cases.append(
-                            'COUNT(DISTINCT CASE WHEN sws."{col_name}" IN ({value}) THEN schools_school."id" ELSE NULL END) '
-                            'AS "{label}",'.format(
+                            'COUNT(DISTINCT CASE WHEN sws."{col_name}" IN ({value}) '
+                            'THEN schools_school."id" ELSE NULL END) AS "{label}",'.format(
                                 col_name=kwargs['col_name'],
                                 label=label,
                                 value=','.join([str(v) for v in values])
@@ -1349,7 +1351,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             else:
                 if is_sql_value:
                     label_cases.append(
-                        'COUNT(DISTINCT CASE WHEN sws."{col_name}" IS NULL THEN schools_school."id" ELSE NULL END) AS "{label}",'.format(
+                        'COUNT(DISTINCT CASE WHEN sws."{col_name}" IS NULL THEN schools_school."id" ELSE NULL END) '
+                        'AS "{label}",'.format(
                             col_name=kwargs['col_name'],
                             label=label,
                         ))
@@ -1357,16 +1360,16 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     values = set(values_l)
                     if parameter_col_type == 'str':
                         label_cases.append(
-                            'COUNT(DISTINCT CASE WHEN LOWER(sws."{col_name}") NOT IN ({value}) THEN schools_school."id" ELSE NULL END) '
-                            'AS "{label}",'.format(
+                            'COUNT(DISTINCT CASE WHEN LOWER(sws."{col_name}") NOT IN ({value}) '
+                            'THEN schools_school."id" ELSE NULL END) AS "{label}",'.format(
                                 col_name=kwargs['col_name'],
                                 label=label,
                                 value=','.join(["'" + str(v).lower() + "'" for v in values])
                             ))
                     elif parameter_col_type == 'int':
                         label_cases.append(
-                            'COUNT(DISTINCT CASE WHEN sws."{col_name}" NOT IN ({value}) THEN schools_school."id" ELSE NULL END) '
-                            'AS "{label}",'.format(
+                            'COUNT(DISTINCT CASE WHEN sws."{col_name}" NOT IN ({value}) '
+                            'THEN schools_school."id" ELSE NULL END) AS "{label}",'.format(
                                 col_name=kwargs['col_name'],
                                 label=label,
                                 value=','.join([str(v) for v in values])
@@ -1398,7 +1401,9 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             {label_case_statements}
             ST_AsGeoJSON(ST_Transform(schools_school."geopoint", 4326)) AS geopoint,
             CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
-                   WHEN schools_school.connectivity_status = 'no' THEN 'not_connected' ELSE 'unknown' END as connectivity_status
+                WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
+                ELSE 'unknown'
+            END as connectivity_status
         FROM "schools_school"
         INNER JOIN locations_country c ON c.id = schools_school.country_id
             AND c."deleted" IS NULL
@@ -1695,7 +1700,8 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                         {school_condition}
                         {school_weekly_condition}
                         AND "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
-                        AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date"::date <= '{end_date}')
+                        AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date"::date
+                        <= '{end_date}')
                     GROUP BY "schools_school"."id"
                     ORDER BY "schools_school"."id" ASC
                 ) as t
