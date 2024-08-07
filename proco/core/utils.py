@@ -343,13 +343,26 @@ def get_filter_sql(request, filter_key, table_name):
         sql_str = None
         field_name = None
 
-        if field_filter.endswith('__iexact'):
+        if field_filter.endswith('__exact'):
+            field_name = field_filter.replace('__exact', '')
+
+            if filter_value == 'none':
+                sql_str = """coalesce(TRIM({table_name}."{field_name}"), '') = ''"""
+            else:
+                sql_str = """{table_name}."{field_name}" = '{value}'"""
+        elif field_filter.endswith('__iexact'):
             field_name = field_filter.replace('__iexact', '')
 
             if filter_value == 'none':
                 sql_str = """coalesce(TRIM({table_name}."{field_name}"), '') = ''"""
             else:
                 sql_str = """LOWER({table_name}."{field_name}") = '{value}'"""
+        elif field_filter.endswith('__contains'):
+            field_name = field_filter.replace('__contains', '')
+            sql_str = """{table_name}."{field_name}"::text LIKE '{value}'"""
+        elif field_filter.endswith('__icontains'):
+            field_name = field_filter.replace('__icontains', '')
+            sql_str = """LOWER({table_name}."{field_name}")::text LIKE '{value}'"""
         elif field_filter.endswith('__on'):
             field_name = field_filter.replace('__on', '')
 
@@ -359,6 +372,8 @@ def get_filter_sql(request, filter_key, table_name):
                 sql_str = """{table_name}."{field_name}" = {value}"""
         elif field_filter.endswith('__range'):
             field_name = field_filter.replace('__range', '')
+            if ',' not in filter_value:
+                filter_value += ',null'
 
             start, end = filter_value.split(',')
             if start != 'null':
@@ -379,6 +394,8 @@ def get_filter_sql(request, filter_key, table_name):
                 table_name=table_name,
                 field_name=field_name,
             )
+            if ',' not in filter_value:
+                filter_value += ',null'
 
             start, end = filter_value.split(',')
             range_sql_list = []
