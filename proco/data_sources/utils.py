@@ -467,20 +467,14 @@ def sync_dailycheckapp_realtime_data():
         else:
             country = None
 
-        schools_qs = School.objects
-        if country:
-            schools_qs = schools_qs.filter(country=country)
-
         dcm_giga_ids = set(dailycheckapp_measurements.filter(
             country_code=country_code,
             source__iexact='DailyCheckApp',
-        ).values_list(
-            'giga_id_school', flat=True,
-        ).order_by('giga_id_school'))
+        ).values_list('giga_id_school', flat=True).order_by('giga_id_school'))
 
         dcm_schools = {
             school.giga_id_school: school
-            for school in schools_qs.filter(giga_id_school__in=dcm_giga_ids)
+            for school in School.objects.filter(giga_id_school__in=dcm_giga_ids)
         }
         logger.debug('Total schools in DailyCheckApp: {0}, Successfully mapped schools: {1}'.format(
             len(dcm_giga_ids), len(dcm_schools)))
@@ -488,9 +482,11 @@ def sync_dailycheckapp_realtime_data():
         mlab_school_ids = set(dailycheckapp_measurements.filter(
             country_code=country_code,
             source__iexact='MLab',
-        ).values_list(
-            'school_id', flat=True,
-        ).order_by('school_id'))
+        ).values_list('school_id', flat=True).order_by('school_id'))
+
+        schools_qs = School.objects
+        if country:
+            schools_qs = schools_qs.filter(country=country)
 
         mlab_schools = {
             school.external_id: school
