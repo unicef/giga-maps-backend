@@ -1867,6 +1867,100 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
             none_check_sql = f'"connection_statistics_schoolweeklystatus"."{parameter_field}" IS NULL'
         return select_qs.extra(where=[none_check_sql]).exists()
 
+    def update_range_filter_options(self, options, parameter_table, parameter_field, parameter_options):
+        last_weekly_status_field = 'last_weekly_status__{}'.format(parameter_field)
+
+        options['include_none_filter'] = self.include_none_filter(parameter_table, parameter_field)
+
+        if options.get('range_auto_compute', False):
+            select_qs = School.objects.filter(country_id=self.context['country_id'])
+            if parameter_table == 'school_static':
+                parameter_field_props = SchoolWeeklyStatus._meta.get_field(parameter_field)
+
+                select_qs = select_qs.select_related('last_weekly_status').values('country_id').annotate(
+                    min_value=Min(F(last_weekly_status_field)),
+                    max_value=Max(F(last_weekly_status_field)),
+                )
+            else:
+                parameter_field_props = School._meta.get_field(parameter_field)
+
+                select_qs = select_qs.values('country_id').annotate(
+                    min_value=Min(parameter_field),
+                    max_value=Max(parameter_field),
+                )
+
+            country_range_json = list(
+                select_qs.values('country_id', 'min_value', 'max_value').order_by('country_id').distinct())[-1]
+
+            if country_range_json:
+                del country_range_json['country_id']
+
+                country_range_json['min_value'] = floor(country_range_json['min_value'])
+                country_range_json['max_value'] = ceil(country_range_json['max_value'])
+
+                if 'downcast_aggr_str' in parameter_options:
+                    downcast_eval = parameter_options['downcast_aggr_str']
+                    country_range_json['min_value'] = floor(
+                        eval(downcast_eval.format(val=country_range_json['min_value'])))
+                    country_range_json['max_value'] = ceil(
+                        eval(downcast_eval.format(val=country_range_json['max_value'])))
+
+                country_range_json['min_place_holder'] = 'Min ({})'.format(country_range_json['min_value'])
+                country_range_json['max_place_holder'] = 'Max ({})'.format(country_range_json['max_value'])
+            else:
+                internal_type = parameter_field_props.get_internal_type()
+                min_value, max_value = connection.ops.integer_field_range(internal_type)
+                country_range_json = {
+                    'min_place_holder': 'Min',
+                    'max_place_holder': 'Max',
+                    'min_value': min_value,
+                    'max_value': max_value
+                }
+
+            options['active_range'] = country_range_json
+
+    def update_boolean_filter_options(self, options, parameter_table, parameter_field):
+        join_condition = ''
+        filter_condition = ''
+
+        select_qry = """
+        SELECT DISTINCT {col} AS {col_name}
+        FROM schools_school AS schools
+        {join_condition}
+        WHERE schools.deleted IS NULL
+            AND schools.country_id = {c_id}
+            {filter_condition}
+        ORDER BY {col_name} DESC NULLS LAST
+        """
+
+        if parameter_table == 'school_static':
+            join_condition = ('INNER JOIN connection_statistics_schoolweeklystatus AS school_static '
+                              'ON schools.last_weekly_status_id = school_static.id')
+            filter_condition = 'AND school_static.deleted IS NULL'
+
+        sql_qry = select_qry.format(
+            col_name=parameter_field,
+            col=parameter_table + '.' + parameter_field,
+            c_id=self.context['country_id'],
+            join_condition=join_condition,
+            filter_condition=filter_condition)
+        choices = []
+        data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__)
+        for value in data:
+            field_value = value[parameter_field]
+
+            if core_utilities.is_blank_string(field_value):
+                choices.append({
+                    'label': 'Unknown',
+                    'value': 'none'
+                })
+            else:
+                choices.append({
+                    'label': 'Yes' if field_value else 'No',
+                    'value': 'true' if field_value else 'false',
+                })
+        options['choices'] = choices
+
     def get_options(self, instance):
         options = instance.options
         if isinstance(options, dict):
@@ -1876,8 +1970,6 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
             parameter_table = parameter_details.table_alias
 
             parameter_options = parameter_details.options
-
-            last_weekly_status_field = 'last_weekly_status__{}'.format(parameter_field)
 
             if options.get('live_choices', False):
                 join_condition = ''
@@ -1922,54 +2014,9 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
                 options['choices'] = choices
 
             if instance.type == accounts_models.AdvanceFilter.TYPE_RANGE:
-                options['include_none_filter'] = self.include_none_filter(parameter_table, parameter_field)
-
-                if options.get('range_auto_compute', False):
-                    select_qs = School.objects.filter(country_id=self.context['country_id'])
-                    if parameter_table == 'school_static':
-                        parameter_field_props = SchoolWeeklyStatus._meta.get_field(parameter_field)
-
-                        select_qs = select_qs.select_related('last_weekly_status').values('country_id').annotate(
-                            min_value=Min(F(last_weekly_status_field)),
-                            max_value=Max(F(last_weekly_status_field)),
-                        )
-                    else:
-                        parameter_field_props = School._meta.get_field(parameter_field)
-
-                        select_qs = select_qs.values('country_id').annotate(
-                            min_value=Min(parameter_field),
-                            max_value=Max(parameter_field),
-                        )
-
-                    country_range_json = list(
-                        select_qs.values('country_id', 'min_value', 'max_value').order_by('country_id').distinct())[-1]
-
-                    if country_range_json:
-                        del country_range_json['country_id']
-
-                        country_range_json['min_value'] = floor(country_range_json['min_value'])
-                        country_range_json['max_value'] = ceil(country_range_json['max_value'])
-
-                        if 'downcast_aggr_str' in parameter_options:
-                            downcast_eval = parameter_options['downcast_aggr_str']
-                            country_range_json['min_value'] = floor(
-                                eval(downcast_eval.format(val=country_range_json['min_value'])))
-                            country_range_json['max_value'] = ceil(
-                                eval(downcast_eval.format(val=country_range_json['max_value'])))
-
-                        country_range_json['min_place_holder'] = 'Min ({})'.format(country_range_json['min_value'])
-                        country_range_json['max_place_holder'] = 'Max ({})'.format(country_range_json['max_value'])
-                    else:
-                        internal_type = parameter_field_props.get_internal_type()
-                        min_value, max_value = connection.ops.integer_field_range(internal_type)
-                        country_range_json = {
-                            'min_place_holder': 'Min',
-                            'max_place_holder': 'Max',
-                            'min_value': min_value,
-                            'max_value': max_value
-                        }
-
-                    options['active_range'] = country_range_json
+                self.update_range_filter_options(options, parameter_table, parameter_field, parameter_options)
+            elif instance.type == accounts_models.AdvanceFilter.TYPE_BOOLEAN:
+                self.update_boolean_filter_options(options, parameter_table, parameter_field)
 
         return options
 

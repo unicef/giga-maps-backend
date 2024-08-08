@@ -15,7 +15,21 @@ configuration_json = [
         'table_alias': 'schools',
         'table_label': 'School',
         'is_filter_applicable': True,
-        'options': {'active_countries_filter': "LOWER(environment) IN ('urban', 'rural')"},
+        'options': {
+            'active_countries_filter': "LOWER(environment) IN ('urban', 'rural')",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_DROPDOWN: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IEXACT
+                ],
+                accounts_models.AdvanceFilter.TYPE_DROPDOWN_MULTISELECT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IN
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_CONTAINS,
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_ICONTAINS
+                ],
+            },
+        },
     },
     {
         'name': 'school_type',
@@ -26,7 +40,21 @@ configuration_json = [
         'table_alias': 'schools',
         'table_label': 'School',
         'is_filter_applicable': True,
-        'options': {'active_countries_filter': "LOWER(school_type) IN ('private', 'public')"}
+        'options': {
+            'active_countries_filter': "LOWER(school_type) IN ('private', 'public')",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_DROPDOWN: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IEXACT
+                ],
+                accounts_models.AdvanceFilter.TYPE_DROPDOWN_MULTISELECT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IN
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_CONTAINS,
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_ICONTAINS
+                ],
+            },
+        }
     },
     {
         'name': 'education_level',
@@ -37,7 +65,21 @@ configuration_json = [
         'table_alias': 'schools',
         'table_label': 'School',
         'is_filter_applicable': True,
-        'options': {'active_countries_filter': "LOWER(education_level) IN ('primary', 'secondary')"}
+        'options': {
+            'active_countries_filter': "LOWER(education_level) IN ('primary', 'secondary')",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_DROPDOWN: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IEXACT
+                ],
+                accounts_models.AdvanceFilter.TYPE_DROPDOWN_MULTISELECT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IN
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_CONTAINS,
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_ICONTAINS
+                ],
+            },
+        }
     },
     {
         'name': 'num_computers',
@@ -48,7 +90,17 @@ configuration_json = [
         'table_alias': 'school_static',
         'table_label': 'Static Data',
         'is_filter_applicable': True,
-        'options': {'active_countries_filter': "num_computers IS NOT NULL AND num_computers > 0"},
+        'options': {
+            'active_countries_filter': "num_computers IS NOT NULL AND num_computers > 0",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_RANGE: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_RANGE,
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT,
+                ],
+            },
+        },
     },
     {
         'name': 'num_students',
@@ -59,7 +111,17 @@ configuration_json = [
         'table_alias': 'school_static',
         'table_label': 'Static Data',
         'is_filter_applicable': True,
-        'options': {'active_countries_filter': "num_students IS NOT NULL AND num_students > 0"},
+        'options': {
+            'active_countries_filter': "num_students IS NOT NULL AND num_students > 0",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_RANGE: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_RANGE,
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT,
+                ],
+            },
+        },
     },
     {
         'name': 'num_teachers',
@@ -70,7 +132,17 @@ configuration_json = [
         'table_alias': 'school_static',
         'table_label': 'Static Data',
         'is_filter_applicable': True,
-        'options': {'active_countries_filter': "num_teachers IS NOT NULL AND num_teachers > 0"},
+        'options': {
+            'active_countries_filter': "num_teachers IS NOT NULL AND num_teachers > 0",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_RANGE: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_RANGE,
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT,
+                ],
+            },
+        },
     },
     {
         'name': 'connectivity_speed',
@@ -85,6 +157,14 @@ configuration_json = [
             'active_countries_filter': "connectivity_speed IS NOT NULL",
             'downcast_aggr_str': '{val} / (1000 * 1000)',
             'upcast_aggr_str': '{val} * 1000 * 1000',
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_RANGE: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_RANGE,
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT,
+                ],
+            },
         },
     },
     {
@@ -96,7 +176,32 @@ configuration_json = [
         'table_alias': 'school_static',
         'table_label': 'Static Data',
         'is_filter_applicable': True,
-        'options': {'active_countries_filter': "computer_lab = true"},
+        'options': {
+            'active_countries_filter': "computer_lab = true",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_BOOLEAN: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_ON,
+                ],
+            },
+        },
+    },
+    {
+        'name': 'connectivity',
+        'label': 'Has Live Connectivity',
+        'type': accounts_models.ColumnConfiguration.TYPE_BOOLEAN,
+        'description': None,
+        'table_name': 'connection_statistics_schoolweeklystatus',
+        'table_alias': 'school_static',
+        'table_label': 'Static Data',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter': "connectivity IS NOT NULL",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_BOOLEAN: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_ON,
+                ],
+            },
+        },
     },
     {
         'name': 'coverage_type',
@@ -109,7 +214,19 @@ configuration_json = [
         'is_filter_applicable': True,
         'options': {
             'active_countries_filter':
-                """LOWER("connection_statistics_schoolweeklystatus"."coverage_type") != 'unknown'"""
+                """LOWER("connection_statistics_schoolweeklystatus"."coverage_type") != 'unknown'""",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_DROPDOWN: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IEXACT
+                ],
+                accounts_models.AdvanceFilter.TYPE_DROPDOWN_MULTISELECT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IN
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_CONTAINS,
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_ICONTAINS
+                ],
+            },
         },
     }
 ]
