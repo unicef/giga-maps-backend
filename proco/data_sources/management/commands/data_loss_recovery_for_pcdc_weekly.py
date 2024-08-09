@@ -131,19 +131,19 @@ class Command(BaseCommand):
         parser.add_argument(
             '-start_week_no', dest='start_week_no', type=int,
             required=True,
-            help='Date from we need to check the missing data. Default is 30 days from Current date.'
+            help='Start week no from which we need to pull the data and then do aggregation.'
         )
 
         parser.add_argument(
             '-end_week_no', dest='end_week_no', type=int,
             required=True,
-            help='Date till we need to check the missing data. Default is today date.'
+            help='End week no from which we need to pull the data and then do aggregation.'
         )
 
         parser.add_argument(
             '-year', dest='year', type=int,
             required=True,
-            help='Date till we need to check the missing data. Default is today date.'
+            help='Year for which weeks are provided.'
         )
 
         parser.add_argument(
@@ -314,6 +314,7 @@ class Command(BaseCommand):
                 logger.info('Finalizing the records for Country ID: {0}'.format(country_id))
                 finalize_previous_day_data(None, country_id, end_date)
 
+            impacted_country_ids.extend(countries_ids)
             logger.info('Finalized records successfully to actual proco tables.\n\n')
 
         for impacted_country_id in set(impacted_country_ids):

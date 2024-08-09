@@ -475,6 +475,29 @@ class Command(BaseCommand):
             help='Pass the School ID in case want to control the update.'
         )
 
+        parser.add_argument(
+            '--data_loss_recovery_for_pcdc_weekly_with_schedular', action='store_true',
+            dest='data_loss_recovery_for_pcdc_weekly_with_schedular', default=False,
+            help='If provided, run the data_loss_recovery_for_pcdc_weekly utility through Schedular in real time.'
+        )
+
+        parser.add_argument(
+            '-start_week_no', dest='start_week_no', type=int,
+            required=False,
+            help='Start week no from which we need to pull the data and then do aggregation.'
+        )
+
+        parser.add_argument(
+            '-end_week_no', dest='end_week_no', type=int,
+            required=False,
+            help='End week no from which we need to pull the data and then do aggregation.'
+        )
+
+        parser.add_argument(
+            '--pull_data', action='store_true', dest='pull_data', default=False,
+            help='Pull the PCDC live data from API for specified date.'
+        )
+
     def handle(self, **options):
         logger.info('Executing data cleanup utility.\n')
         logger.debug('Options: {}\n\n'.format(options))
@@ -505,7 +528,7 @@ class Command(BaseCommand):
             logger.info('Completed school daily duplicate record cleanup.\n\n')
 
         if options.get('clean_duplicate_country_weekly'):
-            logger.info('Performing country weekly wuplicate record cleanup.')
+            logger.info('Performing country weekly duplicate record cleanup.')
             delete_duplicate_country_weekly_records()
             logger.info('Completed country weekly duplicate record cleanup.\n\n')
 
@@ -520,7 +543,7 @@ class Command(BaseCommand):
             logger.info('Completed QoS data model duplicate record cleanup.\n\n')
 
         if options.get('cleanup_school_master_rows'):
-            logger.debinfoug('Performing school master data source duplicate record cleanup.')
+            logger.info('Performing school master data source duplicate record cleanup.')
             sources_tasks.cleanup_school_master_rows()
             logger.info('Completed school master data source duplicate record cleanup.\n\n')
 
@@ -582,5 +605,13 @@ class Command(BaseCommand):
             for country_year in country_id_vs_year_qs:
                 # redo_aggregations_task(country_year[0], country_year[1], None)
                 redo_aggregations_task.delay(country_year[0], country_year[1], week_no)
+
+        if options.get('data_loss_recovery_for_pcdc_weekly_with_schedular'):
+            start_week_no = options.get('start_week_no', None)
+            end_week_no = options.get('end_week_no', None)
+            year = options.get('year', None)
+            pull_data = options.get('pull_data', False)
+
+            sources_tasks.data_loss_recovery_for_pcdc_weekly_task.delay(start_week_no, end_week_no, year, pull_data)
 
         logger.info('Completed data cleanup successfully.\n')

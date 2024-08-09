@@ -404,6 +404,8 @@ def load_daily_check_app_data_source_response_to_model(model, request_configs):
             has_more_data = False
         else:
             for data in response_data:
+                if not data.get('created_at', None):
+                    data['created_at'] = data.get('timestamp')
                 insert_entries.append(model(**data))
 
         if len(insert_entries) >= 5000:

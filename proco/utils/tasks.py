@@ -1,5 +1,4 @@
 import logging
-import time
 import uuid
 
 from celery import chain
@@ -77,8 +76,8 @@ def update_all_cached_values():
                     query_params={'country_id': country.id},
                 ),
                 update_cached_value.s(
-                    url=reverse('accounts:list-published-advance-filters'),
-                    kwargs={'status': 'PUBLISHED', 'country_id': country.id},
+                    url=reverse('accounts:list-published-advance-filters',
+                                kwargs={'status': 'PUBLISHED', 'country_id': country.id}),
                     query_params={'expand': 'column_configuration'},
                 ),
             ]
@@ -117,8 +116,8 @@ def update_country_related_cache(country_code):
             query_params={'country_id': country.id},
         )
         update_cached_value.delay(
-            url=reverse('accounts:list-published-advance-filters'),
-            kwargs={'status': 'PUBLISHED', 'country_id': country.id},
+            url=reverse('accounts:list-published-advance-filters',
+                        kwargs={'status': 'PUBLISHED', 'country_id': country.id}),
             query_params={'expand': 'column_configuration'},
         ),
 
