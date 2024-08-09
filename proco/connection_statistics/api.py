@@ -481,6 +481,7 @@ class ConnectivityAPIView(APIView):
             realtime_registration_status__rt_registered=True,
             realtime_registration_status__rt_registration_date__date__lte=end_date,
             realtime_registration_status__deleted__isnull=True,
+            t__deleted__isnull=True,
         ).annotate(
             dummy_group_by=Value(1)).values('dummy_group_by').annotate(
             good=Count(Case(When(t__connectivity_speed__gt=speed_benchmark, then='id')), distinct=True),
@@ -570,8 +571,11 @@ class ConnectivityAPIView(APIView):
         avg_daily_connectivity_speed = self.queryset.filter(
             realtime_registration_status__rt_registered=True,
             realtime_registration_status__rt_registration_date__date__lte=end_date,
+            realtime_registration_status__deleted__isnull=True,
             daily_status__date__range=[start_date, end_date],
             daily_status__connectivity_speed__isnull=False,
+
+            daily_status__deleted__isnull=True,
         ).values('daily_status__date').annotate(
             avg_speed=Avg('daily_status__connectivity_speed'),
         ).order_by('daily_status__date')

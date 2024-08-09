@@ -7,6 +7,7 @@ from datetime import timedelta
 from celery import chain, chord, group, current_task
 from django.conf import settings
 from django.contrib.gis.geos import Point
+from django.core.management import call_command
 from django.db.models import Count
 from django.db.utils import DataError
 from requests.exceptions import HTTPError
@@ -815,6 +816,44 @@ def clean_old_live_data():
         # Delete all entries from QoS Data Table which is older than 7 days
         sources_models.QoSData.objects.filter(timestamp__lt=older_then_date).delete()
         task_instance.info('"QoSData" data table completed')
+
+        background_task_utilities.task_on_complete(task_instance)
+    else:
+        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+
+
+@app.task(soft_time_limit=10 * 60 * 60, time_limit=10 * 60 * 60)
+def data_loss_recovery_for_pcdc_weekly_task(start_week_no, end_week_no, year, pull_data, *args):
+    """
+    data_loss_recovery_for_pcdc_weekly_task
+        Task to schedule manually from Console.
+    """
+    if not start_week_no or not end_week_no or not year:
+        logger.error('Required args not provided: [start_week_no, end_week_no, year]')
+        return
+
+    logger.info('Starting data loss recovery for pcdc task: start_week_no "{0}" - end_week_no "{1}" - '
+                'year "{2}"'.format(start_week_no, end_week_no, year))
+
+    task_key = 'data_loss_recovery_for_pcdc_weekly_task_start_week_no_{0}_end_week_no_{1}_year_{2}_on_{3}'.format(
+        start_week_no, end_week_no, year, format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
+
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(
+        task_id, task_key, 'Recover the data fro PCDC live source')
+
+    if task_instance:
+        logger.debug('Not found running job: {}'.format(task_key))
+        cmd_args = [
+            '-start_week_no={}'.format(start_week_no),
+            '-end_week_no={}'.format(end_week_no),
+            '-year={}'.format(year),
+        ]
+
+        if pull_data:
+            cmd_args.append('--pull_data')
+
+        call_command('data_loss_recovery_for_pcdc_weekly', *cmd_args)
 
         background_task_utilities.task_on_complete(task_instance)
     else:
