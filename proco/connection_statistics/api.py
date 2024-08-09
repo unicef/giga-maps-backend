@@ -571,9 +571,9 @@ class ConnectivityAPIView(APIView):
         avg_daily_connectivity_speed = self.queryset.filter(
             realtime_registration_status__rt_registered=True,
             realtime_registration_status__rt_registration_date__date__lte=end_date,
+            realtime_registration_status__deleted__isnull=True,
             daily_status__date__range=[start_date, end_date],
             daily_status__connectivity_speed__isnull=False,
-            realtime_registration_status__deleted__isnull=True,
             daily_status__deleted__isnull=True,
         ).values('daily_status__date').annotate(
             avg_speed=Avg('daily_status__connectivity_speed'),
@@ -877,9 +877,10 @@ class CountrySummaryAPIViewSet(BaseModelViewSet):
         if pk is not None:
             try:
                 country_weekly_status = CountryWeeklyStatus.objects.get(pk=pk)
-                data = statistics_serializers.CountryWeeklyStatusUpdateRetrieveSerializer(instance=country_weekly_status,
-                                                                                         data=request.data,
-                                                                                         partial=True)
+                data = statistics_serializers.CountryWeeklyStatusUpdateRetrieveSerializer(
+                    instance=country_weekly_status,
+                    data=request.data,
+                    partial=True)
                 if data.is_valid(raise_exception=True):
                     change_message = changed_fields(country_weekly_status, request.data)
                     action_log(request, [country_weekly_status], 2, change_message, self.model, field_name='id')
@@ -1201,7 +1202,7 @@ class SchoolDailyConnectivitySummaryAPIViewSet(BaseModelViewSet):
             try:
                 school_daily_status = SchoolDailyStatus.objects.get(pk=pk)
                 data = statistics_serializers.SchoolDailyStatusUpdateRetrieveSerializer(instance=school_daily_status,
-                                                                                       data=request.data, partial=True)
+                                                                                        data=request.data, partial=True)
                 if data.is_valid(raise_exception=True):
                     change_message = changed_fields(school_daily_status, request.data)
                     action_log(request, [school_daily_status], 2, change_message, self.model, field_name='id')
