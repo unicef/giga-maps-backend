@@ -31,22 +31,22 @@ def check_missing_dates_to_table(date_list):
         timestamp__date__lte=date_list[-1],
     ).values_list('timestamp__date', flat=True).distinct('timestamp__date').order_by('timestamp__date')
 
-    logger.debug('Missing dates are between {0} - {1}: '.format(date_list[0], date_list[-1]))
+    logger.info('Missing dates are between {0} - {1}: '.format(date_list[0], date_list[-1]))
     missing_dates = list(set(date_list) - set(list(pcdc_timestamp_qry)))
 
     for missing_date in sorted(missing_dates):
         # print missing date in string format
-        logger.debug(date_utilities.format_date(missing_date))
+        logger.info(date_utilities.format_date(missing_date))
 
 
 def delete_dailycheckapp_realtime_data(date):
-    logger.debug('Deleting all the PCDC rows only, from "RealTimeConnectivity" data table for date: {0}'.format(date))
+    logger.info('Deleting all the PCDC rows only, from "RealTimeConnectivity" data table for date: {0}'.format(date))
     RealTimeConnectivity.objects.filter(
         created__date=date,
         live_data_source=statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE,
     ).delete()
 
-    logger.debug('Deleting all the rows from "DailyCheckAppMeasurementData" data table for date: {0}'.format(date))
+    logger.info('Deleting all the rows from "DailyCheckAppMeasurementData" data table for date: {0}'.format(date))
     DailyCheckAppMeasurementData.objects.filter(timestamp__date=date).delete()
 
 
@@ -123,16 +123,16 @@ class Command(BaseCommand):
         if pull_data and pull_data_date:
             pull_data_date = pull_data_date.date()
 
-            logger.debug('Deleting PCDC data for date: {}'.format(pull_data_date))
+            logger.info('Deleting PCDC data for date: {}'.format(pull_data_date))
             delete_dailycheckapp_realtime_data(pull_data_date)
-            logger.debug('Data deleted successfully.\n\n')
+            logger.info('Data deleted successfully.\n\n')
 
-            logger.debug('Syncing the PCDC api data to proco PCDC table for date: {}'.format(pull_data_date))
+            logger.info('Syncing the PCDC api data to proco PCDC table for date: {}'.format(pull_data_date))
             sync_dailycheckapp_realtime_data(pull_data_date)
-            logger.debug('Data synced successfully.\n\n')
+            logger.info('Data synced successfully.\n\n')
 
-            logger.debug('Aggregating the pulled data by giga_id_school + country_code and '
-                         'storing in RealTimeConnectivity table.')
+            logger.info('Aggregating the pulled data by giga_id_school + country_code and '
+                        'storing in RealTimeConnectivity table.')
             dailycheckapp_measurements = DailyCheckAppMeasurementData.objects.filter(
                 timestamp__date=pull_data_date,
             ).filter(
@@ -158,15 +158,11 @@ class Command(BaseCommand):
                 'country_code', flat=True,
             ).order_by('country_code'))
             for country_code in countries:
-                logger.debug('Current country code: {}'.format(country_code))
+                logger.info('Current country code: {}'.format(country_code))
                 if country_code:
                     country = Country.objects.filter(code=country_code).first()
                 else:
                     country = None
-
-                schools_qs = School.objects
-                if country:
-                    schools_qs = schools_qs.filter(country=country)
 
                 dcm_giga_ids = set(dailycheckapp_measurements.filter(
                     country_code=country_code,
@@ -177,9 +173,9 @@ class Command(BaseCommand):
 
                 dcm_schools = {
                     school.giga_id_school: school
-                    for school in schools_qs.filter(giga_id_school__in=dcm_giga_ids)
+                    for school in School.objects.filter(giga_id_school__in=dcm_giga_ids)
                 }
-                logger.debug('Total schools in dailycheckapp: {0}, Successfully mapped schools: {1}'.format(
+                logger.info('Total schools in dailycheckapp: {0}, Successfully mapped schools: {1}'.format(
                     len(dcm_giga_ids), len(dcm_schools)))
 
                 mlab_school_ids = set(dailycheckapp_measurements.filter(
@@ -189,11 +185,15 @@ class Command(BaseCommand):
                     'school_id', flat=True,
                 ).order_by('school_id'))
 
+                schools_qs = School.objects
+                if country:
+                    schools_qs = schools_qs.filter(country=country)
+
                 mlab_schools = {
                     school.external_id: school
                     for school in schools_qs.filter(external_id__in=mlab_school_ids)
                 }
-                logger.debug('Total schools in MLab: {0}, Successfully mapped schools: {1}'.format(
+                logger.info('Total schools in MLab: {0}, Successfully mapped schools: {1}'.format(
                     len(mlab_school_ids), len(mlab_schools)))
 
                 unknown_schools = []
@@ -232,22 +232,22 @@ class Command(BaseCommand):
                     ))
 
                     if len(realtime) == 5000:
-                        logger.debug(
+                        logger.info(
                             'Loading the data to "RealTimeConnectivity" table as it has reached 5000 benchmark.')
                         RealTimeConnectivity.objects.bulk_create(realtime)
                         realtime = []
 
                 if len(unknown_schools) > 0:
-                    logger.debug('Skipped dailycheckapp measurement for country: "{0}" unknown school: {1}'.format(
+                    logger.info('Skipped dailycheckapp measurement for country: "{0}" unknown school: {1}'.format(
                         country_code, unknown_schools))
 
-            logger.debug('Loading the remaining ({0}) data to "RealTimeConnectivity" table.'.format(len(realtime)))
+            logger.info('Loading the remaining ({0}) data to "RealTimeConnectivity" table.'.format(len(realtime)))
             if len(realtime) > 0:
                 RealTimeConnectivity.objects.bulk_create(realtime)
 
-            logger.debug('Aggregated successfully to RealTimeConnectivity table.\n\n')
+            logger.info('Aggregated successfully to RealTimeConnectivity table.\n\n')
 
-            logger.debug('Starting finalizing the records to actual proco tables.')
+            logger.info('Starting finalizing the records to actual proco tables.')
             countries_ids = RealTimeConnectivity.objects.filter(
                 created__date=pull_data_date,
                 live_data_source=statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE,
@@ -261,12 +261,12 @@ class Command(BaseCommand):
             monday_week_no = date_utilities.get_week_from_date(monday_date)
             monday_year = date_utilities.get_year_from_date(monday_date)
 
-            logger.debug('Weekly record details. \tWeek No: {0}\tYear: {1}'.format(monday_week_no, monday_year))
+            logger.info('Weekly record details. \tWeek No: {0}\tYear: {1}'.format(monday_week_no, monday_year))
 
             for country_id in countries_ids:
-                logger.debug('Finalizing the records for Country ID: {0}'.format(country_id))
+                logger.info('Finalizing the records for Country ID: {0}'.format(country_id))
                 finalize_previous_day_data(None, country_id, pull_data_date)
 
             logger.info('Finalized records successfully to actual proco tables.\n\n')
 
-        logger.info('Completed dataloss recovery for pcdc successfully.\n')
+        logger.info('Completed data loss recovery utility for pcdc successfully.\n')
