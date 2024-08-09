@@ -574,7 +574,6 @@ class ConnectivityAPIView(APIView):
             realtime_registration_status__deleted__isnull=True,
             daily_status__date__range=[start_date, end_date],
             daily_status__connectivity_speed__isnull=False,
-
             daily_status__deleted__isnull=True,
         ).values('daily_status__date').annotate(
             avg_speed=Avg('daily_status__connectivity_speed'),
