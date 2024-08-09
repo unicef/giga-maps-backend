@@ -99,10 +99,10 @@ class Command(BaseCommand):
                         )
                         ids_to_keep.append(relationship_instance.id)
                         if created:
-                            logger.debug('New AdvanceFilter + country relationship created: {0}'.format(
+                            logger.info('New AdvanceFilter + country relationship created: {0}'.format(
                                 relationship_instance.__dict__))
                         else:
-                            logger.debug(
+                            logger.info(
                                 'Existing AdvanceFilter + country relationship updated: {0}'.format(
                                     relationship_instance.__dict__))
 

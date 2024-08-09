@@ -41,11 +41,11 @@ def create_and_execute_insert_query(table_columns, insert_statement_list):
         )
 
         insert_ts = timezone.now()
-        logger.debug('Executing bulk insert for total: {} records'.format(len(insert_statement_list)))
-        logger.debug(insert_statement)
+        logger.info('Executing bulk insert for total: {} records'.format(len(insert_statement_list)))
+        logger.info(insert_statement)
         cursor.executemany(insert_statement, insert_statement_list)
         insert_te = timezone.now()
-        logger.debug('Bulk insert time is "{}" second'.format((insert_te - insert_ts).seconds))
+        logger.info('Bulk insert time is "{}" second'.format((insert_te - insert_ts).seconds))
 
 
 def populate_school_registration_data(country_id, school_id):
@@ -75,8 +75,8 @@ def populate_school_registration_data(country_id, school_id):
         query += f' AND school.country_id = {country_id}'
 
     with connection.cursor() as cursor:
-        logger.debug('Getting select statement query result from School + SchoolDailyStatus tables')
-        logger.debug('Query: {}'.format(query))
+        logger.info('Getting select statement query result from School + SchoolDailyStatus tables')
+        logger.info('Query: {}'.format(query))
 
         cursor.execute(query)
         description = cursor.description
@@ -97,7 +97,7 @@ def populate_school_registration_data(country_id, school_id):
     create_and_execute_insert_query(table_columns, insert_statement_list)
 
     te = timezone.now()
-    logger.debug('Executed the function in "{}" seconds'.format((te - ts).seconds))
+    logger.info('Executed the function in "{}" seconds'.format((te - ts).seconds))
     return current_rows_num, last_processed_id
 
 
@@ -125,9 +125,9 @@ class Command(BaseCommand):
         school_id = options.get('school_id')
 
         if options.get('reset_mapping', False):
-            logger.debug('Starting deleting old records.')
+            logger.info('Starting deleting old records.')
             delete_relationships(country_id, school_id)
-            logger.debug('Deleted old records.')
+            logger.info('Deleted old records.')
 
         logger.info('School Registration update operation STARTED ({0})'.format(options))
         populate_school_registration_data(country_id, school_id)
