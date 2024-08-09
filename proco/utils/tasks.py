@@ -3,6 +3,7 @@ import uuid
 
 from celery import chain
 from celery import current_task
+from django.conf import settings
 from django.core.management import call_command
 from django.db.models import Q
 from django.db.models.functions.text import Lower
@@ -29,10 +30,11 @@ def update_cached_value(*args, url='', query_params=None, **kwargs):
 
 
 @app.task(soft_time_limit=15 * 60, time_limit=15 * 60)
-def update_all_cached_values():
+def update_all_cached_values(*args, clean_cache=False):
+    from proco.accounts.models import DataLayerCountryRelationship, DataLayer
     from proco.locations.models import Country
     from proco.schools.models import School
-    from proco.accounts.models import DataLayerCountryRelationship, DataLayer
+    from proco.utils.cache import cache_manager
 
     task_key = 'update_all_cached_values_status_{current_time}'.format(
         current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H%M'))
@@ -42,7 +44,16 @@ def update_all_cached_values():
         task_id, task_key, 'Update the Redis cache, allowed once in a hour')
 
     if task_instance:
-        logger.debug('Not found running job: {}'.format(task_key))
+        logger.info('Not found running job: {}'.format(task_key))
+
+        if clean_cache:
+            if settings.INVALIDATE_CACHE_HARD.lower() == 'true':
+                cache_manager.invalidate(hard=True)
+                logger.info('Cache cleared. Map is updated in real time.')
+            else:
+                cache_manager.invalidate()
+                logger.info('Cache invalidation started. Maps will be updated in a few minutes.')
+
         update_cached_value.delay(url=reverse('locations:search-countries-admin-schools'))
         update_cached_value.delay(url=reverse('locations:countries-list'))
         update_cached_value.delay(url=reverse('connection_statistics:global-stat'))
@@ -78,7 +89,7 @@ def update_all_cached_values():
                 update_cached_value.s(
                     url=reverse('accounts:list-published-advance-filters',
                                 kwargs={'status': 'PUBLISHED', 'country_id': country.id}),
-                    query_params={'expand': 'column_configuration'},
+                    query_params={'expand': 'column_configuration', 'ordering': 'name'},
                 ),
             ]
 
@@ -118,7 +129,7 @@ def update_country_related_cache(country_code):
         update_cached_value.delay(
             url=reverse('accounts:list-published-advance-filters',
                         kwargs={'status': 'PUBLISHED', 'country_id': country.id}),
-            query_params={'expand': 'column_configuration'},
+            query_params={'expand': 'column_configuration', 'ordering': 'name'},
         ),
 
 

@@ -2180,6 +2180,15 @@ class PublishedAdvanceFiltersViewSet(CachedListMixin, BaseModelViewSet):
 
     permit_list_expands = ['column_configuration', ]
 
+    def get_list_cache_key(self):
+        params = dict(self.request.query_params)
+        params.pop(self.CACHE_KEY, None)
+        return '{0}_{1}_{2}'.format(
+            self.LIST_CACHE_KEY_PREFIX,
+            '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(self.kwargs.items()))),
+            '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))),
+        )
+
     def apply_queryset_filters(self, queryset):
         """
         Override if applying more complex filters to queryset.
