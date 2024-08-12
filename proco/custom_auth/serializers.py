@@ -310,13 +310,10 @@ class UserRoleRelationshipSerializer(serializers.ModelSerializer):
         """
             Method to validate new role of the user.
         """
-        if role and self.instance:
-            # In case of updating the user role relationship, the new role should not be same
-            # as that of the existing role.
-            if self.instance.role.id != role.id:
-                return role
+        # In case of updating the user role relationship, the new role should not be same
+        # as that of the existing role.
+        if role and self.instance and self.instance.role.id == role.id:
             raise auth_exceptions.InvalidRoleError()
-
         return role
 
     def update(self, instance, validated_data):
@@ -427,13 +424,10 @@ class UpdateUserSerializer(BaseUserSerializer):
         """
             Method to validate new role of the user.
         """
-        if new_role and self.instance:
-            # In case of updating the user role relationship, the new role should not be same
-            # as that of the existing role.
-            user_existing_role = self.instance.get_roles()
-            if user_existing_role and user_existing_role.id == new_role.id:
-                raise auth_exceptions.InvalidRoleError()
-
+        # In case of updating the user role relationship, the new role should not be same
+        # as that of the existing role.
+        if new_role and self.instance and self.instance.role.id == new_role.id:
+            raise auth_exceptions.InvalidRoleError()
         return new_role
 
     def update(self, instance, validated_data):

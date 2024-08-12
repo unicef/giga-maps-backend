@@ -27,6 +27,7 @@ def finalize_setup(sender, **kwargs):
             'task': 'proco.utils.tasks.update_all_cached_values',
             'schedule': crontab(hour=4, minute=0),
             'args': (),
+            'kwargs': {'clean_cache': True},
         },
         'proco.utils.tasks.rebuild_school_index': {
             'task': 'proco.utils.tasks.rebuild_school_index',

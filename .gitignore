@@ -87,3 +87,4 @@ rabbitmq
 
 postgres_data/
 docker/docker-compose.dev.yml
+proco/assets/*.db

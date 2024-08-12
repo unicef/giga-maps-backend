@@ -79,3 +79,6 @@ pipenv run gunicorn config.wsgi:application -b 0.0.0.0:8000 -w 8 --timeout=300
 # pipenv run python manage.py data_cleanup --clean_duplicate_school_gigs_ids
 
 # pipenv run python manage.py create_admin_user -email='pcdc_user_with_write_api_key5@nagarro.com' -first_name='PCDC' -last_name='User' --inactive_email
+
+# pipenv run python manage.py load_column_configurations --update_configurations
+# pipenv run python manage.py populate_active_filters_for_countries --reset

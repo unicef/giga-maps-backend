@@ -30,8 +30,8 @@ def delete_index():
 
     try:
         result = admin_client.delete_index(SchoolIndex.Meta.index_name)
-        logger.debug('Index: ', SchoolIndex.Meta.index_name, 'Deleted')
-        logger.debug(result)
+        logger.info('Index: ', SchoolIndex.Meta.index_name, 'Deleted')
+        logger.info(result)
     except Exception as ex:
         logger.error(ex)
 
@@ -51,7 +51,7 @@ def create_index():
     cors_options = CorsOptions(allowed_origins=['*'], max_age_in_seconds=24 * 60 * 60)
     scoring_profiles = []
 
-    logger.debug('Index name: ', SchoolIndex.Meta.index_name)
+    logger.info('Index name: ', SchoolIndex.Meta.index_name)
 
     index = SearchIndex(
         name=SchoolIndex.Meta.index_name,
@@ -62,7 +62,7 @@ def create_index():
 
     try:
         result = admin_client.create_index(index)
-        logger.debug('Index: ', result.name, 'created')
+        logger.info('Index: ', result.name, 'created')
     except Exception as ex:
         logger.error(ex)
 
@@ -72,12 +72,12 @@ def clear_index():
                                  AzureKeyCredential(cognitive_search_settings['SEARCH_API_KEY']))
 
     doc_counts = search_client.get_document_count()
-    logger.debug("There are {0} documents in the {1} search index.".format(
+    logger.info("There are {0} documents in the {1} search index.".format(
         doc_counts, repr(SchoolIndex.Meta.index_name)))
 
     if doc_counts > 0:
         all_docs = search_client.search('*')
-        logger.debug('All documents: {0}'.format(all_docs))
+        logger.info('All documents: {0}'.format(all_docs))
 
         search_client.delete_documents(all_docs)
 
@@ -116,7 +116,7 @@ def collect_data(country_id):
             del qry_data['admin2_id']
         docs.append(qry_data)
 
-    logger.debug('Total records to upload: {0}'.format(len(docs)))
+    logger.info('Total records to upload: {0}'.format(len(docs)))
     # docs = docs[0:100000]
     # print('Total records to upload: {0}'.format(len(docs)))
     return docs
@@ -134,7 +134,7 @@ def upload_docs(search_client, headers, data_chunk, failed_data_chunks, count, r
     while retry_no <= 3 and not uploaded:
         try:
             result = search_client.upload_documents(documents=data_chunk, headers=headers)
-            logger.debug("Upload of new document succeeded for count '{0}' in retry no: '{1}': {2}".format(
+            logger.info("Upload of new document succeeded for count '{0}' in retry no: '{1}': {2}".format(
                 count, retry_no, result[0].succeeded)
             )
             uploaded = True
@@ -202,7 +202,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, **options):
-        logger.debug('Index operations STARTED ({0})'.format(SchoolIndex.Meta.index_name))
+        logger.info('Index operations STARTED ({0})'.format(SchoolIndex.Meta.index_name))
         if settings.ENABLE_AZURE_COGNITIVE_SEARCH:
             country_id = options.get('country_id', False)
 
@@ -224,7 +224,7 @@ class Command(BaseCommand):
                     data_to_load = collect_data(country_id)
 
                     if len(data_to_load) > 0:
-                        logger.debug('Load index - Start - {0}'.format(country_id))
+                        logger.info('Load index - Start - {0}'.format(country_id))
                         load_index(data_to_load, batch_size=10000)
                 else:
                     all_countries = list(
@@ -234,7 +234,7 @@ class Command(BaseCommand):
                         data_to_load = collect_data(country_id)
 
                         if len(data_to_load) > 0:
-                            logger.debug('Load index - Start - {0}'.format(country_id))
+                            logger.info('Load index - Start - {0}'.format(country_id))
                             load_index(data_to_load, batch_size=10000)
 
-        logger.debug('Index operations ENDED ({0})'.format(SchoolIndex.Meta.index_name))
+        logger.info('Index operations ENDED ({0})'.format(SchoolIndex.Meta.index_name))

@@ -76,7 +76,7 @@ class Command(BaseCommand):
 
     def handle(self, **options):
         logger.info('Executing redo aggregations utility.\n')
-        logger.debug('Options: {}\n\n'.format(options))
+        logger.info('Options: {}\n\n'.format(options))
 
         country_id = options.get('country_id', None)
         country = Country.objects.get(id=country_id)
@@ -88,21 +88,21 @@ class Command(BaseCommand):
         monday_date_list = list(get_all_monday_dates(dates_list))
 
         if options.get('update_school_weekly'):
-            logger.debug('Performing school weekly aggregations for date range: {0} - {1}'.format(
+            logger.info('Performing school weekly aggregations for date range: {0} - {1}'.format(
                 monday_date_list[0], monday_date_list[-1]))
             for monday_date in monday_date_list:
                 aggregate_school_daily_status_to_school_weekly_status(country, monday_date)
             logger.info('Completed school weekly aggregations.\n\n')
 
         if options.get('update_country_daily'):
-            logger.debug('Performing country daily aggregations for date range: {0} - {1}'.format(
+            logger.info('Performing country daily aggregations for date range: {0} - {1}'.format(
                 dates_list[0], dates_list[-1]))
             for date in dates_list:
                 aggregate_school_daily_to_country_daily(country, date)
             logger.info('Completed country daily aggregations.\n\n')
 
         if options.get('update_country_weekly'):
-            logger.debug('Performing country weekly aggregations for date range: {0} - {1}'.format(
+            logger.info('Performing country weekly aggregations for date range: {0} - {1}'.format(
                 monday_date_list[0], monday_date_list[-1]))
             for monday_date in monday_date_list:
                 monday_week_no = date_utilities.get_week_from_date(monday_date)
@@ -111,8 +111,8 @@ class Command(BaseCommand):
                 ).exists():
                     update_country_weekly_status(country, monday_date)
                 else:
-                    logger.debug('Country weekly aggregations skipped as school weekly has no record for same data:'
-                                 ' Year - {0}, Week No - {1}'.format(year, monday_week_no))
+                    logger.info('Country weekly aggregations skipped as school weekly has no record for same data:'
+                                ' Year - {0}, Week No - {1}'.format(year, monday_week_no))
             logger.info('Completed country weekly aggregations.\n\n')
 
         country.invalidate_country_related_cache()

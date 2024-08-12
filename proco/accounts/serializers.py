@@ -1,13 +1,16 @@
 import copy
 import re
 from datetime import timedelta
+from math import floor, ceil
 
 from django.apps import apps
 from django.conf import settings
 from django.contrib.admin.models import LogEntry
 from django.core.management import call_command
 from django.core.validators import validate_email
+from django.db import connection
 from django.db import transaction
+from django.db.models import F, Min, Max
 from django.db.models import Q
 from django.db.models.functions.text import Lower
 from rest_flex_fields.serializers import FlexFieldsModelSerializer
@@ -17,11 +20,14 @@ from proco.accounts import exceptions as accounts_exceptions
 from proco.accounts import models as accounts_models
 from proco.accounts import utils as account_utilities
 from proco.accounts.config import app_config as account_config
+from proco.connection_statistics.models import SchoolWeeklyStatus
+from proco.core import db_utils as db_utilities
 from proco.core import utils as core_utilities
 from proco.custom_auth import models as auth_models
 from proco.custom_auth.serializers import ExpandUserSerializer
 from proco.custom_auth.utils import get_user_emails_for_permissions
 from proco.locations import models as locations_models
+from proco.schools.models import School
 from proco.utils import dates as date_utilities
 
 
@@ -1755,4 +1761,471 @@ class DataLayerCountryRelationshipSerializer(serializers.ModelSerializer):
                 validated_data['last_modified_by'] = validated_data.get('last_modified_by') or request_user
 
             instance = super().create(validated_data)
+        return instance
+
+
+class AdvanceFilterCountryRelationshipSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = accounts_models.AdvanceFilterCountryRelationship
+
+        read_only_fields = (
+            'id',
+            'created',
+            'last_modified_at',
+        )
+
+        fields = read_only_fields + (
+            'advance_filter',
+            'country',
+        )
+
+        extra_kwargs = {
+            'advance_filter': {'required': True},
+            'country': {'required': True},
+        }
+
+    def create(self, validated_data):
+        request_user = core_utilities.get_current_user(context=self.context)
+        # set created_by and last_modified_by value
+        if request_user is not None:
+            validated_data['created_by'] = validated_data.get('created_by') or request_user
+            validated_data['last_modified_by'] = validated_data.get('last_modified_by') or request_user
+
+        instance = super().create(validated_data)
+        return instance
+
+
+class ColumnConfigurationListSerializer(FlexFieldsModelSerializer):
+    options = serializers.JSONField()
+
+    class Meta:
+        model = accounts_models.ColumnConfiguration
+        read_only_fields = fields = (
+            'id',
+            'name',
+            'label',
+            'type',
+            'description',
+            'table_name',
+            'table_alias',
+            'table_label',
+            'is_filter_applicable',
+            'options',
+        )
+
+
+class ExpandColumnConfigurationSerializer(FlexFieldsModelSerializer):
+    options = serializers.SerializerMethodField()
+
+    class Meta:
+        model = accounts_models.ColumnConfiguration
+        read_only_fields = fields = (
+            'name',
+            'label',
+            'type',
+            'table_name',
+            'table_alias',
+            'table_label',
+            'options',
+        )
+
+    def get_options(self, instance):
+        options = instance.options
+        if isinstance(options, dict):
+            if 'active_countries_filter' in options:
+                del options['active_countries_filter']
+        return options
+
+
+class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
+    options = serializers.SerializerMethodField()
+
+    class Meta:
+        model = accounts_models.AdvanceFilter
+        read_only_fields = fields = (
+            'name',
+            'type',
+            'description',
+            'column_configuration',
+            'options',
+            'query_param_filter'
+        )
+
+        expandable_fields = {
+            'column_configuration': (ExpandColumnConfigurationSerializer, {'source': 'column_configuration'}),
+        }
+
+    def include_none_filter(self, parameter_table, parameter_field):
+        select_qs = School.objects.filter(country_id=self.context['country_id'])
+        none_check_sql = f'"schools_school"."{parameter_field}" IS NULL'
+        if parameter_table == 'school_static':
+            last_weekly_status_field = 'last_weekly_status__{}'.format(parameter_field)
+            select_qs = select_qs.select_related('last_weekly_status').annotate(**{
+                parameter_table + '_' + parameter_field: F(last_weekly_status_field)
+            })
+
+            none_check_sql = f'"connection_statistics_schoolweeklystatus"."{parameter_field}" IS NULL'
+        return select_qs.extra(where=[none_check_sql]).exists()
+
+    def update_range_filter_options(self, options, parameter_table, parameter_field, parameter_options):
+        last_weekly_status_field = 'last_weekly_status__{}'.format(parameter_field)
+
+        options['include_none_filter'] = self.include_none_filter(parameter_table, parameter_field)
+
+        if options.get('range_auto_compute', False):
+            select_qs = School.objects.filter(country_id=self.context['country_id'])
+            if parameter_table == 'school_static':
+                parameter_field_props = SchoolWeeklyStatus._meta.get_field(parameter_field)
+
+                select_qs = select_qs.select_related('last_weekly_status').values('country_id').annotate(
+                    min_value=Min(F(last_weekly_status_field)),
+                    max_value=Max(F(last_weekly_status_field)),
+                )
+            else:
+                parameter_field_props = School._meta.get_field(parameter_field)
+
+                select_qs = select_qs.values('country_id').annotate(
+                    min_value=Min(parameter_field),
+                    max_value=Max(parameter_field),
+                )
+
+            country_range_json = list(
+                select_qs.values('country_id', 'min_value', 'max_value').order_by('country_id').distinct())[-1]
+
+            if country_range_json:
+                del country_range_json['country_id']
+
+                country_range_json['min_value'] = floor(country_range_json['min_value'])
+                country_range_json['max_value'] = ceil(country_range_json['max_value'])
+
+                if 'downcast_aggr_str' in parameter_options:
+                    downcast_eval = parameter_options['downcast_aggr_str']
+                    country_range_json['min_value'] = floor(
+                        eval(downcast_eval.format(val=country_range_json['min_value'])))
+                    country_range_json['max_value'] = ceil(
+                        eval(downcast_eval.format(val=country_range_json['max_value'])))
+
+                country_range_json['min_place_holder'] = 'Min ({})'.format(country_range_json['min_value'])
+                country_range_json['max_place_holder'] = 'Max ({})'.format(country_range_json['max_value'])
+            else:
+                internal_type = parameter_field_props.get_internal_type()
+                min_value, max_value = connection.ops.integer_field_range(internal_type)
+                country_range_json = {
+                    'min_place_holder': 'Min',
+                    'max_place_holder': 'Max',
+                    'min_value': min_value,
+                    'max_value': max_value
+                }
+
+            options['active_range'] = country_range_json
+
+    def update_boolean_filter_options(self, options, parameter_table, parameter_field):
+        join_condition = ''
+        filter_condition = ''
+
+        select_qry = """
+        SELECT DISTINCT {col} AS {col_name}
+        FROM schools_school AS schools
+        {join_condition}
+        WHERE schools.deleted IS NULL
+            AND schools.country_id = {c_id}
+            {filter_condition}
+        ORDER BY {col_name} DESC NULLS LAST
+        """
+
+        if parameter_table == 'school_static':
+            join_condition = ('INNER JOIN connection_statistics_schoolweeklystatus AS school_static '
+                              'ON schools.last_weekly_status_id = school_static.id')
+            filter_condition = 'AND school_static.deleted IS NULL'
+
+        sql_qry = select_qry.format(
+            col_name=parameter_field,
+            col=parameter_table + '.' + parameter_field,
+            c_id=self.context['country_id'],
+            join_condition=join_condition,
+            filter_condition=filter_condition)
+        choices = []
+        data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__)
+        for value in data:
+            field_value = value[parameter_field]
+
+            if core_utilities.is_blank_string(field_value):
+                choices.append({
+                    'label': 'Unknown',
+                    'value': 'none'
+                })
+            else:
+                choices.append({
+                    'label': 'Yes' if field_value else 'No',
+                    'value': 'true' if field_value else 'false',
+                })
+        options['choices'] = choices
+
+    def get_options(self, instance):
+        options = instance.options
+        if isinstance(options, dict):
+            parameter_details = instance.column_configuration
+            parameter_field = parameter_details.name
+            field_type = parameter_details.type
+            parameter_table = parameter_details.table_alias
+
+            parameter_options = parameter_details.options
+
+            if options.get('live_choices', False):
+                join_condition = ''
+                filter_condition = ''
+
+                select_qry = """
+                SELECT DISTINCT {col} AS {col_name}
+                FROM schools_school AS schools
+                {join_condition}
+                WHERE schools.deleted IS NULL
+                    AND schools.country_id = {c_id}
+                    {filter_condition}
+                ORDER BY {col_name} ASC NULLS LAST
+                """
+
+                if parameter_table == 'school_static':
+                    join_condition = ('INNER JOIN connection_statistics_schoolweeklystatus AS school_static '
+                                      'ON schools.last_weekly_status_id = school_static.id')
+                    filter_condition = 'AND school_static.deleted IS NULL'
+
+                sql_qry = select_qry.format(
+                    col_name=parameter_field,
+                    col=f"LOWER(NULLIF({parameter_table + '.' + parameter_field}, ''))" if field_type == 'str' else parameter_table + '.' + parameter_field,
+                    c_id=self.context['country_id'],
+                    join_condition=join_condition,
+                    filter_condition=filter_condition)
+                choices = []
+                data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__)
+                for value in data:
+                    field_value = value[parameter_field]
+                    if core_utilities.is_blank_string(field_value):
+                        choices.append({
+                            'label': 'Unknown',
+                            'value': 'none'
+                        })
+                    else:
+                        choices.append({
+                            'label': field_value.title()
+                            if field_type == accounts_models.ColumnConfiguration.TYPE_STR else field_value,
+                            'value': field_value
+                        })
+                options['choices'] = choices
+
+            if instance.type == accounts_models.AdvanceFilter.TYPE_RANGE:
+                self.update_range_filter_options(options, parameter_table, parameter_field, parameter_options)
+            elif instance.type == accounts_models.AdvanceFilter.TYPE_BOOLEAN:
+                self.update_boolean_filter_options(options, parameter_table, parameter_field)
+
+        return options
+
+
+class AdvanceFiltersListSerializer(FlexFieldsModelSerializer):
+    active_countries_list = serializers.JSONField()
+    options = serializers.JSONField()
+
+    class Meta:
+        model = accounts_models.AdvanceFilter
+        read_only_fields = fields = (
+            'id',
+            'code',
+            'name',
+            'description',
+            'type',
+            'options',
+            'query_param_filter',
+            'column_configuration',
+            'status',
+            'published_by',
+            'active_countries_list',
+        )
+
+        expandable_fields = {
+            'column_configuration': (ExpandColumnConfigurationSerializer, {'source': 'column_configuration'}),
+            'published_by': (ExpandUserSerializer, {'source': 'published_by'}),
+            'last_modified_by': (ExpandUserSerializer, {'source': 'last_modified_by'}),
+            'created_by': (ExpandUserSerializer, {'source': 'created_by'}),
+        }
+
+    def to_representation(self, instance):
+        active_countries_list = list(instance.active_countries.all().order_by(
+            'country_id').values_list('country_id', flat=True).distinct('country_id'))
+        setattr(instance, 'active_countries_list', active_countries_list)
+        return super().to_representation(instance)
+
+
+class BaseAdvanceFilterListCRUDSerializer(serializers.ModelSerializer):
+    def validate_name(self, name):
+        if re.match(account_config.valid_filter_name_pattern, name):
+            return name
+        raise accounts_exceptions.InvalidAdvanceFilterNameError()
+
+    def validate_code(self, code):
+        if re.match(r'[a-zA-Z0-9-\' _]*$', code):
+            if (
+                (self.instance and code != self.instance.code) or
+                (not self.instance and accounts_models.AdvanceFilter.objects.filter(code__iexact=code).exists())
+            ):
+                raise accounts_exceptions.DuplicateAdvanceFilterCodeError(message_kwargs={'code': code.upper()})
+            return code.upper()
+        raise accounts_exceptions.InvalidAdvanceFilterCodeError()
+
+
+class CreateAdvanceFilterSerializer(BaseAdvanceFilterListCRUDSerializer):
+    options = serializers.JSONField(required=False)
+
+    class Meta:
+        model = accounts_models.AdvanceFilter
+
+        read_only_fields = (
+            'id',
+            'created',
+            'last_modified_at',
+        )
+
+        fields = read_only_fields + (
+            'code',
+            'name',
+            'description',
+            'type',
+            'status',
+            'options',
+            'query_param_filter',
+            'column_configuration',
+        )
+
+        extra_kwargs = {
+            'name': {'required': True},
+            'type': {'required': True},
+            'column_configuration': {'required': True}
+        }
+
+    def validate_status(self, status):
+        return accounts_models.AdvanceFilter.FILTER_STATUS_DRAFT
+
+    def to_internal_value(self, data):
+        if not data.get('code') and data.get('name'):
+            data['code'] = core_utilities.normalize_str(str(data.get('name'))).upper()
+        return super().to_internal_value(data)
+
+    def create(self, validated_data):
+        """
+        create
+            This method is used to create Advance Filter
+        :param validated_data:
+        :return:
+        """
+        request_user = core_utilities.get_current_user(context=self.context)
+
+        if request_user is not None:
+            validated_data['created_by'] = validated_data.get('created_by') or request_user
+            validated_data['last_modified_by'] = validated_data.get('last_modified_by') or request_user
+
+        return super().create(validated_data)
+
+
+class UpdateAdvanceFilterSerializer(BaseAdvanceFilterListCRUDSerializer):
+    options = serializers.JSONField(required=False)
+
+    class Meta:
+        model = accounts_models.AdvanceFilter
+        read_only_fields = (
+            'id',
+            'last_modified_at',
+            'published_by',
+            'published_at'
+        )
+
+        fields = read_only_fields + (
+            'code',
+            'name',
+            'description',
+            'type',
+            'status',
+            'column_configuration',
+            'options',
+            'query_param_filter',
+        )
+
+        extra_kwargs = {
+            'status': {'required': True},
+        }
+
+    def validate_status(self, status):
+        # If new status is DRAFT, then existing status must be in DRAFT
+        # If new status is DISABLED, then existing status must be as PUBLISHED
+        if (
+            status == accounts_models.AdvanceFilter.FILTER_STATUS_DRAFT and
+            self.instance.status == accounts_models.AdvanceFilter.FILTER_STATUS_DRAFT
+        ) or (
+            status == accounts_models.AdvanceFilter.FILTER_STATUS_DISABLED and
+            self.instance.status == accounts_models.AdvanceFilter.FILTER_STATUS_PUBLISHED
+        ):
+            return status
+
+        # The publisher can update the filter at any status but won't be able to change the status value
+        if self.instance.status in [accounts_models.AdvanceFilter.FILTER_STATUS_DISABLED,
+                                    accounts_models.AdvanceFilter.FILTER_STATUS_PUBLISHED]:
+            request_user = core_utilities.get_current_user(context=self.context)
+            user_is_publisher = len(get_user_emails_for_permissions(
+                [auth_models.RolePermission.CAN_PUBLISH_ADVANCE_FILTER],
+                ids_to_filter=[request_user.id]
+            )) > 0
+
+            if user_is_publisher:
+                return self.instance.status
+
+        raise accounts_exceptions.InvalidAdvanceFilterUpdateError()
+
+    def validate_code(self, code):
+        if re.match(r'[a-zA-Z0-9-\' _]*$', code):
+            # Check if filter exist with same code excluding current filter
+            if accounts_models.AdvanceFilter.objects.filter(code__iexact=code).exclude(pk=self.instance.id).exists():
+                raise accounts_exceptions.DuplicateAdvanceFilterCodeError(message_kwargs={'code': code.upper()})
+            return code.upper()
+        raise accounts_exceptions.InvalidAdvanceFilterCodeError()
+
+
+class PublishAdvanceFilterSerializer(serializers.ModelSerializer):
+    options = serializers.JSONField(required=False)
+
+    class Meta:
+        model = accounts_models.AdvanceFilter
+        read_only_fields = (
+            'id',
+            'created',
+            'last_modified_at',
+            'code',
+            'name',
+            'description',
+            'type',
+            'column_configuration',
+            'options',
+            'query_param_filter',
+            'published_by',
+            'published_at',
+        )
+
+        fields = read_only_fields + (
+            'status',
+        )
+
+    def update(self, instance, validated_data):
+        """
+        update
+            This method is used to publish the Advance Filter instance
+        :param instance:
+        :param validated_data:
+        :return:
+        """
+        validated_data['status'] = accounts_models.AdvanceFilter.FILTER_STATUS_PUBLISHED
+        validated_data['published_at'] = core_utilities.get_current_datetime_object()
+        validated_data['published_by'] = core_utilities.get_current_user(context=self.context)
+
+        instance = super().update(instance, validated_data)
+
+        args = ['--reset', '-filter_id={0}'.format(instance.id)]
+        call_command('populate_active_filters_for_countries', *args)
+
         return instance

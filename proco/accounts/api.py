@@ -2,11 +2,10 @@ import copy
 import json
 import logging
 from datetime import timedelta
-from math import floor, ceil
 
 from django.conf import settings
 from django.contrib.admin.models import LogEntry
-from django.db.models import Case, F, IntegerField, Value, When, Min, Max
+from django.db.models import Case, IntegerField, Value, When
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
@@ -14,10 +13,12 @@ from django.views.decorators.cache import cache_control
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import permissions
 from rest_framework import status as rest_status
+from rest_framework.filters import SearchFilter
 from rest_framework.response import Response
 from rest_framework.utils.urls import remove_query_param
 from rest_framework.views import APIView
 
+from proco.accounts import exceptions as accounts_exceptions
 from proco.accounts import models as accounts_models
 from proco.accounts import serializers
 from proco.accounts import utils as account_utilities
@@ -31,7 +32,6 @@ from proco.core import utils as core_utilities
 from proco.core.viewsets import BaseModelViewSet
 from proco.custom_auth import models as auth_models
 from proco.locations.models import Country
-from proco.schools.models import School
 from proco.utils import dates as date_utilities
 from proco.utils.cache import cache_manager
 from proco.utils.filters import NullsAlwaysLastOrderingFilter
@@ -294,114 +294,12 @@ class AppStaticConfigurationsViewSet(APIView):
             'MESSAGE_MODE_CHOICES': dict(accounts_models.Message.MESSAGE_MODE_CHOICES),
             'PERMISSION_CHOICES': dict(auth_models.RolePermission.PERMISSION_CHOICES),
             'COVERAGE_TYPES': dict(statistics_models.SchoolWeeklyStatus.COVERAGE_TYPES),
+            'FILTER_TYPE_CHOICES': dict(accounts_models.AdvanceFilter.FILTER_TYPE_CHOICES),
+            'FILTER_QUERY_PARAM_CHOICES': dict(accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_CHOICES),
+            'FILTER_STATUS_CHOICES': dict(accounts_models.AdvanceFilter.STATUS_CHOICES),
         }
 
         return Response(data=static_data)
-
-
-class AdvancedFiltersViewSet(APIView):
-    base_auth_permissions = (
-        permissions.AllowAny,
-    )
-
-    CACHE_KEY = 'cache'
-    CACHE_KEY_PREFIX = 'ADVANCE_FILTERS_JSON'
-
-    def get_cache_key(self):
-        params = dict(self.request.query_params)
-        params.pop(self.CACHE_KEY, None)
-        return '{0}_{1}'.format(self.CACHE_KEY_PREFIX,
-                                '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))), )
-
-    def get(self, request, *args, **kwargs):
-        use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
-        cache_key = self.get_cache_key()
-
-        response_data = None
-        if use_cached_data:
-            response_data = cache_manager.get(cache_key)
-
-        if not response_data:
-            filters = copy.deepcopy(settings.FILTERS_DATA)
-
-            for filter_json in filters:
-                parameter_table = filter_json['parameter']['table']
-                parameter_field = filter_json['parameter']['field']
-
-                last_weekly_status_field = 'last_weekly_status__{}'.format(parameter_field)
-
-                active_countries_list = []
-
-                # Populate the active countries list
-                active_countries_sql_filter = filter_json.get('active_countries_filter', None)
-                if active_countries_sql_filter:
-                    country_qs = School.objects.all()
-                    if parameter_table == 'school_static':
-                        country_qs = country_qs.select_related('last_weekly_status').annotate(**{
-                            parameter_table + '_' + parameter_field: F(last_weekly_status_field)
-                        })
-
-                    active_countries_list = list(country_qs.extra(
-                        where=[active_countries_sql_filter],
-                    ).order_by('country_id').values_list('country_id', flat=True).distinct('country_id'))
-
-                    if len(active_countries_list) > 0:
-                        filter_json['active_countries_list'] = active_countries_list
-
-                    del filter_json['active_countries_filter']
-
-                if filter_json['type'] == 'range':
-                    select_qs = School.objects.all()
-                    if len(active_countries_list) > 0:
-                        select_qs = select_qs.filter(country_id__in=active_countries_list)
-
-                    if parameter_table == 'school_static':
-                        select_qs = select_qs.select_related('last_weekly_status').values('country_id').annotate(
-                            min_value=Min(F(last_weekly_status_field)),
-                            max_value=Max(F(last_weekly_status_field)),
-                        )
-                    else:
-                        select_qs = select_qs.values('country_id').annotate(
-                            min_value=Min(parameter_field),
-                            max_value=Max(parameter_field),
-                        )
-
-                    min_max_result_country_wise = list(
-                        select_qs.values('country_id', 'min_value', 'max_value').order_by('country_id').distinct())
-
-                    active_countries_range = filter_json['active_countries_range']
-
-                    for min_max_result in min_max_result_country_wise:
-                        country_id = min_max_result.pop('country_id')
-                        country_range_json = active_countries_range.get(country_id, copy.deepcopy(
-                            active_countries_range['default']))
-                        min_max_result['min_value'] = floor(min_max_result['min_value'])
-                        min_max_result['max_value'] = ceil(min_max_result['max_value'])
-
-                        if 'downcast_aggr_str' in filter_json:
-                            downcast_eval = filter_json['downcast_aggr_str']
-                            min_max_result['min_value'] = floor(
-                                eval(downcast_eval.format(val=min_max_result['min_value'])))
-                            min_max_result['max_value'] = ceil(
-                                eval(downcast_eval.format(val=min_max_result['max_value'])))
-
-                        country_range_json.update(**min_max_result)
-
-                        country_range_json['min_place_holder'] = 'Min ({})'.format(min_max_result['min_value'])
-                        country_range_json['max_place_holder'] = 'Max ({})'.format(min_max_result['max_value'])
-                        active_countries_range[country_id] = country_range_json
-
-                    filter_json['active_countries_range'] = active_countries_range
-
-            response_data = {
-                'count': len(settings.FILTERS_DATA),
-                'results': filters,
-            }
-            request_path = remove_query_param(request.get_full_path(), 'cache')
-            cache_manager.set(cache_key, response_data, request_path=request_path,
-                              soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
-
-        return Response(data=response_data)
 
 
 class DataSourceViewSet(BaseModelViewSet):
@@ -1058,7 +956,9 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             schools_school."education_level",
             ROUND(AVG(sds."{col_name}"::numeric), 2) AS "live_avg",
             CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
-                   WHEN schools_school.connectivity_status = 'no' THEN 'not_connected' ELSE 'unknown' END as connectivity_status,
+                WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
+                ELSE 'unknown'
+            END as connectivity_status,
             CASE WHEN srr."rt_registered" = True AND srr."rt_registration_date"::date <= '{end_date}' THEN true
             ELSE false END AS is_rt_connected,
             {case_conditions}
@@ -1327,16 +1227,16 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     values_l.extend(values)
                     if parameter_col_type == 'str':
                         label_cases.append(
-                            'COUNT(DISTINCT CASE WHEN LOWER(sws."{col_name}") IN ({value}) THEN schools_school."id" ELSE NULL END) '
-                            'AS "{label}",'.format(
+                            'COUNT(DISTINCT CASE WHEN LOWER(sws."{col_name}") IN ({value}) '
+                            'THEN schools_school."id" ELSE NULL END) AS "{label}",'.format(
                                 col_name=kwargs['col_name'],
                                 label=label,
                                 value=','.join(["'" + str(v).lower() + "'" for v in values])
                             ))
                     elif parameter_col_type == 'int':
                         label_cases.append(
-                            'COUNT(DISTINCT CASE WHEN sws."{col_name}" IN ({value}) THEN schools_school."id" ELSE NULL END) '
-                            'AS "{label}",'.format(
+                            'COUNT(DISTINCT CASE WHEN sws."{col_name}" IN ({value}) '
+                            'THEN schools_school."id" ELSE NULL END) AS "{label}",'.format(
                                 col_name=kwargs['col_name'],
                                 label=label,
                                 value=','.join([str(v) for v in values])
@@ -1344,7 +1244,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             else:
                 if is_sql_value:
                     label_cases.append(
-                        'COUNT(DISTINCT CASE WHEN sws."{col_name}" IS NULL THEN schools_school."id" ELSE NULL END) AS "{label}",'.format(
+                        'COUNT(DISTINCT CASE WHEN sws."{col_name}" IS NULL THEN schools_school."id" ELSE NULL END) '
+                        'AS "{label}",'.format(
                             col_name=kwargs['col_name'],
                             label=label,
                         ))
@@ -1352,16 +1253,16 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     values = set(values_l)
                     if parameter_col_type == 'str':
                         label_cases.append(
-                            'COUNT(DISTINCT CASE WHEN LOWER(sws."{col_name}") NOT IN ({value}) THEN schools_school."id" ELSE NULL END) '
-                            'AS "{label}",'.format(
+                            'COUNT(DISTINCT CASE WHEN LOWER(sws."{col_name}") NOT IN ({value}) '
+                            'THEN schools_school."id" ELSE NULL END) AS "{label}",'.format(
                                 col_name=kwargs['col_name'],
                                 label=label,
                                 value=','.join(["'" + str(v).lower() + "'" for v in values])
                             ))
                     elif parameter_col_type == 'int':
                         label_cases.append(
-                            'COUNT(DISTINCT CASE WHEN sws."{col_name}" NOT IN ({value}) THEN schools_school."id" ELSE NULL END) '
-                            'AS "{label}",'.format(
+                            'COUNT(DISTINCT CASE WHEN sws."{col_name}" NOT IN ({value}) '
+                            'THEN schools_school."id" ELSE NULL END) AS "{label}",'.format(
                                 col_name=kwargs['col_name'],
                                 label=label,
                                 value=','.join([str(v) for v in values])
@@ -1393,7 +1294,9 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             {label_case_statements}
             ST_AsGeoJSON(ST_Transform(schools_school."geopoint", 4326)) AS geopoint,
             CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
-                   WHEN schools_school.connectivity_status = 'no' THEN 'not_connected' ELSE 'unknown' END as connectivity_status
+                WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
+                ELSE 'unknown'
+            END as connectivity_status
         FROM "schools_school"
         INNER JOIN locations_country c ON c.id = schools_school.country_id
             AND c."deleted" IS NULL
@@ -1690,7 +1593,8 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                         {school_condition}
                         {school_weekly_condition}
                         AND "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
-                        AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date"::date <= '{end_date}')
+                        AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date"::date
+                        <= '{end_date}')
                     GROUP BY "schools_school"."id"
                     ORDER BY "schools_school"."id" ASC
                 ) as t
@@ -2122,3 +2026,187 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
         except Exception as ex:
             logger.error('Exception occurred for school connectivity tiles endpoint: {0}'.format(ex))
             return Response({'error': 'An error occurred while processing the request'}, status=500)
+
+
+class ColumnConfigurationViewSet(BaseModelViewSet):
+    model = accounts_models.ColumnConfiguration
+    serializer_class = serializers.ColumnConfigurationListSerializer
+
+    permission_classes = (
+        core_permissions.IsUserAuthenticated,
+        core_permissions.CanViewColumnConfigurations,
+    )
+
+    filter_backends = (
+        DjangoFilterBackend,
+        NullsAlwaysLastOrderingFilter,
+    )
+
+    ordering_field_names = ['label', 'name']
+    apply_query_pagination = True
+
+    filterset_fields = {
+        'id': ['exact', 'in'],
+        'type': ['iexact', 'in', 'exact'],
+        'name': ['iexact', 'in', 'exact'],
+        'table_name': ['iexact', 'in', 'exact'],
+        'is_filter_applicable': ['exact'],
+    }
+
+
+class AdvanceFiltersViewSet(BaseModelViewSet):
+    model = accounts_models.AdvanceFilter
+    serializer_class = serializers.AdvanceFiltersListSerializer
+
+    action_serializers = {
+        'create': serializers.CreateAdvanceFilterSerializer,
+        'partial_update': serializers.UpdateAdvanceFilterSerializer,
+    }
+
+    permission_classes = (
+        core_permissions.IsUserAuthenticated,
+        core_permissions.CanViewAdvanceFilters,
+        core_permissions.CanAddAdvanceFilter,
+        core_permissions.CanUpdateAdvanceFilter,
+    )
+
+    filter_backends = (
+        DjangoFilterBackend,
+        NullsAlwaysLastOrderingFilter,
+        SearchFilter,
+    )
+
+    ordering_field_names = ['-last_modified_at', 'name']
+    apply_query_pagination = True
+    search_fields = ('=code', '=status', 'name', 'description', 'type')
+
+    filterset_fields = {
+        'id': ['exact', 'in'],
+        'status': ['iexact', 'in', 'exact'],
+        'published_by_id': ['exact', 'in'],
+        'name': ['iexact', 'in', 'exact'],
+    }
+
+    permit_list_expands = ['created_by', 'published_by', 'last_modified_by', 'column_configuration']
+
+    def apply_queryset_filters(self, queryset):
+        """
+        Override if applying more complex filters to queryset.
+        :param queryset:
+        :return queryset:
+        """
+
+        query_params = self.request.query_params.dict()
+        query_param_keys = query_params.keys()
+
+        if 'country_id' in query_param_keys:
+            queryset = queryset.filter(
+                active_countries__country=query_params['country_id'],
+                active_countries__deleted__isnull=True,
+            )
+        elif 'country_id__in' in query_param_keys:
+            queryset = queryset.filter(
+                active_countries__country_id__in=[c_id.strip() for c_id in query_params['country_id__in'].split(',')],
+                active_countries__deleted__isnull=True,
+            )
+
+        return super().apply_queryset_filters(queryset)
+
+    def perform_destroy(self, instance):
+        """
+        Delete the filter from Admin portal listing only if its in Draft or Disabled mode.
+        Published filter can not be deleted.
+        """
+        if instance.status in [accounts_models.AdvanceFilter.FILTER_STATUS_DRAFT,
+                               accounts_models.AdvanceFilter.FILTER_STATUS_DISABLED]:
+            instance.deleted = core_utilities.get_current_datetime_object()
+            instance.last_modified_at = core_utilities.get_current_datetime_object()
+            instance.last_modified_by = core_utilities.get_current_user(request=self.request)
+            return super().perform_destroy(instance)
+        raise accounts_exceptions.InvalidAdvanceFilterDeleteError(
+            message_kwargs={'filter': instance.name, 'status': instance.status},
+        )
+
+
+class AdvanceFiltersPublishViewSet(BaseModelViewSet):
+    model = accounts_models.AdvanceFilter
+    serializer_class = serializers.PublishAdvanceFilterSerializer
+
+    permission_classes = (
+        core_permissions.IsUserAuthenticated,
+        core_permissions.CanPublishAdvanceFilter,
+    )
+
+    def apply_queryset_filters(self, queryset):
+        """
+        Filter only in Draft or Disabled status can be Published.
+        """
+        queryset = queryset.filter(
+            status__in=[accounts_models.AdvanceFilter.FILTER_STATUS_DRAFT,
+                        accounts_models.AdvanceFilter.FILTER_STATUS_DISABLED],
+        )
+        return super().apply_queryset_filters(queryset)
+
+
+class PublishedAdvanceFiltersViewSet(CachedListMixin, BaseModelViewSet):
+    """
+    PublishedAdvanceFiltersViewSet
+    Cache Attr:
+        Auto Cache: Not required
+        Call Cache: Yes
+    """
+    LIST_CACHE_KEY_PREFIX = 'PUBLISHED_FILTERS_LIST'
+
+    model = accounts_models.AdvanceFilter
+    serializer_class = serializers.PublishedAdvanceFiltersListSerializer
+
+    base_auth_permissions = (
+        permissions.AllowAny,
+    )
+
+    filter_backends = (
+        DjangoFilterBackend,
+        NullsAlwaysLastOrderingFilter,
+    )
+
+    ordering_field_names = ['-last_modified_at', 'name']
+    apply_query_pagination = True
+
+    filterset_fields = {
+        'id': ['exact', 'in'],
+        'published_by_id': ['exact', 'in'],
+        'name': ['iexact', 'in', 'exact'],
+    }
+
+    permit_list_expands = ['column_configuration', ]
+
+    def get_list_cache_key(self):
+        params = dict(self.request.query_params)
+        params.pop(self.CACHE_KEY, None)
+        return '{0}_{1}_{2}'.format(
+            self.LIST_CACHE_KEY_PREFIX,
+            '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(self.kwargs.items()))),
+            '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))),
+        )
+
+    def apply_queryset_filters(self, queryset):
+        """
+        Override if applying more complex filters to queryset.
+        :param queryset:
+        :return queryset:
+        """
+
+        country_id = self.kwargs.get('country_id')
+        status = self.kwargs.get('status', 'PUBLISHED')
+
+        queryset = queryset.filter(
+            status=status,
+            active_countries__country=country_id,
+            active_countries__deleted__isnull=True,
+        )
+
+        return super().apply_queryset_filters(queryset)
+
+    def update_serializer_context(self, context):
+        context['country_id'] = self.kwargs.get('country_id')
+        return context

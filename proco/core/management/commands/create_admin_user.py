@@ -19,7 +19,7 @@ def create_user_role_relationship(user, role_name):
 
 
 def valid_email(value):
-    logger.debug('Validating email: {0}'.format(value))
+    logger.info('Validating email: {0}'.format(value))
     validate_email(value)
     return value
 
@@ -47,7 +47,7 @@ class Command(BaseCommand):
 
     def handle(self, **options):
         user_email = options.get('user_email')
-        logger.debug('User create/update operation started ({0})'.format(user_email))
+        logger.info('User create/update operation started ({0})'.format(user_email))
 
         user_instance, created = ApplicationUser.objects.update_or_create(
             username=user_email,
@@ -62,6 +62,6 @@ class Command(BaseCommand):
             },
         )
 
-        logger.debug(user_instance.__dict__)
+        logger.info(user_instance.__dict__)
         create_user_role_relationship(user_instance, Role.SYSTEM_ROLE_NAME_ADMIN)
-        logger.debug('User create/update operation ended ({0})'.format(user_email))
+        logger.info('User create/update operation ended ({0})'.format(user_email))

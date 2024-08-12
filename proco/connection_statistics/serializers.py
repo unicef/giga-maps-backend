@@ -294,7 +294,7 @@ class SchoolCoverageStatusSerializer(serializers.ModelSerializer):
         return school_weekly_data
 
 
-class CountryWeeklyStatusUpdateRetriveSerializer(serializers.ModelSerializer):
+class CountryWeeklyStatusUpdateRetrieveSerializer(serializers.ModelSerializer):
     class Meta:
         model = CountryWeeklyStatus
         fields = '__all__'
@@ -396,9 +396,9 @@ class DetailSchoolWeeklySummarySerializer(SchoolWeeklyStatusSerializer):
         fields = "__all__"
 
 
-class SchoolDailyStatusUpdateRetriveSerializer(serializers.ModelSerializer):
+class SchoolDailyStatusUpdateRetrieveSerializer(serializers.ModelSerializer):
     """
-    CountryUpdateRetriveSerializer
+    CountryUpdateRetrieveSerializer
         Serializer to create Country.
     """
 

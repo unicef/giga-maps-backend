@@ -6,6 +6,11 @@ class AppConfig(object):
         return r'[a-zA-Z0-9-\' _()]*$'
 
     @property
+    def valid_filter_name_pattern(self):
+        """Regex to validate names"""
+        return r'[a-zA-Z0-9-\' _()#]*$'
+
+    @property
     def public_api_key_generation_email_subject_format(self):
         """format for the email subject when an API Key is generated for a Public API."""
         return '%s - API Key generated for "%s" API'
