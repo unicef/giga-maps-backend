@@ -125,6 +125,13 @@ class CountryViewSet(
             if len(country_ids) > 0:
                 queryset = queryset.filter(id__in=country_ids)
 
+        has_api_requests = self.request.query_params.get('has_api_requests', '').lower()
+        if has_api_requests == 'true':
+            country_ids = list(accounts_models.APIKeyCountryRelationship.objects.all().values_list(
+                'country_id', flat=True).order_by('country_id').distinct('country_id'))
+            if len(country_ids) > 0:
+                queryset = queryset.filter(id__in=country_ids)
+
         return queryset
 
 
