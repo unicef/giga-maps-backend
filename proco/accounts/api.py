@@ -17,6 +17,7 @@ from rest_framework.filters import SearchFilter
 from rest_framework.response import Response
 from rest_framework.utils.urls import remove_query_param
 from rest_framework.views import APIView
+from rest_framework.filters import SearchFilter
 
 from proco.accounts import exceptions as accounts_exceptions
 from proco.accounts import models as accounts_models
@@ -90,6 +91,7 @@ class APIKeysViewSet(BaseModelViewSet):
 
     filter_backends = (
         DjangoFilterBackend,
+        SearchFilter,
         # NullsAlwaysLastOrderingFilter,
     )
 
@@ -100,6 +102,8 @@ class APIKeysViewSet(BaseModelViewSet):
         'status': ['iexact', 'in', 'exact'],
         'user_id': ['exact', 'in'],
     }
+
+    search_fields = ['api__name', 'user__first_name', 'user__last_name', 'user__email']
 
     permit_list_expands = ['user', 'api', 'status_updated_by']
 
