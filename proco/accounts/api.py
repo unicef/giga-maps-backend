@@ -114,6 +114,19 @@ class APIKeysViewSet(BaseModelViewSet):
             auth_models.RolePermission.CAN_APPROVE_REJECT_API_KEY, False)
 
         queryset = queryset.filter(api__deleted__isnull=True, has_write_access=False)
+        query_params = self.request.query_params.dict()
+        query_param_keys = query_params.keys()
+
+        if 'country_id' in query_param_keys:
+            queryset = queryset.filter(
+                active_countries__country=query_params['country_id'],
+                active_countries__deleted__isnull=True,
+            )
+        elif 'country_id__in' in query_param_keys:
+            queryset = queryset.filter(
+                active_countries__country_id__in=[c_id.strip() for c_id in query_params['country_id__in'].split(',')],
+                active_countries__deleted__isnull=True,
+            )
 
         if not core_utilities.is_superuser(request_user) and not has_approval_permission:
             queryset = queryset.filter(user=request_user)
