@@ -253,6 +253,9 @@ class QoSData(models.Model):
     speed_upload_probe = models.FloatField(blank=True, null=True)
     latency_probe = models.FloatField(blank=True, null=True)
 
+    speed_download_mean = models.FloatField(blank=True, null=True)
+    speed_upload_mean = models.FloatField(blank=True, null=True)
+
     provider = models.TextField(blank=True, null=True)
     ip_family = models.IntegerField(blank=True, null=True)
 
