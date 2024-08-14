@@ -737,6 +737,7 @@ def sync_qos_realtime_data():
         'timestamp', 'speed_download', 'speed_upload', 'latency', 'school',
         'roundtrip_time', 'jitter_download', 'jitter_upload', 'rtt_packet_loss_pct',
         'speed_download_probe', 'speed_upload_probe', 'latency_probe',
+        'speed_download_mean', 'speed_upload_mean',
     ).order_by('timestamp').distinct(*['timestamp', 'school'])
 
     logger.debug('Migrating the records from "QoSData" to "RealTimeConnectivity" with date range: {0} - {1}'.format(
@@ -755,6 +756,11 @@ def sync_qos_realtime_data():
             # convert Mbps to bps
             connectivity_speed_probe = connectivity_speed_probe * 1000 * 1000
 
+        connectivity_speed_mean = qos_measurement.get('speed_download_mean')
+        if connectivity_speed_mean:
+            # convert Mbps to bps
+            connectivity_speed_mean = connectivity_speed_mean * 1000 * 1000
+
         connectivity_upload_speed = qos_measurement.get('speed_upload')
         if connectivity_upload_speed:
             # convert Mbps to bps
@@ -765,6 +771,11 @@ def sync_qos_realtime_data():
             # convert Mbps to bps
             connectivity_upload_speed_probe = connectivity_upload_speed_probe * 1000 * 1000
 
+        connectivity_upload_speed_mean = qos_measurement.get('speed_upload_mean')
+        if connectivity_upload_speed_mean:
+            # convert Mbps to bps
+            connectivity_upload_speed_mean = connectivity_upload_speed_mean * 1000 * 1000
+
         realtime.append(RealTimeConnectivity(
             created=qos_measurement.get('timestamp'),
             connectivity_speed=connectivity_speed,
@@ -773,6 +784,8 @@ def sync_qos_realtime_data():
             connectivity_speed_probe=connectivity_speed_probe,
             connectivity_upload_speed_probe=connectivity_upload_speed_probe,
             connectivity_latency_probe=qos_measurement.get('latency_probe'),
+            connectivity_speed_mean=connectivity_speed_mean,
+            connectivity_upload_speed_mean=connectivity_upload_speed_mean,
             roundtrip_time=qos_measurement.get('roundtrip_time'),
             jitter_download=qos_measurement.get('jitter_download'),
             jitter_upload=qos_measurement.get('jitter_upload'),

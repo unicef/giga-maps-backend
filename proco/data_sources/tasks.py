@@ -295,6 +295,8 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                             school_weekly.connectivity_speed_probe = None
                             school_weekly.connectivity_upload_speed_probe = None
                             school_weekly.connectivity_latency_probe = None
+                            school_weekly.connectivity_speed_mean = None
+                            school_weekly.connectivity_upload_speed_mean = None
                         else:
                             school_weekly = statistics_models.SchoolWeeklyStatus.objects.create(
                                 school=school,

@@ -13,7 +13,7 @@ from proco.data_sources.models import QoSData, SchoolMasterData
 from proco.locations.models import Country
 from proco.schools.models import School
 from proco.utils.dates import get_current_year
-from proco.utils.tasks import redo_aggregations_task, populate_school_new_fields_task
+from proco.utils.tasks import redo_aggregations_task, populate_school_new_fields_task, rebuild_school_index
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -476,6 +476,12 @@ class Command(BaseCommand):
         )
 
         parser.add_argument(
+            '--rebuild_school_index_with_schedular', action='store_true',
+            dest='rebuild_school_index_with_schedular', default=False,
+            help='If provided, run the rebuild_school_index utility through Schedular in real time.'
+        )
+
+        parser.add_argument(
             '--data_loss_recovery_for_pcdc_weekly_with_schedular', action='store_true',
             dest='data_loss_recovery_for_pcdc_weekly_with_schedular', default=False,
             help='If provided, run the data_loss_recovery_for_pcdc_weekly utility through Schedular in real time.'
@@ -613,5 +619,8 @@ class Command(BaseCommand):
             pull_data = options.get('pull_data', False)
 
             sources_tasks.data_loss_recovery_for_pcdc_weekly_task.delay(start_week_no, end_week_no, year, pull_data)
+
+        if options.get('rebuild_school_index_with_schedular'):
+            rebuild_school_index.delay()
 
         logger.info('Completed data cleanup successfully.\n')
