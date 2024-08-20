@@ -166,7 +166,7 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
     #     self.assertFalse(os.path.isfile(profile_file))
 
     def test_sync_qos_realtime_data(self):
-        self.assertIsNone(sources_utilities.sync_qos_realtime_data())
+        self.assertIsNone(sources_utilities.sync_qos_realtime_data(123))
 
     def test_sync_dailycheckapp_realtime_data(self):
         self.assertIsNone(sources_utilities.sync_dailycheckapp_realtime_data())
