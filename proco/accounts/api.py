@@ -477,6 +477,7 @@ class DataLayerPreviewViewSet(APIView):
     )
 
     def get_map_query(self, kwargs):
+        print('HEREEEEEEEEEEEEEEEEEEEEEEE')
         query = """
         SELECT "schools_school".id, "schools_school".name,
             CASE WHEN rt_status.rt_registered = True AND rt_status.rt_registration_date <= '{end_date}' THEN True
@@ -491,7 +492,7 @@ class DataLayerPreviewViewSet(APIView):
         FROM schools_school
         LEFT JOIN (
             SELECT "schools_school"."id" AS school_id,
-                AVG(t."{col_name}") AS "field_avg"
+                AVG(t."{col_name}") AS "{col_name}"
             FROM "schools_school"
             INNER JOIN "connection_statistics_schoolrealtimeregistration"
                 ON ("schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id")
@@ -510,8 +511,8 @@ class DataLayerPreviewViewSet(APIView):
                 AND t."deleted" IS NULL)
             GROUP BY "schools_school"."id"
             ORDER BY "schools_school"."id" ASC
-        ) as t
-            ON t.school_id = "schools_school".id
+        ) as sds
+            ON sds.school_id = "schools_school".id
         LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status
             ON rt_status.school_id = "schools_school".id
         WHERE "schools_school"."deleted" IS NULL
@@ -521,22 +522,39 @@ class DataLayerPreviewViewSet(APIView):
         LIMIT 1000
         """
 
-        kwargs['case_conditions'] = """
-            CASE WHEN t.field_avg >  {benchmark_value} THEN 'good'
-                WHEN t.field_avg <= {benchmark_value} and t.field_avg >= {base_benchmark} THEN 'moderate'
-                WHEN t.field_avg < {base_benchmark}  THEN 'bad'
-                ELSE 'unknown'
-            END as connectivity,
-        """.format(**kwargs)
+        legend_configs = kwargs['legend_configs']
+        if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
+            label_cases = []
+            for title, values_and_label in legend_configs.items():
+                values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
+                                     values_and_label.get('values', [])))
 
-        if kwargs['is_reverse'] is True:
+                if len(values) > 0:
+                    is_sql_value = 'SQL:' in values[0]
+                    if is_sql_value:
+                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
+                else:
+                    label_cases.append("ELSE '{label}'".format(label=title))
+
+            kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS connectivity,'
+        else:
             kwargs['case_conditions'] = """
-                CASE WHEN t.field_avg < {benchmark_value}  THEN 'good'
-                    WHEN t.field_avg >= {benchmark_value} AND t.field_avg <= {base_benchmark} THEN 'moderate'
-                    WHEN t.field_avg > {base_benchmark} THEN 'bad'
-                    ELSE 'unknown'
-                END as connectivity,
-            """.format(**kwargs)
+                        CASE WHEN sds.{col_name} >  {benchmark_value} THEN 'good'
+                            WHEN sds.{col_name} <= {benchmark_value} and sds.{col_name} >= {base_benchmark} THEN 'moderate'
+                            WHEN sds.{col_name} < {base_benchmark}  THEN 'bad'
+                            ELSE 'unknown'
+                        END AS connectivity,
+                    """.format(**kwargs)
+
+            if kwargs['is_reverse'] is True:
+                kwargs['case_conditions'] = """
+                            CASE WHEN sds.{col_name} < {benchmark_value}  THEN 'good'
+                                WHEN sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark} THEN 'moderate'
+                                WHEN sds.{col_name} > {base_benchmark} THEN 'bad'
+                                ELSE 'unknown'
+                            END AS connectivity,
+                        """.format(**kwargs)
 
         if len(kwargs['country_ids']) > 0:
             kwargs['country_condition'] = '"schools_school"."country_id" IN ({0}) AND'.format(
@@ -551,8 +569,9 @@ class DataLayerPreviewViewSet(APIView):
 
         return query.format(**kwargs)
 
-    def get_static_map_query(self, kwargs):
-        query = """
+
+def get_static_map_query(self, kwargs):
+    query = """
         SELECT
             s.id,
             s.name,
@@ -570,57 +589,65 @@ class DataLayerPreviewViewSet(APIView):
         LIMIT 1000
         """
 
-        kwargs['country_condition'] = ''
+    kwargs['country_condition'] = ''
 
-        if len(kwargs['country_ids']) > 0:
-            kwargs['country_condition'] = 'AND s.country_id IN ({0})'.format(
-                ','.join([str(country_id) for country_id in kwargs['country_ids']])
-            )
+    if len(kwargs['country_ids']) > 0:
+        kwargs['country_condition'] = 'AND s.country_id IN ({0})'.format(
+            ','.join([str(country_id) for country_id in kwargs['country_ids']])
+        )
 
-        legend_configs = kwargs['legend_configs']
-        label_cases = []
-        values_l = []
-        parameter_col_type = kwargs['parameter_col'].get('type', 'str').lower()
-        for title, values_and_label in legend_configs.items():
-            values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
-                                 values_and_label.get('values', [])))
+    legend_configs = kwargs['legend_configs']
+    label_cases = []
+    values_l = []
+    parameter_col_type = kwargs['parameter_col'].get('type', 'str').lower()
+    for title, values_and_label in legend_configs.items():
+        values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
+                             values_and_label.get('values', [])))
 
-            if len(values) > 0:
-                is_sql_value = 'SQL:' in values[0]
-                if is_sql_value:
-                    sql_statement = str(','.join(values)).replace('SQL:', '').format(
-                        col_name=kwargs['col_name'],
-                    )
-                    label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
-                else:
-                    values_l.extend(values)
-                    if parameter_col_type == 'str':
-                        label_cases.append(
-                            """WHEN LOWER(sws."{col_name}") IN ({value}) THEN '{label}'""".format(
-                                col_name=kwargs['col_name'],
-                                label=title,
-                                value=','.join(["'" + str(v).lower() + "'" for v in values])
-                            ))
-                    elif parameter_col_type == 'int':
-                        label_cases.append(
-                            """WHEN sws."{col_name}" IN ({value}) THEN '{label}'""".format(
-                                col_name=kwargs['col_name'],
-                                label=title,
-                                value=','.join([str(v) for v in values])
-                            ))
+        if len(values) > 0:
+            is_sql_value = 'SQL:' in values[0]
+            if is_sql_value:
+                sql_statement = str(','.join(values)).replace('SQL:', '').format(
+                    col_name=kwargs['col_name'],
+                )
+                label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
             else:
-                label_cases.append("ELSE '{label}'".format(label=title))
+                values_l.extend(values)
+                if parameter_col_type == 'str':
+                    label_cases.append(
+                        """WHEN LOWER(sws."{col_name}") IN ({value}) THEN '{label}'""".format(
+                            col_name=kwargs['col_name'],
+                            label=title,
+                            value=','.join(["'" + str(v).lower() + "'" for v in values])
+                        ))
+                elif parameter_col_type == 'int':
+                    label_cases.append(
+                        """WHEN sws."{col_name}" IN ({value}) THEN '{label}'""".format(
+                            col_name=kwargs['col_name'],
+                            label=title,
+                            value=','.join([str(v) for v in values])
+                        ))
+        else:
+            label_cases.append("ELSE '{label}'".format(label=title))
 
-        kwargs['label_case_statements'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
+    kwargs['label_case_statements'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
 
-        return query.format(**kwargs)
+    return query.format(**kwargs)
 
-    def get(self, request, *args, **kwargs):
-        data_layer_instance = get_object_or_404(accounts_models.DataLayer.objects.all(), pk=self.kwargs.get('pk'))
-        data_sources = data_layer_instance.data_sources.all()
 
+def get(self, request, *args, **kwargs):
+    print('HEREEEEEEEEEEEE')
+    data_layer_instance = get_object_or_404(accounts_models.DataLayer.objects.all(), pk=self.kwargs.get('pk'))
+    data_sources = data_layer_instance.data_sources.all()
+
+    country_ids = data_layer_instance.applicable_countries
+    parameter_col = data_sources.first().data_source_column
+
+    parameter_column_name = str(parameter_col['name'])
+    legend_configs = data_layer_instance.legend_configs
+
+    if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
         live_data_sources = ['UNKNOWN']
-
         for d in data_sources:
             source_type = d.data_source.data_source_type
             if source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_QOS:
@@ -628,70 +655,50 @@ class DataLayerPreviewViewSet(APIView):
             elif source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP:
                 live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
 
-        country_ids = data_layer_instance.applicable_countries
-        parameter_col = data_sources.first().data_source_column
+        global_benchmark = data_layer_instance.global_benchmark.get('value')
+        benchmark_base = str(parameter_col.get('base_benchmark', 1))
 
-        parameter_column_name = str(parameter_col['name'])
+        data_layer_qs = statistics_models.SchoolDailyStatus.objects.all()
+        if len(country_ids) > 0:
+            data_layer_qs = data_layer_qs.filter(school__country__in=country_ids)
 
-        if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
-            response = {
-                'map': None,
-            }
+        date = core_utilities.get_current_datetime_object().date() - timedelta(days=6)
 
-            global_benchmark = data_layer_instance.global_benchmark.get('value')
-            benchmark_base = str(parameter_col.get('base_benchmark', 1))
+        latest_school_daily_instance = data_layer_qs.order_by('-date').first()
+        if latest_school_daily_instance:
+            date = latest_school_daily_instance.date
 
-            data_layer_qs = statistics_models.SchoolDailyStatus.objects.all()
-            if len(country_ids) > 0:
-                data_layer_qs = data_layer_qs.filter(school__country__in=country_ids)
+        start_date = date - timedelta(days=date.weekday())
+        end_date = start_date + timedelta(days=6)
+        query_kwargs = {
+            'col_name': parameter_column_name,
+            'benchmark_value': global_benchmark,
+            'base_benchmark': benchmark_base,
+            'country_ids': country_ids,
+            'start_date': start_date,
+            'end_date': end_date,
+            'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
+            'parameter_col': parameter_col,
+            'is_reverse': data_layer_instance.is_reverse,
+            'legend_configs': legend_configs,
+        }
 
-            date = core_utilities.get_current_datetime_object().date() - timedelta(days=6)
+        map_points = db_utilities.sql_to_response(self.get_map_query(query_kwargs), label=self.__class__.__name__)
+    else:
+        query_kwargs = {
+            'col_name': parameter_column_name,
+            'legend_configs': legend_configs,
+            'country_ids': country_ids,
+            'parameter_col': parameter_col,
+        }
 
-            latest_school_daily_instance = data_layer_qs.order_by('-date').first()
-            if latest_school_daily_instance:
-                date = latest_school_daily_instance.date
+        map_points = db_utilities.sql_to_response(self.get_static_map_query(query_kwargs),
+                                                  label=self.__class__.__name__)
 
-            start_date = date - timedelta(days=date.weekday())
-            end_date = start_date + timedelta(days=6)
-            query_kwargs = {
-                'col_name': parameter_column_name,
-                'benchmark_value': global_benchmark,
-                'base_benchmark': benchmark_base,
-                'country_ids': country_ids,
-                'start_date': start_date,
-                'end_date': end_date,
-                'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
-                'parameter_col': parameter_col,
-                'is_reverse': data_layer_instance.is_reverse,
-            }
-
-            map_points = db_utilities.sql_to_response(self.get_map_query(query_kwargs), label=self.__class__.__name__)
-            if map_points:
-                for map_point in map_points:
-                    map_point['geopoint'] = json.loads(map_point['geopoint'])
-            response['map'] = map_points
-        else:
-            response = {
-                'map': None,
-            }
-
-            legend_configs = data_layer_instance.legend_configs
-
-            query_kwargs = {
-                'col_name': parameter_column_name,
-                'legend_configs': legend_configs,
-                'country_ids': country_ids,
-                'parameter_col': parameter_col,
-            }
-
-            map_points = db_utilities.sql_to_response(self.get_static_map_query(query_kwargs),
-                                                      label=self.__class__.__name__)
-            if map_points:
-                for map_point in map_points:
-                    map_point['geopoint'] = json.loads(map_point['geopoint'])
-            response['map'] = map_points
-
-        return Response(data=response)
+    if map_points:
+        for map_point in map_points:
+            map_point['geopoint'] = json.loads(map_point['geopoint'])
+    return Response(data={'map': map_points})
 
 
 class PublishedDataLayersViewSet(CachedListMixin, BaseModelViewSet):
