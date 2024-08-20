@@ -549,7 +549,7 @@ def sync_dailycheckapp_realtime_data():
     sources_models.DailyCheckAppMeasurementData.set_last_dailycheckapp_measurement_date(last_update)
 
 
-def load_qos_data_source_response_to_model():
+def load_qos_data_source_response_to_model(changes_for_countries):
     qos_ds_settings = ds_settings.get('QOS')
 
     share_name = qos_ds_settings['SHARE_NAME']
@@ -573,8 +573,6 @@ def load_qos_data_source_response_to_model():
     # Create a SharingClient.
     client = ProcoSharingClient(profile_file)
     qos_share = client.get_share(share_name)
-
-    changes_for_countries = {}
 
     if qos_share:
         qos_schema = client.get_schema(qos_share, schema_name)
@@ -720,11 +718,12 @@ def load_qos_data_source_response_to_model():
         pass
 
 
-def sync_qos_realtime_data():
+def sync_qos_realtime_data(country_id):
     current_datetime = core_utilities.get_current_datetime_object()
 
     last_entry_date = RealTimeConnectivity.objects.filter(
         live_data_source=statistics_configs.QOS_SOURCE,
+        school__country_id=country_id,
     ).order_by('-created').values_list('created', flat=True).first()
 
     if not last_entry_date:
@@ -733,6 +732,7 @@ def sync_qos_realtime_data():
     qos_measurements = sources_models.QoSData.objects.filter(
         timestamp__gt=last_entry_date,
         timestamp__lte=current_datetime,
+        country_id=country_id,
     ).values(
         'timestamp', 'speed_download', 'speed_upload', 'latency', 'school',
         'roundtrip_time', 'jitter_download', 'jitter_upload', 'rtt_packet_loss_pct',

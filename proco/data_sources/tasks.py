@@ -630,8 +630,16 @@ def load_data_from_daily_check_app_api(*args):
 @app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)
 def load_data_from_qos_apis(*args):
     logger.info('Loading the QoS data to DB.')
-    source_utilities.load_qos_data_source_response_to_model()
-    source_utilities.sync_qos_realtime_data()
+    changes_for_countries = {}
+
+    source_utilities.load_qos_data_source_response_to_model(changes_for_countries)
+
+    countries_ids = list(Country.objects.all().filter(
+        iso3_format__in=list(changes_for_countries.keys())
+    ).values_list('id', flat=True).order_by('id').distinct('id'))
+
+    for country_id in countries_ids:
+        source_utilities.sync_qos_realtime_data(country_id)
     logger.info('Loaded the QoS data to DB successfully.')
 
 
