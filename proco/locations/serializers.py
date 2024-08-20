@@ -68,7 +68,7 @@ class ExpandCountryAdminMetadataSerializer(FlexFieldsModelSerializer):
         }
 
 
-class BaseCountrySerializer(serializers.ModelSerializer):
+class BaseCountrySerializer(FlexFieldsModelSerializer):
     map_preview = serializers.SerializerMethodField()
 
     admin_metadata = serializers.SerializerMethodField()
