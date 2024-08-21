@@ -200,6 +200,8 @@ def sync_qos_realtime_data(date, country):
         speed_download_probe_avg=Avg('speed_download_probe'),
         speed_upload_probe_avg=Avg('speed_upload_probe'),
         latency_probe_avg=Avg('latency_probe'),
+        speed_download_mean_avg=Avg('speed_download_mean'),
+        speed_upload_mean_avg=Avg('speed_upload_mean'),
     ).order_by('school')
 
     if not qos_measurements.exists():
@@ -231,6 +233,16 @@ def sync_qos_realtime_data(date, country):
             # convert Mbps to bps
             connectivity_upload_speed_probe = connectivity_upload_speed_probe * 1000 * 1000
 
+        connectivity_speed_mean = qos_measurement.get('speed_download_mean_avg')
+        if connectivity_speed_mean:
+            # convert Mbps to bps
+            connectivity_speed_mean = connectivity_speed_mean * 1000 * 1000
+
+        connectivity_upload_speed_mean = qos_measurement.get('speed_upload_mean_avg')
+        if connectivity_upload_speed_mean:
+            # convert Mbps to bps
+            connectivity_upload_speed_mean = connectivity_upload_speed_mean * 1000 * 1000
+
         realtime.append(RealTimeConnectivity(
             created=date,
             connectivity_speed=connectivity_speed,
@@ -243,6 +255,8 @@ def sync_qos_realtime_data(date, country):
             connectivity_speed_probe=connectivity_speed_probe,
             connectivity_upload_speed_probe=connectivity_upload_speed_probe,
             connectivity_latency_probe=qos_measurement.get('latency_probe_avg'),
+            connectivity_speed_mean=connectivity_speed_mean,
+            connectivity_upload_speed_mean=connectivity_upload_speed_mean,
             school_id=qos_measurement.get('school'),
             live_data_source=statistics_configs.QOS_SOURCE,
         ))

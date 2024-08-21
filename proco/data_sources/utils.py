@@ -549,7 +549,7 @@ def sync_dailycheckapp_realtime_data():
     sources_models.DailyCheckAppMeasurementData.set_last_dailycheckapp_measurement_date(last_update)
 
 
-def load_qos_data_source_response_to_model():
+def load_qos_data_source_response_to_model(changes_for_countries):
     qos_ds_settings = ds_settings.get('QOS')
 
     share_name = qos_ds_settings['SHARE_NAME']
@@ -573,8 +573,6 @@ def load_qos_data_source_response_to_model():
     # Create a SharingClient.
     client = ProcoSharingClient(profile_file)
     qos_share = client.get_share(share_name)
-
-    changes_for_countries = {}
 
     if qos_share:
         qos_schema = client.get_schema(qos_share, schema_name)
@@ -720,11 +718,12 @@ def load_qos_data_source_response_to_model():
         pass
 
 
-def sync_qos_realtime_data():
+def sync_qos_realtime_data(country_id):
     current_datetime = core_utilities.get_current_datetime_object()
 
     last_entry_date = RealTimeConnectivity.objects.filter(
         live_data_source=statistics_configs.QOS_SOURCE,
+        school__country_id=country_id,
     ).order_by('-created').values_list('created', flat=True).first()
 
     if not last_entry_date:
@@ -733,10 +732,12 @@ def sync_qos_realtime_data():
     qos_measurements = sources_models.QoSData.objects.filter(
         timestamp__gt=last_entry_date,
         timestamp__lte=current_datetime,
+        country_id=country_id,
     ).values(
         'timestamp', 'speed_download', 'speed_upload', 'latency', 'school',
         'roundtrip_time', 'jitter_download', 'jitter_upload', 'rtt_packet_loss_pct',
         'speed_download_probe', 'speed_upload_probe', 'latency_probe',
+        'speed_download_mean', 'speed_upload_mean',
     ).order_by('timestamp').distinct(*['timestamp', 'school'])
 
     logger.debug('Migrating the records from "QoSData" to "RealTimeConnectivity" with date range: {0} - {1}'.format(
@@ -755,6 +756,11 @@ def sync_qos_realtime_data():
             # convert Mbps to bps
             connectivity_speed_probe = connectivity_speed_probe * 1000 * 1000
 
+        connectivity_speed_mean = qos_measurement.get('speed_download_mean')
+        if connectivity_speed_mean:
+            # convert Mbps to bps
+            connectivity_speed_mean = connectivity_speed_mean * 1000 * 1000
+
         connectivity_upload_speed = qos_measurement.get('speed_upload')
         if connectivity_upload_speed:
             # convert Mbps to bps
@@ -765,6 +771,11 @@ def sync_qos_realtime_data():
             # convert Mbps to bps
             connectivity_upload_speed_probe = connectivity_upload_speed_probe * 1000 * 1000
 
+        connectivity_upload_speed_mean = qos_measurement.get('speed_upload_mean')
+        if connectivity_upload_speed_mean:
+            # convert Mbps to bps
+            connectivity_upload_speed_mean = connectivity_upload_speed_mean * 1000 * 1000
+
         realtime.append(RealTimeConnectivity(
             created=qos_measurement.get('timestamp'),
             connectivity_speed=connectivity_speed,
@@ -773,6 +784,8 @@ def sync_qos_realtime_data():
             connectivity_speed_probe=connectivity_speed_probe,
             connectivity_upload_speed_probe=connectivity_upload_speed_probe,
             connectivity_latency_probe=qos_measurement.get('latency_probe'),
+            connectivity_speed_mean=connectivity_speed_mean,
+            connectivity_upload_speed_mean=connectivity_upload_speed_mean,
             roundtrip_time=qos_measurement.get('roundtrip_time'),
             jitter_download=qos_measurement.get('jitter_download'),
             jitter_upload=qos_measurement.get('jitter_upload'),
