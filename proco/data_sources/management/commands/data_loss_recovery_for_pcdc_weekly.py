@@ -10,9 +10,14 @@ from django.db.models import Q
 
 from proco.connection_statistics import models as statistics_models
 from proco.connection_statistics.config import app_config as statistics_configs
+from proco.connection_statistics.utils import (
+    aggregate_real_time_data_to_school_daily_status,
+    aggregate_school_daily_status_to_school_weekly_status,
+    aggregate_school_daily_to_country_daily,
+    update_country_weekly_status,
+)
 from proco.core.utils import get_current_datetime_object
 from proco.data_sources.models import DailyCheckAppMeasurementData
-from proco.data_sources.tasks import finalize_previous_day_data
 from proco.data_sources.utils import load_daily_check_app_data_source_response_to_model
 from proco.locations.models import Country
 from proco.schools.models import School
@@ -168,13 +173,13 @@ class Command(BaseCommand):
             start_date = date_utilities.get_first_date_of_week(year, week_no)
             end_date = start_date + timedelta(days=6)
 
+            date_list = sorted(
+                [(start_date + timedelta(days=x)) for x in range((end_date - start_date).days)] + [end_date])
+            logger.info('date_list: {0}'.format(date_list))
+
             if pull_data:
                 country_ids = delete_dailycheckapp_realtime_data(start_date, end_date, week_no, year)
                 impacted_country_ids.extend(country_ids)
-
-                date_list = sorted(
-                    [(start_date + timedelta(days=x)) for x in range((end_date - start_date).days)] + [end_date])
-                logger.info('date_list: {}'.format(date_list))
 
                 for pull_data_date in date_list:
                     logger.info('Syncing the PCDC api data to proco PCDC table for date: {}'.format(pull_data_date))
@@ -312,7 +317,15 @@ class Command(BaseCommand):
 
             for country_id in countries_ids:
                 logger.info('Finalizing the records for Country ID: {0}'.format(country_id))
-                finalize_previous_day_data(None, country_id, end_date)
+                country = Country.objects.get(id=country_id)
+
+                for aggregate_data_date in date_list:
+                    aggregate_real_time_data_to_school_daily_status(country, aggregate_data_date)
+                    aggregate_school_daily_to_country_daily(country, aggregate_data_date)
+
+                weekly_data_available = aggregate_school_daily_status_to_school_weekly_status(country, end_date)
+                if weekly_data_available:
+                    update_country_weekly_status(country, end_date)
 
             impacted_country_ids.extend(countries_ids)
             logger.info('Finalized records successfully to actual proco tables.\n\n')
@@ -320,5 +333,8 @@ class Command(BaseCommand):
         for impacted_country_id in set(impacted_country_ids):
             cmd_args = ['--reset', f'-country_id={impacted_country_id}']
             call_command('populate_school_registration_data', *cmd_args)
+
+            country = Country.objects.get(id=impacted_country_id)
+            country.invalidate_country_related_cache()
 
         logger.info('Completed data loss recovery utility for pcdc successfully.\n')

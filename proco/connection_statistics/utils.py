@@ -46,6 +46,8 @@ def aggregate_real_time_data_to_school_daily_status(country, date):
             connectivity_speed_probe_avg=Avg('connectivity_speed_probe'),
             connectivity_upload_speed_probe_avg=Avg('connectivity_upload_speed_probe'),
             connectivity_latency_probe_avg=Avg('connectivity_latency_probe'),
+            connectivity_speed_mean_avg=Avg('connectivity_speed_mean'),
+            connectivity_upload_speed_mean_avg=Avg('connectivity_upload_speed_mean'),
             connectivity_upload_speed_avg=Avg('connectivity_upload_speed'),
         ).order_by()
 
@@ -64,6 +66,8 @@ def aggregate_real_time_data_to_school_daily_status(country, date):
                     'connectivity_speed_probe': source_agg['connectivity_speed_probe_avg'],
                     'connectivity_upload_speed_probe': source_agg['connectivity_upload_speed_probe_avg'],
                     'connectivity_latency_probe': source_agg['connectivity_latency_probe_avg'],
+                    'connectivity_speed_mean': source_agg['connectivity_speed_mean_avg'],
+                    'connectivity_upload_speed_mean': source_agg['connectivity_upload_speed_mean_avg'],
                     'connectivity_upload_speed': source_agg['connectivity_upload_speed_avg'],
                     'deleted': None,
                 },
@@ -83,6 +87,8 @@ def aggregate_school_daily_to_country_daily(country, date) -> bool:
         connectivity_speed_probe_avg=Avg('connectivity_speed_probe'),
         connectivity_upload_speed_probe_avg=Avg('connectivity_upload_speed_probe'),
         connectivity_latency_probe_avg=Avg('connectivity_latency_probe'),
+        connectivity_speed_mean_avg=Avg('connectivity_speed_mean'),
+        connectivity_upload_speed_mean_avg=Avg('connectivity_upload_speed_mean'),
         connectivity_upload_speed_avg=Avg('connectivity_upload_speed'),
     ).order_by()
 
@@ -107,6 +113,8 @@ def aggregate_school_daily_to_country_daily(country, date) -> bool:
                 'connectivity_speed_probe': source_agg['connectivity_speed_probe_avg'],
                 'connectivity_upload_speed_probe': source_agg['connectivity_upload_speed_probe_avg'],
                 'connectivity_latency_probe': source_agg['connectivity_latency_probe_avg'],
+                'connectivity_speed_mean': source_agg['connectivity_speed_mean_avg'],
+                'connectivity_upload_speed_mean': source_agg['connectivity_upload_speed_mean_avg'],
                 'connectivity_upload_speed': source_agg['connectivity_upload_speed_avg'],
                 'deleted': None,
             },
@@ -158,6 +166,7 @@ def aggregate_school_daily_status_to_school_weekly_status(country, date) -> bool
             Avg('connectivity_speed'), Avg('connectivity_upload_speed'), Avg('connectivity_latency'),
             Avg('roundtrip_time'), Avg('jitter_download'), Avg('jitter_upload'), Avg('rtt_packet_loss_pct'),
             Avg('connectivity_speed_probe'), Avg('connectivity_upload_speed_probe'), Avg('connectivity_latency_probe'),
+            Avg('connectivity_speed_mean'), Avg('connectivity_upload_speed_mean'),
         )
 
         school_weekly.modified = get_current_datetime_object()
@@ -171,6 +180,8 @@ def aggregate_school_daily_status_to_school_weekly_status(country, date) -> bool
         school_weekly.connectivity_speed_probe = aggregate['connectivity_speed_probe__avg']
         school_weekly.connectivity_upload_speed_probe = aggregate['connectivity_upload_speed_probe__avg']
         school_weekly.connectivity_latency_probe = aggregate['connectivity_latency_probe__avg']
+        school_weekly.connectivity_speed_mean = aggregate['connectivity_speed_mean__avg']
+        school_weekly.connectivity_upload_speed_mean = aggregate['connectivity_upload_speed_mean__avg']
         school_weekly.connectivity_upload_speed = aggregate['connectivity_upload_speed__avg']
 
         if created:
@@ -355,6 +366,10 @@ def update_country_weekly_status(country: Country, date):
                                             filter=Q(connectivity_upload_speed_probe__gt=0)),
         connectivity_latency_probe=Avg('connectivity_latency_probe',
                                        filter=Q(connectivity_latency_probe__gt=0)),
+        connectivity_speed_mean=Avg('connectivity_speed_mean',
+                                    filter=Q(connectivity_speed_mean__gt=0)),
+        connectivity_upload_speed_mean=Avg('connectivity_upload_speed_mean',
+                                           filter=Q(connectivity_upload_speed_mean__gt=0)),
     )
 
     country_status.connectivity_speed = schools_stats['connectivity_speed']
@@ -366,6 +381,8 @@ def update_country_weekly_status(country: Country, date):
     country_status.connectivity_speed_probe = schools_stats['connectivity_speed_probe']
     country_status.connectivity_upload_speed_probe = schools_stats['connectivity_upload_speed_probe']
     country_status.connectivity_latency_probe = schools_stats['connectivity_latency_probe']
+    country_status.connectivity_speed_mean = schools_stats['connectivity_speed_mean']
+    country_status.connectivity_upload_speed_mean = schools_stats['connectivity_upload_speed_mean']
     country_status.connectivity_upload_speed = schools_stats['connectivity_upload_speed']
 
     # move country status as far as we can
