@@ -29,6 +29,10 @@ class ConnectivityStatistics(models.Model):
 
     connectivity_latency_probe = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
 
+    connectivity_speed_mean = models.PositiveIntegerField(help_text=_('bps'), blank=True, null=True, default=None)
+    connectivity_upload_speed_mean = models.PositiveIntegerField(help_text=_('bps'),
+                                                                 blank=True, null=True, default=None)
+
     roundtrip_time = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
     jitter_download = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
     jitter_upload = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
