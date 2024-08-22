@@ -1831,9 +1831,8 @@ class ExpandColumnConfigurationSerializer(FlexFieldsModelSerializer):
 
     def get_options(self, instance):
         options = instance.options
-        if isinstance(options, dict):
-            if 'active_countries_filter' in options:
-                del options['active_countries_filter']
+        if isinstance(options, dict) and 'active_countries_filter' in options:
+            del options['active_countries_filter']
         return options
 
 
