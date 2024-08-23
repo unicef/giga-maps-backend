@@ -92,9 +92,7 @@ steps:
   condition:
       and(
         succeeded(),
-        or(
-          eq(variables['Build.SourceBranch'], 'refs/heads/staging')
-        )
+        eq(variables['Build.SourceBranch'], 'refs/heads/staging')
       )
   inputs:
     command: buildAndPush
