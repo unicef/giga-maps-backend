@@ -366,6 +366,7 @@ def populate_default_layer_from_active_layer_list(country_id):
             'Default layer already exists for given country: \n\tCountry ID: {0}\n\t'
             'Layer Code: {1}\n\tLayer Name: {2}'.format(instance.country.name, instance.data_layer.code, instance.data_layer.name)
         )
+        return
     elif country_id:
         data_layer_country_qs = data_layer_country_qs.filter(country_id=country_id)
 
