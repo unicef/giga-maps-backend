@@ -104,6 +104,8 @@ class SchoolMasterData(TimeStampedModel, models.Model):
     connectivity_RT_datasource = models.CharField(blank=True, null=True, max_length=255)  # rt_source
     connectivity_RT_ingestion_timestamp = core_models.CustomDateTimeField(null=True, blank=True)  # rt_registration_date
 
+    download_speed_benchmark = models.FloatField(blank=True, default=None, null=True)  # download_speed_benchmark
+
     # No Mapping
     connectivity = models.CharField(blank=True, null=True, max_length=255)
 

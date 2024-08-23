@@ -284,6 +284,7 @@ class CountryUpdateRetrieveSerializer(serializers.ModelSerializer):
                 'data_layer': data_layer_dict['data_layer_id'],
                 'is_default': data_layer_dict['is_default'],
                 'data_sources': data_layer_dict.get('data_sources', {}),
+                'legend_configs': data_layer_dict.get('legend_configs', {}),
             }
 
             data_layer_country_relationships = DataLayerCountryRelationshipSerializer(
@@ -322,6 +323,8 @@ class CountryUpdateRetrieveSerializer(serializers.ModelSerializer):
                 'data_layer_id': relationship_instance.data_layer_id,
                 'is_default': relationship_instance.is_default,
                 'data_sources': relationship_instance.data_sources,
+                'is_applicable': relationship_instance.is_applicable,
+                'legend_configs': relationship_instance.legend_configs,
             })
 
         linked_filters = instance.active_filters.all()
@@ -427,6 +430,8 @@ class DetailCountrySerializer(BaseCountrySerializer):
                 'data_layer_id': relationship_instance.data_layer_id,
                 'is_default': relationship_instance.is_default,
                 'data_sources': relationship_instance.data_sources,
+                'is_applicable': relationship_instance.is_applicable,
+                'legend_configs': relationship_instance.legend_configs,
             })
 
         return active_layers_list

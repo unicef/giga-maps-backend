@@ -477,17 +477,18 @@ class DataLayerPreviewViewSet(APIView):
 
     def get_map_query(self, kwargs):
         query = """
-        SELECT "schools_school".id, "schools_school".name,
+        SELECT s.id,
             CASE WHEN rt_status.rt_registered = True AND rt_status.rt_registration_date <= '{end_date}' THEN True
                     ELSE False
             END as is_rt_connected,
             {case_conditions}
-            CASE WHEN "schools_school".connectivity_status IN ('good', 'moderate') THEN 'connected'
-                WHEN "schools_school".connectivity_status = 'no' THEN 'not_connected'
+            CASE WHEN s.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                WHEN s.connectivity_status = 'no' THEN 'not_connected'
                 ELSE 'unknown'
             END as connectivity_status,
-            ST_AsGeoJSON(ST_Transform("schools_school".geopoint, 4326)) as geopoint
-        FROM schools_school
+            ST_AsGeoJSON(ST_Transform(s.geopoint, 4326)) as geopoint
+        FROM schools_school s
+        LEFT JOIN connection_statistics_schoolweeklystatus sws ON s.last_weekly_status_id = sws.id
         LEFT JOIN (
             SELECT "schools_school"."id" AS school_id,
                 AVG(t."{col_name}") AS "{col_name}"
@@ -509,11 +510,9 @@ class DataLayerPreviewViewSet(APIView):
                 AND t."deleted" IS NULL)
             GROUP BY "schools_school"."id"
             ORDER BY "schools_school"."id" ASC
-        ) as sds
-            ON sds.school_id = "schools_school".id
-        LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status
-            ON rt_status.school_id = "schools_school".id
-        WHERE "schools_school"."deleted" IS NULL
+        ) AS sds ON sds.school_id = s.id
+        LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = s.id
+        WHERE s."deleted" IS NULL
         AND rt_status."deleted" IS NULL
         {country_condition_outer}
         ORDER BY random()
@@ -558,7 +557,7 @@ class DataLayerPreviewViewSet(APIView):
             kwargs['country_condition'] = '"schools_school"."country_id" IN ({0}) AND'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
-            kwargs['country_condition_outer'] = 'AND "schools_school"."country_id" IN ({0})'.format(
+            kwargs['country_condition_outer'] = 'AND s."country_id" IN ({0})'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
         else:
