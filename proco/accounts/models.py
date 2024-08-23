@@ -348,7 +348,7 @@ class DataLayer(core_models.BaseModel):
     applicable_countries = JSONField(null=True, default=list)
     global_benchmark = JSONField(null=True, default=dict)
 
-    # GIGA - Add Data Layer - Legend Categorization - Static Layer
+    # GIGA - Add Data Layer - Legend Categorization - Static/Live Layer
     legend_configs = JSONField(null=True, default=list)
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=LAYER_STATUS_DRAFT, db_index=True)
@@ -397,6 +397,9 @@ class DataLayerCountryRelationship(core_models.BaseModelMixin):
 
     is_default = models.BooleanField(default=False)
     data_sources = JSONField(null=True, default=dict)
+
+    legend_configs = JSONField(null=True, default=dict)
+    is_applicable = models.BooleanField(default=True)
 
     class Meta:
         ordering = ['last_modified_at']

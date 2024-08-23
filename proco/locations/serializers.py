@@ -240,6 +240,7 @@ class CountryUpdateRetrieveSerializer(serializers.ModelSerializer):
                 'data_layer': data_layer_dict['data_layer_id'],
                 'is_default': data_layer_dict['is_default'],
                 'data_sources': data_layer_dict.get('data_sources', {}),
+                'legend_configs': data_layer_dict.get('legend_configs', {}),
             }
 
             data_layer_country_relationships = DataLayerCountryRelationshipSerializer(

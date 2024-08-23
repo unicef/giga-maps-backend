@@ -1410,6 +1410,8 @@ class CreateDataLayersSerializer(BaseDataLayerCRUDSerializer):
     def to_internal_value(self, data):
         if not data.get('code') and data.get('name'):
             data['code'] = core_utilities.normalize_str(str(data.get('name'))).upper()
+        elif data.get('code'):
+            data['code'] = str(data.get('code')).upper()
         return super().to_internal_value(data)
 
     def create(self, validated_data):
@@ -1571,6 +1573,10 @@ class UpdateDataLayerSerializer(BaseDataLayerCRUDSerializer):
 
             data_layer_instance = super().update(instance, validated_data)
 
+            if data_layer_instance.status == accounts_models.DataLayer.LAYER_STATUS_PUBLISHED:
+                args = ['--reset', '-layer_id={0}'.format(instance.id)]
+                call_command('populate_active_data_layer_for_countries', *args)
+
             # Once Data Layer is created, send the status email to the PUBLISHERS
             request_user = core_utilities.get_current_user(context=self.context)
 
@@ -1595,7 +1601,7 @@ class UpdateDataLayerSerializer(BaseDataLayerCRUDSerializer):
                 account_utilities.send_email_over_mailjet_service(publishers, cc=[request_user.email, ],
                                                                   **email_content)
 
-        return data_layer_instance
+            return data_layer_instance
 
 
 class PublishDataLayerSerializer(BaseDataLayerCRUDSerializer):
@@ -1728,6 +1734,7 @@ class LogActionSerializer(serializers.ModelSerializer):
 
 class DataLayerCountryRelationshipSerializer(serializers.ModelSerializer):
     data_sources = serializers.JSONField()
+    legend_configs = serializers.JSONField()
 
     class Meta:
         model = accounts_models.DataLayerCountryRelationship
@@ -1743,6 +1750,8 @@ class DataLayerCountryRelationshipSerializer(serializers.ModelSerializer):
             'country',
             'is_default',
             'data_sources',
+            'legend_configs',
+            'is_applicable',
         )
 
         extra_kwargs = {
@@ -1750,6 +1759,7 @@ class DataLayerCountryRelationshipSerializer(serializers.ModelSerializer):
             'country': {'required': True},
             'is_default': {'required': True},
             'data_sources': {'required': True},
+            'legend_configs': {'required': True},
         }
 
     def create(self, validated_data):
