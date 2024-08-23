@@ -89,8 +89,7 @@ steps:
       and(
         succeeded(),
         or(
-          eq(variables['Build.SourceBranch'], 'refs/heads/staging'),
-          startsWith(variables['Build.SourceBranch'], 'refs/heads/release/')
+          eq(variables['Build.SourceBranch'], 'refs/heads/staging')
         )
       )
   inputs:
@@ -103,11 +102,11 @@ steps:
 
 - task: Docker@2
   displayName: Prod - Build and Push image
-#  condition:
-#      and(
-#        succeeded(),
-#        startsWith(variables['Build.SourceBranch'], 'refs/heads/release/')
-#      )
+  condition:
+      and(
+        succeeded(),
+        startsWith(variables['Build.SourceBranch'], 'refs/tags/release-')
+      )
   inputs:
     command: buildAndPush
     repository: $(imageRepositoryProd)
