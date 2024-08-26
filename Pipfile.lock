@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "cb2d38abf27bdcce05377ed1be8efb5c556559d7242ae3cdd105c93a0bfbb983"
+            "sha256": "20fefc2d6a996de72c10cccb1af7bc765fc2f84bea6e92551311a6a4ab671a03"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -1578,11 +1578,11 @@
         },
         "attrs": {
             "hashes": [
-                "sha256:1f28b4522cdc2fb4256ac1a020c78acf9cba2c6b461ccd2c126f3aa8e8335d04",
-                "sha256:6279836d581513a26f1bf235f9acd333bc9115683f14f7e8fae46c98fc50e015"
+                "sha256:5cfb1b9148b5b086569baec03f20d7b6bf3bcacc9a42bebf87ffaaca362f6346",
+                "sha256:81921eb96de3191c8258c199618104dd27ac608d9366f5e35d011eae1867ede2"
             ],
             "markers": "python_version >= '3.7'",
-            "version": "==23.1.0"
+            "version": "==24.2.0"
         },
         "bandit": {
             "hashes": [
@@ -1814,6 +1814,7 @@
                 "sha256:ffdfce58ea94c6580c77888a86506937f9a1a227dfcd15f245d694ae20a6b6e5"
             ],
             "index": "pypi",
+            "markers": "python_full_version >= '3.8.1'",
             "version": "==6.1.0"
         },
         "flake8-bandit": {
@@ -1841,11 +1842,12 @@
         },
         "flake8-bugbear": {
             "hashes": [
-                "sha256:32b2903e22331ae04885dae25756a32a8c666c85142e933f43512a70f342052a",
-                "sha256:83324bad4d90fee4bf64dd69c61aff94debf8073fbd807c8b6a36eec7a2f0719"
+                "sha256:25bc3867f7338ee3b3e0916bf8b8a0b743f53a9a5175782ddc4325ed4f386b89",
+                "sha256:9b77627eceda28c51c27af94560a72b5b2c97c016651bdce45d8f56c180d2d32"
             ],
             "index": "pypi",
-            "version": "==23.12.2"
+            "markers": "python_full_version >= '3.8.1'",
+            "version": "==24.8.19"
         },
         "flake8-commas": {
             "hashes": [
@@ -2054,6 +2056,7 @@
                 "sha256:6c2d30ab6be0e4a46919781807b4f0d834ebdd6c6e3dca0bda5a15f863427b6e"
             ],
             "index": "pypi",
+            "markers": "python_version >= '3.6'",
             "version": "==0.7.0"
         },
         "mdurl": {
@@ -2265,6 +2268,7 @@
                 "sha256:44fe31000b2d866f2e41841b18528a505fbd7fef9017b04eff4e2648a0fadc67"
             ],
             "index": "pypi",
+            "markers": "python_version >= '3.8'",
             "version": "==2.11.1"
         },
         "pyflakes": {
