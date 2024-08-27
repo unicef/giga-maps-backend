@@ -1020,11 +1020,14 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             ST_AsGeoJSON(ST_Transform(schools_school."geopoint", 4326)) AS geopoint,
             schools_school."environment",
             schools_school."education_level",
-            ROUND(AVG(sds."{col_name}"::numeric), 2) AS "live_avg",
+            ROUND(sds."{col_name}"::numeric, 2) AS "live_avg",
+            CASE WHEN sws."download_speed_benchmark" > 0 THEN sws."download_speed_benchmark" * 1000000
+                ELSE sws."download_speed_benchmark"
+            END AS download_speed_benchmark,
             CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
                 WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
                 ELSE 'unknown'
-            END as connectivity_status,
+            END AS connectivity_status,
             CASE WHEN srr."rt_registered" = True AND srr."rt_registration_date"::date <= '{end_date}' THEN true
             ELSE false END AS is_rt_connected,
             {case_conditions}
@@ -1043,40 +1046,73 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         LEFT JOIN "connection_statistics_schoolrealtimeregistration" AS srr
             ON schools_school."id" = srr."school_id"
             AND srr."deleted" IS NULL
-        LEFT OUTER JOIN "connection_statistics_schooldailystatus" sds
-            ON schools_school."id" = sds."school_id"
-            AND sds."deleted" IS NULL
-            AND (sds."date" BETWEEN '{start_date}' AND '{end_date}')
-            AND sds."live_data_source" IN ({live_source_types})
+        LEFT JOIN (
+            SELECT "schools_school"."id" AS school_id,
+                AVG(t."{col_name}") AS "{col_name}"
+            FROM "schools_school"
+            LEFT OUTER JOIN "connection_statistics_schooldailystatus" t
+                ON (
+                    "schools_school"."id" = t."school_id"
+                    AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
+                    AND t."live_data_source" IN ({live_source_types})
+                )
+            WHERE (
+                "schools_school"."id" IN ({ids})
+                AND "schools_school"."deleted" IS NULL
+                AND t."deleted" IS NULL)
+            GROUP BY "schools_school"."id"
+            ORDER BY "schools_school"."id" ASC
+        ) AS sds ON sds.school_id = schools_school.id
+        LEFT OUTER JOIN "connection_statistics_schoolweeklystatus" sws
+            ON schools_school."last_weekly_status_id" = sws."id"
         WHERE "schools_school"."id" IN ({ids})
         GROUP BY schools_school."id", srr."rt_registered", srr."rt_registration_date",
             adm1_metadata."name", adm1_metadata."description_ui_label",
             adm2_metadata."name", adm2_metadata."description_ui_label",
-            c."name", adm1_metadata."giga_id_admin", adm2_metadata."giga_id_admin"
+            c."name", adm1_metadata."giga_id_admin", adm2_metadata."giga_id_admin",
+            sds."connectivity_speed", sws."download_speed_benchmark"
         ORDER BY schools_school."id" ASC
         """
 
         kwargs = copy.deepcopy(self.kwargs)
         kwargs['ids'] = ','.join(kwargs['school_ids'])
 
-        kwargs['case_conditions'] = """
-        CASE
-            WHEN AVG(sds."{col_name}") > {benchmark_value} THEN 'good'
-            WHEN (AVG(sds."{col_name}") >= {base_benchmark} AND AVG(sds."{col_name}") <= {benchmark_value})
-                THEN 'moderate'
-            WHEN AVG(sds."{col_name}") < {base_benchmark} THEN 'bad'
-            ELSE 'unknown' END AS live_avg_connectivity
-        """.format(**kwargs)
+        legend_configs = kwargs['legend_configs']
 
-        if kwargs['is_reverse'] is True:
+        if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
+            label_cases = []
+            for title, values_and_label in legend_configs.items():
+                values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
+                                     values_and_label.get('values', [])))
+
+                if len(values) > 0:
+                    is_sql_value = 'SQL:' in values[0]
+                    if is_sql_value:
+                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
+                else:
+                    label_cases.append("ELSE '{label}'".format(label=title))
+
+            kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS live_avg_connectivity'
+        else:
             kwargs['case_conditions'] = """
             CASE
-                WHEN AVG(sds."{col_name}") < {benchmark_value} THEN 'good'
-                WHEN (AVG(sds."{col_name}") >= {benchmark_value} AND AVG(sds."{col_name}") <= {base_benchmark})
+                WHEN sds."{col_name}" > {benchmark_value} THEN 'good'
+                WHEN (sds."{col_name}" >= {base_benchmark} AND sds."{col_name}" <= {benchmark_value})
                     THEN 'moderate'
-                WHEN AVG(sds."{col_name}") > {base_benchmark} THEN 'bad'
+                WHEN sds."{col_name}" < {base_benchmark} THEN 'bad'
                 ELSE 'unknown' END AS live_avg_connectivity
             """.format(**kwargs)
+
+            if kwargs['is_reverse'] is True:
+                kwargs['case_conditions'] = """
+                CASE
+                    WHEN sds."{col_name}" < {benchmark_value} THEN 'good'
+                    WHEN (sds."{col_name}" >= {benchmark_value} AND sds."{col_name}" <= {base_benchmark})
+                        THEN 'moderate'
+                    WHEN sds."{col_name}" > {base_benchmark} THEN 'bad'
+                    ELSE 'unknown' END AS live_avg_connectivity
+                """.format(**kwargs)
 
         return query.format(**kwargs)
 
@@ -1488,6 +1524,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     'col_name': parameter_column_name,
                     'benchmark_value': benchmark_value,
                     'global_benchmark': global_benchmark,
+                    'national_benchmark': benchmark_value,
                     'base_benchmark': base_benchmark,
                     'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                     'parameter_col': parameter_col,
