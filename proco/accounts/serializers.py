@@ -1176,6 +1176,8 @@ class DataLayersListSerializer(FlexFieldsModelSerializer):
             'base_benchmark': str(parameter_col.get('base_benchmark', 1)),
             'parameter_column_unit': parameter_column_unit,
             'round_unit_value': unit_agg_str,
+            'benchmark_name': instance.global_benchmark.get('benchmark_name', 'Global'),
+            'benchmark_type': instance.global_benchmark.get('benchmark_type', 'global'),
         }
 
     def to_representation(self, data_layer):

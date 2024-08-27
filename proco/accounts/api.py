@@ -858,6 +858,22 @@ class BaseDataLayerAPIViewSet(APIView):
 
         return benchmark_val, benchmark_unit
 
+    def get_legend_configs(self, data_layer_instance):
+        legend_configs = data_layer_instance.legend_configs
+
+        if self.kwargs['benchmark'] == 'national':
+            country_ids = self.kwargs.get('country_ids', [])
+            if len(country_ids) > 0:
+                legend_configurations = Country.objects.all().filter(
+                    id__in=country_ids,
+                    active_layers__deleted__isnull=True,
+                    active_layers__data_layer_id=data_layer_instance.id,
+                ).order_by('id').values_list('active_layers__legend_configs', flat=True).first()
+                if legend_configurations and len(legend_configurations) > 0 and legend_configurations != '{}':
+                    legend_configs = json.loads(legend_configurations)
+
+        return legend_configs
+
 
 @method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
 class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
@@ -877,12 +893,13 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
     def get_info_query(self):
         query = """
         SELECT {case_conditions}
-            COUNT(DISTINCT CASE WHEN t.field_avg IS NOT NULL THEN t.school_id ELSE NULL END)
+            COUNT(DISTINCT CASE WHEN sds.{col_name} IS NOT NULL THEN sds.school_id ELSE NULL END)
                 AS "school_with_realtime_data",
-            COUNT(DISTINCT t.school_id) AS "no_of_schools_measure"
+            COUNT(DISTINCT sds.school_id) AS "no_of_schools_measure"
         FROM (
             SELECT "schools_school"."id" AS school_id,
-                AVG(t."{col_name}") AS "field_avg"
+                "schools_school"."last_weekly_status_id",
+                AVG(t."{col_name}") AS "{col_name}"
             FROM "schools_school"
             INNER JOIN "connection_statistics_schoolrealtimeregistration"
                 ON ("schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id")
@@ -905,7 +922,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date"::date <= '{end_date}')
             GROUP BY "schools_school"."id"
             ORDER BY "schools_school"."id" ASC
-        ) as t
+        ) AS sds
+        {school_weekly_outer_join}
         """
 
         kwargs = copy.deepcopy(self.kwargs)
@@ -915,23 +933,50 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs['school_condition'] = ''
         kwargs['school_weekly_join'] = ''
         kwargs['school_weekly_condition'] = ''
+        kwargs['school_weekly_outer_join'] = ''
 
-        kwargs['case_conditions'] = """
-        COUNT(DISTINCT CASE WHEN t.field_avg > {benchmark_value} THEN t.school_id ELSE NULL END) AS "good",
-        COUNT(DISTINCT CASE WHEN (t.field_avg >= {base_benchmark} AND t.field_avg <= {benchmark_value})
-            THEN t.school_id ELSE NULL END) AS "moderate",
-        COUNT(DISTINCT CASE WHEN t.field_avg < {base_benchmark} THEN t.school_id ELSE NULL END) AS "bad",
-        COUNT(DISTINCT CASE WHEN t.field_avg IS NULL THEN t.school_id ELSE NULL END) AS "unknown",
-        """.format(**kwargs)
+        legend_configs = kwargs['legend_configs']
+        if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
+            label_cases = []
+            for title, values_and_label in legend_configs.items():
+                values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
+                                     values_and_label.get('values', [])))
 
-        if kwargs['is_reverse'] is True:
+                if len(values) > 0:
+                    is_sql_value = 'SQL:' in values[0]
+                    if is_sql_value:
+                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        label_cases.append(
+                            'COUNT(DISTINCT CASE WHEN {sql} THEN sds.school_id ELSE NULL END) AS "{label}",'.format(
+                                sql=sql_statement, label=title))
+                else:
+                    label_cases.append(
+                        'COUNT(DISTINCT CASE WHEN sds.{col_name} IS NULL '
+                        'THEN sds.school_id ELSE NULL END) AS "{label}",'.format(
+                            col_name=kwargs['col_name'],label=title))
+
+            kwargs['case_conditions'] = ' '.join(label_cases)
+
+            kwargs['school_weekly_outer_join'] = """
+            LEFT OUTER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
+            """
+        else:
             kwargs['case_conditions'] = """
-            COUNT(DISTINCT CASE WHEN t.field_avg < {benchmark_value} THEN t.school_id ELSE NULL END) AS "good",
-            COUNT(DISTINCT CASE WHEN (t.field_avg >= {benchmark_value} AND t.field_avg <= {base_benchmark})
-                THEN t.school_id ELSE NULL END) AS "moderate",
-            COUNT(DISTINCT CASE WHEN t.field_avg > {base_benchmark} THEN t.school_id ELSE NULL END) AS "bad",
-            COUNT(DISTINCT CASE WHEN t.field_avg IS NULL THEN t.school_id ELSE NULL END) AS "unknown",
+            COUNT(DISTINCT CASE WHEN sds.{col_name} > {benchmark_value} THEN sds.school_id ELSE NULL END) AS "good",
+            COUNT(DISTINCT CASE WHEN (sds.{col_name} >= {base_benchmark} AND sds.{col_name} <= {benchmark_value})
+                THEN sds.school_id ELSE NULL END) AS "moderate",
+            COUNT(DISTINCT CASE WHEN sds.{col_name} < {base_benchmark} THEN sds.school_id ELSE NULL END) AS "bad",
+            COUNT(DISTINCT CASE WHEN sds.{col_name} IS NULL THEN sds.school_id ELSE NULL END) AS "unknown",
             """.format(**kwargs)
+
+            if kwargs['is_reverse'] is True:
+                kwargs['case_conditions'] = """
+                COUNT(DISTINCT CASE WHEN sds.{col_name} < {benchmark_value} THEN sds.school_id ELSE NULL END) AS "good",
+                COUNT(DISTINCT CASE WHEN (sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark})
+                    THEN sds.school_id ELSE NULL END) AS "moderate",
+                COUNT(DISTINCT CASE WHEN sds.{col_name} > {base_benchmark} THEN sds.school_id ELSE NULL END) AS "bad",
+                COUNT(DISTINCT CASE WHEN sds.{col_name} IS NULL THEN sds.school_id ELSE NULL END) AS "unknown",
+                """.format(**kwargs)
 
         if len(kwargs.get('country_ids', [])) > 0:
             kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
@@ -1410,6 +1455,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
             self.update_kwargs(country_ids, data_layer_instance)
             benchmark_value, benchmark_unit = self.get_benchmark_value(data_layer_instance)
+            global_benchmark = data_layer_instance.global_benchmark.get('value')
 
             unit_agg_str = '{val}'
 
@@ -1436,13 +1482,17 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             self.kwargs['round_unit_value'] = unit_agg_str
 
             if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+                legend_configs = self.get_legend_configs(data_layer_instance)
+
                 self.kwargs.update({
                     'col_name': parameter_column_name,
                     'benchmark_value': benchmark_value,
+                    'global_benchmark': global_benchmark,
                     'base_benchmark': base_benchmark,
                     'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                     'parameter_col': parameter_col,
                     'is_reverse': data_layer_instance.is_reverse,
+                    'legend_configs': legend_configs,
                 })
 
                 if len(self.kwargs.get('school_ids', [])) > 0:
