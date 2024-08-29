@@ -1575,6 +1575,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     graph_data, positive_speeds = self.generate_graph_data()
                     live_avg = round(sum(positive_speeds) / len(positive_speeds), 2) if len(positive_speeds) > 0 else 0
 
+                    # TODO: Change this logic
                     live_avg_connectivity = 'unknown'
                     rounded_benchmark_value_int = round(
                         eval(unit_agg_str.format(val=core_utilities.convert_to_int(benchmark_value))), 2)
@@ -1670,7 +1671,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     CASE WHEN rt_status.rt_registered = True AND rt_status.rt_registration_date::date <= '{end_date}'
                         THEN True ELSE False
                     END as is_rt_connected,
-                    t.field_avg AS field_avg,
+                    sds.{col_name} AS field_avg,
                     {case_conditions}
                     CASE WHEN "schools_school".connectivity_status IN ('good', 'moderate') THEN 'connected'
                         WHEN "schools_school".connectivity_status = 'no' THEN 'not_connected'
@@ -1681,7 +1682,8 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 {school_weekly_join}
                 LEFT JOIN (
                     SELECT "schools_school"."id" AS school_id,
-                        AVG(t."{col_name}") AS "field_avg"
+                        "schools_school"."last_weekly_status_id",
+                        AVG(t."{col_name}") AS "{col_name}"
                     FROM "schools_school"
                     INNER JOIN "connection_statistics_schoolrealtimeregistration"
                         ON ("schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id")
@@ -1705,8 +1707,8 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                         <= '{end_date}')
                     GROUP BY "schools_school"."id"
                     ORDER BY "schools_school"."id" ASC
-                ) as t
-                    ON t.school_id = "schools_school".id
+                ) AS sds ON sds.school_id = "schools_school".id
+                {school_weekly_outer_join}
                 LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status
                     ON rt_status.school_id = "schools_school".id
                 WHERE "schools_school"."deleted" IS NULL
@@ -1733,6 +1735,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
         kwargs['school_weekly_join'] = ''
         kwargs['school_weekly_condition'] = ''
+        kwargs['school_weekly_outer_join'] = ''
 
         kwargs['env'] = self.envelope_to_bounds_sql(env)
 
@@ -1741,22 +1744,42 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
         add_random_condition = True
 
-        kwargs['case_conditions'] = """
-            CASE WHEN t.field_avg >  {benchmark_value} THEN 'good'
-                WHEN t.field_avg < {benchmark_value} and t.field_avg >= {base_benchmark} THEN 'moderate'
-                WHEN t.field_avg < {base_benchmark}  THEN 'bad'
-                ELSE 'unknown'
-            END AS field_status,
-        """.format(**kwargs)
+        legend_configs = kwargs['legend_configs']
+        if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
+            label_cases = []
+            for title, values_and_label in legend_configs.items():
+                values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
+                                     values_and_label.get('values', [])))
 
-        if kwargs['is_reverse'] is True:
+                if len(values) > 0:
+                    is_sql_value = 'SQL:' in values[0]
+                    if is_sql_value:
+                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
+                else:
+                    label_cases.append("ELSE '{label}'".format(label=title))
+
+            kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status,'
+            kwargs['school_weekly_outer_join'] = """
+            LEFT OUTER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
+            """
+        else:
             kwargs['case_conditions'] = """
-            CASE WHEN t.field_avg < {benchmark_value}  THEN 'good'
-                WHEN t.field_avg >= {benchmark_value} and t.field_avg <= {base_benchmark} THEN 'moderate'
-                WHEN t.field_avg > {base_benchmark} THEN 'bad'
-                ELSE 'unknown'
-            END AS field_status,
+                CASE WHEN sds.{col_name} >  {benchmark_value} THEN 'good'
+                    WHEN sds.{col_name} < {benchmark_value} and sds.{col_name} >= {base_benchmark} THEN 'moderate'
+                    WHEN sds.{col_name} < {base_benchmark}  THEN 'bad'
+                    ELSE 'unknown'
+                END AS field_status,
             """.format(**kwargs)
+
+            if kwargs['is_reverse'] is True:
+                kwargs['case_conditions'] = """
+                CASE WHEN sds.{col_name} < {benchmark_value}  THEN 'good'
+                    WHEN sds.{col_name} >= {benchmark_value} and sds.{col_name} <= {base_benchmark} THEN 'moderate'
+                    WHEN sds.{col_name} > {base_benchmark} THEN 'bad'
+                    ELSE 'unknown'
+                END AS field_status,
+                """.format(**kwargs)
 
         if len(kwargs.get('country_ids', [])) > 0:
             add_random_condition = False
@@ -1829,7 +1852,6 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             {school_weekly_join}
             LEFT JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
             WHERE schools_school."deleted" IS NULL
-            AND sws."deleted" IS NULL
             {country_condition}
             {admin1_condition}
             {school_condition}
@@ -1952,15 +1974,21 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
         self.update_kwargs(country_ids, data_layer_instance)
         benchmark_value, _ = self.get_benchmark_value(data_layer_instance)
+        global_benchmark = data_layer_instance.global_benchmark.get('value')
 
         if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+            legend_configs = self.get_legend_configs(data_layer_instance)
+
             self.kwargs.update({
                 'col_name': parameter_column_name,
                 'benchmark_value': benchmark_value,
+                'global_benchmark': global_benchmark,
+                'national_benchmark': benchmark_value,
                 'base_benchmark': base_benchmark,
                 'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                 'parameter_col': parameter_col,
                 'layer_type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
+                'legend_configs': legend_configs,
             })
         else:
             legend_configs = data_layer_instance.legend_configs
