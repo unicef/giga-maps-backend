@@ -581,7 +581,7 @@ class DataLayerPreviewViewSet(APIView):
                 {label_case_statements}
             FROM schools_school as s
             LEFT JOIN connection_statistics_schoolweeklystatus sws ON s.last_weekly_status_id = sws.id
-            WHERE s."deleted" IS NULL AND sws."deleted" IS NULL {country_condition}
+            WHERE s."deleted" IS NULL {country_condition}
             ORDER BY random()
             LIMIT 1000
             """
@@ -1015,11 +1015,9 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             CASE WHEN srr."rt_registered" = True THEN true ELSE false END AS is_data_synced,
             schools_school."admin1_id",
             adm1_metadata."name" AS admin1_name,
-            adm1_metadata."giga_id_admin" AS admin1_code,
             adm1_metadata."description_ui_label" AS admin1_description_ui_label,
             schools_school."admin2_id",
             adm2_metadata."name" AS admin2_name,
-            adm2_metadata."giga_id_admin" AS admin2_code,
             adm2_metadata."description_ui_label" AS admin2_description_ui_label,
             schools_school."country_id",
             c."name" AS country_name,
@@ -1027,9 +1025,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             schools_school."environment",
             schools_school."education_level",
             ROUND(sds."{col_name}"::numeric, 2) AS "live_avg",
-            CASE WHEN sws."download_speed_benchmark" > 0 THEN sws."download_speed_benchmark" * 1000000
-                ELSE sws."download_speed_benchmark"
-            END AS download_speed_benchmark,
+            sws."download_speed_benchmark",
             CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
                 WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
                 ELSE 'unknown'
@@ -1130,13 +1126,39 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
     def get_school_view_statistics_info_query(self):
         query = """
-        SELECT sws.*
+        SELECT sws.school_id,
+            sws.id,
+            sws.num_students,
+            sws.num_teachers,
+            sws.num_classroom,
+            sws.num_latrines,
+            sws.running_water,
+            sws.electricity_availability,
+            sws.computer_lab,
+            sws.num_computers,
+            sws.connectivity_type,
+            sws.connectivity,
+            sws.coverage_availability,
+            sws.coverage_type,
+            sws.download_speed_contracted,
+            sws.electricity_type,
+            sws.fiber_node_distance,
+            sws.microwave_node_distance,
+            sws.nearest_gsm_distance,
+            sws.nearest_lte_distance,
+            sws.nearest_umts_distance,
+            sws.num_adm_personnel,
+            sws.num_computers_desired,
+            sws.pop_within_1km,
+            sws.pop_within_2km,
+            sws.pop_within_3km,
+            sws.schools_within_1km,
+            sws.schools_within_2km,
+            sws.schools_within_3km
         FROM "schools_school"
         INNER JOIN connection_statistics_schoolweeklystatus sws
-            ON sws."id" = "schools_school"."last_weekly_status_id"
-        WHERE
-            "schools_school"."deleted" IS NULL
-            AND sws."deleted" IS NULL
+            ON "schools_school"."last_weekly_status_id" = sws."id"
+        WHERE "schools_school"."deleted" IS NULL
             AND "schools_school"."id" IN ({ids})
         """.format(ids=','.join(self.kwargs['school_ids']))
 
@@ -1279,7 +1301,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         FROM "schools_school"
         {school_weekly_join}
         LEFT JOIN connection_statistics_schoolweeklystatus sws ON "schools_school"."last_weekly_status_id" = sws."id"
-        WHERE "schools_school"."deleted" IS NULL AND sws."deleted" IS NULL
+        WHERE "schools_school"."deleted" IS NULL
         {country_condition}
         {admin1_condition}
         {school_condition}
@@ -1715,7 +1737,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     "schools_school".id,
                     CASE WHEN rt_status.rt_registered = True AND rt_status.rt_registration_date::date <= '{end_date}'
                         THEN True ELSE False
-                    END as is_rt_connected,
+                    END AS is_rt_connected,
                     sds.{col_name} AS field_avg,
                     {case_conditions}
                     CASE WHEN "schools_school".connectivity_status IN ('good', 'moderate') THEN 'connected'
