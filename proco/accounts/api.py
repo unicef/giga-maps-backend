@@ -1036,6 +1036,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             END AS connectivity_status,
             CASE WHEN srr."rt_registered" = True AND srr."rt_registration_date"::date <= '{end_date}' THEN true
             ELSE false END AS is_rt_connected,
+            {benchmark_value}
             {case_conditions}
         FROM "schools_school" schools_school
         INNER JOIN public.locations_country c ON c."id" = schools_school."country_id"
@@ -1083,8 +1084,13 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs = copy.deepcopy(self.kwargs)
         kwargs['ids'] = ','.join(kwargs['school_ids'])
 
-        legend_configs = kwargs['legend_configs']
+        kwargs['benchmark_value'] = ''
+        benchmark_value = kwargs['benchmark_configs'].get('value', None)
+        if benchmark_value and 'SQL:' in benchmark_value:
+            kwargs['benchmark_value'] = benchmark_value.replace('SQL:', '').format(
+                **kwargs) + ' AS benchmark_sql_value,'
 
+        legend_configs = kwargs['legend_configs']
         if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
             label_cases = []
             for title, values_and_label in legend_configs.items():
@@ -1560,6 +1566,27 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                             info_panel_school['live_avg'] = live_avg
                             info_panel_school['graph_data'] = graph_data[str(info_panel_school['id'])]
 
+                            benchmark_value_from_sql = info_panel_school.get('benchmark_sql_value', None)
+                            if benchmark_value_from_sql:
+                                rounded_benchmark_value_int = round(
+                                    eval(unit_agg_str.format(
+                                        val=core_utilities.convert_to_int(benchmark_value_from_sql))), 2)
+                                benchmark_value = str(benchmark_value_from_sql)
+                            else:
+                                rounded_benchmark_value_int = round(
+                                    eval(unit_agg_str.format(val=core_utilities.convert_to_int(benchmark_value))), 2)
+
+                            info_panel_school['benchmark_metadata'] = {
+                                'benchmark_value': benchmark_value,
+                                'rounded_benchmark_value': rounded_benchmark_value_int,
+                                'benchmark_unit': benchmark_unit,
+                                'base_benchmark': base_benchmark,
+                                'parameter_column_unit': parameter_column_unit,
+                                'round_unit_value': unit_agg_str,
+                                'convert_unit': self.kwargs.get('convert_unit'),
+                                'display_unit': display_unit,
+                            }
+
                     response = info_panel_school_list
                 else:
                     is_data_synced_qs = SchoolWeeklyStatus.objects.filter(
@@ -1627,6 +1654,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                         'graph_data': graph_data,
                         'benchmark_metadata': {
                             'benchmark_value': benchmark_value,
+                            'rounded_benchmark_value': rounded_benchmark_value_int,
                             'benchmark_unit': benchmark_unit,
                             'base_benchmark': base_benchmark,
                             'parameter_column_unit': parameter_column_unit,
