@@ -1478,10 +1478,10 @@ class UpdateDataLayerSerializer(BaseDataLayerCRUDSerializer):
             'last_modified_at',
             'published_by',
             'published_at',
+            'code',
         )
 
         fields = read_only_fields + (
-            'code',
             'icon',
             'name',
             'description',

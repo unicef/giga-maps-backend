@@ -895,6 +895,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         SELECT {case_conditions}
             COUNT(DISTINCT CASE WHEN sds.{col_name} IS NOT NULL THEN sds.school_id ELSE NULL END)
                 AS "school_with_realtime_data",
+            {benchmark_value}
             COUNT(DISTINCT sds.school_id) AS "no_of_schools_measure"
         FROM (
             SELECT "schools_school"."id" AS school_id,
@@ -934,6 +935,11 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs['school_weekly_join'] = ''
         kwargs['school_weekly_condition'] = ''
         kwargs['school_weekly_outer_join'] = ''
+        kwargs['benchmark_value'] = ''
+
+        benchmark_value = kwargs['benchmark_configs'].get('value', None)
+        if benchmark_value and 'SQL:' in benchmark_value:
+            kwargs['benchmark_value'] = benchmark_value.replace('SQL:', '').format(**kwargs) + ' AS benchmark_sql_value,'
 
         legend_configs = kwargs['legend_configs']
         if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
@@ -1488,6 +1494,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             parameter_column_name = str(parameter_col['name'])
             parameter_column_unit = str(parameter_col.get('unit', '')).lower()
             base_benchmark = str(parameter_col.get('base_benchmark', 1))
+            display_unit = parameter_col.get('display_unit', '')
 
             self.update_kwargs(country_ids, data_layer_instance)
             benchmark_value, benchmark_unit = self.get_benchmark_value(data_layer_instance)
@@ -1530,6 +1537,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     'parameter_col': parameter_col,
                     'is_reverse': data_layer_instance.is_reverse,
                     'legend_configs': legend_configs,
+                    'benchmark_configs': data_layer_instance.global_benchmark,
                 })
 
                 if len(self.kwargs.get('school_ids', [])) > 0:
@@ -1575,10 +1583,17 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     graph_data, positive_speeds = self.generate_graph_data()
                     live_avg = round(sum(positive_speeds) / len(positive_speeds), 2) if len(positive_speeds) > 0 else 0
 
-                    # TODO: Change this logic
                     live_avg_connectivity = 'unknown'
-                    rounded_benchmark_value_int = round(
-                        eval(unit_agg_str.format(val=core_utilities.convert_to_int(benchmark_value))), 2)
+
+                    benchmark_value_from_sql = query_response.get('benchmark_sql_value', None)
+                    if benchmark_value_from_sql:
+                        rounded_benchmark_value_int = round(
+                                eval(unit_agg_str.format(val=core_utilities.convert_to_int(benchmark_value_from_sql))), 2)
+                        benchmark_value = str(benchmark_value_from_sql)
+                    else:
+                        rounded_benchmark_value_int = round(
+                            eval(unit_agg_str.format(val=core_utilities.convert_to_int(benchmark_value))), 2)
+
                     rounded_base_benchmark_int = round(
                         eval(unit_agg_str.format(val=core_utilities.convert_to_int(base_benchmark))), 2)
 
@@ -1616,6 +1631,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                             'base_benchmark': base_benchmark,
                             'parameter_column_unit': parameter_column_unit,
                             'round_unit_value': unit_agg_str,
+                            'convert_unit': self.kwargs.get('convert_unit'),
+                            'display_unit': display_unit,
                         },
                     }
             else:
