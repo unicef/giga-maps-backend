@@ -369,6 +369,11 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                     school_weekly.disputed_region = False if core_utilities.is_blank_string(
                         row.disputed_region) else str(row.disputed_region).lower() in true_choices
 
+                    download_speed_benchmark = row.download_speed_benchmark
+                    if download_speed_benchmark:
+                        # convert Mbps to bps
+                        school_weekly.download_speed_benchmark = download_speed_benchmark * 1000 * 1000
+
                     school_weekly.save()
 
                     rt_registered = None

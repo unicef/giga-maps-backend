@@ -889,12 +889,12 @@ class ExpandDataSourceSerializer(FlexFieldsModelSerializer):
             'request_config',
             'column_config',
             'status',
-            'published_by',
-            'published_at',
-            'last_modified_at',
-            'last_modified_by',
-            'created',
-            'created_by',
+            # 'published_by',
+            # 'published_at',
+            # 'last_modified_at',
+            # 'last_modified_by',
+            # 'created',
+            # 'created_by',
         )
 
 
@@ -1130,9 +1130,9 @@ class DataLayersListSerializer(FlexFieldsModelSerializer):
             'legend_configs',
             'status',
             'published_by',
-            'published_at',
-            'created',
-            'last_modified_at',
+            # 'published_at',
+            # 'created',
+            # 'last_modified_at',
             'is_reverse',
             'data_sources_list',
             'data_source_column',
@@ -1176,6 +1176,8 @@ class DataLayersListSerializer(FlexFieldsModelSerializer):
             'base_benchmark': str(parameter_col.get('base_benchmark', 1)),
             'parameter_column_unit': parameter_column_unit,
             'round_unit_value': unit_agg_str,
+            'benchmark_name': instance.global_benchmark.get('benchmark_name', 'Global'),
+            'benchmark_type': instance.global_benchmark.get('benchmark_type', 'global'),
         }
 
     def to_representation(self, data_layer):
@@ -1410,6 +1412,8 @@ class CreateDataLayersSerializer(BaseDataLayerCRUDSerializer):
     def to_internal_value(self, data):
         if not data.get('code') and data.get('name'):
             data['code'] = core_utilities.normalize_str(str(data.get('name'))).upper()
+        elif data.get('code'):
+            data['code'] = str(data.get('code')).upper()
         return super().to_internal_value(data)
 
     def create(self, validated_data):
@@ -1474,10 +1478,10 @@ class UpdateDataLayerSerializer(BaseDataLayerCRUDSerializer):
             'last_modified_at',
             'published_by',
             'published_at',
+            'code',
         )
 
         fields = read_only_fields + (
-            'code',
             'icon',
             'name',
             'description',
@@ -1571,6 +1575,10 @@ class UpdateDataLayerSerializer(BaseDataLayerCRUDSerializer):
 
             data_layer_instance = super().update(instance, validated_data)
 
+            if data_layer_instance.status == accounts_models.DataLayer.LAYER_STATUS_PUBLISHED:
+                args = ['--reset', '-layer_id={0}'.format(instance.id)]
+                call_command('populate_active_data_layer_for_countries', *args)
+
             # Once Data Layer is created, send the status email to the PUBLISHERS
             request_user = core_utilities.get_current_user(context=self.context)
 
@@ -1595,7 +1603,7 @@ class UpdateDataLayerSerializer(BaseDataLayerCRUDSerializer):
                 account_utilities.send_email_over_mailjet_service(publishers, cc=[request_user.email, ],
                                                                   **email_content)
 
-        return data_layer_instance
+            return data_layer_instance
 
 
 class PublishDataLayerSerializer(BaseDataLayerCRUDSerializer):
@@ -1728,6 +1736,7 @@ class LogActionSerializer(serializers.ModelSerializer):
 
 class DataLayerCountryRelationshipSerializer(serializers.ModelSerializer):
     data_sources = serializers.JSONField()
+    legend_configs = serializers.JSONField()
 
     class Meta:
         model = accounts_models.DataLayerCountryRelationship
@@ -1743,6 +1752,8 @@ class DataLayerCountryRelationshipSerializer(serializers.ModelSerializer):
             'country',
             'is_default',
             'data_sources',
+            'legend_configs',
+            'is_applicable',
         )
 
         extra_kwargs = {
@@ -1750,6 +1761,7 @@ class DataLayerCountryRelationshipSerializer(serializers.ModelSerializer):
             'country': {'required': True},
             'is_default': {'required': True},
             'data_sources': {'required': True},
+            'legend_configs': {'required': True},
         }
 
     def create(self, validated_data):
@@ -1831,9 +1843,8 @@ class ExpandColumnConfigurationSerializer(FlexFieldsModelSerializer):
 
     def get_options(self, instance):
         options = instance.options
-        if isinstance(options, dict):
-            if 'active_countries_filter' in options:
-                del options['active_countries_filter']
+        if isinstance(options, dict) and 'active_countries_filter' in options:
+            del options['active_countries_filter']
         return options
 
 

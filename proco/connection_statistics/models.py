@@ -227,6 +227,8 @@ class SchoolWeeklyStatus(ConnectivityStatistics, TimeStampedModel, models.Model)
     connectivity_govt_collection_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
     disputed_region = models.BooleanField(default=False)
 
+    download_speed_benchmark = models.FloatField(blank=True, default=None, null=True)
+
     objects = BaseManager()
 
     class Meta:

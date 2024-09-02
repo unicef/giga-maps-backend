@@ -232,6 +232,8 @@ def aggregate_school_daily_status_to_school_weekly_status(country, date) -> bool
                 school_weekly.connectivity_govt_collection_year = prev_weekly.connectivity_govt_collection_year
                 school_weekly.disputed_region = prev_weekly.disputed_region
 
+                school_weekly.download_speed_benchmark = prev_weekly.download_speed_benchmark
+
         school_weekly.save()
 
     return updated
