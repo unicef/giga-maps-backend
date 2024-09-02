@@ -895,7 +895,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         SELECT {case_conditions}
             COUNT(DISTINCT CASE WHEN sds.{col_name} IS NOT NULL THEN sds.school_id ELSE NULL END)
                 AS "school_with_realtime_data",
-            {benchmark_value}
+            {benchmark_value_sql}
             COUNT(DISTINCT sds.school_id) AS "no_of_schools_measure"
         FROM (
             SELECT "schools_school"."id" AS school_id,
@@ -935,11 +935,11 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs['school_weekly_join'] = ''
         kwargs['school_weekly_condition'] = ''
         kwargs['school_weekly_outer_join'] = ''
-        kwargs['benchmark_value'] = ''
+        kwargs['benchmark_value_sql'] = ''
 
         benchmark_value = kwargs['benchmark_configs'].get('value', None)
         if benchmark_value and 'SQL:' in benchmark_value:
-            kwargs['benchmark_value'] = benchmark_value.replace('SQL:', '').format(**kwargs) + ' AS benchmark_sql_value,'
+            kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(**kwargs) + ' AS benchmark_sql_value,'
 
         legend_configs = kwargs['legend_configs']
         if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
@@ -1003,7 +1003,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
             """
             kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
-
         return query.format(**kwargs)
 
     def get_school_view_info_query(self):
@@ -1032,7 +1031,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             END AS connectivity_status,
             CASE WHEN srr."rt_registered" = True AND srr."rt_registration_date"::date <= '{end_date}' THEN true
             ELSE false END AS is_rt_connected,
-            {benchmark_value}
+            {benchmark_value_sql}
             {case_conditions}
         FROM "schools_school" schools_school
         INNER JOIN public.locations_country c ON c."id" = schools_school."country_id"
@@ -1073,17 +1072,17 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             adm1_metadata."name", adm1_metadata."description_ui_label",
             adm2_metadata."name", adm2_metadata."description_ui_label",
             c."name", adm1_metadata."giga_id_admin", adm2_metadata."giga_id_admin",
-            sds."connectivity_speed", sws."download_speed_benchmark"
+            sds."{col_name}", sws."download_speed_benchmark"
         ORDER BY schools_school."id" ASC
         """
 
         kwargs = copy.deepcopy(self.kwargs)
         kwargs['ids'] = ','.join(kwargs['school_ids'])
 
-        kwargs['benchmark_value'] = ''
+        kwargs['benchmark_value_sql'] = ''
         benchmark_value = kwargs['benchmark_configs'].get('value', None)
         if benchmark_value and 'SQL:' in benchmark_value:
-            kwargs['benchmark_value'] = benchmark_value.replace('SQL:', '').format(
+            kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(
                 **kwargs) + ' AS benchmark_sql_value,'
 
         legend_configs = kwargs['legend_configs']

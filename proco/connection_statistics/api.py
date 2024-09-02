@@ -562,7 +562,10 @@ class ConnectivityAPIView(APIView):
                 'benchmark_unit': "bps",
                 'base_benchmark': "1000000",
                 'parameter_column_unit': "bps",
-                'round_unit_value': "{val} / (1000 * 1000)"
+                'round_unit_value': "{val} / (1000 * 1000)",
+                'rounded_benchmark_value': rounded_benchmark_value_int,
+                'convert_unit': 'mbps',
+                'display_unit': 'Mbps',
             },
         }
 
