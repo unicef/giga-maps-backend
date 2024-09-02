@@ -853,7 +853,7 @@ class CountrySummaryAPIViewSet(BaseModelViewSet):
         if self.action == 'list':
             ser_class = statistics_serializers.ListCountryWeeklyStatusSerializer
         elif self.action in ['create', 'update', 'destroy']:
-            ser_class = statistics_serializers.CountryWeeklyStatusUpdateRetriveSerializer
+            ser_class = statistics_serializers.CountryWeeklyStatusUpdateRetrieveSerializer
         else:
             ser_class = statistics_serializers.DetailCountryWeeklyStatusSerializer
         return (ser_class)
@@ -864,7 +864,7 @@ class CountrySummaryAPIViewSet(BaseModelViewSet):
 
     def create(self, request, *args, **kwargs):
         try:
-            data = statistics_serializers.CountryWeeklyStatusUpdateRetriveSerializer(data=request.data)
+            data = statistics_serializers.CountryWeeklyStatusUpdateRetrieveSerializer(data=request.data)
             if data.is_valid():
                 data.save()
                 action_log(request, [data.data], 1, '', self.model, field_name='id')
@@ -877,9 +877,10 @@ class CountrySummaryAPIViewSet(BaseModelViewSet):
         if pk is not None:
             try:
                 country_weekly_status = CountryWeeklyStatus.objects.get(pk=pk)
-                data = statistics_serializers.CountryWeeklyStatusUpdateRetriveSerializer(instance=country_weekly_status,
-                                                                                         data=request.data,
-                                                                                         partial=True)
+                data = statistics_serializers.CountryWeeklyStatusUpdateRetrieveSerializer(
+                    instance=country_weekly_status,
+                    data=request.data,
+                    partial=True)
                 if data.is_valid(raise_exception=True):
                     change_message = changed_fields(country_weekly_status, request.data)
                     action_log(request, [country_weekly_status], 2, change_message, self.model, field_name='id')
@@ -895,7 +896,7 @@ class CountrySummaryAPIViewSet(BaseModelViewSet):
             try:
                 country_weekly_status = CountryWeeklyStatus.objects.get(id=pk)
                 if country_weekly_status:
-                    serializer = statistics_serializers.CountryWeeklyStatusUpdateRetriveSerializer(
+                    serializer = statistics_serializers.CountryWeeklyStatusUpdateRetrieveSerializer(
                         country_weekly_status, partial=True,
                         context={'request': request}, )
                     return Response(serializer.data)
@@ -1164,7 +1165,7 @@ class SchoolDailyConnectivitySummaryAPIViewSet(BaseModelViewSet):
         if self.action == 'list':
             ser_class = statistics_serializers.ListSchoolDailyStatusSerializer
         elif self.action in ['create', 'update', 'destroy']:
-            ser_class = statistics_serializers.SchoolDailyStatusUpdateRetriveSerializer
+            ser_class = statistics_serializers.SchoolDailyStatusUpdateRetrieveSerializer
         else:
             ser_class = statistics_serializers.DetailSchoolDailyStatusSerializer
         return (ser_class)
@@ -1187,7 +1188,7 @@ class SchoolDailyConnectivitySummaryAPIViewSet(BaseModelViewSet):
 
     def create(self, request, *args, **kwargs):
         try:
-            data = statistics_serializers.SchoolDailyStatusUpdateRetriveSerializer(data=request.data)
+            data = statistics_serializers.SchoolDailyStatusUpdateRetrieveSerializer(data=request.data)
             if data.is_valid():
                 data.save()
                 action_log(request, [data.data], 1, '', self.model, field_name='id')
@@ -1200,8 +1201,8 @@ class SchoolDailyConnectivitySummaryAPIViewSet(BaseModelViewSet):
         if pk is not None:
             try:
                 school_daily_status = SchoolDailyStatus.objects.get(pk=pk)
-                data = statistics_serializers.SchoolDailyStatusUpdateRetriveSerializer(instance=school_daily_status,
-                                                                                       data=request.data, partial=True)
+                data = statistics_serializers.SchoolDailyStatusUpdateRetrieveSerializer(instance=school_daily_status,
+                                                                                        data=request.data, partial=True)
                 if data.is_valid(raise_exception=True):
                     change_message = changed_fields(school_daily_status, request.data)
                     action_log(request, [school_daily_status], 2, change_message, self.model, field_name='id')
@@ -1217,7 +1218,7 @@ class SchoolDailyConnectivitySummaryAPIViewSet(BaseModelViewSet):
             try:
                 school_daily_status = SchoolDailyStatus.objects.get(id=pk)
                 if school_daily_status:
-                    serializer = statistics_serializers.SchoolDailyStatusUpdateRetriveSerializer(
+                    serializer = statistics_serializers.SchoolDailyStatusUpdateRetrieveSerializer(
                         school_daily_status,
                         partial=True,
                         context={'request': request},

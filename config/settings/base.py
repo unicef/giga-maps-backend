@@ -1,5 +1,3 @@
-import json
-import os
 import sys
 import warnings
 
@@ -33,6 +31,7 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 AUTH_USER_MODEL = 'custom_auth.ApplicationUser'
 
+ENABLED_BACKEND_PROMETHEUS_METRICS = env.bool('ENABLED_BACKEND_PROMETHEUS_METRICS', default=True)
 # Application definition
 # --------------------------------------------------------------------------
 
@@ -87,7 +86,6 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 # --------------------------------------------------------------------------
 
 MIDDLEWARE = [
-    'django_prometheus.middleware.PrometheusBeforeMiddleware',
     'django.middleware.gzip.GZipMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -101,8 +99,11 @@ MIDDLEWARE = [
     # 'drf_secure_token.middleware.UpdateTokenMiddleware',
     'admin_reorder.middleware.ModelAdminReorder',
     'proco.utils.middleware.CustomCorsMiddleware',
-    'django_prometheus.middleware.PrometheusAfterMiddleware',
 ]
+
+if ENABLED_BACKEND_PROMETHEUS_METRICS:
+    MIDDLEWARE.insert(0, 'django_prometheus.middleware.PrometheusBeforeMiddleware')
+    MIDDLEWARE.insert(len(MIDDLEWARE), 'django_prometheus.middleware.PrometheusAfterMiddleware')
 
 # Custom authentication backend
 AUTHENTICATION_BACKENDS = ['proco.custom_auth.backends.RemoteAndModelBackend']
@@ -432,9 +433,6 @@ DATA_SOURCE_CONFIG = {
 }
 
 INVALIDATE_CACHE_HARD = env('INVALIDATE_CACHE_HARD', default='false')
-
-with open(os.path.join(BASE_DIR, 'proco', 'core', 'resources', 'filters.json')) as filters_json_file:
-    FILTERS_DATA = json.load(filters_json_file)
 
 # DATABASE_ROUTERS = ["proco.utils.read_db_router.StandbyRouter"]
 

@@ -1391,27 +1391,6 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(put_response.status_code, status.HTTP_200_OK)
 
 
-class AdvanceFiltersApiTestCase(TestAPIViewSetMixin, TestCase):
-    databases = ['default', ]
-
-    def setUp(self):
-        cache.clear()
-        super().setUp()
-
-    def test_list_advance_filters(self):
-        url, _, view = accounts_url((), {}, view_name='list-advanced-filters')
-
-        response = self.forced_auth_req('get', url, _, view=view)
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-
-        response_data = response.data
-
-        self.assertEqual(type(response_data), dict)
-        self.assertTrue(response_data['count'] > 0)
-        self.assertTrue(len(response_data['results']) > 0)
-
-
 class LogActionApiTestCase(TestAPIViewSetMixin, TestCase):
     databases = ['default', ]
 

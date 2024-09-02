@@ -115,10 +115,10 @@ class Command(BaseCommand):
                         )
                         ids_to_keep.append(relationship_instance.id)
                         if created:
-                            logger.debug('New dataLayers + country relationship created for live layer: {0}'.format(
+                            logger.info('New dataLayers + country relationship created for live layer: {0}'.format(
                                 relationship_instance.__dict__))
                         else:
-                            logger.debug(
+                            logger.info(
                                 'Existing dataLayers + country relationship updated for live layer: {0}'.format(
                                     relationship_instance.__dict__))
                 elif data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_STATIC:
@@ -157,10 +157,10 @@ class Command(BaseCommand):
                         )
                         ids_to_keep.append(relationship_instance.id)
                         if created:
-                            logger.debug('New dataLayers + country relationship created for static layer: {0}'.format(
+                            logger.info('New dataLayers + country relationship created for static layer: {0}'.format(
                                 relationship_instance.__dict__))
                         else:
-                            logger.debug(
+                            logger.info(
                                 'Existing dataLayers + country relationship updated for static layer: {0}'.format(
                                     relationship_instance.__dict__))
 

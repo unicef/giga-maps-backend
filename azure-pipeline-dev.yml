@@ -4,9 +4,13 @@
 # https://aka.ms/yaml
 
 trigger:
-- develop
-- staging
-- release/*
+  branches:
+    include:
+    - develop
+    - staging
+  tags:
+    include:
+    - 'release-*'
 
 name: $(SourceBranchName).$(Build.BuildId).$(Date:yyyyMMdd).$(Rev:r)
 
@@ -88,10 +92,7 @@ steps:
   condition:
       and(
         succeeded(),
-        or(
-          eq(variables['Build.SourceBranch'], 'refs/heads/staging'),
-          startsWith(variables['Build.SourceBranch'], 'refs/heads/release/')
-        )
+        eq(variables['Build.SourceBranch'], 'refs/heads/staging')
       )
   inputs:
     command: buildAndPush
@@ -103,11 +104,11 @@ steps:
 
 - task: Docker@2
   displayName: Prod - Build and Push image
-#  condition:
-#      and(
-#        succeeded(),
-#        startsWith(variables['Build.SourceBranch'], 'refs/heads/release/')
-#      )
+  condition:
+      and(
+        succeeded(),
+        startsWith(variables['Build.SourceBranch'], 'refs/tags/release-')
+      )
   inputs:
     command: buildAndPush
     repository: $(imageRepositoryProd)

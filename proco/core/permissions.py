@@ -434,3 +434,28 @@ class CanViewContactMessage(ProcoBasePermission):
 class CanDeleteContactMessage(ProcoBasePermission):
     method = 'DELETE'
     permission_name = RolePermission.CAN_DELETE_CONTACT_MESSAGE
+
+
+class CanViewColumnConfigurations(ProcoBasePermission):
+    method = 'GET'
+    permission_name = RolePermission.CAN_VIEW_COLUMN_CONFIGURATIONS
+
+
+class CanViewAdvanceFilters(ProcoBasePermission):
+    method = 'GET'
+    permission_name = RolePermission.CAN_VIEW_ADVANCE_FILTER
+
+
+class CanAddAdvanceFilter(ProcoBasePermission):
+    method = 'POST'
+    permission_name = RolePermission.CAN_ADD_ADVANCE_FILTER
+
+
+class CanUpdateAdvanceFilter(ProcoBasePermission):
+    method = 'PUT'
+    permission_name = RolePermission.CAN_UPDATE_ADVANCE_FILTER
+
+
+class CanPublishAdvanceFilter(ProcoBasePermission):
+    method = 'PUT'
+    permission_name = RolePermission.CAN_PUBLISH_ADVANCE_FILTER

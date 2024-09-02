@@ -15,7 +15,7 @@ logger = logging.getLogger('gigamaps.' + __name__)
 
 
 def get_user(email, force_user, first_name, last_name, inactive_email):
-    logger.debug('Validating: {0}'.format(email))
+    logger.info('Validating: {0}'.format(email))
     validate_email(email)
 
     application_user = ApplicationUser.objects.all().annotate(email_lower=Lower('email')).filter(
@@ -126,4 +126,4 @@ class Command(BaseCommand):
             )
             logger.info('Api key with write access created successfully!\n')
 
-        logger.debug('Api key: {0}'.format(api_key_instance.api_key))
+        logger.info('Api key: {0}'.format(api_key_instance.api_key))
