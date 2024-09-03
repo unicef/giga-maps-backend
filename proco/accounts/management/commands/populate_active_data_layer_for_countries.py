@@ -83,6 +83,14 @@ class Command(BaseCommand):
                 parameter_column_name = str(parameter_col['name'])
                 parameter_column_type = str(parameter_col['type'])
 
+                accounts_models.DataLayerCountryRelationship.objects.filter(
+                    data_layer=data_layer_instance,
+                ).exclude(
+                    country_id__in=applicable_country_ids,
+                ).update(
+                    is_applicable=False,
+                )
+
                 if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
                     sql = """
                     SELECT DISTINCT s."country_id"
