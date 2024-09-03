@@ -360,8 +360,8 @@ def populate_default_layer_from_active_layer_list(country_id):
         data_layer__deleted__isnull=True,
     ).order_by('-data_layer__last_modified_at')
 
-    if country_id and data_layer_country_qs.filter(country_id=country_id, is_default=True).exists():
-        instance = data_layer_country_qs.filter(country_id=country_id, is_default=True).first()
+    if country_id and data_layer_country_qs.filter(country_id=country_id, is_default=True, is_applicable=True).exists():
+        instance = data_layer_country_qs.filter(country_id=country_id, is_default=True, is_applicable=True).first()
         logger.error(
             'Default layer already exists for given country: \n\tCountry ID: {0}\n\t'
             'Layer Code: {1}\n\tLayer Name: {2}'.format(instance.country.name, instance.data_layer.code, instance.data_layer.name)
@@ -373,14 +373,18 @@ def populate_default_layer_from_active_layer_list(country_id):
     active_country_ids = data_layer_country_qs.values_list('country_id', flat=True).order_by('country_id').distinct('country_id')
 
     for active_country_id in active_country_ids:
-        if data_layer_country_qs.filter(country_id=active_country_id, is_default=True).exists():
-            instance = data_layer_country_qs.filter(country_id=active_country_id, is_default=True).first()
+        if data_layer_country_qs.filter(country_id=active_country_id, is_default=True, is_applicable=True).exists():
+            instance = data_layer_country_qs.filter(country_id=active_country_id, is_default=True, is_applicable=True).first()
 
             logger.warning(
                 'Default layer already exists for given country: \n\tCountry ID: {0}\n\t'
                 'Layer Code: {1}\n\tLayer Name: {2}'.format(instance.country.name, instance.data_layer.code, instance.data_layer.name)
             )
         else:
+            data_layer_country_qs.filter(country_id=active_country_id).update(is_default=False)
+
+            data_layer_country_qs = data_layer_country_qs.filter(is_applicable=True)
+
             live_download_layer_instance_entry = data_layer_country_qs.filter(
                 country_id=active_country_id,
                 data_layer__data_sources__data_source_column__icontains='"name":"connectivity_speed"',
@@ -403,8 +407,9 @@ def populate_default_layer_from_active_layer_list(country_id):
                         country_id=active_country_id,
                         data_layer__data_sources__deleted__isnull=True,
                     ).first()
-                    live_first_layer_instance_entry.is_default = True
-                    live_first_layer_instance_entry.save(update_fields=('is_default',))
+                    if live_first_layer_instance_entry:
+                        live_first_layer_instance_entry.is_default = True
+                        live_first_layer_instance_entry.save(update_fields=('is_default',))
 
 
 
