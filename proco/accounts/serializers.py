@@ -1148,37 +1148,42 @@ class DataLayersListSerializer(FlexFieldsModelSerializer):
         }
 
     def get_benchmark_metadata(self, instance):
-        if instance.type == accounts_models.DataLayer.LAYER_TYPE_STATIC:
-            return {}
-
         parameter_col = instance.data_sources.all().first().data_source_column
-
-        convert_unit = instance.global_benchmark.get('convert_unit')
         parameter_column_unit = str(parameter_col.get('unit', '')).lower()
+        display_unit = parameter_col.get('display_unit', '')
 
-        unit_agg_str = '{val}'
-        if convert_unit == 'mbps' and parameter_column_unit == 'bps':
-            unit_agg_str = '{val} / (1000 * 1000)'
-        elif convert_unit == 'mbps' and parameter_column_unit == 'kbps':
-            unit_agg_str = '{val} / 1000'
-        elif convert_unit == 'kbps' and parameter_column_unit == 'bps':
-            unit_agg_str = '{val} / 1000'
-        elif convert_unit == 'kbps' and parameter_column_unit == 'mbps':
-            unit_agg_str = '{val} * 1000'
-        elif convert_unit == 'bps' and parameter_column_unit == 'kbps':
-            unit_agg_str = '{val} * 1000'
-        elif convert_unit == 'bps' and parameter_column_unit == 'mbps':
-            unit_agg_str = '{val} * 1000 * 1000'
-
-        return {
-            'benchmark_value': instance.global_benchmark.get('value'),
-            'benchmark_unit': instance.global_benchmark.get('unit'),
-            'base_benchmark': str(parameter_col.get('base_benchmark', 1)),
+        benchmark_metadata = {
             'parameter_column_unit': parameter_column_unit,
-            'round_unit_value': unit_agg_str,
+            'display_unit': display_unit,
             'benchmark_name': instance.global_benchmark.get('benchmark_name', 'Global'),
             'benchmark_type': instance.global_benchmark.get('benchmark_type', 'global'),
         }
+
+        if instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+            convert_unit = instance.global_benchmark.get('convert_unit')
+
+            unit_agg_str = '{val}'
+            if convert_unit == 'mbps' and parameter_column_unit == 'bps':
+                unit_agg_str = '{val} / (1000 * 1000)'
+            elif convert_unit == 'mbps' and parameter_column_unit == 'kbps':
+                unit_agg_str = '{val} / 1000'
+            elif convert_unit == 'kbps' and parameter_column_unit == 'bps':
+                unit_agg_str = '{val} / 1000'
+            elif convert_unit == 'kbps' and parameter_column_unit == 'mbps':
+                unit_agg_str = '{val} * 1000'
+            elif convert_unit == 'bps' and parameter_column_unit == 'kbps':
+                unit_agg_str = '{val} * 1000'
+            elif convert_unit == 'bps' and parameter_column_unit == 'mbps':
+                unit_agg_str = '{val} * 1000 * 1000'
+
+            benchmark_metadata.update({
+                'benchmark_value': instance.global_benchmark.get('value'),
+                'benchmark_unit': instance.global_benchmark.get('unit'),
+                'base_benchmark': str(parameter_col.get('base_benchmark', 1)),
+                'round_unit_value': unit_agg_str,
+            })
+
+        return benchmark_metadata
 
     def to_representation(self, data_layer):
         data_sources_list = []

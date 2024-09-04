@@ -1527,6 +1527,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             benchmark_value, benchmark_unit = self.get_benchmark_value(data_layer_instance)
             global_benchmark = data_layer_instance.global_benchmark.get('value')
 
+            legend_configs = self.get_legend_configs(data_layer_instance)
+
             unit_agg_str = '{val}'
 
             if (
@@ -1552,7 +1554,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             self.kwargs['round_unit_value'] = unit_agg_str
 
             if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
-                legend_configs = self.get_legend_configs(data_layer_instance)
 
                 self.kwargs.update({
                     'col_name': parameter_column_name,
@@ -1685,8 +1686,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                         },
                     }
             else:
-                legend_configs = data_layer_instance.legend_configs
-
                 self.kwargs.update({
                     'col_name': parameter_column_name,
                     'legend_configs': legend_configs,
@@ -1714,6 +1713,10 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                         'total_schools': query_response['total_schools'],
                         'connected_schools': {label: query_response[label] for label in query_labels},
                         'legend_configs': legend_configs,
+                        'benchmark_metadata': {
+                            'parameter_column_unit': parameter_column_unit,
+                            'display_unit': display_unit,
+                        },
                     }
 
             cache_manager.set(cache_key, response, request_path=request_path,
@@ -2042,9 +2045,9 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         benchmark_value, _ = self.get_benchmark_value(data_layer_instance)
         global_benchmark = data_layer_instance.global_benchmark.get('value')
 
-        if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
-            legend_configs = self.get_legend_configs(data_layer_instance)
+        legend_configs = self.get_legend_configs(data_layer_instance)
 
+        if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
             self.kwargs.update({
                 'col_name': parameter_column_name,
                 'benchmark_value': benchmark_value,
@@ -2057,8 +2060,6 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 'legend_configs': legend_configs,
             })
         else:
-            legend_configs = data_layer_instance.legend_configs
-
             self.kwargs.update({
                 'col_name': parameter_column_name,
                 'legend_configs': legend_configs,
