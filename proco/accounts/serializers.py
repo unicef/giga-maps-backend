@@ -1132,7 +1132,7 @@ class DataLayersListSerializer(FlexFieldsModelSerializer):
             'published_by',
             # 'published_at',
             # 'created',
-            # 'last_modified_at',
+            'last_modified_at',
             'is_reverse',
             'data_sources_list',
             'data_source_column',
