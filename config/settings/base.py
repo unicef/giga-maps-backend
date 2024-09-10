@@ -455,8 +455,7 @@ LOGGING = {
     },
     'formatters': {
         'verbose': {
-            'format': '%(hostname)s %(hostip)s %(asctime)s %(levelname)s %(pathname)s %(process)d '
-                      '%(processName)s %(thread)d: %(message)s'
+            'format': '%(hostname)s %(hostip)s %(asctime)s %(levelname)s %(pathname)s: %(message)s'
         },
     },
     'handlers': {
