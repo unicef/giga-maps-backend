@@ -869,7 +869,7 @@ class BaseDataLayerAPIViewSet(APIView):
                     active_layers__deleted__isnull=True,
                     active_layers__data_layer_id=data_layer_instance.id,
                 ).order_by('id').values_list('active_layers__legend_configs', flat=True).first()
-                if legend_configurations and len(legend_configurations) > 0 and legend_configurations != '{}':
+                if legend_configurations and len(legend_configurations) > 0:
                     legend_configs = json.loads(legend_configurations)
 
         return legend_configs
@@ -937,7 +937,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs['school_weekly_outer_join'] = ''
         kwargs['benchmark_value_sql'] = ''
 
-        benchmark_value = kwargs['benchmark_configs'].get('value', None)
+        benchmark_value = kwargs['benchmark_value']
         if benchmark_value and 'SQL:' in benchmark_value:
             kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(**kwargs) + ' AS benchmark_sql_value,'
 
@@ -1080,7 +1080,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs['ids'] = ','.join(kwargs['school_ids'])
 
         kwargs['benchmark_value_sql'] = ''
-        benchmark_value = kwargs['benchmark_configs'].get('value', None)
+        benchmark_value = kwargs['benchmark_value']
         if benchmark_value and 'SQL:' in benchmark_value:
             kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(
                 **kwargs) + ' AS benchmark_sql_value,'
@@ -1565,7 +1565,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     'parameter_col': parameter_col,
                     'is_reverse': data_layer_instance.is_reverse,
                     'legend_configs': legend_configs,
-                    'benchmark_configs': data_layer_instance.global_benchmark,
                 })
 
                 if len(self.kwargs.get('school_ids', [])) > 0:
