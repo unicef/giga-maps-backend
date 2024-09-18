@@ -30,7 +30,6 @@ urlpatterns = [
     path('invalidate-cache/', api.InvalidateCache.as_view(), name='admin-invalidate-cache'),
 
     path('app_configs/', api.AppStaticConfigurationsViewSet.as_view(), name='get-app-static-configurations'),
-    path('advanced_filters/', api.AdvancedFiltersViewSet.as_view(), name='list-advanced-filters'),
     path('data_sources/', api.DataSourceViewSet.as_view({
         'get': 'list',
         'post': 'create',
@@ -69,4 +68,23 @@ urlpatterns = [
     path('recent_action_log/', api.LogActionViewSet.as_view({'get': 'list', }), name='list-recent-action-log'),
 
     path('time-players/v2/', api.TimePlayerViewSet.as_view(), name='get-time-player-data-v2'),
+
+    path('column_configurations/', api.ColumnConfigurationViewSet.as_view({
+        'get': 'list',
+    }), name='list-column-configurations'),
+
+    path('adv_filters/', api.AdvanceFiltersViewSet.as_view({
+        'get': 'list',
+        'post': 'create',
+    }), name='list-or-create-advance-filters'),
+    path('adv_filters/<int:pk>/', api.AdvanceFiltersViewSet.as_view({
+        'put': 'partial_update',
+        'delete': 'destroy',
+    }), name='update-or-delete-advance-filter'),
+    path('adv_filters/<int:pk>/publish/', api.AdvanceFiltersPublishViewSet.as_view({
+        'put': 'partial_update',
+    }), name='publish-advance-filter'),
+    path('adv_filters/<str:status>/<int:country_id>/', api.PublishedAdvanceFiltersViewSet.as_view({
+        'get': 'list',
+    }), name='list-published-advance-filters'),
 ]

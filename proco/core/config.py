@@ -51,21 +51,5 @@ class AppConfig(object):
         """Length of valid mobile number"""
         return 10
 
-    @property
-    def get_giga_filter_fields(self):
-        global FILTERS_FIELDS
-        if FILTERS_FIELDS is None:
-            filter_fields = {}
-            filters_data = settings.FILTERS_DATA
-            for data in filters_data:
-                parameter = data['parameter']
-                table_filters = filter_fields.get(parameter['table'], [])
-                table_filters.append(parameter['field'] + '__' + parameter['filter'])
-                if data.get('include_none_filter', False):
-                    table_filters.append(parameter['field'] + '__none_' + parameter['filter'])
-                filter_fields[parameter['table']] = table_filters
-            FILTERS_FIELDS = filter_fields
-        return FILTERS_FIELDS
-
 
 app_config = AppConfig()

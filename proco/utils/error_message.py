@@ -1,4 +1,4 @@
-error_mess_retrive = {
+error_mess_retrieve = {
     "error_mess": "Error in record Fetch"
 }
 id_missing_error_mess = {

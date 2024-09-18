@@ -24,9 +24,9 @@ def delete_duplicate_schools_based_on_giga_id():
         'country_id', 'giga_id_school', 'deleted').annotate(
         total_records=Count('id', distinct=False),
     ).order_by('-total_records', 'country_id', 'giga_id_school', 'deleted').filter(total_records__gt=1)[:10000]
-    logger.debug('Queryset to get max 10K records to update the deleted time '
-                 'where more than 1 record has same Country, School Giga ID and deleted datetime '
-                 'in School table: {0}'.format(rows_with_more_than_1_records.query))
+    logger.info('Queryset to get max 10K records to update the deleted time '
+                'where more than 1 record has same Country, School Giga ID and deleted datetime '
+                'in School table: {0}'.format(rows_with_more_than_1_records.query))
 
     for row in rows_with_more_than_1_records:
         count = 1
@@ -34,7 +34,7 @@ def delete_duplicate_schools_based_on_giga_id():
             country_id=row['country_id'],
             giga_id_school=row['giga_id_school'],
         ).order_by('-id')[1:]:
-            logger.debug('Deletion for: Id - {0}, Country ID - {1}, Giga ID - {2}'.format(
+            logger.info('Deletion for: Id - {0}, Country ID - {1}, Giga ID - {2}'.format(
                 deleted_row.id, deleted_row.country_id, deleted_row.giga_id_school))
             deleted_row.deleted = get_current_datetime_object() + timedelta(minutes=count)
             deleted_row.save(update_fields=('deleted',))
@@ -45,15 +45,15 @@ def delete_duplicate_schools_based_on_giga_id():
         'country_id', 'giga_id_school').annotate(
         total_records=Count('id', distinct=False),
     ).order_by('-total_records', 'country_id', 'giga_id_school').filter(total_records__gt=1)[:10000]
-    logger.debug('Queryset to get max 10K records to delete where more than 1 record has same '
-                 'Country and School Giga ID in School table: {0}'.format(rows_with_more_than_1_records.query))
+    logger.info('Queryset to get max 10K records to delete where more than 1 record has same '
+                'Country and School Giga ID in School table: {0}'.format(rows_with_more_than_1_records.query))
 
     for row in rows_with_more_than_1_records:
         for row_to_delete in School.objects.all().filter(
             country_id=row['country_id'],
             giga_id_school=row['giga_id_school'],
         ).order_by('-id')[1:]:
-            logger.debug('Deletion for: Id - {0}, Country ID - {1}, Giga ID - {2}'.format(
+            logger.info('Deletion for: Id - {0}, Country ID - {1}, Giga ID - {2}'.format(
                 row_to_delete.id, row_to_delete.country_id, row_to_delete.giga_id_school))
             row_to_delete.delete()
 
@@ -63,7 +63,7 @@ def delete_duplicate_schools_based_on_external_id():
         'country_id', 'external_id').annotate(
         total_records=Count('id', distinct=False),
     ).order_by('-total_records', 'country_id', 'external_id').filter(total_records__gt=1)[:10000]
-    logger.debug(
+    logger.info(
         'Queryset to get max 10K records to delete where more than 1 record has same Country and School External ID '
         'in School table: {0}'.format(rows_with_more_than_1_records.query))
 
@@ -83,8 +83,8 @@ def delete_duplicate_school_weekly_records():
         'school_id', 'week', 'year').annotate(
         total_records=Count('school_id', distinct=False),
     ).order_by('-total_records', 'school_id', 'week', 'year').filter(total_records__gt=1)[:10000]
-    logger.debug('Queryset to get max 10K records to delete where more than 1 record has same Year, Week and '
-                 'School ID in School Weekly table: {0}'.format(rows_with_more_than_1_records.query))
+    logger.info('Queryset to get max 10K records to delete where more than 1 record has same Year, Week and '
+                'School ID in School Weekly table: {0}'.format(rows_with_more_than_1_records.query))
 
     for row in rows_with_more_than_1_records:
         school_id = row['school_id']
@@ -101,24 +101,24 @@ def delete_duplicate_school_weekly_records():
         ).values_list('id', flat=True).order_by('id'))
 
         if last_weekly_id in school_weekly_ids_to_delete:
-            logger.debug('School Last Weekly Status id ({0}) is IN the deletion list. '
-                         'Hence skipping the current record and deleting all remaining.'.format(last_weekly_id))
+            logger.info('School Last Weekly Status id ({0}) is IN the deletion list. '
+                        'Hence skipping the current record and deleting all remaining.'.format(last_weekly_id))
             for row_to_delete in statistics_models.SchoolWeeklyStatus.objects.filter(
                 id__in=school_weekly_ids_to_delete,
             ).exclude(id=last_weekly_id).order_by('-id'):
-                logger.debug('Deletion for: Id - {0}, Year - {1}, Week - {2}, School Id - {3}'.format(
+                logger.info('Deletion for: Id - {0}, Year - {1}, Week - {2}, School Id - {3}'.format(
                     row_to_delete.id, row_to_delete.year, row_to_delete.week, row_to_delete.school_id))
                 # Hard deletion
                 row_to_delete.delete(force=True)
         else:
-            logger.debug('School Last Weekly Status id ({0}) is NOT IN the deletion list. Hence skipping first '
-                         'record and deleting all remaining based on ID DESC.'.format(last_weekly_id))
+            logger.info('School Last Weekly Status id ({0}) is NOT IN the deletion list. Hence skipping first '
+                        'record and deleting all remaining based on ID DESC.'.format(last_weekly_id))
             for row_to_delete in statistics_models.SchoolWeeklyStatus.objects.filter(
                 school_id=row['school_id'],
                 week=row['week'],
                 year=row['year'],
             ).order_by('-id')[1:]:
-                logger.debug('Deletion for: Id - {0}, Year - {1}, Week - {2}, School Id - {3}'.format(
+                logger.info('Deletion for: Id - {0}, Year - {1}, Week - {2}, School Id - {3}'.format(
                     row_to_delete.id, row_to_delete.year, row_to_delete.week, row_to_delete.school_id))
                 # Hard deletion
                 row_to_delete.delete(force=True)
@@ -129,7 +129,7 @@ def delete_duplicate_school_daily_records():
         'school_id', 'date', 'live_data_source').annotate(
         total_records=Count('school_id', distinct=False),
     ).order_by('-total_records', 'school_id', 'date', 'live_data_source').filter(total_records__gt=1)[:10000]
-    logger.debug(
+    logger.info(
         'Queryset to get max 10K records to delete where more than 1 record has same Date, Live Data Source and '
         'School ID in School Daily table: {0}'.format(rows_with_more_than_1_records.query))
 
@@ -139,7 +139,7 @@ def delete_duplicate_school_daily_records():
             date=row['date'],
             live_data_source=row['live_data_source'],
         ).order_by('-id')[1:]:
-            logger.debug('Deletion for: Id - {0}, Date - {1}, Data Source - {2}, School Id - {3}'.format(
+            logger.info('Deletion for: Id - {0}, Date - {1}, Data Source - {2}, School Id - {3}'.format(
                 row_to_delete.id, row_to_delete.date, row_to_delete.live_data_source, row_to_delete.school_id))
             # Hard deletion
             row_to_delete.delete(force=True)
@@ -150,7 +150,7 @@ def delete_duplicate_country_daily_records():
         'country_id', 'date', 'live_data_source').annotate(
         total_records=Count('country_id', distinct=False),
     ).order_by('-total_records', 'country_id', 'date', 'live_data_source').filter(total_records__gt=1)[:10000]
-    logger.debug(
+    logger.info(
         'Queryset to get max 10K records to delete where more than 1 record has same Date, Live Data Source and '
         'Country ID in Country Daily table: {0}'.format(rows_with_more_than_1_records.query))
 
@@ -160,7 +160,7 @@ def delete_duplicate_country_daily_records():
             date=row['date'],
             live_data_source=row['live_data_source'],
         ).order_by('-id')[1:]:
-            logger.debug('Deletion for: Id - {0}, Date - {1}, Data Source - {2}, Country Id - {3}'.format(
+            logger.info('Deletion for: Id - {0}, Date - {1}, Data Source - {2}, Country Id - {3}'.format(
                 row_to_delete.id, row_to_delete.date, row_to_delete.live_data_source, row_to_delete.country_id))
             # Hard deletion
             row_to_delete.delete(force=True)
@@ -171,15 +171,15 @@ def delete_duplicate_qos_model_records():
         'school_id', 'timestamp').annotate(
         total_records=Count('school_id'),
     ).order_by('-total_records', 'school_id', 'timestamp').filter(total_records__gt=1)
-    logger.debug('Queryset to get records to delete where more than 1 record has same school and timestamp in '
-                 'QoS Data table: {0}'.format(rows_with_more_than_1_records.query))
+    logger.info('Queryset to get records to delete where more than 1 record has same school and timestamp in '
+                'QoS Data table: {0}'.format(rows_with_more_than_1_records.query))
 
     for row in rows_with_more_than_1_records:
         for row_to_delete in QoSData.objects.filter(
             school_id=row['school_id'],
             timestamp=row['timestamp'],
         ).order_by('-version')[1:]:
-            logger.debug('Deletion for: Id - {0}, Timestamp - {1}, School Id - {2}'.format(
+            logger.info('Deletion for: Id - {0}, Timestamp - {1}, School Id - {2}'.format(
                 row_to_delete.id, row_to_delete.timestamp, row_to_delete.school_id))
             # Hard deletion
             row_to_delete.delete()
@@ -190,8 +190,8 @@ def delete_duplicate_country_weekly_records():
         'country_id', 'week', 'year').annotate(
         total_records=Count('country_id', distinct=False),
     ).order_by('-total_records', 'country_id', 'week', 'year').filter(total_records__gt=1)[:10000]
-    logger.debug('Queryset to get max 10K records to delete where more than 1 record has same Year, Week and '
-                 'Country ID in Country Weekly table: {0}'.format(rows_with_more_than_1_records.query))
+    logger.info('Queryset to get max 10K records to delete where more than 1 record has same Year, Week and '
+                'Country ID in Country Weekly table: {0}'.format(rows_with_more_than_1_records.query))
 
     for row in rows_with_more_than_1_records:
         country_id = row['country_id']
@@ -208,24 +208,24 @@ def delete_duplicate_country_weekly_records():
         ).values_list('id', flat=True).order_by('id'))
 
         if last_weekly_id in country_weekly_ids_to_delete:
-            logger.debug('Country Last Weekly Status id ({0}) is IN the deletion list. '
-                         'Hence skipping the current record and deleting all remaining.'.format(last_weekly_id))
+            logger.info('Country Last Weekly Status id ({0}) is IN the deletion list. '
+                        'Hence skipping the current record and deleting all remaining.'.format(last_weekly_id))
             for row_to_delete in statistics_models.CountryWeeklyStatus.objects.filter(
                 id__in=country_weekly_ids_to_delete,
             ).exclude(id=last_weekly_id).order_by('-id'):
-                logger.debug('Deletion for: Id - {0}, Year - {1}, Week - {2}, Country Id - {3}'.format(
+                logger.info('Deletion for: Id - {0}, Year - {1}, Week - {2}, Country Id - {3}'.format(
                     row_to_delete.id, row_to_delete.year, row_to_delete.week, row_to_delete.country_id))
                 # Hard deletion
                 row_to_delete.delete(force=True)
         else:
-            logger.debug('Country Last Weekly Status id ({0}) is NOT IN the deletion list. Hence skipping first '
-                         'record and deleting all remaining based on ID DESC.'.format(last_weekly_id))
+            logger.info('Country Last Weekly Status id ({0}) is NOT IN the deletion list. Hence skipping first '
+                        'record and deleting all remaining based on ID DESC.'.format(last_weekly_id))
             for row_to_delete in statistics_models.CountryWeeklyStatus.objects.filter(
                 country_id=row['country_id'],
                 week=row['week'],
                 year=row['year'],
             ).order_by('-id')[1:]:
-                logger.debug('Deletion for: Id - {0}, Year - {1}, Week - {2}, Country Id - {3}'.format(
+                logger.info('Deletion for: Id - {0}, Year - {1}, Week - {2}, Country Id - {3}'.format(
                     row_to_delete.id, row_to_delete.year, row_to_delete.week, row_to_delete.country_id))
                 # Hard deletion
                 row_to_delete.delete(force=True)
@@ -241,15 +241,15 @@ def delete_duplicate_school_records():
     ).exclude(
         giga_id_school='',
     )
-    logger.debug('Queryset to get records to delete where more than 1 record has same Giga ID and '
-                 'Country ID in School table: {0}'.format(rows_with_more_than_1_records.query))
+    logger.info('Queryset to get records to delete where more than 1 record has same Giga ID and '
+                'Country ID in School table: {0}'.format(rows_with_more_than_1_records.query))
 
     for row in rows_with_more_than_1_records:
         for row_to_delete in School.objects.filter(
             country_id=row['country_id'],
             giga_id_school=row['giga_id_school'],
         ).order_by('-id')[1:]:
-            logger.debug('Deletion for: Id - {0}, Country ID - {1}, Giga ID - {2}'.format(
+            logger.info('Deletion for: Id - {0}, Country ID - {1}, Giga ID - {2}'.format(
                 row_to_delete.id, row_to_delete.country_id, row_to_delete.giga_id_school))
             # Hard deletion may fail
             row_to_delete.delete()
@@ -346,7 +346,7 @@ fc5f2401-447d-320d-bb38-8cd2c2b58521,51070790,144
             for tok in row.split(',')
         ]
         file_data.append(dict(zip(headers, row_data)))
-    logger.debug(file_data)
+    logger.info(file_data)
     for data in file_data:
         School.objects.filter(
             country_id=data['country_id'],
@@ -506,7 +506,7 @@ class Command(BaseCommand):
 
     def handle(self, **options):
         logger.info('Executing data cleanup utility.\n')
-        logger.debug('Options: {}\n\n'.format(options))
+        logger.info('Options: {}\n\n'.format(options))
 
         country_id = options.get('country_id', None)
         start_school_id = options.get('start_school_id', None)
@@ -607,7 +607,7 @@ class Command(BaseCommand):
                 country_id_vs_year_qs = country_id_vs_year_qs.filter(year=options.get('year'))
 
             country_id_vs_year_qs = country_id_vs_year_qs.filter(year__lte=get_current_year(), )
-            logger.debug('Query to select country and year for scheduling: {}\n\n'.format(country_id_vs_year_qs.query))
+            logger.info('Query to select country and year for scheduling: {}\n\n'.format(country_id_vs_year_qs.query))
             for country_year in country_id_vs_year_qs:
                 # redo_aggregations_task(country_year[0], country_year[1], None)
                 redo_aggregations_task.delay(country_year[0], country_year[1], week_no)

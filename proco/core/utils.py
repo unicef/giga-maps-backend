@@ -309,11 +309,33 @@ def bulk_create_or_update(records, model, unique_fields, batch_size=1000):
         )
 
 
+def get_giga_filter_fields(request):
+    from proco.accounts.models import AdvanceFilter
+    from proco.utils.cache import cache_manager
+
+    filter_field_data = {}
+
+    if request.query_params.get('cache', 'on').lower() in ['on', 'true']:
+        filter_field_data = cache_manager.get('GIGA_FILTERS_FIELDS')
+
+    if not filter_field_data:
+        filter_field_data = {}
+        filters_data = AdvanceFilter.objects.filter(status=AdvanceFilter.FILTER_STATUS_PUBLISHED)
+        for data in filters_data:
+            parameter = data.column_configuration
+            table_filters = filter_field_data.get(parameter.table_alias, [])
+            table_filters.append(parameter.name + '__' + data.query_param_filter)
+            if isinstance(data.options, dict) and data.options.get('include_none_filter', False):
+                table_filters.append(parameter.name + '__none_' + data.query_param_filter)
+            filter_field_data[parameter.table_alias] = table_filters
+    return filter_field_data
+
+
 def get_filter_sql(request, filter_key, table_name):
-    filter_fields = core_config.get_giga_filter_fields.get(filter_key, [])
+    filter_fields = get_giga_filter_fields(request)
     query_params = request.query_params.dict()
 
-    advance_filters = set(filter_fields) & set(query_params.keys())
+    advance_filters = set(filter_fields.get(filter_key, [])) & set(query_params.keys())
 
     sql_list = []
     for field_filter in advance_filters:
@@ -321,13 +343,26 @@ def get_filter_sql(request, filter_key, table_name):
         sql_str = None
         field_name = None
 
-        if field_filter.endswith('__iexact'):
+        if field_filter.endswith('__exact'):
+            field_name = field_filter.replace('__exact', '')
+
+            if filter_value == 'none':
+                sql_str = """coalesce(TRIM({table_name}."{field_name}"), '') = ''"""
+            else:
+                sql_str = """{table_name}."{field_name}" = '{value}'"""
+        elif field_filter.endswith('__iexact'):
             field_name = field_filter.replace('__iexact', '')
 
             if filter_value == 'none':
                 sql_str = """coalesce(TRIM({table_name}."{field_name}"), '') = ''"""
             else:
                 sql_str = """LOWER({table_name}."{field_name}") = '{value}'"""
+        elif field_filter.endswith('__contains'):
+            field_name = field_filter.replace('__contains', '')
+            sql_str = """{table_name}."{field_name}"::text LIKE '{value}'"""
+        elif field_filter.endswith('__icontains'):
+            field_name = field_filter.replace('__icontains', '')
+            sql_str = """LOWER({table_name}."{field_name}")::text LIKE '{value}'"""
         elif field_filter.endswith('__on'):
             field_name = field_filter.replace('__on', '')
 
@@ -337,6 +372,8 @@ def get_filter_sql(request, filter_key, table_name):
                 sql_str = """{table_name}."{field_name}" = {value}"""
         elif field_filter.endswith('__range'):
             field_name = field_filter.replace('__range', '')
+            if ',' not in filter_value:
+                filter_value += ',null'
 
             start, end = filter_value.split(',')
             if start != 'null':
@@ -357,6 +394,8 @@ def get_filter_sql(request, filter_key, table_name):
                 table_name=table_name,
                 field_name=field_name,
             )
+            if ',' not in filter_value:
+                filter_value += ',null'
 
             start, end = filter_value.split(',')
             range_sql_list = []

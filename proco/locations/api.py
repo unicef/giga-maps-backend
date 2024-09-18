@@ -37,7 +37,7 @@ from proco.locations.serializers import (
     CountryCSVSerializer,
     CountrySerializer,
     CountryStatusSerializer,
-    CountryUpdateRetriveSerializer,
+    CountryUpdateRetrieveSerializer,
     DetailCountrySerializer,
     ExpandCountryAdminMetadataSerializer,
     ListCountrySerializer,
@@ -125,6 +125,13 @@ class CountryViewSet(
             if len(country_ids) > 0:
                 queryset = queryset.filter(id__in=country_ids)
 
+        has_api_requests = self.request.query_params.get('has_api_requests', '').lower()
+        if has_api_requests == 'true':
+            country_ids = list(accounts_models.APIKeyCountryRelationship.objects.all().values_list(
+                'country_id', flat=True).order_by('country_id').distinct('country_id'))
+            if len(country_ids) > 0:
+                queryset = queryset.filter(id__in=country_ids)
+
         return queryset
 
 
@@ -155,7 +162,7 @@ class CountryDataViewSet(BaseModelViewSet):
         if self.action == 'list':
             ser_class = ListCountrySerializer
         elif self.action in ['create', 'update', 'destroy']:
-            ser_class = CountryUpdateRetriveSerializer
+            ser_class = CountryUpdateRetrieveSerializer
         else:
             ser_class = DetailCountrySerializer
         return (ser_class)
@@ -177,7 +184,7 @@ class CountryDataViewSet(BaseModelViewSet):
 
     def create(self, request, *args, **kwargs):
         try:
-            data = CountryUpdateRetriveSerializer(data=request.data)
+            data = CountryUpdateRetrieveSerializer(data=request.data)
             if data.is_valid(raise_exception=True):
                 data.save()
                 action_log(request, [data.data], 1, '', self.model, field_name='name')
@@ -195,7 +202,7 @@ class CountryDataViewSet(BaseModelViewSet):
                 if copy_request_data.get('flag') is None:
                     copy_request_data['flag'] = country.flag
 
-                data = CountryUpdateRetriveSerializer(instance=country, data=copy_request_data)
+                data = CountryUpdateRetrieveSerializer(instance=country, data=copy_request_data)
                 if data.is_valid(raise_exception=True):
                     change_message = changed_fields(country, copy_request_data)
                     action_log(request, [country], 2, change_message, self.model, field_name='name')
@@ -214,6 +221,10 @@ class CountryDataViewSet(BaseModelViewSet):
             response = super().destroy(request, *args, **kwargs)
 
             accounts_models.DataLayerCountryRelationship.objects.filter(country=instance).update(
+                deleted=core_utilities.get_current_datetime_object(),
+                last_modified_by=request_user,
+            )
+            accounts_models.AdvanceFilterCountryRelationship.objects.filter(country=instance).update(
                 deleted=core_utilities.get_current_datetime_object(),
                 last_modified_by=request_user,
             )
@@ -244,7 +255,10 @@ class CountryDataViewSet(BaseModelViewSet):
                     deleted=core_utilities.get_current_datetime_object(),
                     last_modified_by=request_user,
                 )
-
+                accounts_models.AdvanceFilterCountryRelationship.objects.filter(country=country).update(
+                    deleted=core_utilities.get_current_datetime_object(),
+                    last_modified_by=request_user,
+                )
                 accounts_models.APIKeyCountryRelationship.objects.filter(country=country).update(
                     deleted=core_utilities.get_current_datetime_object(),
                     last_modified_by=request_user,

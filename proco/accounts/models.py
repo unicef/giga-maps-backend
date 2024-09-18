@@ -407,3 +407,199 @@ class DataLayerCountryRelationship(core_models.BaseModelMixin):
                              condition=Q(deleted=None),
                              name='unique_without_deleted'),
         ]
+
+
+class ColumnConfiguration(core_models.BaseModelMixin):
+    """
+    ColumnConfiguration
+        This class define model used to store the applicable columns for drop down selections.
+    Inherits : `BaseModel`
+    """
+
+    TYPE_INT = 'int'
+    TYPE_FLOAT = 'float'
+    TYPE_STR = 'str'
+    TYPE_BOOLEAN = 'boolean'
+
+    COLUMN_TYPE_CHOICES = (
+        (TYPE_INT, 'Integer'),
+        (TYPE_FLOAT, 'Float'),
+        (TYPE_STR, 'String'),
+        (TYPE_BOOLEAN, 'Boolean'),
+    )
+
+    name = models.CharField(
+        max_length=50,
+        null=False,
+        verbose_name='Column DB Name',
+        db_index=True,
+    )
+
+    label = models.CharField(
+        max_length=100,
+        null=False,
+        verbose_name='Column UI Name',
+        db_index=True,
+    )
+
+    type = models.CharField(
+        max_length=10,
+        choices=COLUMN_TYPE_CHOICES,
+        db_index=True,
+    )
+
+    description = models.CharField(max_length=500, null=True, blank=True)
+
+    table_name = models.CharField(
+        max_length=50,
+        null=False,
+        verbose_name='Table DB Name',
+        db_index=True,
+    )
+
+    table_alias = models.CharField(
+        max_length=100,
+        null=False,
+        verbose_name='Table Query Name',
+        db_index=True,
+    )
+
+    table_label = models.CharField(
+        max_length=100,
+        null=False,
+        verbose_name='Table UI Name',
+        db_index=True,
+    )
+
+    is_filter_applicable = models.BooleanField(default=False)
+    options = JSONField(null=True, default=dict)
+
+    class Meta:
+        ordering = ['last_modified_at']
+
+
+class AdvanceFilter(core_models.BaseModel):
+    """
+    AdvanceFilters
+        This class define model used to store Advance filter entity details.
+    Inherits : `BaseModel`
+    """
+
+    TYPE_DROPDOWN = 'DROPDOWN'
+    TYPE_DROPDOWN_MULTISELECT = 'DROPDOWN_MULTISELECT'
+    TYPE_RANGE = 'RANGE'
+    TYPE_INPUT = 'INPUT'
+    TYPE_BOOLEAN = 'BOOLEAN'
+
+    FILTER_TYPE_CHOICES = (
+        (TYPE_DROPDOWN, 'Dropdown'),
+        (TYPE_DROPDOWN_MULTISELECT, 'Dropdown with multi select'),
+        (TYPE_RANGE, 'Range'),
+        (TYPE_INPUT, 'Input'),
+        (TYPE_BOOLEAN, 'Boolean'),
+    )
+
+    FILTER_QUERY_PARAM_EXACT = 'exact'
+    FILTER_QUERY_PARAM_IEXACT = 'iexact'
+    FILTER_QUERY_PARAM_CONTAINS = 'contains'
+    FILTER_QUERY_PARAM_ICONTAINS = 'icontains'
+    FILTER_QUERY_PARAM_RANGE = 'range'
+    FILTER_QUERY_PARAM_ON = 'on'
+    FILTER_QUERY_PARAM_IN = 'in'
+
+    FILTER_QUERY_PARAM_CHOICES = (
+        (FILTER_QUERY_PARAM_EXACT, 'Exact match'),
+        (FILTER_QUERY_PARAM_IEXACT, 'Exact match by ignoring casing'),
+        (FILTER_QUERY_PARAM_CONTAINS, 'Contains value'),
+        (FILTER_QUERY_PARAM_ICONTAINS, 'Contains value by ignoring casing'),
+        (FILTER_QUERY_PARAM_RANGE, 'Inside range'),
+        (FILTER_QUERY_PARAM_ON, 'Yes/No choice'),
+        (FILTER_QUERY_PARAM_IN, 'In give list of values')
+    )
+
+    FILTER_STATUS_DRAFT = 'DRAFT'
+    FILTER_STATUS_PUBLISHED = 'PUBLISHED'
+    FILTER_STATUS_DISABLED = 'DISABLED'
+
+    STATUS_CHOICES = (
+        (FILTER_STATUS_DRAFT, 'In Draft'),
+        (FILTER_STATUS_PUBLISHED, 'Activated'),
+        (FILTER_STATUS_DISABLED, 'De-activated'),
+    )
+
+    # Unique
+    code = models.CharField(
+        max_length=255,
+        null=False,
+        verbose_name='Filter Code',
+        db_index=True,
+    )
+
+    name = models.CharField(
+        max_length=255,
+        null=False,
+        verbose_name='Filter Name',
+        db_index=True,
+    )
+
+    description = models.CharField(max_length=500, null=True, blank=True)
+
+    type = models.CharField(
+        max_length=50,
+        choices=FILTER_TYPE_CHOICES,
+        db_index=True,
+    )
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=FILTER_STATUS_DRAFT, db_index=True)
+    published_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        null=True,
+        related_name='filter_published_%(class)ss',
+        on_delete=models.DO_NOTHING,
+        verbose_name='Published By'
+    )
+    published_at = core_models.CustomDateTimeField(db_index=True, null=True, blank=True)
+
+    column_configuration = models.ForeignKey(ColumnConfiguration, related_name='filters', on_delete=models.DO_NOTHING)
+
+    options = JSONField(null=True, default=dict)
+
+    query_param_filter = models.CharField(
+        max_length=20,
+        choices=FILTER_QUERY_PARAM_CHOICES,
+        default=FILTER_QUERY_PARAM_IEXACT,
+    )
+
+    class Meta:
+        ordering = ['last_modified_at']
+        constraints = [
+            UniqueConstraint(fields=['code', 'deleted'],
+                             name='unique_with_deleted_for_advance_filters'),
+            UniqueConstraint(fields=['code'],
+                             condition=Q(deleted=None),
+                             name='unique_without_deleted_for_advance_filters'),
+        ]
+
+    def save(self, **kwargs):
+        self.code = str(self.code).upper()
+        super().save(**kwargs)
+
+
+class AdvanceFilterCountryRelationship(core_models.BaseModelMixin):
+    """
+    AdvanceFilterCountryRelationship
+        This model is used to store the Advance Filter and Country relationship.
+    """
+    advance_filter = models.ForeignKey(AdvanceFilter, related_name='active_countries', on_delete=models.DO_NOTHING)
+    country = models.ForeignKey(Country, related_name='active_filters', on_delete=models.DO_NOTHING)
+
+    class Meta:
+        ordering = ['last_modified_at']
+        constraints = [
+            UniqueConstraint(fields=['advance_filter', 'country', 'deleted'],
+                             name='unique_with_deleted_for_advance_filters_country'),
+            UniqueConstraint(fields=['advance_filter', 'country'],
+                             condition=Q(deleted=None),
+                             name='unique_without_deleted_for_advance_filters_country'),
+        ]

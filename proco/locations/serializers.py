@@ -6,8 +6,16 @@ from django.db.models.functions.text import Lower
 from rest_flex_fields.serializers import FlexFieldsModelSerializer
 from rest_framework import serializers
 
-from proco.accounts.models import DataLayerCountryRelationship, APIKeyCountryRelationship
-from proco.accounts.serializers import DataLayerCountryRelationshipSerializer
+from proco.accounts.models import (
+    AdvanceFilter,
+    APIKeyCountryRelationship,
+    AdvanceFilterCountryRelationship,
+    DataLayerCountryRelationship,
+)
+from proco.accounts.serializers import (
+    AdvanceFilterCountryRelationshipSerializer,
+    DataLayerCountryRelationshipSerializer,
+)
 from proco.connection_statistics.models import (
     CountryDailyStatus,
     CountryWeeklyStatus,
@@ -23,6 +31,7 @@ from proco.locations import exceptions as locations_exceptions
 from proco.locations.models import Country, CountryAdminMetadata
 from proco.schools.models import School
 from proco.schools.serializers import ExpandCountrySerializer
+
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -59,7 +68,7 @@ class ExpandCountryAdminMetadataSerializer(FlexFieldsModelSerializer):
         }
 
 
-class BaseCountrySerializer(serializers.ModelSerializer):
+class BaseCountrySerializer(FlexFieldsModelSerializer):
     map_preview = serializers.SerializerMethodField()
 
     admin_metadata = serializers.SerializerMethodField()
@@ -103,15 +112,16 @@ class CountrySerializer(BaseCountrySerializer):
     pass
 
 
-class CountryUpdateRetriveSerializer(serializers.ModelSerializer):
+class CountryUpdateRetrieveSerializer(serializers.ModelSerializer):
     """
-    CountryUpdateRetriveSerializer
+    CountryUpdateRetrieveSerializer
         Serializer to create Country.
     """
 
     benchmark_metadata = serializers.JSONField()
 
     active_layers_list = serializers.JSONField()
+    active_filters_list = serializers.JSONField()
 
     class Meta:
         model = Country
@@ -167,6 +177,7 @@ class CountryUpdateRetriveSerializer(serializers.ModelSerializer):
         ).order_by('-id').first()
 
         active_layers_list = validated_data.pop('active_layers_list', [])
+        active_filters_list = validated_data.pop('active_filters_list', [])
 
         if deleted_country_with_same_code_iso3_format:
             validated_data['deleted'] = None
@@ -194,6 +205,11 @@ class CountryUpdateRetriveSerializer(serializers.ModelSerializer):
 
             request_user = core_utilities.get_current_user(context=self.context)
             DataLayerCountryRelationship.objects.filter(country=country_instance).update(
+                deleted=core_utilities.get_current_datetime_object(),
+                last_modified_by=request_user,
+            )
+
+            AdvanceFilterCountryRelationship.objects.filter(country=country_instance).update(
                 deleted=core_utilities.get_current_datetime_object(),
                 last_modified_by=request_user,
             )
@@ -233,12 +249,26 @@ class CountryUpdateRetriveSerializer(serializers.ModelSerializer):
             data_layer_country_relationships.is_valid(raise_exception=True)
             data_layer_country_relationships.save()
 
+        for filter_dict in active_filters_list:
+            filter_country_data = {
+                'country': country_instance.id,
+                'advance_filter': filter_dict['advance_filter_id'],
+            }
+
+            filter_country_relationships = AdvanceFilterCountryRelationshipSerializer(
+                data=filter_country_data,
+                context=self.context,
+            )
+            filter_country_relationships.is_valid(raise_exception=True)
+            filter_country_relationships.save()
+
         return country_instance
 
     def update(self, instance, validated_data):
         country_instance = super().update(instance, validated_data)
 
         active_layers_list = validated_data.pop('active_layers_list', [])
+        active_filters_list = validated_data.pop('active_filters_list', [])
 
         request_user = core_utilities.get_current_user(context=self.context)
 
@@ -262,10 +292,28 @@ class CountryUpdateRetriveSerializer(serializers.ModelSerializer):
             data_layer_country_relationships.is_valid(raise_exception=True)
             data_layer_country_relationships.save()
 
+        AdvanceFilterCountryRelationship.objects.filter(country=country_instance).update(
+            deleted=core_utilities.get_current_datetime_object(),
+            last_modified_by=request_user,
+        )
+        for filter_dict in active_filters_list:
+            filter_country_data = {
+                'country': country_instance.id,
+                'advance_filter': filter_dict['advance_filter_id'],
+            }
+
+            filter_country_relationships = AdvanceFilterCountryRelationshipSerializer(
+                data=filter_country_data,
+                context=self.context,
+            )
+            filter_country_relationships.is_valid(raise_exception=True)
+            filter_country_relationships.save()
+
         return country_instance
 
     def to_representation(self, instance):
         active_layers_list = []
+        active_filters_list = []
 
         linked_layers = instance.active_layers.all()
         for relationship_instance in linked_layers:
@@ -274,7 +322,16 @@ class CountryUpdateRetriveSerializer(serializers.ModelSerializer):
                 'is_default': relationship_instance.is_default,
                 'data_sources': relationship_instance.data_sources,
             })
+
+        linked_filters = instance.active_filters.all()
+        for relationship_instance in linked_filters:
+            active_filters_list.append({
+                'advance_filter_id': relationship_instance.advance_filter_id,
+            })
+
         setattr(instance, 'active_layers_list', active_layers_list)
+        setattr(instance, 'active_filters_list', active_filters_list)
+
         return super().to_representation(instance)
 
 
@@ -337,6 +394,7 @@ class DetailCountrySerializer(BaseCountrySerializer):
     admin1_metadata = serializers.SerializerMethodField()
 
     active_layers_list = serializers.SerializerMethodField()
+    active_filters_list = serializers.SerializerMethodField()
 
     data_source = serializers.SerializerMethodField()
 
@@ -347,6 +405,7 @@ class DetailCountrySerializer(BaseCountrySerializer):
             'admin1_metadata',
             'last_weekly_status_id',
             'active_layers_list',
+            'active_filters_list',
         )
 
     def get_statistics(self, instance):
@@ -370,6 +429,16 @@ class DetailCountrySerializer(BaseCountrySerializer):
             })
 
         return active_layers_list
+
+    def get_active_filters_list(self, instance):
+        active_filters_list = []
+        linked_filters = instance.active_filters.all().filter(advance_filter__status=AdvanceFilter.FILTER_STATUS_PUBLISHED)
+        for relationship_instance in linked_filters:
+            active_filters_list.append({
+                'advance_filter_id': relationship_instance.advance_filter_id,
+            })
+
+        return active_filters_list
 
     def get_data_source(self, instance):
         data_source = instance.data_source
