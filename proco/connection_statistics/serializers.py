@@ -114,6 +114,12 @@ class SchoolDailyStatusSerializer(serializers.ModelSerializer):
         return obj.date.isocalendar()[2]
 
 
+class SchoolStatisticsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SchoolWeeklyStatus
+        fields = '__all__'
+
+
 class SchoolConnectivityStatusSerializer(serializers.ModelSerializer):
     country_name = serializers.ReadOnlyField(source='country.name')
 
@@ -190,7 +196,7 @@ class SchoolConnectivityStatusSerializer(serializers.ModelSerializer):
         return 'unknown'
 
     def get_statistics(self, instance):
-        school_weekly_data = SchoolWeeklyStatusSerializer(instance.last_weekly_status).data
+        school_weekly_data = SchoolStatisticsSerializer(instance.last_weekly_status).data
         if school_weekly_data:
             school_weekly_data['connectivity_status'] = self.get_connectivity_status(instance)
             school_weekly_data['connectivity_speed'] = self.get_live_avg(instance)
@@ -285,7 +291,7 @@ class SchoolCoverageStatusSerializer(serializers.ModelSerializer):
         return 'unknown'
 
     def get_statistics(self, instance):
-        school_weekly_data = SchoolWeeklyStatusSerializer(instance.last_weekly_status).data
+        school_weekly_data = SchoolStatisticsSerializer(instance.last_weekly_status).data
         if school_weekly_data:
             school_weekly_data['connectivity_status'] = self.get_connectivity_status(instance)
             school_weekly_data['connectivity_speed'] = round(school_weekly_data['connectivity_speed'] / 1000000, 2) if (
