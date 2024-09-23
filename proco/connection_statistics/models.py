@@ -227,6 +227,19 @@ class SchoolWeeklyStatus(ConnectivityStatistics, TimeStampedModel, models.Model)
     connectivity_govt_collection_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
     disputed_region = models.BooleanField(default=False)
 
+    num_students_girls = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_students_boys = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_students_other = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_teachers_female = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_teachers_male = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_tablets = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_robotic_equipment = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    computer_availability = models.NullBooleanField(default=None)
+    teachers_trained = models.NullBooleanField(default=None)
+    sustainable_business_model = models.NullBooleanField(default=None)
+    device_availability = models.NullBooleanField(default=None)
+
     objects = BaseManager()
 
     class Meta:
