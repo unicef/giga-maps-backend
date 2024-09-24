@@ -216,6 +216,8 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
     if task_instance:
         logger.debug('Not found running job for published rows handler task: {}'.format(task_key))
         updated_school_ids = []
+        created_school_ids = []
+
         new_published_records = sources_models.SchoolMasterData.objects.filter(
             status=sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED, is_read=False,
         )
@@ -251,7 +253,7 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                             layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN2,
                         ).first()
 
-                    school, _ = School.objects.update_or_create(
+                    school, created = School.objects.update_or_create(
                         giga_id_school=row.school_id_giga,
                         country=row.country,
                         defaults={
@@ -403,6 +405,8 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                     row.save()
 
                     updated_school_ids.append(school.id)
+                    if created:
+                        created_school_ids.append(school.id)
                 except Exception as ex:
                     logger.error('Error reported on publishing: {0}'.format(ex))
                     logger.error('Record: {0}'.format(row.__dict__))
@@ -411,6 +415,12 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
         if len(updated_school_ids) > 0:
             for i in range(0, len(updated_school_ids), 20):
                 populate_school_new_fields_task.delay(None, None, None, school_ids=updated_school_ids[i:i + 20])
+
+
+        for new_school_id in created_school_ids:
+            # As it's a new school added through School Master record publishing, add the school to search index
+            cmd_args = ['--update_index', '-school_id={0}'.format(new_school_id)]
+            call_command('index_rebuild_schools', *cmd_args)
 
         background_task_utilities.task_on_complete(task_instance)
     else:

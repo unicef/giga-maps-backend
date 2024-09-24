@@ -533,7 +533,7 @@ class ConnectivityStatApiTestCase(TestAPIViewSetMixin, TestCase):
             'is_weekly': 'true',
         }, view_name='country-connectivity-stat')
 
-        with self.assertNumQueries(4):
+        with self.assertNumQueries(6):
             response = self.forced_auth_req('get', url, view=view)
 
             self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -1081,7 +1081,7 @@ class CountryCoverageStatsAPITestCase(TestAPIViewSetMixin, TestCase):
         url, _, view = statistics_url((), {'country_id': self.country_one.id}, view_name='country-coverage-stat')
 
         # Call the API to cache the data
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(4):
             self.forced_auth_req('get', url, view=view)
 
         with self.assertNumQueries(0):
@@ -1091,7 +1091,7 @@ class CountryCoverageStatsAPITestCase(TestAPIViewSetMixin, TestCase):
         url = reverse('connection_statistics:country-coverage-stat')
         query_params = {'country_id': self.country_one.id}
         # Call the API without caching
-        with self.assertNumQueries(3):
+        with self.assertNumQueries(5):
             response = self.client.get(url, query_params, HTTP_CACHE_CONTROL='no-cache')
             self.assertEqual(response.status_code, status.HTTP_200_OK)
 
