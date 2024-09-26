@@ -260,6 +260,15 @@ def update_country_weekly_status(country: Country, date):
         country_status = CountryWeeklyStatus.objects.create(
             country=country, year=monday_year, week=monday_week_no,
         )
+
+        latest_entry = CountryWeeklyStatus.objects.all().filter(
+            country=country, year__lte=country_status.year, week__lt=country_status.week
+        ).order_by('-year', '-week').first()
+
+        if latest_entry:
+            country_status.integration_status = latest_entry.integration_status
+            country_status.save(update_fields=('integration_status',))
+
         created = True
 
     if created:
