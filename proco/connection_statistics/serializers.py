@@ -117,6 +117,9 @@ class SchoolDailyStatusSerializer(serializers.ModelSerializer):
 class SchoolConnectivityStatusSerializer(serializers.ModelSerializer):
     country_name = serializers.ReadOnlyField(source='country.name')
 
+    admin1_id = serializers.ReadOnlyField(source='admin1.id', default=None)
+    admin2_id = serializers.ReadOnlyField(source='admin2.id', default=None)
+
     admin1_name = serializers.ReadOnlyField(source='admin1.name', default='')
     admin2_name = serializers.ReadOnlyField(source='admin2.name', default='')
 
@@ -148,9 +151,11 @@ class SchoolConnectivityStatusSerializer(serializers.ModelSerializer):
             'live_avg',
             'live_avg_connectivity',
             'connectivity_status',
+            'admin1_id',
             'admin1_name',
             'admin1_code',
             'admin1_description_ui_label',
+            'admin2_id',
             'admin2_name',
             'admin2_code',
             'admin2_description_ui_label',
@@ -232,6 +237,9 @@ class SchoolCoverageStatusSerializer(serializers.ModelSerializer):
     country_name = serializers.ReadOnlyField(source='country.name')
     statistics = serializers.SerializerMethodField()
 
+    admin1_id = serializers.ReadOnlyField(source='admin1.id', default=None)
+    admin2_id = serializers.ReadOnlyField(source='admin2.id', default=None)
+
     admin1_name = serializers.ReadOnlyField(source='admin1.name', default='')
     admin2_name = serializers.ReadOnlyField(source='admin2.name', default='')
 
@@ -250,9 +258,11 @@ class SchoolCoverageStatusSerializer(serializers.ModelSerializer):
             'name',
             'external_id',
             'giga_id_school',
+            'admin1_id',
             'admin1_name',
             'admin1_code',
             'admin1_description_ui_label',
+            'admin2_id',
             'admin2_name',
             'admin2_code',
             'admin2_description_ui_label',
