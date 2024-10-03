@@ -32,11 +32,6 @@ stages:
   jobs:
   - job: Test
     steps:
-    - task: UsePythonVersion@0
-      displayName: Building Razor with $(pythonVersion)
-      inputs:
-        versionSpec: $(pythonVersion)
-        addToPath: true
     - task: Bash@3
       displayName: Unit Tests
       condition: eq(variables['Build.SourceBranch'], 'refs/heads/develop')
@@ -79,6 +74,11 @@ stages:
   - job: Build
     dependsOn: Test
     steps:
+    - task: UsePythonVersion@0
+      displayName: Building Razor with $(pythonVersion)
+      inputs:
+        versionSpec: $(pythonVersion)
+        addToPath: true
     - task: Docker@2
       displayName: Dev - Build and Push image
       inputs:
@@ -168,7 +168,20 @@ stages:
         DockerNamespace: uniconnectacr.azurecr.io
         DockerRepository: 'dev/project-connect-backend-v2'
         DockerImageTag: '$(Build.BuildId)'
-        StartupCommand: '/bin/bash celery.sh --loglevel=DEBUG'    
+        StartupCommand: '/bin/bash celery.sh --loglevel=DEBUG'   
+- stage: stg_deploy
+  displayName: Deploy To Staging
+  trigger: manual
+  pool: 
+    vmImage: 'ubuntu-22.04'
+  jobs:
+  - job: Staging
+    condition: and(
+        succeeded(),
+        eq(variables['Build.SourceBranch'], 'refs/heads/staging')
+      )
+    steps: 
+    - script: echo 'Staging Deployment, will be enabled post Dev deployment success.' 
 - stage: prod_deploy
   displayName: Deploy To Prouction
   trigger: manual
@@ -176,6 +189,9 @@ stages:
     vmImage: 'ubuntu-22.04'
   jobs:
   - job: Production
-    condition: eq(variables['Build.SourceBranch'], 'refs/heads/main')
+    condition: and(
+        succeeded(),
+        startsWith(variables['Build.SourceBranch'], 'refs/tags/release-')
+      )
     steps: 
     - script: echo 'Production Deployment, will be enabled post Dev deployment success.'
