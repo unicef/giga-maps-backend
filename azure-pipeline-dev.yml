@@ -14,8 +14,6 @@ trigger:
 
 name: $(SourceBranchName).$(Build.BuildId).$(Date:yyyyMMdd).$(Rev:r)
 
-pool:
-  vmImage: 'ubuntu-22.04'
 variables:
   dockerRegistryServiceConnection: $(DOCKER_SERVICE_CONNECTION)
   dockerfilePath: './Dockerfile'
@@ -26,93 +24,158 @@ variables:
   tag: '$(Build.BuildId)'
   pythonVersion: '3.8'
 
-steps:
-# Use a specific Python version
-- task: UsePythonVersion@0
-  displayName: Building Razor with $(pythonVersion)
-  inputs:
-     versionSpec: $(pythonVersion)
-     addToPath: true
+stages:
+- stage: build_test
+  displayName: Build and Test
+  pool:
+    vmImage: 'ubuntu-22.04'
+  jobs:
+  - job: Test
+    steps:
+    - task: UsePythonVersion@0
+      displayName: Building Razor with $(pythonVersion)
+      inputs:
+        versionSpec: $(pythonVersion)
+        addToPath: true
+    - task: Bash@3
+      displayName: Unit Tests
+      condition: eq(variables['Build.SourceBranch'], 'refs/heads/develop')
+      inputs:
+        targetType: 'inline'
+        script: |
+          sudo systemctl start postgresql.service
+          sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'root';"
+          wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+          echo "deb http://apt.postgresql.org/pub/repos/apt/ `lsb_release -cs`-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          curl -fsSL https://packages.redis.io/gpg | sudo gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/redis.list
+          sudo apt update
+          sudo apt install postgis postgresql-14-postgis-3
+          sudo apt-get install redis
+          sudo apt install binutils libproj-dev gdal-bin
+          sudo pip install pipenv
+          pipenv install --ignore-pipfile --dev
+          ./scripts/runtests.sh
+      continueOnError: true
+    - task: Bash@3
+      displayName: Sonar Scan
+      condition: eq(variables['Build.SourceBranch'], 'refs/heads/develop')
+      inputs:
+        targetType: 'inline'
+        script: |
+          export SONAR_SCANNER_VERSION=5.0.1.3006
+          export SONAR_SCANNER_HOME=$HOME/.sonar/sonar-scanner-$SONAR_SCANNER_VERSION-linux
+          curl --create-dirs -sSLo $HOME/.sonar/sonar-scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-$SONAR_SCANNER_VERSION-linux.zip
+          unzip -o $HOME/.sonar/sonar-scanner.zip -d $HOME/.sonar/
+          export PATH=$SONAR_SCANNER_HOME/bin:$PATH
+          export SONAR_SCANNER_OPTS="-server"
+          export SONAR_TOKEN=$(SONAR_TOKEN)
+          sonar-scanner \
+            -Dsonar.projectKey=${{ lower(variables['Build.DefinitionName']) }} \
+            -Dsonar.sources=proco \
+            -Dsonar.host.url=$(SONAR_HOST) \
+            -Dsonar.python.coverage.reportPaths=coverage.xml \
+            -Dsonar.exclusions=**/migrations/**,**/proco_data_migrations/**,**/tests/**,**/proco/**/admin.py,**/dailycheckapp_contact/**,**/realtime_dailycheckapp/**,**/realtime_unicef/**,**/management/commands/**
+  - job: Build
+    dependsOn: Test
+    steps:
+    - task: Docker@2
+      displayName: Dev - Build and Push image
+      inputs:
+        command: buildAndPush
+        repository: $(imageRepositoryDev)
+        dockerfile: $(dockerfilePath)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: |
+          $(tag)
+    - task: Docker@2
+      displayName: Stg - Build and Push image
+      condition:
+          and(
+            succeeded(),
+            eq(variables['Build.SourceBranch'], 'refs/heads/staging')
+          )
+      inputs:
+        command: buildAndPush
+        repository: $(imageRepositoryStg)
+        dockerfile: $(dockerfilePath)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: |
+          $(tag)
+    - task: Docker@2
+      displayName: Prod - Build and Push image
+      condition:
+          and(
+            succeeded(),
+            startsWith(variables['Build.SourceBranch'], 'refs/tags/release-')
+          )
+      inputs:
+        command: buildAndPush
+        repository: $(imageRepositoryProd)
+        dockerfile: $(dockerfilePath)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: |
+          $(tag)
 
-- task: Bash@3
-  displayName: Unit Tests
-  condition: eq(variables['Build.SourceBranch'], 'refs/heads/develop')
-  inputs:
-    targetType: 'inline'
-    script: |
-      sudo systemctl start postgresql.service
-      sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'root';"
-      wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
-      echo "deb http://apt.postgresql.org/pub/repos/apt/ `lsb_release -cs`-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
-      curl -fsSL https://packages.redis.io/gpg | sudo gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg
-      echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/redis.list
-      sudo apt update
-      sudo apt install postgis postgresql-14-postgis-3
-      sudo apt-get install redis
-      sudo apt install binutils libproj-dev gdal-bin
-      sudo pip install pipenv
-      pipenv install --ignore-pipfile --dev
-      ./scripts/runtests.sh
-  continueOnError: true
-
-# Sonar Scan
-- task: Bash@3
-  displayName: Sonar Scan
-  condition: eq(variables['Build.SourceBranch'], 'refs/heads/develop')
-  inputs:
-    targetType: 'inline'
-    script: |
-      export SONAR_SCANNER_VERSION=5.0.1.3006
-      export SONAR_SCANNER_HOME=$HOME/.sonar/sonar-scanner-$SONAR_SCANNER_VERSION-linux
-      curl --create-dirs -sSLo $HOME/.sonar/sonar-scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-$SONAR_SCANNER_VERSION-linux.zip
-      unzip -o $HOME/.sonar/sonar-scanner.zip -d $HOME/.sonar/
-      export PATH=$SONAR_SCANNER_HOME/bin:$PATH
-      export SONAR_SCANNER_OPTS="-server"
-      export SONAR_TOKEN=$(SONAR_TOKEN)
-      sonar-scanner \
-        -Dsonar.projectKey=${{ lower(variables['Build.DefinitionName']) }} \
-        -Dsonar.sources=proco \
-        -Dsonar.host.url=$(SONAR_HOST) \
-        -Dsonar.python.coverage.reportPaths=coverage.xml \
-        -Dsonar.exclusions=**/migrations/**,**/proco_data_migrations/**,**/tests/**,**/proco/**/admin.py,**/dailycheckapp_contact/**,**/realtime_dailycheckapp/**,**/realtime_unicef/**,**/management/commands/**
-
-# Docker build and push
-- task: Docker@2
-  displayName: Dev - Build and Push image
-  inputs:
-    command: buildAndPush
-    repository: $(imageRepositoryDev)
-    dockerfile: $(dockerfilePath)
-    containerRegistry: $(dockerRegistryServiceConnection)
-    tags: |
-      $(tag)
-
-- task: Docker@2
-  displayName: Stg - Build and Push image
-  condition:
-      and(
-        succeeded(),
-        eq(variables['Build.SourceBranch'], 'refs/heads/staging')
-      )
-  inputs:
-    command: buildAndPush
-    repository: $(imageRepositoryStg)
-    dockerfile: $(dockerfilePath)
-    containerRegistry: $(dockerRegistryServiceConnection)
-    tags: |
-      $(tag)
-
-- task: Docker@2
-  displayName: Prod - Build and Push image
-  condition:
-      and(
-        succeeded(),
-        startsWith(variables['Build.SourceBranch'], 'refs/tags/release-')
-      )
-  inputs:
-    command: buildAndPush
-    repository: $(imageRepositoryProd)
-    dockerfile: $(dockerfilePath)
-    containerRegistry: $(dockerRegistryServiceConnection)
-    tags: |
-      $(tag)
+- stage: dev_deploy
+  displayName: Deploy To Development
+  dependsOn: build_test
+  pool: 
+    vmImage: 'ubuntu-22.04'
+  jobs:
+  - job: Development
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/develop')
+    steps: 
+    - script: |
+        sudo apt install redis-tools -y
+        sudo redis-cli -u $(REDIS_URL_DEV) FLUSHALL
+      displayName: 'Install and Flush Redis CLI'
+    - task: AzureRmWebAppDeployment@4
+      displayName: 'Azure App Service Deploy: uni-ooi-giga-maps-backend'
+      inputs:
+        azureSubscription: 'UNI_GIGA RS-UNI-GIGA-MAPS'
+        appType: webAppContainer
+        WebAppName: 'uni-ooi-giga-maps-backend'
+        deployToSlotOrASE: true
+        ResourceGroupName: 'RS-UNI-GIGA-MAPS'
+        SlotName: dev
+        DockerNamespace: uniconnectacr.azurecr.io
+        DockerRepository: 'dev/project-connect-backend-v2'
+        DockerImageTag: '$(Build.BuildId)'
+        StartupCommand: '/bin/bash web-worker.sh'
+    - task: AzureRmWebAppDeployment@4
+      displayName: 'Azure App Service Deploy: uni-ooi-giga-maps-celery-b'
+      inputs:
+        azureSubscription: 'UNI_GIGA RS-UNI-GIGA-MAPS'
+        appType: webAppContainer
+        WebAppName: 'uni-ooi-giga-maps-celery-b'
+        deployToSlotOrASE: true
+        ResourceGroupName: 'RS-UNI-GIGA-MAPS'
+        SlotName: dev
+        DockerNamespace: uniconnectacr.azurecr.io
+        DockerRepository: 'dev/project-connect-backend-v2'
+        DockerImageTag: '$(Build.BuildId)'
+        StartupCommand: '/bin/bash celerybeat.sh --loglevel=DEBUG' 
+    - task: AzureRmWebAppDeployment@4
+      displayName: 'Azure App Service Deploy: uni-ooi-giga-maps-celery-w'
+      inputs:
+        azureSubscription: 'UNI_GIGA RS-UNI-GIGA-MAPS'
+        appType: webAppContainer
+        WebAppName: 'uni-ooi-giga-maps-celery-w'
+        deployToSlotOrASE: true
+        ResourceGroupName: 'RS-UNI-GIGA-MAPS'
+        SlotName: dev
+        DockerNamespace: uniconnectacr.azurecr.io
+        DockerRepository: 'dev/project-connect-backend-v2'
+        DockerImageTag: '$(Build.BuildId)'
+        StartupCommand: '/bin/bash celery.sh --loglevel=DEBUG'    
+- stage: prod_deploy
+  displayName: Deploy To Prouction
+  trigger: manual
+  pool: 
+    vmImage: 'ubuntu-22.04'
+  jobs:
+  - job: Production
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/main')
+    steps: 
+    - script: echo 'Production Deployment, will be enabled post Dev deployment success.'
