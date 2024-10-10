@@ -10,9 +10,9 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        # migrations.AddField(
-        #     model_name='schoolweeklystatus',
-        #     name='download_speed_benchmark',
-        #     field=models.FloatField(blank=True, default=None, null=True),
-        # ),
+        migrations.AddField(
+            model_name='schoolweeklystatus',
+            name='download_speed_benchmark',
+            field=models.FloatField(blank=True, default=None, null=True),
+        ),
     ]

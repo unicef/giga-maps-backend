@@ -1125,35 +1125,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
     def get_school_view_statistics_info_query(self):
         query = """
-        SELECT sws.school_id,
-            sws.id,
-            sws.num_students,
-            sws.num_teachers,
-            sws.num_classroom,
-            sws.num_latrines,
-            sws.running_water,
-            sws.electricity_availability,
-            sws.computer_lab,
-            sws.num_computers,
-            sws.connectivity_type,
-            sws.connectivity,
-            sws.coverage_availability,
-            sws.coverage_type,
-            sws.download_speed_contracted,
-            sws.electricity_type,
-            sws.fiber_node_distance,
-            sws.microwave_node_distance,
-            sws.nearest_gsm_distance,
-            sws.nearest_lte_distance,
-            sws.nearest_umts_distance,
-            sws.num_adm_personnel,
-            sws.num_computers_desired,
-            sws.pop_within_1km,
-            sws.pop_within_2km,
-            sws.pop_within_3km,
-            sws.schools_within_1km,
-            sws.schools_within_2km,
-            sws.schools_within_3km
+        SELECT sws.*
         FROM "schools_school"
         INNER JOIN connection_statistics_schoolweeklystatus sws
             ON "schools_school"."last_weekly_status_id" = sws."id"
