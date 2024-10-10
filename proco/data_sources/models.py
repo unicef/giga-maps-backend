@@ -106,6 +106,22 @@ class SchoolMasterData(TimeStampedModel, models.Model):
 
     download_speed_benchmark = models.FloatField(blank=True, default=None, null=True)  # download_speed_benchmark
 
+    # New fields on 23rd Sept
+    computer_availability = models.CharField(blank=True, null=True, max_length=255)  # computer_availability
+
+    num_students_girls = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_students_girls
+    num_students_boys = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_students_boys
+    num_students_other = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_students_other
+    num_teachers_female = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_teachers_female
+    num_teachers_male = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_teachers_male
+
+    teachers_trained  = models.CharField(blank=True, null=True, max_length=255)  # teachers_trained
+    sustainable_business_model = models.CharField(blank=True, null=True, max_length=255)  # sustainable_business_model
+    device_availability = models.CharField(blank=True, null=True, max_length=255)  # device_availability
+
+    num_tablets = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_tablets
+    num_robotic_equipment = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_robotic_equipment
+
     # No Mapping
     connectivity = models.CharField(blank=True, null=True, max_length=255)
 

@@ -376,6 +376,23 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                         # convert Mbps to bps
                         school_weekly.download_speed_benchmark = download_speed_benchmark * 1000 * 1000
 
+                    school_weekly.num_students_girls = row.num_students_girls
+                    school_weekly.num_students_boys = row.num_students_boys
+                    school_weekly.num_students_other = row.num_students_other
+                    school_weekly.num_teachers_female = row.num_teachers_female
+                    school_weekly.num_teachers_male = row.num_teachers_male
+                    school_weekly.num_tablets = row.num_tablets
+                    school_weekly.num_robotic_equipment = row.num_robotic_equipment
+
+                    school_weekly.computer_availability = None if core_utilities.is_blank_string(
+                        row.computer_availability) else str(row.computer_availability).lower() in true_choices
+                    school_weekly.teachers_trained = None if core_utilities.is_blank_string(
+                        row.teachers_trained) else str(row.teachers_trained).lower() in true_choices
+                    school_weekly.sustainable_business_model = None if core_utilities.is_blank_string(
+                        row.sustainable_business_model) else str(row.sustainable_business_model).lower() in true_choices
+                    school_weekly.device_availability = None if core_utilities.is_blank_string(
+                        row.device_availability) else str(row.device_availability).lower() in true_choices
+
                     school_weekly.save()
 
                     rt_registered = None

@@ -234,6 +234,19 @@ def aggregate_school_daily_status_to_school_weekly_status(country, date) -> bool
 
                 school_weekly.download_speed_benchmark = prev_weekly.download_speed_benchmark
 
+                school_weekly.num_students_girls = prev_weekly.num_students_girls
+                school_weekly.num_students_boys = prev_weekly.num_students_boys
+                school_weekly.num_students_other = prev_weekly.num_students_other
+                school_weekly.num_teachers_female = prev_weekly.num_teachers_female
+                school_weekly.num_teachers_male = prev_weekly.num_teachers_male
+                school_weekly.num_tablets = prev_weekly.num_tablets
+                school_weekly.num_robotic_equipment = prev_weekly.num_robotic_equipment
+
+                school_weekly.computer_availability = prev_weekly.computer_availability
+                school_weekly.teachers_trained = prev_weekly.teachers_trained
+                school_weekly.sustainable_business_model = prev_weekly.sustainable_business_model
+                school_weekly.device_availability = prev_weekly.device_availability
+
         school_weekly.save()
 
     return updated
