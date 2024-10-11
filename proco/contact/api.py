@@ -7,8 +7,8 @@ from rest_framework.filters import SearchFilter
 from rest_framework.generics import CreateAPIView
 from rest_framework.response import Response
 
+from proco.contact import serializers as contact_serializers
 from proco.contact.models import ContactMessage
-from proco.contact.serializers import ContactSerializer
 from proco.core import permissions as core_permissions
 from proco.core.viewsets import BaseModelViewSet
 from proco.utils.error_message import delete_succ_mess
@@ -18,7 +18,7 @@ from proco.utils.log import action_log
 
 class ContactAPIView(BaseModelViewSet):
     model = ContactMessage
-    serializer_class = ContactSerializer
+    serializer_class = contact_serializers.ContactSerializer
     permission_classes = (
         core_permissions.IsUserAuthenticated,
         core_permissions.CanViewContactMessage,
@@ -30,11 +30,13 @@ class ContactAPIView(BaseModelViewSet):
     )
     ordering_field_names = ['-created']
     apply_query_pagination = True
-    search_fields = ('id', 'full_name', 'purpose', 'organisation',)
+    search_fields = ('id', 'full_name', 'purpose', 'organisation', 'email', 'category')
 
     filterset_fields = {
         'id': ['exact', 'in'],
         'full_name': ['exact', 'in'],
+        'email': ['exact', 'in'],
+        'category': ['exact', 'in'],
     }
 
     def destroy(self, request, *args, **kwargs):
@@ -55,6 +57,6 @@ class ContactAPIView(BaseModelViewSet):
 
 
 class CreateContactAPIView(CreateAPIView):
-    serializer_class = ContactSerializer
+    serializer_class = contact_serializers.CreateContactSerializer
 
     permission_classes = (permissions.AllowAny,)
