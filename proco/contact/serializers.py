@@ -3,6 +3,12 @@ from rest_framework import serializers
 from proco.contact.models import ContactMessage
 from proco.core.utils import is_blank_string
 
+class CreateContactSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = ContactMessage
+        fields = '__all__'
+
 
 class ContactSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
@@ -18,4 +24,4 @@ class ContactSerializer(serializers.ModelSerializer):
         return instance.full_name + ' (' + instance.email + ')'
 
     def get_purpose(self, instance):
-        return dict(ContactMessage.CATEGORY_CHOICES).get(instance.category) + ': ' + instance.purpose
+        return dict(ContactMessage.CATEGORY_CHOICES).get(instance.category, instance.category) + ': ' + instance.purpose
