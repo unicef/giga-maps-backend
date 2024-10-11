@@ -1182,7 +1182,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         FROM "schools_school"
         {school_weekly_join}
         LEFT JOIN connection_statistics_schoolweeklystatus sws ON "schools_school"."last_weekly_status_id" = sws."id"
-        WHERE "schools_school"."deleted" IS NULL AND sws."deleted" IS NULL
+        WHERE "schools_school"."deleted" IS NULL
         {country_condition}
         {admin1_condition}
         {school_condition}

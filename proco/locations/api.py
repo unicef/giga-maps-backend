@@ -326,7 +326,7 @@ class CountrySearchStatListAPIView(CachedListMixin, ListAPIView):
         This class is used to list all Countries along with Admin 1 and Admin2 names.
         Inherits: ListAPIView
     """
-    model = School
+    model = Country
 
     base_auth_permissions = (
         permissions.AllowAny,
@@ -338,53 +338,53 @@ class CountrySearchStatListAPIView(CachedListMixin, ListAPIView):
         queryset = self.model.objects.all()
 
         qs = queryset.values(
-            'country__id', 'country__name', 'country__code', 'country__last_weekly_status__integration_status',
-            'admin1__id', 'admin1__name', 'admin1__description', 'admin1__description_ui_label',
-            'admin1__giga_id_admin',
-            'admin2__id', 'admin2__name', 'admin2__description', 'admin2__description_ui_label',
-            'admin2__giga_id_admin',
+            'id', 'name', 'code', 'last_weekly_status__integration_status',
+            'schools__admin1__id', 'schools__admin1__name', 'schools__admin1__description', 'schools__admin1__description_ui_label',
+            'schools__admin1__giga_id_admin',
+            'schools__admin2__id', 'schools__admin2__name', 'schools__admin2__description', 'schools__admin2__description_ui_label',
+            'schools__admin2__giga_id_admin',
         ).annotate(
-            school_count=Count('id'),
-        ).order_by('country__name', 'admin1__name', 'admin2__name')
+            school_count=Count('schools__id'),
+        ).order_by('name', 'schools__admin1__name', 'schools__admin2__name')
 
         qs = qs.annotate(
             custom_order=Case(
-                When(country__last_weekly_status__integration_status=3, then=Value(1)),
-                When(country__last_weekly_status__integration_status=2, then=Value(2)),
-                When(country__last_weekly_status__integration_status=1, then=Value(3)),
-                When(country__last_weekly_status__integration_status=0, then=Value(4)),
-                When(country__last_weekly_status__integration_status=5, then=Value(5)),
-                When(country__last_weekly_status__integration_status=4, then=Value(6)),
+                When(last_weekly_status__integration_status=3, school_count__gt=0, then=Value(1)),
+                When(last_weekly_status__integration_status=2, school_count__gt=0, then=Value(2)),
+                When(last_weekly_status__integration_status=1, school_count__gt=0, then=Value(3)),
+                When(last_weekly_status__integration_status=0, school_count__gt=0, then=Value(4)),
+                When(last_weekly_status__integration_status=5, school_count__gt=0, then=Value(5)),
+                When(last_weekly_status__integration_status=4, school_count__gt=0, then=Value(6)),
                 default=Value(7),
                 output_field=IntegerField(),
             ),
-        ).order_by('custom_order', 'country__name', 'admin1__name', 'admin2__name')
+        ).order_by('custom_order', 'name', 'schools__admin1__name', 'schools__admin2__name')
 
         return qs
 
     def _format_result(self, qry_data):
         data = OrderedDict()
         for resp_data in qry_data:
-            country_id = resp_data.get('country__id')
-            admin1_name = 'Unknown' if core_utilities.is_blank_string(resp_data['admin1__name']) else resp_data[
-                'admin1__name']
-            admin2_name = resp_data['admin2__name']
+            country_id = resp_data.get('id')
+            admin1_name = 'Unknown' if core_utilities.is_blank_string(resp_data['schools__admin1__name']) else resp_data[
+                'schools__admin1__name']
+            admin2_name = resp_data['schools__admin2__name']
 
             country_data = data.get(country_id, {
                 'country_id': country_id,
-                'country_name': resp_data.get('country__name'),
-                'country_code': resp_data.get('country__code'),
-                'integration_status': resp_data.get('country__last_weekly_status__integration_status'),
+                'country_name': resp_data.get('name'),
+                'country_code': resp_data.get('code'),
+                'integration_status': resp_data.get('last_weekly_status__integration_status'),
                 'data': OrderedDict(),
             })
 
             # If admin 1 name exist in response
             admin1_name_data = country_data['data'].get(admin1_name, {
                 'admin1_name': admin1_name,
-                'admin1_id': resp_data.get('admin1__id'),
-                'admin1_description': resp_data.get('admin1__description'),
-                'admin1_description_ui_label': resp_data.get('admin1__description_ui_label'),
-                'admin1_code': resp_data.get('admin1__giga_id_admin'),
+                'admin1_id': resp_data.get('schools__admin1__id'),
+                'admin1_description': resp_data.get('schools__admin1__description'),
+                'admin1_description_ui_label': resp_data.get('schools__admin1__description_ui_label'),
+                'admin1_code': resp_data.get('schools__admin1__giga_id_admin'),
                 'data': OrderedDict(),
             })
             if core_utilities.is_blank_string(admin2_name):
@@ -395,10 +395,10 @@ class CountrySearchStatListAPIView(CachedListMixin, ListAPIView):
                 admin2_name_data = admin2_data.get(admin2_name, {
                     'type': 'Admin',
                     'admin2_name': admin2_name,
-                    'admin2_id': resp_data.get('admin2__id'),
-                    'admin2_description': resp_data.get('admin2__description'),
-                    'admin2_description_ui_label': resp_data.get('admin2__description_ui_label'),
-                    'admin2_code': resp_data.get('admin2__giga_id_admin'),
+                    'admin2_id': resp_data.get('schools__admin2__id'),
+                    'admin2_description': resp_data.get('schools__admin2__description'),
+                    'admin2_description_ui_label': resp_data.get('schools__admin2__description_ui_label'),
+                    'admin2_code': resp_data.get('schools__admin2__giga_id_admin'),
                     'data': OrderedDict(),
                 })
                 admin2_name_data['school_count'] = resp_data.get('school_count', 0)
