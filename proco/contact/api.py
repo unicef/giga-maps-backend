@@ -30,11 +30,13 @@ class ContactAPIView(BaseModelViewSet):
     )
     ordering_field_names = ['-created']
     apply_query_pagination = True
-    search_fields = ('id', 'full_name', 'purpose', 'organisation',)
+    search_fields = ('id', 'full_name', 'purpose', 'organisation', 'email', 'category')
 
     filterset_fields = {
         'id': ['exact', 'in'],
         'full_name': ['exact', 'in'],
+        'email': ['exact', 'in'],
+        'category': ['exact', 'in'],
     }
 
     def destroy(self, request, *args, **kwargs):

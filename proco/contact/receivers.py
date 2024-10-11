@@ -10,9 +10,10 @@ from proco.contact.models import ContactMessage
 
 @receiver(post_save, sender=ContactMessage)
 def send_email_notification(instance, created=False, **kwargs):
-    if created and config.CONTACT_EMAIL:
+    if created and len(config.CONTACT_EMAIL) > 0:
         send_templated_mail(
-            '/contact_email', settings.DEFAULT_FROM_EMAIL, [config.CONTACT_EMAIL], context={
+            '/contact_email', settings.DEFAULT_FROM_EMAIL, config.CONTACT_EMAIL, context={
                 'contact_message': instance,
+                'project_title': settings.PROJECT_FULL_NAME or settings.PROJECT_SHORT_NAME,
             },
         )
