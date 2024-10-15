@@ -17,7 +17,6 @@ from rest_framework.filters import SearchFilter
 from rest_framework.response import Response
 from rest_framework.utils.urls import remove_query_param
 from rest_framework.views import APIView
-from rest_framework.filters import SearchFilter
 
 from proco.accounts import exceptions as accounts_exceptions
 from proco.accounts import models as accounts_models
@@ -27,6 +26,7 @@ from proco.accounts.config import app_config as account_config
 from proco.connection_statistics import models as statistics_models
 from proco.connection_statistics.config import app_config as statistics_configs
 from proco.connection_statistics.models import SchoolWeeklyStatus
+from proco.contact.models import ContactMessage
 from proco.core import db_utils as db_utilities
 from proco.core import permissions as core_permissions
 from proco.core import utils as core_utilities
@@ -314,6 +314,7 @@ class AppStaticConfigurationsViewSet(APIView):
             'FILTER_TYPE_CHOICES': dict(accounts_models.AdvanceFilter.FILTER_TYPE_CHOICES),
             'FILTER_QUERY_PARAM_CHOICES': dict(accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_CHOICES),
             'FILTER_STATUS_CHOICES': dict(accounts_models.AdvanceFilter.STATUS_CHOICES),
+            'CONTACT_MESSAGE_CATEGORY_CHOICES': dict(ContactMessage.CATEGORY_CHOICES),
         }
 
         return Response(data=static_data)

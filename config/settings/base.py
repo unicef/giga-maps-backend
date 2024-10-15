@@ -359,7 +359,7 @@ CONSTANCE_ADDITIONAL_FIELDS = {
     }],
 }
 CONSTANCE_CONFIG = {
-    'CONTACT_EMAIL': (env('CONTACT_EMAIL', default=''), 'Email to receive contact messages', 'email_input'),
+    'CONTACT_EMAIL': (env.list('CONTACT_EMAIL', default=[]), 'Email to receive contact messages', 'email_input'),
 }
 
 # Cache control headers

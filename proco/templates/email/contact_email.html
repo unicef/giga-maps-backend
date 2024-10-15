@@ -1,10 +1,12 @@
-{% block subject %}{{contact_message.full_name}}: {{contact_message.purpose}}{% endblock %}
+{% block subject %}{{project_title}} - {{contact_message.full_name}}: {{contact_message.purpose}}{% endblock %}
 
 {% block html %}
 <p>
     Message from: {{contact_message.full_name}}.<br />
     Organisation: {{contact_message.organisation}}.<br />
     Purpose: {{contact_message.purpose}}.<br />
+    {% if contact_message.email %}Email: {{contact_message.email}}.<br />{% endif %}
+    Category: {{contact_message.category}}.<br />
 </p>
 <p>
     Message text: {{contact_message.message}}
