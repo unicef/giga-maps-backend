@@ -1,10 +1,11 @@
-import re
 import logging
+import re
 from datetime import datetime, time
 
 from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied
+from django.core.management import call_command
 from django.db import connection
 from django.db.models.functions.text import Lower
 from django.http import HttpResponse
@@ -572,6 +573,11 @@ class AdminViewSchoolAPIViewSet(BaseModelViewSet):
             if data.is_valid():
                 data.save()
                 action_log(request, [data.data], 1, '', self.model, field_name='name')
+
+                # As it's a new school added through Admin page, add the school to search index
+                cmd_args = ['--update_index', '-school_id={0}'.format(data.data['id'])]
+                call_command('index_rebuild_schools', *cmd_args)
+
                 return Response(data.data)
             return Response(data.errors, status=rest_status.HTTP_502_BAD_GATEWAY)
         except School.DoesNotExist:

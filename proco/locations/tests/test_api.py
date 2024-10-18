@@ -88,7 +88,12 @@ class CountryApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertIn('integration_status', response.data[0])
 
     def test_country_detail(self):
-        with self.assertNumQueries(4):
+        # 1. Get the country details
+        # 2. Get country admin0 details
+        # 3. Get all admin1 of country
+        # 4. Active data layers
+        # 5. Active filters
+        with self.assertNumQueries(5):
             response = self._test_retrieve(
                 user=None, instance=self.country_one,
             )

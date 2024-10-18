@@ -332,9 +332,11 @@ def get_giga_filter_fields(request):
 
 
 def get_filter_sql(request, filter_key, table_name):
-    filter_fields = get_giga_filter_fields(request)
     query_params = request.query_params.dict()
+    if len(query_params) == 0:
+        return ''
 
+    filter_fields = get_giga_filter_fields(request)
     advance_filters = set(filter_fields.get(filter_key, [])) & set(query_params.keys())
 
     sql_list = []

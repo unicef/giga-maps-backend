@@ -77,11 +77,19 @@ class Command(BaseCommand):
                     elif source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP:
                         live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
 
-                # country_ids = data_layer_instance.applicable_countries
+                applicable_country_ids = data_layer_instance.applicable_countries
                 parameter_col = data_sources.first().data_source_column
 
                 parameter_column_name = str(parameter_col['name'])
                 parameter_column_type = str(parameter_col['type'])
+
+                accounts_models.DataLayerCountryRelationship.objects.filter(
+                    data_layer=data_layer_instance,
+                ).exclude(
+                    country_id__in=applicable_country_ids,
+                ).update(
+                    is_applicable=False,
+                )
 
                 if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
                     sql = """
@@ -103,12 +111,19 @@ class Command(BaseCommand):
                                                                                   label='DataLayerCountryRelationship')
 
                     for country_id_has_layer_data in all_country_ids_has_layer_data:
+                        country_id = country_id_has_layer_data['country_id']
+
+                        is_applicable = True
+                        if len(applicable_country_ids) > 0 and country_id not in applicable_country_ids:
+                            is_applicable = False
+
                         relationship_instance, created = (
                             accounts_models.DataLayerCountryRelationship.objects.update_or_create(
                                 data_layer=data_layer_instance,
-                                country_id=country_id_has_layer_data['country_id'],
+                                country_id=country_id,
                                 defaults={
                                     # 'is_default': not data_layer_instance.created_by,
+                                    'is_applicable': is_applicable,
                                     'last_modified_at': get_current_datetime_object(),
                                 },
                             )
@@ -145,12 +160,19 @@ class Command(BaseCommand):
                                                                                   label='DataLayerCountryRelationship')
 
                     for country_id_has_layer_data in all_country_ids_has_layer_data:
+                        country_id = country_id_has_layer_data['country_id']
+
+                        is_applicable = True
+                        if len(applicable_country_ids) > 0 and country_id not in applicable_country_ids:
+                            is_applicable = False
+
                         relationship_instance, created = (
                             accounts_models.DataLayerCountryRelationship.objects.update_or_create(
                                 data_layer=data_layer_instance,
-                                country_id=country_id_has_layer_data['country_id'],
+                                country_id=country_id,
                                 defaults={
                                     'is_default': False,
+                                    'is_applicable': is_applicable,
                                     'last_modified_at': get_current_datetime_object(),
                                 },
                             )
