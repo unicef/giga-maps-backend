@@ -1069,13 +1069,7 @@ class SchoolSummaryAPIViewSet(BaseModelViewSet):
     def get_queryset(self):
         queryset = super(SchoolSummaryAPIViewSet, self).get_queryset()
         if self.action == 'list' and self.request.query_params.get('country_id'):
-            countries_ids = []
-            for country_id in self.request.query_params.get('country_id').split(','):
-                countries_ids.append(int(country_id))
-            if len(countries_ids) > 0:
-                school_data = School.objects.filter(country_id__in=countries_ids).values_list('id',
-                                                                                              flat=True).distinct()
-                queryset = queryset.filter(school_id__in=school_data)
+            queryset = queryset.filter(school__country_id__in=self.request.query_params.get('country_id').split(','))
         return queryset
 
     def create(self, request, *args, **kwargs):
@@ -1180,13 +1174,7 @@ class SchoolDailyConnectivitySummaryAPIViewSet(BaseModelViewSet):
     def get_queryset(self):
         queryset = super(SchoolDailyConnectivitySummaryAPIViewSet, self).get_queryset()
         if self.action == 'list' and self.request.query_params.get('country_id'):
-            countries_ids = []
-            for country_id in self.request.query_params.get('country_id').split(','):
-                countries_ids.append(int(country_id))
-            if len(countries_ids) > 0:
-                school_data = School.objects.filter(country_id__in=countries_ids).values_list('id',
-                                                                                              flat=True).distinct()
-                queryset = queryset.filter(school_id__in=school_data)
+            queryset = queryset.filter(school__country_id__in=self.request.query_params.get('country_id').split(','))
         return queryset
 
     def create(self, request, *args, **kwargs):
