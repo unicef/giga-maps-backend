@@ -24,8 +24,6 @@ class ListSchoolMasterDataSerializer(FlexFieldsModelSerializer):
         model = sources_models.SchoolMasterData
         read_only_fields = fields = (
             'id',
-            'created',
-            'modified',
             'school_id_giga',
             'school_id_govt',
             'school_name',
