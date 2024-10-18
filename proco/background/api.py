@@ -31,7 +31,7 @@ class BackgroundTaskViewSet(BaseModelViewSet):
     filter_backends = (
         NullsAlwaysLastOrderingFilter, SearchFilter, DjangoFilterBackend,
     )
-    ordering_field_names = ['-created_at', '-completed_at']
+    ordering_field_names = ['-created_at__date', '-status', '-created_at', '-completed_at']
     apply_query_pagination = True
 
     search_fields = ('task_id', 'log', 'name', 'description', 'status')
