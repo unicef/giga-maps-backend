@@ -1,11 +1,11 @@
 import logging
-
 from datetime import timedelta
 
 from django.core.management.base import BaseCommand
 from django.db.models import Count, F
 from django.db.models.functions import Extract
 
+from proco.accounts.models import DataLayer, DataLayerCountryRelationship
 from proco.connection_statistics import models as statistics_models
 from proco.core.utils import get_current_datetime_object
 from proco.data_sources import tasks as sources_tasks
@@ -353,6 +353,89 @@ fc5f2401-447d-320d-bb38-8cd2c2b58521,51070790,144
             external_id=data['external_id'],
         ).update(giga_id_school=data['giga_id_school'])
 
+def populate_default_layer_from_active_layer_list(country_id):
+    data_layer_country_qs = DataLayerCountryRelationship.objects.all().filter(
+        data_layer__type=DataLayer.LAYER_TYPE_LIVE,
+        data_layer__status=DataLayer.LAYER_STATUS_PUBLISHED,
+        data_layer__deleted__isnull=True,
+    ).order_by('-data_layer__last_modified_at')
+
+    if country_id and data_layer_country_qs.filter(country_id=country_id, is_default=True, is_applicable=True).exists():
+        instance = data_layer_country_qs.filter(country_id=country_id, is_default=True, is_applicable=True).first()
+        logger.error(
+            'Default layer already exists for given country: \n\tCountry ID: {0}\n\t'
+            'Layer Code: {1}\n\tLayer Name: {2}'.format(instance.country.name, instance.data_layer.code, instance.data_layer.name)
+        )
+        return
+    elif country_id:
+        data_layer_country_qs = data_layer_country_qs.filter(country_id=country_id)
+
+    active_country_ids = data_layer_country_qs.values_list('country_id', flat=True).order_by('country_id').distinct('country_id')
+
+    for active_country_id in active_country_ids:
+        if data_layer_country_qs.filter(country_id=active_country_id, is_default=True, is_applicable=True).exists():
+            instance = data_layer_country_qs.filter(country_id=active_country_id, is_default=True, is_applicable=True).first()
+
+            logger.warning(
+                'Default layer already exists for given country: \n\tCountry ID: {0}\n\t'
+                'Layer Code: {1}\n\tLayer Name: {2}'.format(instance.country.name, instance.data_layer.code, instance.data_layer.name)
+            )
+        else:
+            data_layer_country_qs.filter(country_id=active_country_id).update(is_default=False)
+
+            data_layer_country_qs = data_layer_country_qs.filter(is_applicable=True)
+
+            live_download_layer_instance_entry = data_layer_country_qs.filter(
+                country_id=active_country_id,
+                data_layer__data_sources__data_source_column__icontains='"name":"connectivity_speed"',
+                data_layer__data_sources__deleted__isnull=True,
+            ).first()
+            if live_download_layer_instance_entry:
+                live_download_layer_instance_entry.is_default = True
+                live_download_layer_instance_entry.save(update_fields=('is_default',))
+            else:
+                live_upload_layer_instance_entry = data_layer_country_qs.filter(
+                    country_id=active_country_id,
+                    data_layer__data_sources__data_source_column__icontains='"name":"connectivity_upload_speed"',
+                    data_layer__data_sources__deleted__isnull=True,
+                ).first()
+                if live_upload_layer_instance_entry:
+                    live_upload_layer_instance_entry.is_default = True
+                    live_upload_layer_instance_entry.save(update_fields=('is_default',))
+                else:
+                    live_first_layer_instance_entry = data_layer_country_qs.filter(
+                        country_id=active_country_id,
+                        data_layer__data_sources__deleted__isnull=True,
+                    ).first()
+                    if live_first_layer_instance_entry:
+                        live_first_layer_instance_entry.is_default = True
+                        live_first_layer_instance_entry.save(update_fields=('is_default',))
+
+
+
+def delete_default_download_layer_from_active_layer_list(country_id, layer_id):
+    data_layer_country_qs = DataLayerCountryRelationship.objects.all().filter(
+        data_layer__created_by__isnull=True,
+        data_layer__type=DataLayer.LAYER_TYPE_LIVE,
+        data_layer__status=DataLayer.LAYER_STATUS_PUBLISHED,
+        data_layer__deleted__isnull=True,
+    )
+
+    if layer_id:
+        data_layer_country_qs = data_layer_country_qs.filter(data_layer_id=layer_id)
+
+    if country_id:
+        data_layer_country_qs = data_layer_country_qs.filter(country_id=country_id)
+
+    logger.info('Queryset to get records to delete from active layer list for default download '
+                'layer: {0}'.format(data_layer_country_qs.query))
+
+    for row_to_delete in data_layer_country_qs:
+        logger.info('Deletion for: Id - {0}, Country ID - {1}, Layer Id - {2}'.format(
+            row_to_delete.id, row_to_delete.country_id, row_to_delete.data_layer_id))
+        # Soft deletion
+        row_to_delete.delete()
+
 
 class Command(BaseCommand):
     def add_arguments(self, parser):
@@ -444,21 +527,21 @@ class Command(BaseCommand):
         )
 
         parser.add_argument(
-            '--handle_published_school_master_data_row_with_schedular', action='store_true',
-            dest='handle_published_school_master_data_row_with_schedular', default=False,
-            help='If provided, run the School Master data publish task through Schedular in real time.'
+            '--handle_published_school_master_data_row_with_scheduler', action='store_true',
+            dest='handle_published_school_master_data_row_with_scheduler', default=False,
+            help='If provided, run the School Master data publish task through Scheduler in real time.'
         )
 
         parser.add_argument(
-            '--redo_aggregations_with_schedular', action='store_true',
-            dest='redo_aggregations_with_schedular', default=False,
-            help='If provided, run the redo_aggregation utility through Schedular in real time.'
+            '--redo_aggregations_with_scheduler', action='store_true',
+            dest='redo_aggregations_with_scheduler', default=False,
+            help='If provided, run the redo_aggregation utility through Scheduler in real time.'
         )
 
         parser.add_argument(
-            '--populate_school_new_fields_with_schedular', action='store_true',
-            dest='populate_school_new_fields_with_schedular', default=False,
-            help='If provided, run the Populate School New Fields task through Schedular in real time.'
+            '--populate_school_new_fields_with_scheduler', action='store_true',
+            dest='populate_school_new_fields_with_scheduler', default=False,
+            help='If provided, run the Populate School New Fields task through Scheduler in real time.'
         )
 
         parser.add_argument(
@@ -476,15 +559,15 @@ class Command(BaseCommand):
         )
 
         parser.add_argument(
-            '--rebuild_school_index_with_schedular', action='store_true',
-            dest='rebuild_school_index_with_schedular', default=False,
-            help='If provided, run the rebuild_school_index utility through Schedular in real time.'
+            '--rebuild_school_index_with_scheduler', action='store_true',
+            dest='rebuild_school_index_with_scheduler', default=False,
+            help='If provided, run the rebuild_school_index utility through Scheduler in real time.'
         )
 
         parser.add_argument(
-            '--data_loss_recovery_for_pcdc_weekly_with_schedular', action='store_true',
-            dest='data_loss_recovery_for_pcdc_weekly_with_schedular', default=False,
-            help='If provided, run the data_loss_recovery_for_pcdc_weekly utility through Schedular in real time.'
+            '--data_loss_recovery_for_pcdc_weekly_with_scheduler', action='store_true',
+            dest='data_loss_recovery_for_pcdc_weekly_with_scheduler', default=False,
+            help='If provided, run the data_loss_recovery_for_pcdc_weekly utility through Scheduler in real time.'
         )
 
         parser.add_argument(
@@ -504,11 +587,24 @@ class Command(BaseCommand):
             help='Pull the PCDC live data from API for specified date.'
         )
 
+        parser.add_argument(
+            '--cleanup_active_download_layer', action='store_true', dest='cleanup_active_download_layer',
+            default=False,
+            help='If provided, delete the default download layers from active layer list and'
+                 ' set the other layer as default.'
+        )
+
+        parser.add_argument(
+            '-layer_id', dest='layer_id', required=False, type=int,
+            help='Pass the Data Layer ID in case want to control the update.'
+        )
+
     def handle(self, **options):
         logger.info('Executing data cleanup utility.\n')
         logger.info('Options: {}\n\n'.format(options))
 
         country_id = options.get('country_id', None)
+        layer_id = options.get('layer_id', None)
         start_school_id = options.get('start_school_id', None)
         end_school_id = options.get('end_school_id', None)
         week_no = options.get('week_no', None)
@@ -577,16 +673,16 @@ class Command(BaseCommand):
                     sources_tasks.handle_published_school_master_data_row(published_row=row)
             logger.info('Completed school master data source publish task handling.\n\n')
 
-        if options.get('handle_published_school_master_data_row_with_schedular'):
+        if options.get('handle_published_school_master_data_row_with_scheduler'):
             sources_tasks.handle_published_school_master_data_row.delay(country_ids=[country_id, ])
 
         if options.get('handle_deleted_school_master_data_row'):
             sources_tasks.handle_deleted_school_master_data_row()
 
-        if options.get('populate_school_new_fields_with_schedular'):
+        if options.get('populate_school_new_fields_with_scheduler'):
             populate_school_new_fields_task.delay(start_school_id, end_school_id, country_id)
 
-        if options.get('redo_aggregations_with_schedular'):
+        if options.get('redo_aggregations_with_scheduler'):
             country_id_vs_year_qs = statistics_models.SchoolDailyStatus.objects.filter(
                 school__deleted__isnull=True,
             ).annotate(
@@ -612,7 +708,7 @@ class Command(BaseCommand):
                 # redo_aggregations_task(country_year[0], country_year[1], None)
                 redo_aggregations_task.delay(country_year[0], country_year[1], week_no)
 
-        if options.get('data_loss_recovery_for_pcdc_weekly_with_schedular'):
+        if options.get('data_loss_recovery_for_pcdc_weekly_with_scheduler'):
             start_week_no = options.get('start_week_no', None)
             end_week_no = options.get('end_week_no', None)
             year = options.get('year', None)
@@ -620,7 +716,11 @@ class Command(BaseCommand):
 
             sources_tasks.data_loss_recovery_for_pcdc_weekly_task.delay(start_week_no, end_week_no, year, pull_data)
 
-        if options.get('rebuild_school_index_with_schedular'):
+        if options.get('rebuild_school_index_with_scheduler'):
             rebuild_school_index.delay()
+
+        if options.get('cleanup_active_download_layer'):
+            delete_default_download_layer_from_active_layer_list(country_id, layer_id)
+            populate_default_layer_from_active_layer_list(country_id)
 
         logger.info('Completed data cleanup successfully.\n')

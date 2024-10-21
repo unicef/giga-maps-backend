@@ -479,20 +479,21 @@ class DataLayerPreviewViewSet(APIView):
 
     def get_map_query(self, kwargs):
         query = """
-        SELECT "schools_school".id, "schools_school".name,
+        SELECT s.id,
             CASE WHEN rt_status.rt_registered = True AND rt_status.rt_registration_date <= '{end_date}' THEN True
                     ELSE False
             END as is_rt_connected,
             {case_conditions}
-            CASE WHEN "schools_school".connectivity_status IN ('good', 'moderate') THEN 'connected'
-                WHEN "schools_school".connectivity_status = 'no' THEN 'not_connected'
+            CASE WHEN s.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                WHEN s.connectivity_status = 'no' THEN 'not_connected'
                 ELSE 'unknown'
             END as connectivity_status,
-            ST_AsGeoJSON(ST_Transform("schools_school".geopoint, 4326)) as geopoint
-        FROM schools_school
+            ST_AsGeoJSON(ST_Transform(s.geopoint, 4326)) as geopoint
+        FROM schools_school s
+        LEFT JOIN connection_statistics_schoolweeklystatus sws ON s.last_weekly_status_id = sws.id
         LEFT JOIN (
             SELECT "schools_school"."id" AS school_id,
-                AVG(t."{col_name}") AS "field_avg"
+                AVG(t."{col_name}") AS "{col_name}"
             FROM "schools_school"
             INNER JOIN "connection_statistics_schoolrealtimeregistration"
                 ON ("schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id")
@@ -511,39 +512,54 @@ class DataLayerPreviewViewSet(APIView):
                 AND t."deleted" IS NULL)
             GROUP BY "schools_school"."id"
             ORDER BY "schools_school"."id" ASC
-        ) as t
-            ON t.school_id = "schools_school".id
-        LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status
-            ON rt_status.school_id = "schools_school".id
-        WHERE "schools_school"."deleted" IS NULL
+        ) AS sds ON sds.school_id = s.id
+        LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = s.id
+        WHERE s."deleted" IS NULL
         AND rt_status."deleted" IS NULL
         {country_condition_outer}
         ORDER BY random()
         LIMIT 1000
         """
 
-        kwargs['case_conditions'] = """
-            CASE WHEN t.field_avg >  {benchmark_value} THEN 'good'
-                WHEN t.field_avg <= {benchmark_value} and t.field_avg >= {base_benchmark} THEN 'moderate'
-                WHEN t.field_avg < {base_benchmark}  THEN 'bad'
-                ELSE 'unknown'
-            END as connectivity,
-        """.format(**kwargs)
+        legend_configs = kwargs['legend_configs']
+        if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
+            label_cases = []
+            for title, values_and_label in legend_configs.items():
+                values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
+                                     values_and_label.get('values', [])))
 
-        if kwargs['is_reverse'] is True:
+                if len(values) > 0:
+                    is_sql_value = 'SQL:' in values[0]
+                    if is_sql_value:
+                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
+                else:
+                    label_cases.append("ELSE '{label}'".format(label=title))
+
+            kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS connectivity,'
+        else:
             kwargs['case_conditions'] = """
-                CASE WHEN t.field_avg < {benchmark_value}  THEN 'good'
-                    WHEN t.field_avg >= {benchmark_value} AND t.field_avg <= {base_benchmark} THEN 'moderate'
-                    WHEN t.field_avg > {base_benchmark} THEN 'bad'
-                    ELSE 'unknown'
-                END as connectivity,
-            """.format(**kwargs)
+                        CASE WHEN sds.{col_name} >  {benchmark_value} THEN 'good'
+                            WHEN sds.{col_name} <= {benchmark_value} and sds.{col_name} >= {base_benchmark} THEN 'moderate'
+                            WHEN sds.{col_name} < {base_benchmark}  THEN 'bad'
+                            ELSE 'unknown'
+                        END AS connectivity,
+                    """.format(**kwargs)
+
+            if kwargs['is_reverse'] is True:
+                kwargs['case_conditions'] = """
+                            CASE WHEN sds.{col_name} < {benchmark_value}  THEN 'good'
+                                WHEN sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark} THEN 'moderate'
+                                WHEN sds.{col_name} > {base_benchmark} THEN 'bad'
+                                ELSE 'unknown'
+                            END AS connectivity,
+                        """.format(**kwargs)
 
         if len(kwargs['country_ids']) > 0:
             kwargs['country_condition'] = '"schools_school"."country_id" IN ({0}) AND'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
-            kwargs['country_condition_outer'] = 'AND "schools_school"."country_id" IN ({0})'.format(
+            kwargs['country_condition_outer'] = 'AND s."country_id" IN ({0})'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
         else:
@@ -552,24 +568,25 @@ class DataLayerPreviewViewSet(APIView):
 
         return query.format(**kwargs)
 
+
     def get_static_map_query(self, kwargs):
         query = """
-        SELECT
-            s.id,
-            s.name,
-            sws."{col_name}",
-            CASE WHEN s.connectivity_status IN ('good', 'moderate') THEN 'connected'
-                WHEN s.connectivity_status = 'no' THEN 'not_connected'
-                ELSE 'unknown'
-            END as connectivity_status,
-            ST_AsGeoJSON(ST_Transform(s.geopoint, 4326)) as geopoint,
-            {label_case_statements}
-        FROM schools_school as s
-        LEFT JOIN connection_statistics_schoolweeklystatus sws ON s.last_weekly_status_id = sws.id
-        WHERE s."deleted" IS NULL AND sws."deleted" IS NULL {country_condition}
-        ORDER BY random()
-        LIMIT 1000
-        """
+            SELECT
+                s.id,
+                s.name,
+                sws."{col_name}",
+                CASE WHEN s.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                    WHEN s.connectivity_status = 'no' THEN 'not_connected'
+                    ELSE 'unknown'
+                END as connectivity_status,
+                ST_AsGeoJSON(ST_Transform(s.geopoint, 4326)) as geopoint,
+                {label_case_statements}
+            FROM schools_school as s
+            LEFT JOIN connection_statistics_schoolweeklystatus sws ON s.last_weekly_status_id = sws.id
+            WHERE s."deleted" IS NULL {country_condition}
+            ORDER BY random()
+            LIMIT 1000
+            """
 
         kwargs['country_condition'] = ''
 
@@ -616,28 +633,25 @@ class DataLayerPreviewViewSet(APIView):
 
         return query.format(**kwargs)
 
+
     def get(self, request, *args, **kwargs):
         data_layer_instance = get_object_or_404(accounts_models.DataLayer.objects.all(), pk=self.kwargs.get('pk'))
         data_sources = data_layer_instance.data_sources.all()
-
-        live_data_sources = ['UNKNOWN']
-
-        for d in data_sources:
-            source_type = d.data_source.data_source_type
-            if source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_QOS:
-                live_data_sources.append(statistics_configs.QOS_SOURCE)
-            elif source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP:
-                live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
 
         country_ids = data_layer_instance.applicable_countries
         parameter_col = data_sources.first().data_source_column
 
         parameter_column_name = str(parameter_col['name'])
+        legend_configs = data_layer_instance.legend_configs
 
         if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
-            response = {
-                'map': None,
-            }
+            live_data_sources = ['UNKNOWN']
+            for d in data_sources:
+                source_type = d.data_source.data_source_type
+                if source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_QOS:
+                    live_data_sources.append(statistics_configs.QOS_SOURCE)
+                elif source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP:
+                    live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
 
             global_benchmark = data_layer_instance.global_benchmark.get('value')
             benchmark_base = str(parameter_col.get('base_benchmark', 1))
@@ -657,6 +671,7 @@ class DataLayerPreviewViewSet(APIView):
             query_kwargs = {
                 'col_name': parameter_column_name,
                 'benchmark_value': global_benchmark,
+                'global_benchmark': global_benchmark,
                 'base_benchmark': benchmark_base,
                 'country_ids': country_ids,
                 'start_date': start_date,
@@ -664,20 +679,11 @@ class DataLayerPreviewViewSet(APIView):
                 'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                 'parameter_col': parameter_col,
                 'is_reverse': data_layer_instance.is_reverse,
+                'legend_configs': legend_configs,
             }
 
             map_points = db_utilities.sql_to_response(self.get_map_query(query_kwargs), label=self.__class__.__name__)
-            if map_points:
-                for map_point in map_points:
-                    map_point['geopoint'] = json.loads(map_point['geopoint'])
-            response['map'] = map_points
         else:
-            response = {
-                'map': None,
-            }
-
-            legend_configs = data_layer_instance.legend_configs
-
             query_kwargs = {
                 'col_name': parameter_column_name,
                 'legend_configs': legend_configs,
@@ -687,12 +693,11 @@ class DataLayerPreviewViewSet(APIView):
 
             map_points = db_utilities.sql_to_response(self.get_static_map_query(query_kwargs),
                                                       label=self.__class__.__name__)
-            if map_points:
-                for map_point in map_points:
-                    map_point['geopoint'] = json.loads(map_point['geopoint'])
-            response['map'] = map_points
 
-        return Response(data=response)
+        if map_points:
+            for map_point in map_points:
+                map_point['geopoint'] = json.loads(map_point['geopoint'])
+        return Response(data={'map': map_points})
 
 
 class PublishedDataLayersViewSet(CachedListMixin, BaseModelViewSet):
@@ -855,6 +860,22 @@ class BaseDataLayerAPIViewSet(APIView):
 
         return benchmark_val, benchmark_unit
 
+    def get_legend_configs(self, data_layer_instance):
+        legend_configs = data_layer_instance.legend_configs
+
+        if self.kwargs['benchmark'] == 'national':
+            country_ids = self.kwargs.get('country_ids', [])
+            if len(country_ids) > 0:
+                legend_configurations = Country.objects.all().filter(
+                    id__in=country_ids,
+                    active_layers__deleted__isnull=True,
+                    active_layers__data_layer_id=data_layer_instance.id,
+                ).order_by('id').values_list('active_layers__legend_configs', flat=True).first()
+                if legend_configurations and len(legend_configurations) > 0:
+                    legend_configs = json.loads(legend_configurations)
+
+        return legend_configs
+
 
 @method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
 class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
@@ -874,12 +895,14 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
     def get_info_query(self):
         query = """
         SELECT {case_conditions}
-            COUNT(DISTINCT CASE WHEN t.field_avg IS NOT NULL THEN t.school_id ELSE NULL END)
+            COUNT(DISTINCT CASE WHEN sds.{col_name} IS NOT NULL THEN sds.school_id ELSE NULL END)
                 AS "school_with_realtime_data",
-            COUNT(DISTINCT t.school_id) AS "no_of_schools_measure"
+            {benchmark_value_sql}
+            COUNT(DISTINCT sds.school_id) AS "no_of_schools_measure"
         FROM (
             SELECT "schools_school"."id" AS school_id,
-                AVG(t."{col_name}") AS "field_avg"
+                "schools_school"."last_weekly_status_id",
+                AVG(t."{col_name}") AS "{col_name}"
             FROM "schools_school"
             INNER JOIN "connection_statistics_schoolrealtimeregistration"
                 ON ("schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id")
@@ -902,7 +925,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date"::date <= '{end_date}')
             GROUP BY "schools_school"."id"
             ORDER BY "schools_school"."id" ASC
-        ) as t
+        ) AS sds
+        {school_weekly_outer_join}
         """
 
         kwargs = copy.deepcopy(self.kwargs)
@@ -912,23 +936,55 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs['school_condition'] = ''
         kwargs['school_weekly_join'] = ''
         kwargs['school_weekly_condition'] = ''
+        kwargs['school_weekly_outer_join'] = ''
+        kwargs['benchmark_value_sql'] = ''
 
-        kwargs['case_conditions'] = """
-        COUNT(DISTINCT CASE WHEN t.field_avg > {benchmark_value} THEN t.school_id ELSE NULL END) AS "good",
-        COUNT(DISTINCT CASE WHEN (t.field_avg >= {base_benchmark} AND t.field_avg <= {benchmark_value})
-            THEN t.school_id ELSE NULL END) AS "moderate",
-        COUNT(DISTINCT CASE WHEN t.field_avg < {base_benchmark} THEN t.school_id ELSE NULL END) AS "bad",
-        COUNT(DISTINCT CASE WHEN t.field_avg IS NULL THEN t.school_id ELSE NULL END) AS "unknown",
-        """.format(**kwargs)
+        benchmark_value = kwargs['benchmark_value']
+        if benchmark_value and 'SQL:' in benchmark_value:
+            kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(**kwargs) + ' AS benchmark_sql_value,'
 
-        if kwargs['is_reverse'] is True:
+        legend_configs = kwargs['legend_configs']
+        if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
+            label_cases = []
+            for title, values_and_label in legend_configs.items():
+                values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
+                                     values_and_label.get('values', [])))
+
+                if len(values) > 0:
+                    is_sql_value = 'SQL:' in values[0]
+                    if is_sql_value:
+                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        label_cases.append(
+                            'COUNT(DISTINCT CASE WHEN {sql} THEN sds.school_id ELSE NULL END) AS "{label}",'.format(
+                                sql=sql_statement, label=title))
+                else:
+                    label_cases.append(
+                        'COUNT(DISTINCT CASE WHEN sds.{col_name} IS NULL '
+                        'THEN sds.school_id ELSE NULL END) AS "{label}",'.format(
+                            col_name=kwargs['col_name'],label=title))
+
+            kwargs['case_conditions'] = ' '.join(label_cases)
+
+            kwargs['school_weekly_outer_join'] = """
+            LEFT OUTER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
+            """
+        else:
             kwargs['case_conditions'] = """
-            COUNT(DISTINCT CASE WHEN t.field_avg < {benchmark_value} THEN t.school_id ELSE NULL END) AS "good",
-            COUNT(DISTINCT CASE WHEN (t.field_avg >= {benchmark_value} AND t.field_avg <= {base_benchmark})
-                THEN t.school_id ELSE NULL END) AS "moderate",
-            COUNT(DISTINCT CASE WHEN t.field_avg > {base_benchmark} THEN t.school_id ELSE NULL END) AS "bad",
-            COUNT(DISTINCT CASE WHEN t.field_avg IS NULL THEN t.school_id ELSE NULL END) AS "unknown",
+            COUNT(DISTINCT CASE WHEN sds.{col_name} > {benchmark_value} THEN sds.school_id ELSE NULL END) AS "good",
+            COUNT(DISTINCT CASE WHEN (sds.{col_name} >= {base_benchmark} AND sds.{col_name} <= {benchmark_value})
+                THEN sds.school_id ELSE NULL END) AS "moderate",
+            COUNT(DISTINCT CASE WHEN sds.{col_name} < {base_benchmark} THEN sds.school_id ELSE NULL END) AS "bad",
+            COUNT(DISTINCT CASE WHEN sds.{col_name} IS NULL THEN sds.school_id ELSE NULL END) AS "unknown",
             """.format(**kwargs)
+
+            if kwargs['is_reverse'] is True:
+                kwargs['case_conditions'] = """
+                COUNT(DISTINCT CASE WHEN sds.{col_name} < {benchmark_value} THEN sds.school_id ELSE NULL END) AS "good",
+                COUNT(DISTINCT CASE WHEN (sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark})
+                    THEN sds.school_id ELSE NULL END) AS "moderate",
+                COUNT(DISTINCT CASE WHEN sds.{col_name} > {base_benchmark} THEN sds.school_id ELSE NULL END) AS "bad",
+                COUNT(DISTINCT CASE WHEN sds.{col_name} IS NULL THEN sds.school_id ELSE NULL END) AS "unknown",
+                """.format(**kwargs)
 
         if len(kwargs.get('country_ids', [])) > 0:
             kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
@@ -949,7 +1005,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
             """
             kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
-
         return query.format(**kwargs)
 
     def get_school_view_info_query(self):
@@ -961,24 +1016,24 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             CASE WHEN srr."rt_registered" = True THEN true ELSE false END AS is_data_synced,
             schools_school."admin1_id",
             adm1_metadata."name" AS admin1_name,
-            adm1_metadata."giga_id_admin" AS admin1_code,
             adm1_metadata."description_ui_label" AS admin1_description_ui_label,
             schools_school."admin2_id",
             adm2_metadata."name" AS admin2_name,
-            adm2_metadata."giga_id_admin" AS admin2_code,
             adm2_metadata."description_ui_label" AS admin2_description_ui_label,
             schools_school."country_id",
             c."name" AS country_name,
             ST_AsGeoJSON(ST_Transform(schools_school."geopoint", 4326)) AS geopoint,
             schools_school."environment",
             schools_school."education_level",
-            ROUND(AVG(sds."{col_name}"::numeric), 2) AS "live_avg",
+            ROUND(sds."{col_name}"::numeric, 2) AS "live_avg",
+            sws."download_speed_benchmark",
             CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
                 WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
                 ELSE 'unknown'
-            END as connectivity_status,
+            END AS connectivity_status,
             CASE WHEN srr."rt_registered" = True AND srr."rt_registration_date"::date <= '{end_date}' THEN true
             ELSE false END AS is_rt_connected,
+            {benchmark_value_sql}
             {case_conditions}
         FROM "schools_school" schools_school
         INNER JOIN public.locations_country c ON c."id" = schools_school."country_id"
@@ -995,40 +1050,78 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         LEFT JOIN "connection_statistics_schoolrealtimeregistration" AS srr
             ON schools_school."id" = srr."school_id"
             AND srr."deleted" IS NULL
-        LEFT OUTER JOIN "connection_statistics_schooldailystatus" sds
-            ON schools_school."id" = sds."school_id"
-            AND sds."deleted" IS NULL
-            AND (sds."date" BETWEEN '{start_date}' AND '{end_date}')
-            AND sds."live_data_source" IN ({live_source_types})
+        LEFT JOIN (
+            SELECT "schools_school"."id" AS school_id,
+                AVG(t."{col_name}") AS "{col_name}"
+            FROM "schools_school"
+            LEFT OUTER JOIN "connection_statistics_schooldailystatus" t
+                ON (
+                    "schools_school"."id" = t."school_id"
+                    AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
+                    AND t."live_data_source" IN ({live_source_types})
+                )
+            WHERE (
+                "schools_school"."id" IN ({ids})
+                AND "schools_school"."deleted" IS NULL
+                AND t."deleted" IS NULL)
+            GROUP BY "schools_school"."id"
+            ORDER BY "schools_school"."id" ASC
+        ) AS sds ON sds.school_id = schools_school.id
+        LEFT OUTER JOIN "connection_statistics_schoolweeklystatus" sws
+            ON schools_school."last_weekly_status_id" = sws."id"
         WHERE "schools_school"."id" IN ({ids})
         GROUP BY schools_school."id", srr."rt_registered", srr."rt_registration_date",
             adm1_metadata."name", adm1_metadata."description_ui_label",
             adm2_metadata."name", adm2_metadata."description_ui_label",
-            c."name", adm1_metadata."giga_id_admin", adm2_metadata."giga_id_admin"
+            c."name", adm1_metadata."giga_id_admin", adm2_metadata."giga_id_admin",
+            sds."{col_name}", sws."download_speed_benchmark"
         ORDER BY schools_school."id" ASC
         """
 
         kwargs = copy.deepcopy(self.kwargs)
         kwargs['ids'] = ','.join(kwargs['school_ids'])
 
-        kwargs['case_conditions'] = """
-        CASE
-            WHEN AVG(sds."{col_name}") > {benchmark_value} THEN 'good'
-            WHEN (AVG(sds."{col_name}") >= {base_benchmark} AND AVG(sds."{col_name}") <= {benchmark_value})
-                THEN 'moderate'
-            WHEN AVG(sds."{col_name}") < {base_benchmark} THEN 'bad'
-            ELSE 'unknown' END AS live_avg_connectivity
-        """.format(**kwargs)
+        kwargs['benchmark_value_sql'] = ''
+        benchmark_value = kwargs['benchmark_value']
+        if benchmark_value and 'SQL:' in benchmark_value:
+            kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(
+                **kwargs) + ' AS benchmark_sql_value,'
 
-        if kwargs['is_reverse'] is True:
+        legend_configs = kwargs['legend_configs']
+        if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
+            label_cases = []
+            for title, values_and_label in legend_configs.items():
+                values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
+                                     values_and_label.get('values', [])))
+
+                if len(values) > 0:
+                    is_sql_value = 'SQL:' in values[0]
+                    if is_sql_value:
+                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
+                else:
+                    label_cases.append("ELSE '{label}'".format(label=title))
+
+            kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS live_avg_connectivity'
+        else:
             kwargs['case_conditions'] = """
             CASE
-                WHEN AVG(sds."{col_name}") < {benchmark_value} THEN 'good'
-                WHEN (AVG(sds."{col_name}") >= {benchmark_value} AND AVG(sds."{col_name}") <= {base_benchmark})
+                WHEN sds."{col_name}" > {benchmark_value} THEN 'good'
+                WHEN (sds."{col_name}" >= {base_benchmark} AND sds."{col_name}" <= {benchmark_value})
                     THEN 'moderate'
-                WHEN AVG(sds."{col_name}") > {base_benchmark} THEN 'bad'
+                WHEN sds."{col_name}" < {base_benchmark} THEN 'bad'
                 ELSE 'unknown' END AS live_avg_connectivity
             """.format(**kwargs)
+
+            if kwargs['is_reverse'] is True:
+                kwargs['case_conditions'] = """
+                CASE
+                    WHEN sds."{col_name}" < {benchmark_value} THEN 'good'
+                    WHEN (sds."{col_name}" >= {benchmark_value} AND sds."{col_name}" <= {base_benchmark})
+                        THEN 'moderate'
+                    WHEN sds."{col_name}" > {base_benchmark} THEN 'bad'
+                    ELSE 'unknown' END AS live_avg_connectivity
+                """.format(**kwargs)
 
         return query.format(**kwargs)
 
@@ -1037,10 +1130,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         SELECT sws.*
         FROM "schools_school"
         INNER JOIN connection_statistics_schoolweeklystatus sws
-            ON sws."id" = "schools_school"."last_weekly_status_id"
-        WHERE
-            "schools_school"."deleted" IS NULL
-            AND sws."deleted" IS NULL
+            ON "schools_school"."last_weekly_status_id" = sws."id"
+        WHERE "schools_school"."deleted" IS NULL
             AND "schools_school"."id" IN ({ids})
         """.format(ids=','.join(self.kwargs['school_ids']))
 
@@ -1404,9 +1495,13 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             parameter_column_name = str(parameter_col['name'])
             parameter_column_unit = str(parameter_col.get('unit', '')).lower()
             base_benchmark = str(parameter_col.get('base_benchmark', 1))
+            display_unit = parameter_col.get('display_unit', '')
 
             self.update_kwargs(country_ids, data_layer_instance)
             benchmark_value, benchmark_unit = self.get_benchmark_value(data_layer_instance)
+            global_benchmark = data_layer_instance.global_benchmark.get('value')
+
+            legend_configs = self.get_legend_configs(data_layer_instance)
 
             unit_agg_str = '{val}'
 
@@ -1433,13 +1528,17 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             self.kwargs['round_unit_value'] = unit_agg_str
 
             if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+
                 self.kwargs.update({
                     'col_name': parameter_column_name,
                     'benchmark_value': benchmark_value,
+                    'global_benchmark': global_benchmark,
+                    'national_benchmark': benchmark_value,
                     'base_benchmark': base_benchmark,
                     'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                     'parameter_col': parameter_col,
                     'is_reverse': data_layer_instance.is_reverse,
+                    'legend_configs': legend_configs,
                 })
 
                 if len(self.kwargs.get('school_ids', [])) > 0:
@@ -1461,6 +1560,27 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
                             info_panel_school['live_avg'] = live_avg
                             info_panel_school['graph_data'] = graph_data[str(info_panel_school['id'])]
+
+                            benchmark_value_from_sql = info_panel_school.get('benchmark_sql_value', None)
+                            if benchmark_value_from_sql:
+                                rounded_benchmark_value_int = round(
+                                    eval(unit_agg_str.format(
+                                        val=core_utilities.convert_to_int(benchmark_value_from_sql))), 2)
+                                benchmark_value = str(benchmark_value_from_sql)
+                            else:
+                                rounded_benchmark_value_int = round(
+                                    eval(unit_agg_str.format(val=core_utilities.convert_to_int(benchmark_value))), 2)
+
+                            info_panel_school['benchmark_metadata'] = {
+                                'benchmark_value': benchmark_value,
+                                'rounded_benchmark_value': rounded_benchmark_value_int,
+                                'benchmark_unit': benchmark_unit,
+                                'base_benchmark': base_benchmark,
+                                'parameter_column_unit': parameter_column_unit,
+                                'round_unit_value': unit_agg_str,
+                                'convert_unit': self.kwargs.get('convert_unit'),
+                                'display_unit': display_unit,
+                            }
 
                     response = info_panel_school_list
                 else:
@@ -1486,8 +1606,16 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     live_avg = round(sum(positive_speeds) / len(positive_speeds), 2) if len(positive_speeds) > 0 else 0
 
                     live_avg_connectivity = 'unknown'
-                    rounded_benchmark_value_int = round(
-                        eval(unit_agg_str.format(val=core_utilities.convert_to_int(benchmark_value))), 2)
+
+                    benchmark_value_from_sql = query_response.get('benchmark_sql_value', None)
+                    if benchmark_value_from_sql:
+                        rounded_benchmark_value_int = round(
+                                eval(unit_agg_str.format(val=core_utilities.convert_to_int(benchmark_value_from_sql))), 2)
+                        benchmark_value = str(benchmark_value_from_sql)
+                    else:
+                        rounded_benchmark_value_int = round(
+                            eval(unit_agg_str.format(val=core_utilities.convert_to_int(benchmark_value))), 2)
+
                     rounded_base_benchmark_int = round(
                         eval(unit_agg_str.format(val=core_utilities.convert_to_int(base_benchmark))), 2)
 
@@ -1521,15 +1649,16 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                         'graph_data': graph_data,
                         'benchmark_metadata': {
                             'benchmark_value': benchmark_value,
+                            'rounded_benchmark_value': rounded_benchmark_value_int,
                             'benchmark_unit': benchmark_unit,
                             'base_benchmark': base_benchmark,
                             'parameter_column_unit': parameter_column_unit,
                             'round_unit_value': unit_agg_str,
+                            'convert_unit': self.kwargs.get('convert_unit'),
+                            'display_unit': display_unit,
                         },
                     }
             else:
-                legend_configs = data_layer_instance.legend_configs
-
                 self.kwargs.update({
                     'col_name': parameter_column_name,
                     'legend_configs': legend_configs,
@@ -1557,6 +1686,10 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                         'total_schools': query_response['total_schools'],
                         'connected_schools': {label: query_response[label] for label in query_labels},
                         'legend_configs': legend_configs,
+                        'benchmark_metadata': {
+                            'parameter_column_unit': parameter_column_unit,
+                            'display_unit': display_unit,
+                        },
                     }
 
             cache_manager.set(cache_key, response, request_path=request_path,
@@ -1579,8 +1712,8 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     "schools_school".id,
                     CASE WHEN rt_status.rt_registered = True AND rt_status.rt_registration_date::date <= '{end_date}'
                         THEN True ELSE False
-                    END as is_rt_connected,
-                    t.field_avg AS field_avg,
+                    END AS is_rt_connected,
+                    sds.{col_name} AS field_avg,
                     {case_conditions}
                     CASE WHEN "schools_school".connectivity_status IN ('good', 'moderate') THEN 'connected'
                         WHEN "schools_school".connectivity_status = 'no' THEN 'not_connected'
@@ -1591,7 +1724,8 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 {school_weekly_join}
                 LEFT JOIN (
                     SELECT "schools_school"."id" AS school_id,
-                        AVG(t."{col_name}") AS "field_avg"
+                        "schools_school"."last_weekly_status_id",
+                        AVG(t."{col_name}") AS "{col_name}"
                     FROM "schools_school"
                     INNER JOIN "connection_statistics_schoolrealtimeregistration"
                         ON ("schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id")
@@ -1615,8 +1749,8 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                         <= '{end_date}')
                     GROUP BY "schools_school"."id"
                     ORDER BY "schools_school"."id" ASC
-                ) as t
-                    ON t.school_id = "schools_school".id
+                ) AS sds ON sds.school_id = "schools_school".id
+                {school_weekly_outer_join}
                 LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status
                     ON rt_status.school_id = "schools_school".id
                 WHERE "schools_school"."deleted" IS NULL
@@ -1643,6 +1777,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
         kwargs['school_weekly_join'] = ''
         kwargs['school_weekly_condition'] = ''
+        kwargs['school_weekly_outer_join'] = ''
 
         kwargs['env'] = self.envelope_to_bounds_sql(env)
 
@@ -1651,22 +1786,42 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
         add_random_condition = True
 
-        kwargs['case_conditions'] = """
-            CASE WHEN t.field_avg >  {benchmark_value} THEN 'good'
-                WHEN t.field_avg < {benchmark_value} and t.field_avg >= {base_benchmark} THEN 'moderate'
-                WHEN t.field_avg < {base_benchmark}  THEN 'bad'
-                ELSE 'unknown'
-            END AS field_status,
-        """.format(**kwargs)
+        legend_configs = kwargs['legend_configs']
+        if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
+            label_cases = []
+            for title, values_and_label in legend_configs.items():
+                values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
+                                     values_and_label.get('values', [])))
 
-        if kwargs['is_reverse'] is True:
+                if len(values) > 0:
+                    is_sql_value = 'SQL:' in values[0]
+                    if is_sql_value:
+                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
+                else:
+                    label_cases.append("ELSE '{label}'".format(label=title))
+
+            kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status,'
+            kwargs['school_weekly_outer_join'] = """
+            LEFT OUTER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
+            """
+        else:
             kwargs['case_conditions'] = """
-            CASE WHEN t.field_avg < {benchmark_value}  THEN 'good'
-                WHEN t.field_avg >= {benchmark_value} and t.field_avg <= {base_benchmark} THEN 'moderate'
-                WHEN t.field_avg > {base_benchmark} THEN 'bad'
-                ELSE 'unknown'
-            END AS field_status,
+                CASE WHEN sds.{col_name} >  {benchmark_value} THEN 'good'
+                    WHEN sds.{col_name} < {benchmark_value} and sds.{col_name} >= {base_benchmark} THEN 'moderate'
+                    WHEN sds.{col_name} < {base_benchmark}  THEN 'bad'
+                    ELSE 'unknown'
+                END AS field_status,
             """.format(**kwargs)
+
+            if kwargs['is_reverse'] is True:
+                kwargs['case_conditions'] = """
+                CASE WHEN sds.{col_name} < {benchmark_value}  THEN 'good'
+                    WHEN sds.{col_name} >= {benchmark_value} and sds.{col_name} <= {base_benchmark} THEN 'moderate'
+                    WHEN sds.{col_name} > {base_benchmark} THEN 'bad'
+                    ELSE 'unknown'
+                END AS field_status,
+                """.format(**kwargs)
 
         if len(kwargs.get('country_ids', [])) > 0:
             add_random_condition = False
@@ -1739,7 +1894,6 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             {school_weekly_join}
             LEFT JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
             WHERE schools_school."deleted" IS NULL
-            AND sws."deleted" IS NULL
             {country_condition}
             {admin1_condition}
             {school_condition}
@@ -1862,19 +2016,23 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
         self.update_kwargs(country_ids, data_layer_instance)
         benchmark_value, _ = self.get_benchmark_value(data_layer_instance)
+        global_benchmark = data_layer_instance.global_benchmark.get('value')
+
+        legend_configs = self.get_legend_configs(data_layer_instance)
 
         if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
             self.kwargs.update({
                 'col_name': parameter_column_name,
                 'benchmark_value': benchmark_value,
+                'global_benchmark': global_benchmark,
+                'national_benchmark': benchmark_value,
                 'base_benchmark': base_benchmark,
                 'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                 'parameter_col': parameter_col,
                 'layer_type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
+                'legend_configs': legend_configs,
             })
         else:
-            legend_configs = data_layer_instance.legend_configs
-
             self.kwargs.update({
                 'col_name': parameter_column_name,
                 'legend_configs': legend_configs,

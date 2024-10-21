@@ -82,7 +82,7 @@ def clear_index():
         search_client.delete_documents(all_docs)
 
 
-def collect_data(country_id):
+def collect_data(country_id, school_id):
     qry_fields = [
         attr
         for attr in dir(SchoolIndex)
@@ -104,6 +104,9 @@ def collect_data(country_id):
 
     if country_id:
         qs = qs.filter(country_id=country_id)
+
+    if school_id:
+        qs = qs.filter(id=school_id)
 
     docs = []
     for qry_data in qs:
@@ -201,10 +204,16 @@ class Command(BaseCommand):
             help='Pass the Country ID in case want to control the update.'
         )
 
+        parser.add_argument(
+            '-school_id', dest='school_id', required=False, type=int,
+            help='Pass the School ID in case want to control the update.'
+        )
+
     def handle(self, **options):
         logger.info('Index operations STARTED ({0})'.format(SchoolIndex.Meta.index_name))
         if settings.ENABLE_AZURE_COGNITIVE_SEARCH:
-            country_id = options.get('country_id', False)
+            country_id = options.get('country_id', None)
+            school_id = options.get('school_id', None)
 
             if options.get('delete_index', False):
                 logger.info('Delete index - Start')
@@ -220,8 +229,8 @@ class Command(BaseCommand):
 
             if options.get('update_index', False):
                 logger.info('Collect index data - Start')
-                if country_id:
-                    data_to_load = collect_data(country_id)
+                if country_id or school_id:
+                    data_to_load = collect_data(country_id, school_id)
 
                     if len(data_to_load) > 0:
                         logger.info('Load index - Start - {0}'.format(country_id))
@@ -231,7 +240,7 @@ class Command(BaseCommand):
                         School.objects.all().values_list('country_id', flat=True).order_by('country_id').distinct(
                             'country_id'))
                     for country_id in all_countries:
-                        data_to_load = collect_data(country_id)
+                        data_to_load = collect_data(country_id, None)
 
                         if len(data_to_load) > 0:
                             logger.info('Load index - Start - {0}'.format(country_id))
