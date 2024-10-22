@@ -674,7 +674,10 @@ class Command(BaseCommand):
             logger.info('Completed school master data source publish task handling.\n\n')
 
         if options.get('handle_published_school_master_data_row_with_scheduler'):
-            sources_tasks.handle_published_school_master_data_row.delay(country_ids=[country_id, ])
+            if country_id:
+                sources_tasks.handle_published_school_master_data_row.delay(country_ids=[country_id, ])
+            else:
+                sources_tasks.handle_published_school_master_data_row.delay()
 
         if options.get('handle_deleted_school_master_data_row'):
             sources_tasks.handle_deleted_school_master_data_row()
