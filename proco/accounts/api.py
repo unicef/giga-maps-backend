@@ -1700,6 +1700,18 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
 @method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
 class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGenerator):
+    CACHE_KEY = 'cache'
+    CACHE_KEY_PREFIX = 'DATA_LAYER_MAP'
+
+    def get_cache_key(self):
+        pk = self.kwargs.get('pk')
+        params = dict(self.request.query_params)
+        params.pop(self.CACHE_KEY, None)
+        return '{0}_{1}_{2}'.format(
+            self.CACHE_KEY_PREFIX,
+            pk,
+            '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))),
+        )
 
     def get_live_map_query(self, env, request):
         query = """
@@ -1991,60 +2003,77 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         return query.format(**kwargs)
 
     def get(self, request, *args, **kwargs):
-        data_layer_instance = get_object_or_404(
-            accounts_models.DataLayer.objects.all(),
-            pk=self.kwargs.get('pk'),
-            status=accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
-        )
+        use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
+        request_path = remove_query_param(request.get_full_path(), 'cache')
+        cache_key = self.get_cache_key()
 
-        data_sources = data_layer_instance.data_sources.all()
 
-        live_data_sources = ['UNKNOWN']
+        response = None
+        if use_cached_data:
+            response = cache_manager.get(cache_key)
 
-        for d in data_sources:
-            source_type = d.data_source.data_source_type
-            if source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_QOS:
-                live_data_sources.append(statistics_configs.QOS_SOURCE)
-            elif source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP:
-                live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
+        if not response:
+            data_layer_instance = get_object_or_404(
+                accounts_models.DataLayer.objects.all(),
+                pk=self.kwargs.get('pk'),
+                status=accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
+            )
 
-        country_ids = data_layer_instance.applicable_countries
-        parameter_col = data_sources.first().data_source_column
+            data_sources = data_layer_instance.data_sources.all()
 
-        parameter_column_name = str(parameter_col['name'])
-        base_benchmark = str(parameter_col.get('base_benchmark', 1))
+            live_data_sources = ['UNKNOWN']
 
-        self.update_kwargs(country_ids, data_layer_instance)
-        benchmark_value, _ = self.get_benchmark_value(data_layer_instance)
-        global_benchmark = data_layer_instance.global_benchmark.get('value')
+            for d in data_sources:
+                source_type = d.data_source.data_source_type
+                if source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_QOS:
+                    live_data_sources.append(statistics_configs.QOS_SOURCE)
+                elif source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP:
+                    live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
 
-        legend_configs = self.get_legend_configs(data_layer_instance)
+            country_ids = data_layer_instance.applicable_countries
+            parameter_col = data_sources.first().data_source_column
 
-        if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
-            self.kwargs.update({
-                'col_name': parameter_column_name,
-                'benchmark_value': benchmark_value,
-                'global_benchmark': global_benchmark,
-                'national_benchmark': benchmark_value,
-                'base_benchmark': base_benchmark,
-                'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
-                'parameter_col': parameter_col,
-                'layer_type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
-                'legend_configs': legend_configs,
-            })
-        else:
-            self.kwargs.update({
-                'col_name': parameter_column_name,
-                'legend_configs': legend_configs,
-                'parameter_col': parameter_col,
-                'layer_type': accounts_models.DataLayer.LAYER_TYPE_STATIC,
-            })
+            parameter_column_name = str(parameter_col['name'])
+            base_benchmark = str(parameter_col.get('base_benchmark', 1))
 
-        try:
-            return self.generate_tile(request)
-        except Exception as ex:
-            logger.error('Exception occurred for school connectivity tiles endpoint: {}'.format(ex))
-            return Response({'error': 'An error occurred while processing the request'}, status=500)
+            self.update_kwargs(country_ids, data_layer_instance)
+            benchmark_value, _ = self.get_benchmark_value(data_layer_instance)
+            global_benchmark = data_layer_instance.global_benchmark.get('value')
+
+            legend_configs = self.get_legend_configs(data_layer_instance)
+
+            if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+                self.kwargs.update({
+                    'col_name': parameter_column_name,
+                    'benchmark_value': benchmark_value,
+                    'global_benchmark': global_benchmark,
+                    'national_benchmark': benchmark_value,
+                    'base_benchmark': base_benchmark,
+                    'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
+                    'parameter_col': parameter_col,
+                    'layer_type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
+                    'legend_configs': legend_configs,
+                })
+            else:
+                self.kwargs.update({
+                    'col_name': parameter_column_name,
+                    'legend_configs': legend_configs,
+                    'parameter_col': parameter_col,
+                    'layer_type': accounts_models.DataLayer.LAYER_TYPE_STATIC,
+                })
+
+            try:
+                response = self.generate_tile(request)
+
+                # Cache only static layer Map data
+                if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_STATIC:
+                    cache_manager.set(cache_key, response, request_path=request_path,
+                                      soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
+            except Exception as ex:
+                logger.error('Exception occurred for school connectivity tiles endpoint: {}'.format(ex))
+                response = Response({'error': 'An error occurred while processing the request'}, status=500)
+
+        return response
 
 
 class LogActionViewSet(BaseModelViewSet):
