@@ -1908,7 +1908,7 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
             country_range_json = list(
                 select_qs.values('country_id', 'min_value', 'max_value').order_by('country_id').distinct())[-1]
 
-            if country_range_json and country_range_json['min_value'] and country_range_json['max_value']:
+            if country_range_json and country_range_json['min_value'] is not None and country_range_json['max_value'] is not None:
                 del country_range_json['country_id']
 
                 country_range_json['min_value'] = floor(country_range_json['min_value'])

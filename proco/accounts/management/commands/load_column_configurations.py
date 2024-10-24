@@ -8,7 +8,7 @@ from proco.core.utils import get_current_datetime_object
 configuration_json = [
     {
         'name': 'environment',
-        'label': 'Region',
+        'label': 'Region (environment)',
         'type': accounts_models.ColumnConfiguration.TYPE_STR,
         'description': None,
         'table_name': 'schools_school',
@@ -33,7 +33,7 @@ configuration_json = [
     },
     {
         'name': 'school_type',
-        'label': 'School Type',
+        'label': 'School Type (school_type)',
         'type': accounts_models.ColumnConfiguration.TYPE_STR,
         'description': None,
         'table_name': 'schools_school',
@@ -58,7 +58,7 @@ configuration_json = [
     },
     {
         'name': 'education_level',
-        'label': 'Education Level',
+        'label': 'Education Level (education_level)',
         'type': accounts_models.ColumnConfiguration.TYPE_STR,
         'description': None,
         'table_name': 'schools_school',
@@ -83,7 +83,7 @@ configuration_json = [
     },
     {
         'name': 'num_computers',
-        'label': '# of Computers',
+        'label': 'Number of Computers (num_computers)',
         'type': accounts_models.ColumnConfiguration.TYPE_INT,
         'description': None,
         'table_name': 'connection_statistics_schoolweeklystatus',
@@ -104,7 +104,7 @@ configuration_json = [
     },
     {
         'name': 'num_students',
-        'label': '# of Students',
+        'label': 'Number of Students (num_students)',
         'type': accounts_models.ColumnConfiguration.TYPE_INT,
         'description': None,
         'table_name': 'connection_statistics_schoolweeklystatus',
@@ -125,7 +125,7 @@ configuration_json = [
     },
     {
         'name': 'num_teachers',
-        'label': '# of Teachers',
+        'label': 'Number of Teachers (num_teachers)',
         'type': accounts_models.ColumnConfiguration.TYPE_INT,
         'description': None,
         'table_name': 'connection_statistics_schoolweeklystatus',
@@ -146,7 +146,7 @@ configuration_json = [
     },
     {
         'name': 'connectivity_speed',
-        'label': 'Download Speed',
+        'label': 'Download Speed (connectivity_speed)',
         'type': accounts_models.ColumnConfiguration.TYPE_INT,
         'description': None,
         'table_name': 'connection_statistics_schoolweeklystatus',
@@ -169,7 +169,7 @@ configuration_json = [
     },
     {
         'name': 'computer_lab',
-        'label': 'Has Computer Lab',
+        'label': 'Has Computer Lab (computer_lab)',
         'type': accounts_models.ColumnConfiguration.TYPE_BOOLEAN,
         'description': None,
         'table_name': 'connection_statistics_schoolweeklystatus',
@@ -187,7 +187,7 @@ configuration_json = [
     },
     {
         'name': 'connectivity',
-        'label': 'Has Live Connectivity',
+        'label': 'Has Live Connectivity (connectivity)',
         'type': accounts_models.ColumnConfiguration.TYPE_BOOLEAN,
         'description': None,
         'table_name': 'connection_statistics_schoolweeklystatus',
@@ -205,7 +205,7 @@ configuration_json = [
     },
     {
         'name': 'coverage_type',
-        'label': 'Coverage Type',
+        'label': 'Coverage Type (coverage_type)',
         'type': accounts_models.ColumnConfiguration.TYPE_STR,
         'description': None,
         'table_name': 'connection_statistics_schoolweeklystatus',
@@ -228,7 +228,378 @@ configuration_json = [
                 ],
             },
         },
-    }
+    },
+    {
+        'name': 'connectivity_type',
+        'label': 'Connectivity Type (connectivity_type)',
+        'type': accounts_models.ColumnConfiguration.TYPE_STR,
+        'description': None,
+        'table_name': 'connection_statistics_schoolweeklystatus',
+        'table_alias': 'school_static',
+        'table_label': 'Static Data',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter':
+                """LOWER("connection_statistics_schoolweeklystatus"."connectivity_type") != 'unknown'""",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_DROPDOWN: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IEXACT
+                ],
+                accounts_models.AdvanceFilter.TYPE_DROPDOWN_MULTISELECT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IN
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_CONTAINS,
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_ICONTAINS
+                ],
+            },
+        },
+    },
+    {
+        'name': 'fiber_node_distance',
+        'label': 'Fiber Node Distance (fiber_node_distance)',
+        'type': accounts_models.ColumnConfiguration.TYPE_INT,
+        'description': None,
+        'table_name': 'connection_statistics_schoolweeklystatus',
+        'table_alias': 'school_static',
+        'table_label': 'Static Data',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter': "fiber_node_distance IS NOT NULL AND fiber_node_distance > 0",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_RANGE: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_RANGE,
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT,
+                ],
+            },
+        },
+    },
+    {
+        'name': 'microwave_node_distance',
+        'label': 'Microwave Node Distance (microwave_node_distance)',
+        'type': accounts_models.ColumnConfiguration.TYPE_INT,
+        'description': None,
+        'table_name': 'connection_statistics_schoolweeklystatus',
+        'table_alias': 'school_static',
+        'table_label': 'Static Data',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter': "microwave_node_distance IS NOT NULL AND microwave_node_distance > 0",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_RANGE: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_RANGE,
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT,
+                ],
+            },
+        },
+    },
+    {
+        'name': 'nearest_nr_distance',
+        'label': 'Nearest NR Distance (nearest_nr_distance)',
+        'type': accounts_models.ColumnConfiguration.TYPE_INT,
+        'description': None,
+        'table_name': 'connection_statistics_schoolweeklystatus',
+        'table_alias': 'school_static',
+        'table_label': 'Static Data',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter': "nearest_nr_distance IS NOT NULL AND nearest_nr_distance > 0",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_RANGE: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_RANGE,
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT,
+                ],
+            },
+        },
+    },
+    {
+        'name': 'nearest_lte_distance',
+        'label': 'Nearest LTE Distance (nearest_lte_distance)',
+        'type': accounts_models.ColumnConfiguration.TYPE_INT,
+        'description': None,
+        'table_name': 'connection_statistics_schoolweeklystatus',
+        'table_alias': 'school_static',
+        'table_label': 'Static Data',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter': "nearest_lte_distance IS NOT NULL AND nearest_lte_distance > 0",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_RANGE: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_RANGE,
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT,
+                ],
+            },
+        },
+    },
+    {
+        'name': 'nearest_umts_distance',
+        'label': 'Nearest UMTS Distance (nearest_umts_distance)',
+        'type': accounts_models.ColumnConfiguration.TYPE_INT,
+        'description': None,
+        'table_name': 'connection_statistics_schoolweeklystatus',
+        'table_alias': 'school_static',
+        'table_label': 'Static Data',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter': "nearest_umts_distance IS NOT NULL AND nearest_umts_distance > 0",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_RANGE: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_RANGE,
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT,
+                ],
+            },
+        },
+    },
+    {
+        'name': 'nearest_gsm_distance',
+        'label': 'Nearest GSM Distance (nearest_gsm_distance)',
+        'type': accounts_models.ColumnConfiguration.TYPE_INT,
+        'description': None,
+        'table_name': 'connection_statistics_schoolweeklystatus',
+        'table_alias': 'school_static',
+        'table_label': 'Static Data',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter': "nearest_gsm_distance IS NOT NULL AND nearest_gsm_distance > 0",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_RANGE: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_RANGE,
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT,
+                ],
+            },
+        },
+    },
+    {
+        'name': 'computer_availability',
+        'label': 'Computer Availability (computer_availability)',
+        'type': accounts_models.ColumnConfiguration.TYPE_BOOLEAN,
+        'description': None,
+        'table_name': 'connection_statistics_schoolweeklystatus',
+        'table_alias': 'school_static',
+        'table_label': 'Static Data',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter': "computer_availability IS NOT NULL",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_BOOLEAN: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_ON,
+                ],
+            },
+        },
+    },
+    {
+        'name': 'num_students_girls',
+        'label': 'Number of Girl Students (num_students_girls)',
+        'type': accounts_models.ColumnConfiguration.TYPE_INT,
+        'description': None,
+        'table_name': 'connection_statistics_schoolweeklystatus',
+        'table_alias': 'school_static',
+        'table_label': 'Static Data',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter': "num_students_girls IS NOT NULL AND num_students_girls > 0",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_RANGE: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_RANGE,
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT,
+                ],
+            },
+        },
+    },
+    {
+        'name': 'num_students_boys',
+        'label': 'Number of Boy Students (num_students_boys)',
+        'type': accounts_models.ColumnConfiguration.TYPE_INT,
+        'description': None,
+        'table_name': 'connection_statistics_schoolweeklystatus',
+        'table_alias': 'school_static',
+        'table_label': 'Static Data',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter': "num_students_boys IS NOT NULL AND num_students_boys > 0",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_RANGE: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_RANGE,
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT,
+                ],
+            },
+        },
+    },
+    {
+        'name': 'num_students_other',
+        'label': 'Number of Other Students (num_students_other)',
+        'type': accounts_models.ColumnConfiguration.TYPE_INT,
+        'description': None,
+        'table_name': 'connection_statistics_schoolweeklystatus',
+        'table_alias': 'school_static',
+        'table_label': 'Static Data',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter': "num_students_other IS NOT NULL AND num_students_other > 0",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_RANGE: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_RANGE,
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT,
+                ],
+            },
+        },
+    },
+    {
+        'name': 'num_teachers_female',
+        'label': 'Number of Female Teachers (num_teachers_female)',
+        'type': accounts_models.ColumnConfiguration.TYPE_INT,
+        'description': None,
+        'table_name': 'connection_statistics_schoolweeklystatus',
+        'table_alias': 'school_static',
+        'table_label': 'Static Data',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter': "num_teachers_female IS NOT NULL AND num_teachers_female > 0",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_RANGE: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_RANGE,
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT,
+                ],
+            },
+        },
+    },
+    {
+        'name': 'num_teachers_male',
+        'label': 'Number of Male Teachers (num_teachers_male)',
+        'type': accounts_models.ColumnConfiguration.TYPE_INT,
+        'description': None,
+        'table_name': 'connection_statistics_schoolweeklystatus',
+        'table_alias': 'school_static',
+        'table_label': 'Static Data',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter': "num_teachers_male IS NOT NULL AND num_teachers_male > 0",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_RANGE: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_RANGE,
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT,
+                ],
+            },
+        },
+    },
+    {
+        'name': 'teachers_trained',
+        'label': 'Trained Teachers (teachers_trained)',
+        'type': accounts_models.ColumnConfiguration.TYPE_BOOLEAN,
+        'description': None,
+        'table_name': 'connection_statistics_schoolweeklystatus',
+        'table_alias': 'school_static',
+        'table_label': 'Static Data',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter': "teachers_trained IS NOT NULL",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_BOOLEAN: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_ON,
+                ],
+            },
+        },
+    },
+    {
+        'name': 'sustainable_business_model',
+        'label': 'Sustainable Business Model (sustainable_business_model)',
+        'type': accounts_models.ColumnConfiguration.TYPE_BOOLEAN,
+        'description': None,
+        'table_name': 'connection_statistics_schoolweeklystatus',
+        'table_alias': 'school_static',
+        'table_label': 'Static Data',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter': "sustainable_business_model IS NOT NULL",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_BOOLEAN: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_ON,
+                ],
+            },
+        },
+    },
+    {
+        'name': 'device_availability',
+        'label': 'Device Availability (device_availability)',
+        'type': accounts_models.ColumnConfiguration.TYPE_BOOLEAN,
+        'description': None,
+        'table_name': 'connection_statistics_schoolweeklystatus',
+        'table_alias': 'school_static',
+        'table_label': 'Static Data',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter': "device_availability IS NOT NULL",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_BOOLEAN: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_ON,
+                ],
+            },
+        },
+    },
+    {
+        'name': 'num_tablets',
+        'label': 'Number of Tablets (num_tablets)',
+        'type': accounts_models.ColumnConfiguration.TYPE_INT,
+        'description': None,
+        'table_name': 'connection_statistics_schoolweeklystatus',
+        'table_alias': 'school_static',
+        'table_label': 'Static Data',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter': "num_tablets IS NOT NULL AND num_tablets > 0",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_RANGE: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_RANGE,
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT,
+                ],
+            },
+        },
+    },
+    {
+        'name': 'num_robotic_equipment',
+        'label': 'Number of Robotic Equipment (num_robotic_equipment)',
+        'type': accounts_models.ColumnConfiguration.TYPE_INT,
+        'description': None,
+        'table_name': 'connection_statistics_schoolweeklystatus',
+        'table_alias': 'school_static',
+        'table_label': 'Static Data',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter': "num_robotic_equipment IS NOT NULL AND num_robotic_equipment > 0",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_RANGE: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_RANGE,
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT,
+                ],
+            },
+        },
+    },
 ]
 
 
