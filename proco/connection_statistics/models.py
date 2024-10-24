@@ -242,6 +242,9 @@ class SchoolWeeklyStatus(ConnectivityStatistics, TimeStampedModel, models.Model)
     sustainable_business_model = models.NullBooleanField(default=None)
     device_availability = models.NullBooleanField(default=None)
 
+    building_id_govt = models.CharField(blank=True, null=True, max_length=255)
+    num_schools_per_building = models.PositiveIntegerField(blank=True, default=None, null=True)
+
     objects = BaseManager()
 
     class Meta:

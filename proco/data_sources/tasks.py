@@ -393,6 +393,9 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                     school_weekly.device_availability = None if core_utilities.is_blank_string(
                         row.device_availability) else str(row.device_availability).lower() in true_choices
 
+                    school_weekly.building_id_govt = row.building_id_govt
+                    school_weekly.num_schools_per_building = row.num_schools_per_building
+
                     school_weekly.save()
 
                     rt_registered = None

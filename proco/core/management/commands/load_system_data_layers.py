@@ -347,6 +347,24 @@ data_source_json = [
                 'display_unit': '',
                 'count_labels': ['good', 'moderate', 'bad'],
             },
+            {
+                'name': 'building_id_govt',
+                'type': 'str',
+                'is_parameter': True,
+                'alias': 'Building Govt ID (building_id_govt)',
+                'unit': '',
+                'display_unit': '',
+                'count_labels': ['good', 'moderate', 'bad'],
+            },
+            {
+                'name': 'num_schools_per_building',
+                'type': 'int',
+                'is_parameter': True,
+                'alias': 'Number of Schools per Building (num_schools_per_building)',
+                'unit': '',
+                'display_unit': '',
+                'count_labels': ['good', 'moderate', 'bad'],
+            },
         ],
         'status': 'PUBLISHED'
     }
