@@ -247,6 +247,9 @@ def aggregate_school_daily_status_to_school_weekly_status(country, date) -> bool
                 school_weekly.sustainable_business_model = prev_weekly.sustainable_business_model
                 school_weekly.device_availability = prev_weekly.device_availability
 
+                school_weekly.building_id_govt = prev_weekly.building_id_govt
+                school_weekly.num_schools_per_building = prev_weekly.num_schools_per_building
+
         school_weekly.save()
 
     return updated
