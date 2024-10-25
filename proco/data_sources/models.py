@@ -122,6 +122,9 @@ class SchoolMasterData(TimeStampedModel, models.Model):
     num_tablets = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_tablets
     num_robotic_equipment = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_robotic_equipment
 
+    building_id_govt = models.CharField(blank=True, null=True, max_length=255)  # building_id_govt
+    num_schools_per_building = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_schools_per_building
+
     # No Mapping
     connectivity = models.CharField(blank=True, null=True, max_length=255)
 

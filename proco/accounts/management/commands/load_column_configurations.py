@@ -600,6 +600,53 @@ configuration_json = [
             },
         },
     },
+    {
+        'name': 'building_id_govt',
+        'label': 'Building Govt ID (building_id_govt)',
+        'type': accounts_models.ColumnConfiguration.TYPE_STR,
+        'description': None,
+        'table_name': 'connection_statistics_schoolweeklystatus',
+        'table_alias': 'school_static',
+        'table_label': 'Static Data',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter':
+                """"connection_statistics_schoolweeklystatus"."building_id_govt" IS NOT NULL""",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_DROPDOWN: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IEXACT
+                ],
+                accounts_models.AdvanceFilter.TYPE_DROPDOWN_MULTISELECT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IN
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_CONTAINS,
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_ICONTAINS
+                ],
+            },
+        },
+    },
+    {
+        'name': 'num_schools_per_building',
+        'label': 'Number of Schools per Building (num_schools_per_building)',
+        'type': accounts_models.ColumnConfiguration.TYPE_INT,
+        'description': None,
+        'table_name': 'connection_statistics_schoolweeklystatus',
+        'table_alias': 'school_static',
+        'table_label': 'Static Data',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter': "num_schools_per_building IS NOT NULL AND num_schools_per_building > 0",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_RANGE: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_RANGE,
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT,
+                ],
+            },
+        },
+    },
 ]
 
 
