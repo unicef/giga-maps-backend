@@ -1762,7 +1762,6 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                         AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date"::date
                         <= '{end_date}')
                     GROUP BY "schools_school"."id"
-                    ORDER BY "schools_school"."id" ASC
                 ) AS sds ON sds.school_id = "schools_school".id
                 {school_weekly_outer_join}
                 LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status
