@@ -18,6 +18,7 @@ from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter
 from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
+from rest_framework.utils.urls import remove_query_param
 from rest_framework.views import APIView
 
 from proco.connection_statistics.models import SchoolWeeklyStatus, SchoolDailyStatus, SchoolRealTimeRegistration
@@ -42,6 +43,7 @@ from proco.schools.serializers import (
 )
 from proco.schools.tasks import process_loaded_file
 from proco.utils import dates as date_utilities
+from proco.utils.cache import cache_manager
 from proco.utils.error_message import id_missing_error_mess, delete_succ_mess, \
     error_mess
 from proco.utils.log import action_log, changed_fields
@@ -462,6 +464,9 @@ class ConnectivityTileGenerator(BaseTileGenerator):
 
 @method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
 class ConnectivityTileRequestHandler(APIView):
+    CACHE_KEY = 'cache'
+    CACHE_KEY_PREFIX = 'CONNECTIVITY_TILES_MAP'
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -473,12 +478,35 @@ class ConnectivityTileRequestHandler(APIView):
         }
         self.tile_generator = ConnectivityTileGenerator(table_config)
 
+
+    def get_cache_key(self):
+        params = dict(self.request.query_params)
+        params.pop(self.CACHE_KEY, None)
+        return '{0}_{1}'.format(
+            self.CACHE_KEY_PREFIX,
+            '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))),
+        )
+
     def get(self, request):
-        try:
-            return self.tile_generator.generate_tile(request)
-        except Exception as ex:
-            logger.error('Exception occurred for school connectivity tiles endpoint: {}'.format(ex))
-            return Response({'error': 'An error occurred while processing the request'}, status=500)
+        use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
+        request_path = remove_query_param(request.get_full_path(), 'cache')
+        cache_key = self.get_cache_key()
+
+        response = None
+        if use_cached_data:
+            response = cache_manager.get(cache_key)
+
+        if not response:
+            try:
+                response = self.tile_generator.generate_tile(request)
+
+                cache_manager.set(cache_key, response, request_path=request_path,
+                                  soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
+            except Exception as ex:
+                logger.error('Exception occurred for school connectivity tiles endpoint: {}'.format(ex))
+                response = Response({'error': 'An error occurred while processing the request'}, status=500)
+
+        return response
 
 
 class DownloadSchoolsViewSet(BaseModelViewSet, core_mixins.DownloadAPIDataToCSVMixin):
