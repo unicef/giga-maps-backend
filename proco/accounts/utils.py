@@ -131,10 +131,12 @@ class BaseTileGenerator:
             with connection.cursor() as cur:
                 cur.execute(sql)
                 if not cur:
-                    return Response({"error": f"sql query failed: {sql}"}, status=404)
-                return cur.fetchone()[0]
+                    response = Response({"error": f"sql query failed: {sql}"}, status=404)
+                else:
+                    response = cur.fetchone()[0]
         except Exception:
-            return Response({"error": "An error occurred while executing SQL query"}, status=500)
+            response = Response({"error": "An error occurred while executing SQL query"}, status=500)
+        return response
 
     def generate_tile(self, request):
         tile = self.path_to_tile(request)
