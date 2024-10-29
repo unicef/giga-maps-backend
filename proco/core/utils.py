@@ -351,6 +351,7 @@ def get_filter_sql(request, filter_key, table_name):
             if filter_value == 'none':
                 sql_str = """coalesce(TRIM({table_name}."{field_name}"), '') = ''"""
             else:
+                filter_value = str(query_params[field_filter])
                 sql_str = """{table_name}."{field_name}" = '{value}'"""
         elif field_filter.endswith('__iexact'):
             field_name = field_filter.replace('__iexact', '')
@@ -361,6 +362,7 @@ def get_filter_sql(request, filter_key, table_name):
                 sql_str = """LOWER({table_name}."{field_name}") = '{value}'"""
         elif field_filter.endswith('__contains'):
             field_name = field_filter.replace('__contains', '')
+            filter_value = str(query_params[field_filter])
             sql_str = """{table_name}."{field_name}"::text LIKE '{value}'"""
         elif field_filter.endswith('__icontains'):
             field_name = field_filter.replace('__icontains', '')
