@@ -1016,9 +1016,11 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             CASE WHEN srr."rt_registered" = True THEN true ELSE false END AS is_data_synced,
             schools_school."admin1_id",
             adm1_metadata."name" AS admin1_name,
+            adm1_metadata."giga_id_admin" AS admin1_code,
             adm1_metadata."description_ui_label" AS admin1_description_ui_label,
             schools_school."admin2_id",
             adm2_metadata."name" AS admin2_name,
+            adm2_metadata."giga_id_admin" AS admin2_code,
             adm2_metadata."description_ui_label" AS admin2_description_ui_label,
             schools_school."country_id",
             c."name" AS country_name,
@@ -1760,7 +1762,6 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                         AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date"::date
                         <= '{end_date}')
                     GROUP BY "schools_school"."id"
-                    ORDER BY "schools_school"."id" ASC
                 ) AS sds ON sds.school_id = "schools_school".id
                 {school_weekly_outer_join}
                 LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status
@@ -2002,11 +2003,29 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
         return query.format(**kwargs)
 
+    def cache_enabled(self, data_layer_instance):
+        # Cache static layer Map data
+        if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_STATIC:
+            return True
+
+        # Check if list of country ids provided and passed country id present in it
+        if len(settings.LIVE_LAYER_CACHE_FOR_COUNTRY_IDS) > 0:
+            if (
+                'country_ids' in self.kwargs and
+                len(list(set(self.kwargs['country_ids']) & set(settings.LIVE_LAYER_CACHE_FOR_COUNTRY_IDS))) == 0
+            ):
+                return False
+
+        date = core_utilities.get_current_datetime_object().date() - timedelta(weeks=settings.LIVE_LAYER_CACHE_FOR_WEEKS)
+        if self.kwargs['start_date'] >= date:
+            return True
+
+        return False
+
     def get(self, request, *args, **kwargs):
         use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
         request_path = remove_query_param(request.get_full_path(), 'cache')
         cache_key = self.get_cache_key()
-
 
         response = None
         if use_cached_data:
@@ -2064,11 +2083,10 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
             try:
                 response = self.generate_tile(request)
-
-                # Cache only static layer Map data
-                if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_STATIC:
+                if self.cache_enabled(data_layer_instance):
                     cache_manager.set(cache_key, response, request_path=request_path,
                                       soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
+
             except Exception as ex:
                 logger.error('Exception occurred for school connectivity tiles endpoint: {}'.format(ex))
                 response = Response({'error': 'An error occurred while processing the request'}, status=500)

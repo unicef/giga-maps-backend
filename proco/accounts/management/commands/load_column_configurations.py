@@ -19,7 +19,8 @@ configuration_json = [
             'active_countries_filter': "LOWER(environment) IN ('urban', 'rural')",
             'applicable_filter_types': {
                 accounts_models.AdvanceFilter.TYPE_DROPDOWN: [
-                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IEXACT
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IEXACT,
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT
                 ],
                 accounts_models.AdvanceFilter.TYPE_DROPDOWN_MULTISELECT: [
                     accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IN
@@ -44,7 +45,8 @@ configuration_json = [
             'active_countries_filter': "LOWER(school_type) IN ('private', 'public')",
             'applicable_filter_types': {
                 accounts_models.AdvanceFilter.TYPE_DROPDOWN: [
-                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IEXACT
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IEXACT,
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT
                 ],
                 accounts_models.AdvanceFilter.TYPE_DROPDOWN_MULTISELECT: [
                     accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IN
@@ -69,7 +71,8 @@ configuration_json = [
             'active_countries_filter': "LOWER(education_level) IN ('primary', 'secondary')",
             'applicable_filter_types': {
                 accounts_models.AdvanceFilter.TYPE_DROPDOWN: [
-                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IEXACT
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IEXACT,
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT
                 ],
                 accounts_models.AdvanceFilter.TYPE_DROPDOWN_MULTISELECT: [
                     accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IN
@@ -217,7 +220,8 @@ configuration_json = [
                 """LOWER("connection_statistics_schoolweeklystatus"."coverage_type") != 'unknown'""",
             'applicable_filter_types': {
                 accounts_models.AdvanceFilter.TYPE_DROPDOWN: [
-                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IEXACT
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IEXACT,
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT
                 ],
                 accounts_models.AdvanceFilter.TYPE_DROPDOWN_MULTISELECT: [
                     accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IN
@@ -243,7 +247,8 @@ configuration_json = [
                 """LOWER("connection_statistics_schoolweeklystatus"."connectivity_type") != 'unknown'""",
             'applicable_filter_types': {
                 accounts_models.AdvanceFilter.TYPE_DROPDOWN: [
-                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IEXACT
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IEXACT,
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT
                 ],
                 accounts_models.AdvanceFilter.TYPE_DROPDOWN_MULTISELECT: [
                     accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IN
@@ -614,7 +619,8 @@ configuration_json = [
                 """"connection_statistics_schoolweeklystatus"."building_id_govt" IS NOT NULL""",
             'applicable_filter_types': {
                 accounts_models.AdvanceFilter.TYPE_DROPDOWN: [
-                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IEXACT
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IEXACT,
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT
                 ],
                 accounts_models.AdvanceFilter.TYPE_DROPDOWN_MULTISELECT: [
                     accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IN
