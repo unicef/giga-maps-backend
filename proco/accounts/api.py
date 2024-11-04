@@ -1837,7 +1837,8 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 """.format(**kwargs)
 
         if len(kwargs.get('country_ids', [])) > 0:
-            add_random_condition = False
+            if 'limit' not in request.query_params:
+                add_random_condition = False
             kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
@@ -1846,7 +1847,9 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             )
 
         if len(kwargs.get('admin1_ids', [])) > 0:
-            add_random_condition = False
+            if 'limit' not in request.query_params:
+                add_random_condition = False
+
             kwargs['admin1_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
                 ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
             )
@@ -1934,13 +1937,17 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         add_random_condition = True
 
         if len(kwargs.get('country_ids', [])) > 0:
-            add_random_condition = False
+            if 'limit' not in request.query_params:
+                add_random_condition = False
+
             kwargs['country_condition'] = 'AND schools_school."country_id" IN ({0})'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
 
         if len(kwargs.get('admin1_ids', [])) > 0:
-            add_random_condition = False
+            if 'limit' not in request.query_params:
+                add_random_condition = False
+
             kwargs['admin1_condition'] = 'AND schools_school."admin1_id" IN ({0})'.format(
                 ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
             )
