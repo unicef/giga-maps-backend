@@ -1723,6 +1723,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             ),
             mvtgeom AS (
                 SELECT DISTINCT ST_AsMVTGeom(ST_Transform("schools_school".geopoint, 3857), bounds.b2d) AS geom,
+                    {random_select_list}
                     "schools_school".id,
                     CASE WHEN rt_status.rt_registered = True AND rt_status.rt_registration_date::date <= '{end_date}'
                         THEN True ELSE False
@@ -1796,6 +1797,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
         kwargs['limit_condition'] = ''
         kwargs['random_order'] = ''
+        kwargs['random_select_list'] = ''
 
         add_random_condition = True
 
@@ -1837,8 +1839,12 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 """.format(**kwargs)
 
         if len(kwargs.get('country_ids', [])) > 0:
-            if 'limit' not in request.query_params:
+            if settings.COUNTRY_MAP_API_SAMPLING_LIMIT:
+                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.COUNTRY_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
                 add_random_condition = False
+
             kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
@@ -1847,7 +1853,10 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             )
 
         if len(kwargs.get('admin1_ids', [])) > 0:
-            if 'limit' not in request.query_params:
+            if settings.ADMIN_MAP_API_SAMPLING_LIMIT is not None:
+                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.ADMIN_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
                 add_random_condition = False
 
             kwargs['admin1_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
@@ -1879,8 +1888,18 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
 
         if add_random_condition:
-            kwargs['limit_condition'] = 'LIMIT ' + request.query_params.get('limit', '50000')
-            kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+            if 'limit' in request.query_params:
+                limit = request.query_params['limit']
+                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+            elif kwargs.get('MAP_API_SAMPLING_LIMIT'):
+                limit = kwargs['MAP_API_SAMPLING_LIMIT']
+                kwargs['random_order'] = 'ORDER BY random()'
+            else:
+                limit = '50000'
+                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+
+            kwargs['limit_condition'] = 'LIMIT ' + str(limit)
+            kwargs['random_select_list'] = 'random(),'
 
         return query.format(**kwargs)
 
@@ -1898,6 +1917,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         ),
         mvtgeom AS (
             SELECT DISTINCT ST_AsMVTGeom(ST_Transform(schools_school.geopoint, 3857), bounds.b2d) AS geom,
+                {random_select_list}
                 schools_school.id,
                 sws."{col_name}" AS field_value,
                 CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
@@ -1933,11 +1953,15 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
         kwargs['limit_condition'] = ''
         kwargs['random_order'] = ''
+        kwargs['random_select_list'] = ''
 
         add_random_condition = True
 
         if len(kwargs.get('country_ids', [])) > 0:
-            if 'limit' not in request.query_params:
+            if settings.COUNTRY_MAP_API_SAMPLING_LIMIT:
+                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.COUNTRY_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
                 add_random_condition = False
 
             kwargs['country_condition'] = 'AND schools_school."country_id" IN ({0})'.format(
@@ -1945,7 +1969,10 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             )
 
         if len(kwargs.get('admin1_ids', [])) > 0:
-            if 'limit' not in request.query_params:
+            if settings.ADMIN_MAP_API_SAMPLING_LIMIT:
+                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.ADMIN_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
                 add_random_condition = False
 
             kwargs['admin1_condition'] = 'AND schools_school."admin1_id" IN ({0})'.format(
@@ -2005,8 +2032,18 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         kwargs['label_case_statements'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
 
         if add_random_condition:
-            kwargs['limit_condition'] = 'LIMIT ' + request.query_params.get('limit', '50000')
-            kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+            if 'limit' in request.query_params:
+                limit = request.query_params['limit']
+                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+            elif kwargs.get('MAP_API_SAMPLING_LIMIT'):
+                limit = kwargs['MAP_API_SAMPLING_LIMIT']
+                kwargs['random_order'] = 'ORDER BY random()'
+            else:
+                limit = '50000'
+                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+
+            kwargs['limit_condition'] = 'LIMIT ' + str(limit)
+            kwargs['random_select_list'] = 'random(),'
 
         return query.format(**kwargs)
 
