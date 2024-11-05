@@ -85,3 +85,8 @@ pipenv run gunicorn config.wsgi:application -b 0.0.0.0:8000 -w 8 --timeout=300
 # pipenv run python manage.py populate_active_filters_for_countries --reset
 
 # pipenv run python manage.py data_cleanup --cleanup_active_download_layer -country_id=144
+
+# pipenv run python manage.py load_column_configurations --update_configurations
+# pipenv run python manage.py load_system_data_layers --update_data_sources
+
+# pipenv run python manage.py data_cleanup --populate_school_lowercase_fields

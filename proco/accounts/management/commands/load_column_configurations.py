@@ -16,7 +16,7 @@ configuration_json = [
         'table_label': 'School',
         'is_filter_applicable': True,
         'options': {
-            'active_countries_filter': "LOWER(environment) IN ('urban', 'rural')",
+            'active_countries_filter': "environment IN ('urban', 'rural')",
             'applicable_filter_types': {
                 accounts_models.AdvanceFilter.TYPE_DROPDOWN: [
                     accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IEXACT,
@@ -59,6 +59,30 @@ configuration_json = [
         }
     },
     {
+        'name': 'school_type_lower',
+        'label': 'School Type (school_type_lower)',
+        'type': accounts_models.ColumnConfiguration.TYPE_STR,
+        'description': None,
+        'table_name': 'schools_school',
+        'table_alias': 'schools',
+        'table_label': 'School',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter': "school_type_lower IS NOT NULL",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_DROPDOWN: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT
+                ],
+                accounts_models.AdvanceFilter.TYPE_DROPDOWN_MULTISELECT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IN
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_CONTAINS,
+                ],
+            },
+        }
+    },
+    {
         'name': 'education_level',
         'label': 'Education Level (education_level)',
         'type': accounts_models.ColumnConfiguration.TYPE_STR,
@@ -80,6 +104,30 @@ configuration_json = [
                 accounts_models.AdvanceFilter.TYPE_INPUT: [
                     accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_CONTAINS,
                     accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_ICONTAINS
+                ],
+            },
+        }
+    },
+    {
+        'name': 'education_level_lower',
+        'label': 'Education Level (education_level_lower)',
+        'type': accounts_models.ColumnConfiguration.TYPE_STR,
+        'description': None,
+        'table_name': 'schools_school',
+        'table_alias': 'schools',
+        'table_label': 'School',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter': "education_level_lower IS NOT NULL",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_DROPDOWN: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT
+                ],
+                accounts_models.AdvanceFilter.TYPE_DROPDOWN_MULTISELECT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IN
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_CONTAINS,
                 ],
             },
         }

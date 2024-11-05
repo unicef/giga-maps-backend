@@ -439,6 +439,14 @@
             "index": "pypi",
             "version": "==1.14.0"
         },
+        "django-dynamic-db-router": {
+            "hashes": [
+                "sha256:0a12c0414d7413c74a6371df6481d7eb5358d214543e9f9cb43633bcce3825d1",
+                "sha256:34ee1a7eb107de3c79d4521418fbc92e098697ac4cf4a904fc26d75a59663c6f"
+            ],
+            "index": "pypi",
+            "version": "==0.3.0"
+        },
         "django-environ": {
             "hashes": [
                 "sha256:0ff95ab4344bfeff693836aa978e6840abef2e2f1145adff7735892711590c05",

@@ -3,6 +3,7 @@ import json
 import logging
 from datetime import timedelta
 
+from azure.core.pipeline.transport import HttpResponse
 from django.conf import settings
 from django.contrib.admin.models import LogEntry
 from django.db.models import Case, IntegerField, Value, When
@@ -38,6 +39,7 @@ from proco.utils.cache import cache_manager
 from proco.utils.filters import NullsAlwaysLastOrderingFilter
 from proco.utils.mixins import CachedListMixin
 from proco.utils.tasks import update_all_cached_values
+
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -1208,7 +1210,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs = copy.deepcopy(self.kwargs)
 
         # Get the daily connectivity_speed for the given country from SchoolDailyStatus model
-        data = db_utilities.sql_to_response(self.get_avg_query(**kwargs), label=self.__class__.__name__)
+        data = db_utilities.sql_to_response(self.get_avg_query(**kwargs), label=self.__class__.__name__, db_var=settings.READ_ONLY_DB_KEY)
 
         # Generate the graph data in the desired format
         graph_data = []
@@ -1545,9 +1547,11 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
                 if len(self.kwargs.get('school_ids', [])) > 0:
                     info_panel_school_list = db_utilities.sql_to_response(self.get_school_view_info_query(),
-                                                                          label=self.__class__.__name__)
+                                                                          label=self.__class__.__name__,
+                                                                          db_var=settings.READ_ONLY_DB_KEY)
                     statistics = db_utilities.sql_to_response(self.get_school_view_statistics_info_query(),
-                                                              label=self.__class__.__name__)
+                                                              label=self.__class__.__name__,
+                                                              db_var=settings.READ_ONLY_DB_KEY)
                     graph_data, positive_speeds = self.generate_graph_data()
 
                     if len(info_panel_school_list) > 0:
@@ -1601,8 +1605,9 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     elif len(self.kwargs.get('country_ids', [])) > 0:
                         is_data_synced_qs = is_data_synced_qs.filter(school__country_id__in=self.kwargs['country_ids'])
 
-                    query_response = db_utilities.sql_to_response(self.get_info_query(), label=self.__class__.__name__)[
-                        -1]
+                    query_response = db_utilities.sql_to_response(self.get_info_query(),
+                                                                  label=self.__class__.__name__,
+                                                                  db_var=settings.READ_ONLY_DB_KEY)[-1]
 
                     graph_data, positive_speeds = self.generate_graph_data()
                     live_avg = round(sum(positive_speeds) / len(positive_speeds), 2) if len(positive_speeds) > 0 else 0
@@ -1669,9 +1674,11 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
                 if len(self.kwargs.get('school_ids', [])) > 0:
                     info_panel_school_list = db_utilities.sql_to_response(self.get_static_school_view_info_query(),
-                                                                          label=self.__class__.__name__)
+                                                                          label=self.__class__.__name__,
+                                                                          db_var=settings.READ_ONLY_DB_KEY)
                     statistics = db_utilities.sql_to_response(self.get_school_view_statistics_info_query(),
-                                                              label=self.__class__.__name__)
+                                                              label=self.__class__.__name__,
+                                                              db_var=settings.READ_ONLY_DB_KEY)
 
                     if len(info_panel_school_list) > 0:
                         for info_panel_school in info_panel_school_list:
@@ -1683,7 +1690,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 else:
                     query_labels = []
                     query_response = db_utilities.sql_to_response(self.get_static_info_query(query_labels),
-                                                                  label=self.__class__.__name__)[-1]
+                                                                  label=self.__class__.__name__,
+                                                                  db_var=settings.READ_ONLY_DB_KEY)[-1]
                     response = {
                         'total_schools': query_response['total_schools'],
                         'connected_schools': {label: query_response[label] for label in query_labels},
@@ -2127,10 +2135,9 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
             try:
                 response = self.generate_tile(request)
-                if self.cache_enabled(data_layer_instance):
+                if self.cache_enabled(data_layer_instance) and response.status_code == rest_status.HTTP_200_OK:
                     cache_manager.set(cache_key, response, request_path=request_path,
                                       soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
-
             except Exception as ex:
                 logger.error('Exception occurred for school connectivity tiles endpoint: {}'.format(ex))
                 response = Response({'error': 'An error occurred while processing the request'}, status=500)
