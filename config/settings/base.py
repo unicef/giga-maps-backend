@@ -442,7 +442,7 @@ READ_ONLY_DB_KEY = 'read_only_database'
 
 DATABASE_ROUTERS = [
     'proco.utils.db_routers.ReadOnlyDBRouter',
-    'dynamic_db_router.DynamicDbRouter',
+    # 'dynamic_db_router.DynamicDbRouter',
 ]
 
 GIGAMAPS_LOG_LEVEL = env('GIGAMAPS_LOG_LEVEL', default='INFO')
