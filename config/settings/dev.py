@@ -23,13 +23,8 @@ MANAGERS = ADMINS
 
 DATABASES = {
     'default': env.db(default='postgis://localhost/proco'),
-    'read_only_database': env.db(default='postgis://localhost/proco'),
+    READ_ONLY_DB_KEY: env.db(var='READ_ONLY_DATABASE_URL'),
 }
-
-try:
-    DATABASES['read_only_database'] = env.db_url(var='READ_ONLY_DATABASE_URL')
-except ImproperlyConfigured:
-    pass
 
 # Email settings
 # --------------------------------------------------------------------------

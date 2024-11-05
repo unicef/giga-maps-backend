@@ -349,7 +349,17 @@ def get_filter_sql(request, filter_key, table_name):
             field_name = field_filter.replace('__exact', '')
 
             if filter_value == 'none':
-                sql_str = """coalesce(TRIM({table_name}."{field_name}"), '') = ''"""
+                sql_str = """{table_name}."{field_name}" IN (NULL, '')"""
+            elif '|' in filter_value:
+                filter_values = str(query_params[field_filter]).split('|')
+                value_list  = []
+                for val in filter_values:
+                    if val == 'none':
+                        value_list.append('NULL')
+                    else:
+                        value_list.append("'" + str(val) + "'")
+                filter_value = ','.join(value_list)
+                sql_str = """{table_name}."{field_name}" IN ({value})"""
             else:
                 filter_value = str(query_params[field_filter])
                 sql_str = """{table_name}."{field_name}" = '{value}'"""
@@ -357,7 +367,17 @@ def get_filter_sql(request, filter_key, table_name):
             field_name = field_filter.replace('__iexact', '')
 
             if filter_value == 'none':
-                sql_str = """coalesce(TRIM({table_name}."{field_name}"), '') = ''"""
+                sql_str = """{table_name}."{field_name}" IN (NULL, '')"""
+            elif '|' in filter_value:
+                filter_values = filter_value.split('|')
+                value_list  = []
+                for val in filter_values:
+                    if val == 'none':
+                        value_list.append('NULL')
+                    else:
+                        value_list.append("'" + str(val) + "'")
+                filter_value = ','.join(value_list)
+                sql_str = """LOWER({table_name}."{field_name}") IN ({value})"""
             else:
                 sql_str = """LOWER({table_name}."{field_name}") = '{value}'"""
         elif field_filter.endswith('__contains'):

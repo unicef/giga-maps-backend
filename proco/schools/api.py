@@ -6,7 +6,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied
 from django.core.management import call_command
-from django.db import connection
+from django.db import connections
 from django.db.models.functions.text import Lower
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
@@ -180,7 +180,7 @@ class BaseTileGenerator:
 
     def sql_to_pbf(self, sql):
         try:
-            with connection.cursor() as cur:
+            with connections[settings.READ_ONLY_DB_KEY].cursor() as cur:
                 cur.execute(sql)
                 if not cur:
                     return Response({"error": f"sql query failed: {sql}"}, status=404)
