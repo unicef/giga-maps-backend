@@ -441,7 +441,7 @@ INVALIDATE_CACHE_HARD = env('INVALIDATE_CACHE_HARD', default='false')
 READ_ONLY_DB_KEY = 'read_only_database'
 
 DATABASE_ROUTERS = [
-    'proco.utils.db_routers.ReadOnlyDBRouter',
+    # 'proco.utils.db_routers.ReadOnlyDBRouter',
     # 'dynamic_db_router.DynamicDbRouter',
 ]
 
