@@ -437,8 +437,19 @@ def delete_default_download_layer_from_active_layer_list(country_id, layer_id):
         # Soft deletion
         row_to_delete.delete()
 
-def populate_school_new_lowercase_fields():
-    School.objects.update(
+def populate_school_new_lowercase_fields(country_id, start_school_id, end_school_id):
+    schools_qry = School.objects.all()
+
+    if start_school_id:
+        schools_qry = schools_qry.filter(id__gte=start_school_id, )
+
+    if end_school_id:
+        schools_qry = schools_qry.filter(id__lte=end_school_id, )
+
+    if country_id:
+        schools_qry = schools_qry.filter(country_id=country_id, )
+
+    schools_qry.update(
         name_lower=Lower('name'),
         education_level_lower=Lower('education_level'),
         school_type_lower=Lower('school_type')
@@ -742,6 +753,6 @@ class Command(BaseCommand):
 
         if options.get('populate_school_lowercase_fields'):
             logger.info('Re-calculating the School table lower case fields: name_lower, education_level_lower, school_type_lower')
-            populate_school_new_lowercase_fields()
+            populate_school_new_lowercase_fields(country_id, start_school_id, end_school_id)
 
         logger.info('Completed data cleanup utility successfully.\n')

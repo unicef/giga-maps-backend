@@ -89,4 +89,4 @@ pipenv run gunicorn config.wsgi:application -b 0.0.0.0:8000 -w 8 --timeout=300
 # pipenv run python manage.py load_column_configurations --update_configurations
 # pipenv run python manage.py load_system_data_layers --update_data_sources
 
-# pipenv run python manage.py data_cleanup --populate_school_lowercase_fields
+# pipenv run python manage.py data_cleanup --populate_school_lowercase_fields -country_id=222 -start_school_id=3030276 -end_school_id=3030287
