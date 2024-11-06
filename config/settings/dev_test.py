@@ -24,7 +24,6 @@ MANAGERS = ADMINS
 
 DATABASES = {
     'default': env.db(default='postgis://localhost/proco'),
-    READ_ONLY_DB_KEY: env.db(var='READ_ONLY_DATABASE_URL'),
 }
 
 DATABASES['default']['CONN_MAX_AGE'] = 1000

@@ -99,7 +99,7 @@ MIDDLEWARE = [
     # 'drf_secure_token.middleware.UpdateTokenMiddleware',
     'admin_reorder.middleware.ModelAdminReorder',
     'proco.utils.middleware.CustomCorsMiddleware',
-    # 'proco.utils.db_routers.CustomRequestDBRouterMiddleware',
+    'proco.utils.db_routers.CustomRequestDBRouterMiddleware',
 ]
 
 if ENABLED_BACKEND_PROMETHEUS_METRICS:
@@ -441,7 +441,7 @@ INVALIDATE_CACHE_HARD = env('INVALIDATE_CACHE_HARD', default='false')
 READ_ONLY_DB_KEY = 'read_only_database'
 
 DATABASE_ROUTERS = [
-    # 'proco.utils.db_routers.ReadOnlyDBRouter',
+    'proco.utils.db_routers.ReadOnlyDBRouter',
     'dynamic_db_router.DynamicDbRouter',
 ]
 
