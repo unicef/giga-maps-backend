@@ -986,14 +986,13 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 COUNT(DISTINCT CASE WHEN sds.{col_name} IS NULL THEN sds.school_id ELSE NULL END) AS "unknown",
                 """.format(**kwargs)
 
-        if len(kwargs.get('country_ids', [])) > 0:
-            kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
-                ','.join([str(country_id) for country_id in kwargs['country_ids']])
-            )
-
         if len(kwargs.get('admin1_ids', [])) > 0:
             kwargs['admin1_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
                 ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
+            )
+        elif len(kwargs.get('country_ids', [])) > 0:
+            kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
+                ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
 
         if len(kwargs['school_filters']) > 0:
@@ -1177,20 +1176,18 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs['school_weekly_join'] = ''
         kwargs['school_weekly_condition'] = ''
 
-        if len(kwargs.get('country_ids', [])) > 0:
-            kwargs['country_condition'] = '"schools_school"."country_id" IN ({0}) AND'.format(
-                ','.join([str(country_id) for country_id in kwargs['country_ids']])
-            )
-
-        if len(kwargs.get('admin1_ids', [])) > 0:
-            kwargs['admin1_condition'] = '"schools_school"."admin1_id" IN ({0}) AND'.format(
-                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
-            )
-
         if len(kwargs.get('school_ids', [])) > 0:
             kwargs['school_condition'] = '"schools_school"."id" IN ({0}) AND '.format(','.join(kwargs['school_ids']))
             kwargs['school_selection'] = '"schools_school"."id", '
             kwargs['school_group_by'] = ', "schools_school"."id"'
+        elif len(kwargs.get('admin1_ids', [])) > 0:
+            kwargs['admin1_condition'] = '"schools_school"."admin1_id" IN ({0}) AND'.format(
+                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
+            )
+        elif len(kwargs.get('country_ids', [])) > 0:
+            kwargs['country_condition'] = '"schools_school"."country_id" IN ({0}) AND'.format(
+                ','.join([str(country_id) for country_id in kwargs['country_ids']])
+            )
 
         if len(kwargs['school_filters']) > 0:
             kwargs['school_condition'] += kwargs['school_filters'] + ' AND '
@@ -1291,14 +1288,13 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs['school_weekly_join'] = ''
         kwargs['school_weekly_condition'] = ''
 
-        if len(kwargs.get('country_ids', [])) > 0:
-            kwargs['country_condition'] = ' AND "schools_school"."country_id" IN ({0})'.format(
-                ','.join([str(country_id) for country_id in kwargs['country_ids']])
-            )
-
         if len(kwargs.get('admin1_ids', [])) > 0:
             kwargs['admin1_condition'] = ' AND "schools_school"."admin1_id" IN ({0})'.format(
                 ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
+            )
+        elif len(kwargs.get('country_ids', [])) > 0:
+            kwargs['country_condition'] = ' AND "schools_school"."country_id" IN ({0})'.format(
+                ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
 
         if len(kwargs['school_filters']) > 0:
@@ -1836,24 +1832,6 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 END AS field_status,
                 """.format(**kwargs)
 
-        if len(kwargs.get('country_ids', [])) > 0:
-            add_random_condition = False
-            kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
-                ','.join([str(country_id) for country_id in kwargs['country_ids']])
-            )
-            kwargs['country_outer_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
-                ','.join([str(country_id) for country_id in kwargs['country_ids']])
-            )
-
-        if len(kwargs.get('admin1_ids', [])) > 0:
-            add_random_condition = False
-            kwargs['admin1_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
-                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
-            )
-            kwargs['admin1_outer_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
-                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
-            )
-
         if len(kwargs.get('school_ids', [])) > 0:
             add_random_condition = False
             kwargs['school_condition'] = 'AND "schools_school"."id" IN ({0})'.format(
@@ -1862,6 +1840,22 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
             kwargs['school_outer_condition'] = 'AND "schools_school"."id" IN ({0})'.format(
                 ','.join([str(school_id) for school_id in kwargs['school_ids']])
+            )
+        elif len(kwargs.get('admin1_ids', [])) > 0:
+            add_random_condition = False
+            kwargs['admin1_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
+                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
+            )
+            kwargs['admin1_outer_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
+                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
+            )
+        elif len(kwargs.get('country_ids', [])) > 0:
+            add_random_condition = False
+            kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
+                ','.join([str(country_id) for country_id in kwargs['country_ids']])
+            )
+            kwargs['country_outer_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
+                ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
 
         if len(kwargs['school_filters']) > 0:
@@ -1933,22 +1927,20 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
         add_random_condition = True
 
-        if len(kwargs.get('country_ids', [])) > 0:
-            add_random_condition = False
-            kwargs['country_condition'] = 'AND schools_school."country_id" IN ({0})'.format(
-                ','.join([str(country_id) for country_id in kwargs['country_ids']])
-            )
-
-        if len(kwargs.get('admin1_ids', [])) > 0:
-            add_random_condition = False
-            kwargs['admin1_condition'] = 'AND schools_school."admin1_id" IN ({0})'.format(
-                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
-            )
-
         if len(kwargs.get('school_ids', [])) > 0:
             add_random_condition = False
             kwargs['school_condition'] = 'AND schools_school."id" IN ({0})'.format(
                 ','.join([str(school_id) for school_id in kwargs['school_ids']])
+            )
+        elif len(kwargs.get('admin1_ids', [])) > 0:
+            add_random_condition = False
+            kwargs['admin1_condition'] = 'AND schools_school."admin1_id" IN ({0})'.format(
+                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
+            )
+        elif len(kwargs.get('country_ids', [])) > 0:
+            add_random_condition = False
+            kwargs['country_condition'] = 'AND schools_school."country_id" IN ({0})'.format(
+                ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
 
         if len(kwargs['school_filters']) > 0:

@@ -324,25 +324,24 @@ class ConnectivityTileGenerator(BaseTileGenerator):
             'school_id' in request.query_params or
             'school_id__in' in request.query_params
         ):
-            if 'country_id' in request.query_params:
+            if 'school_id' in request.query_params:
+                table_configs['school_condition'] = f" AND schools_school.id = {request.query_params['school_id']}"
+            elif 'school_id__in' in request.query_params:
+                school_ids = ','.join([c.strip() for c in request.query_params['school_id__in'].split(',')])
+                table_configs['school_condition'] = f" AND schools_school.id IN ({school_ids})"
+            elif 'admin1_id' in request.query_params:
+                table_configs[
+                    'admin1_condition'] = f" AND schools_school.admin1_id = {request.query_params['admin1_id']}"
+            elif 'admin1_id__in' in request.query_params:
+                admin1_ids = ','.join([c.strip() for c in request.query_params['admin1_id__in'].split(',')])
+                table_configs['admin1_condition'] = f" AND schools_school.admin1_id IN ({admin1_ids})"
+            elif 'country_id' in request.query_params:
                 table_configs[
                     'country_condition'] = f" AND schools_school.country_id = {request.query_params['country_id']}"
             elif 'country_id__in' in request.query_params:
                 country_ids = ','.join([c.strip() for c in request.query_params['country_id__in'].split(',')])
                 table_configs['country_condition'] = f" AND schools_school.country_id IN ({country_ids})"
 
-            if 'admin1_id' in request.query_params:
-                table_configs[
-                    'admin1_condition'] = f" AND schools_school.admin1_id = {request.query_params['admin1_id']}"
-            elif 'admin1_id__in' in request.query_params:
-                admin1_ids = ','.join([c.strip() for c in request.query_params['admin1_id__in'].split(',')])
-                table_configs['admin1_condition'] = f" AND schools_school.admin1_id IN ({admin1_ids})"
-
-            if 'school_id' in request.query_params:
-                table_configs['school_condition'] = f" AND schools_school.id = {request.query_params['school_id']}"
-            elif 'school_id__in' in request.query_params:
-                school_ids = ','.join([c.strip() for c in request.query_params['school_id__in'].split(',')])
-                table_configs['school_condition'] = f" AND schools_school.id IN ({school_ids})"
         else:
             zoom_level = int(request.query_params.get('z', '0'))
             if zoom_level == 0:
