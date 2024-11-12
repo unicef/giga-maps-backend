@@ -99,6 +99,7 @@ MIDDLEWARE = [
     # 'drf_secure_token.middleware.UpdateTokenMiddleware',
     'admin_reorder.middleware.ModelAdminReorder',
     'proco.utils.middleware.CustomCorsMiddleware',
+    'proco.utils.db_routers.CustomRequestDBRouterMiddleware',
 ]
 
 if ENABLED_BACKEND_PROMETHEUS_METRICS:
@@ -437,7 +438,12 @@ DATA_SOURCE_CONFIG = {
 
 INVALIDATE_CACHE_HARD = env('INVALIDATE_CACHE_HARD', default='false')
 
-# DATABASE_ROUTERS = ["proco.utils.read_db_router.StandbyRouter"]
+READ_ONLY_DB_KEY = 'read_only_database'
+
+DATABASE_ROUTERS = [
+    'proco.utils.db_routers.ReadOnlyDBRouter',
+    'dynamic_db_router.DynamicDbRouter',
+]
 
 GIGAMAPS_LOG_LEVEL = env('GIGAMAPS_LOG_LEVEL', default='INFO')
 
@@ -478,3 +484,25 @@ LOGGING = {
         },
     },
 }
+
+
+COUNTRY_MAP_API_SAMPLING_LIMIT = env('COUNTRY_MAP_API_SAMPLING_LIMIT', default=None)
+ADMIN_MAP_API_SAMPLING_LIMIT = env('ADMIN_MAP_API_SAMPLING_LIMIT', default=None)
+
+READ_ONLY_DATABASE_ALLOWED_REQUESTS = [
+    'global-stat',
+    'get-time-player-data',
+    'tiles-connectivity-view',
+    'get-latest-week-and-month',
+    'list-published-advance-filters',
+    'list-published-data-layers',
+    'info-data-layer',
+    'map-data-layer',
+    'download-schools',
+    'download-countries',
+    'search-countries-admin-schools',
+    'get-time-player-data-v2',
+    'tiles-view',
+]
+
+READ_ONLY_DATABASE_ALLOWED_MODELS = []

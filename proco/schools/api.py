@@ -6,7 +6,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied
 from django.core.management import call_command
-from django.db import connection
+from django.db import connections
 from django.db.models.functions.text import Lower
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
@@ -180,7 +180,7 @@ class BaseTileGenerator:
 
     def sql_to_pbf(self, sql):
         try:
-            with connection.cursor() as cur:
+            with connections[settings.READ_ONLY_DB_KEY].cursor() as cur:
                 cur.execute(sql)
                 if not cur:
                     return Response({"error": f"sql query failed: {sql}"}, status=404)
@@ -329,12 +329,14 @@ class ConnectivityTileGenerator(BaseTileGenerator):
             elif 'school_id__in' in request.query_params:
                 school_ids = ','.join([c.strip() for c in request.query_params['school_id__in'].split(',')])
                 table_configs['school_condition'] = f" AND schools_school.id IN ({school_ids})"
+
             elif 'admin1_id' in request.query_params:
                 table_configs[
                     'admin1_condition'] = f" AND schools_school.admin1_id = {request.query_params['admin1_id']}"
             elif 'admin1_id__in' in request.query_params:
                 admin1_ids = ','.join([c.strip() for c in request.query_params['admin1_id__in'].split(',')])
                 table_configs['admin1_condition'] = f" AND schools_school.admin1_id IN ({admin1_ids})"
+
             elif 'country_id' in request.query_params:
                 table_configs[
                     'country_condition'] = f" AND schools_school.country_id = {request.query_params['country_id']}"

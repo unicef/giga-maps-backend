@@ -1344,7 +1344,8 @@ class TimePlayerViewSet(ListAPIView):
             }
 
             query_data = db_utilities.sql_to_response(self.get_live_query(**query_kwargs),
-                                                      label=self.__class__.__name__)
+                                                      label=self.__class__.__name__,
+                                                      db_var=settings.READ_ONLY_DB_KEY)
 
             data = self._format_result(query_data)
             cache_manager.set(cache_key, data, request_path=request_path, soft_timeout=settings.CACHE_CONTROL_MAX_AGE)

@@ -54,10 +54,15 @@ class School(TimeStampedModel):
     address = models.CharField(blank=True, max_length=255)
     postal_code = models.CharField(blank=True, max_length=128)
     email = models.EmailField(max_length=128, null=True, blank=True, default=None)
+
     education_level = models.CharField(blank=True, max_length=255)
+    education_level_lower = models.CharField(blank=True, max_length=255, editable=False, db_index=True)
+
     education_level_regional = models.CharField(max_length=6400007, blank=True)
     environment = models.CharField(choices=ENVIRONMENT_STATUSES, blank=True, max_length=64)
+
     school_type = models.CharField(blank=True, max_length=64, db_index=True)
+    school_type_lower = models.CharField(blank=True, max_length=64, editable=False, db_index=True)
 
     last_weekly_status = models.ForeignKey(
         'connection_statistics.SchoolWeeklyStatus', null=True, blank=True,
@@ -89,6 +94,11 @@ class School(TimeStampedModel):
 
     def save(self, **kwargs):
         self.name_lower = str(self.name).lower()
+        if self.education_level:
+            self.education_level_lower = str(self.education_level).lower()
+        if self.school_type:
+            self.school_type_lower = str(self.school_type).lower()
+
         self.external_id = str(self.external_id).lower()
         super().save(**kwargs)
 

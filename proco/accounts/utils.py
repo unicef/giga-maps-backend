@@ -3,7 +3,7 @@ import re
 
 from anymail.message import AnymailMessage
 from django.conf import settings
-from django.db import connection
+from django.db import connections, utils as django_db_utilities
 from django.http import HttpResponse
 from django.template.loader import get_template
 from rest_framework.response import Response
@@ -127,15 +127,15 @@ class BaseTileGenerator:
         raise NotImplementedError("envelope_to_sql must be implemented in the subclass.")
 
     def sql_to_pbf(self, sql):
-        try:
-            with connection.cursor() as cur:
+        with connections[settings.READ_ONLY_DB_KEY].cursor() as cur:
+            try:
                 cur.execute(sql)
                 if not cur:
                     response = Response({"error": f"sql query failed: {sql}"}, status=404)
                 else:
                     response = cur.fetchone()[0]
-        except Exception:
-            response = Response({"error": "An error occurred while executing SQL query"}, status=500)
+            except django_db_utilities.OperationalError:
+                response = Response({"error": "An error occurred while executing requested query"}, status=500)
         return response
 
     def generate_tile(self, request):

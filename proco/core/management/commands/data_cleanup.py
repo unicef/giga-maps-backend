@@ -4,6 +4,7 @@ from datetime import timedelta
 from django.core.management.base import BaseCommand
 from django.db.models import Count, F
 from django.db.models.functions import Extract
+from django.db.models.functions import Lower
 
 from proco.accounts.models import DataLayer, DataLayerCountryRelationship
 from proco.connection_statistics import models as statistics_models
@@ -436,6 +437,24 @@ def delete_default_download_layer_from_active_layer_list(country_id, layer_id):
         # Soft deletion
         row_to_delete.delete()
 
+def populate_school_new_lowercase_fields(country_id, start_school_id, end_school_id):
+    schools_qry = School.objects.all()
+
+    if start_school_id:
+        schools_qry = schools_qry.filter(id__gte=start_school_id, )
+
+    if end_school_id:
+        schools_qry = schools_qry.filter(id__lte=end_school_id, )
+
+    if country_id:
+        schools_qry = schools_qry.filter(country_id=country_id, )
+
+    schools_qry.update(
+        name_lower=Lower('name'),
+        education_level_lower=Lower('education_level'),
+        school_type_lower=Lower('school_type')
+    )
+
 
 class Command(BaseCommand):
     def add_arguments(self, parser):
@@ -599,6 +618,12 @@ class Command(BaseCommand):
             help='Pass the Data Layer ID in case want to control the update.'
         )
 
+        parser.add_argument(
+            '--populate_school_lowercase_fields', action='store_true',
+            dest='populate_school_lowercase_fields', default=False,
+            help='If provided, recalculate the School table lowercase fields.'
+        )
+
     def handle(self, **options):
         logger.info('Executing data cleanup utility.\n')
         logger.info('Options: {}\n\n'.format(options))
@@ -726,4 +751,8 @@ class Command(BaseCommand):
             delete_default_download_layer_from_active_layer_list(country_id, layer_id)
             populate_default_layer_from_active_layer_list(country_id)
 
-        logger.info('Completed data cleanup successfully.\n')
+        if options.get('populate_school_lowercase_fields'):
+            logger.info('Re-calculating the School table lower case fields: name_lower, education_level_lower, school_type_lower')
+            populate_school_new_lowercase_fields(country_id, start_school_id, end_school_id)
+
+        logger.info('Completed data cleanup utility successfully.\n')

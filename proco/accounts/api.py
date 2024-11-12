@@ -3,6 +3,7 @@ import json
 import logging
 from datetime import timedelta
 
+from azure.core.pipeline.transport import HttpResponse
 from django.conf import settings
 from django.contrib.admin.models import LogEntry
 from django.db.models import Case, IntegerField, Value, When
@@ -38,6 +39,7 @@ from proco.utils.cache import cache_manager
 from proco.utils.filters import NullsAlwaysLastOrderingFilter
 from proco.utils.mixins import CachedListMixin
 from proco.utils.tasks import update_all_cached_values
+
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -1205,7 +1207,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs = copy.deepcopy(self.kwargs)
 
         # Get the daily connectivity_speed for the given country from SchoolDailyStatus model
-        data = db_utilities.sql_to_response(self.get_avg_query(**kwargs), label=self.__class__.__name__)
+        data = db_utilities.sql_to_response(self.get_avg_query(**kwargs), label=self.__class__.__name__, db_var=settings.READ_ONLY_DB_KEY)
 
         # Generate the graph data in the desired format
         graph_data = []
@@ -1541,9 +1543,11 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
                 if len(self.kwargs.get('school_ids', [])) > 0:
                     info_panel_school_list = db_utilities.sql_to_response(self.get_school_view_info_query(),
-                                                                          label=self.__class__.__name__)
+                                                                          label=self.__class__.__name__,
+                                                                          db_var=settings.READ_ONLY_DB_KEY)
                     statistics = db_utilities.sql_to_response(self.get_school_view_statistics_info_query(),
-                                                              label=self.__class__.__name__)
+                                                              label=self.__class__.__name__,
+                                                              db_var=settings.READ_ONLY_DB_KEY)
                     graph_data, positive_speeds = self.generate_graph_data()
 
                     if len(info_panel_school_list) > 0:
@@ -1597,8 +1601,9 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     elif len(self.kwargs.get('country_ids', [])) > 0:
                         is_data_synced_qs = is_data_synced_qs.filter(school__country_id__in=self.kwargs['country_ids'])
 
-                    query_response = db_utilities.sql_to_response(self.get_info_query(), label=self.__class__.__name__)[
-                        -1]
+                    query_response = db_utilities.sql_to_response(self.get_info_query(),
+                                                                  label=self.__class__.__name__,
+                                                                  db_var=settings.READ_ONLY_DB_KEY)[-1]
 
                     graph_data, positive_speeds = self.generate_graph_data()
                     live_avg = round(sum(positive_speeds) / len(positive_speeds), 2) if len(positive_speeds) > 0 else 0
@@ -1665,9 +1670,11 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
                 if len(self.kwargs.get('school_ids', [])) > 0:
                     info_panel_school_list = db_utilities.sql_to_response(self.get_static_school_view_info_query(),
-                                                                          label=self.__class__.__name__)
+                                                                          label=self.__class__.__name__,
+                                                                          db_var=settings.READ_ONLY_DB_KEY)
                     statistics = db_utilities.sql_to_response(self.get_school_view_statistics_info_query(),
-                                                              label=self.__class__.__name__)
+                                                              label=self.__class__.__name__,
+                                                              db_var=settings.READ_ONLY_DB_KEY)
 
                     if len(info_panel_school_list) > 0:
                         for info_panel_school in info_panel_school_list:
@@ -1679,7 +1686,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 else:
                     query_labels = []
                     query_response = db_utilities.sql_to_response(self.get_static_info_query(query_labels),
-                                                                  label=self.__class__.__name__)[-1]
+                                                                  label=self.__class__.__name__,
+                                                                  db_var=settings.READ_ONLY_DB_KEY)[-1]
                     response = {
                         'total_schools': query_response['total_schools'],
                         'connected_schools': {label: query_response[label] for label in query_labels},
@@ -1719,6 +1727,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             ),
             mvtgeom AS (
                 SELECT DISTINCT ST_AsMVTGeom(ST_Transform("schools_school".geopoint, 3857), bounds.b2d) AS geom,
+                    {random_select_list}
                     "schools_school".id,
                     CASE WHEN rt_status.rt_registered = True AND rt_status.rt_registration_date::date <= '{end_date}'
                         THEN True ELSE False
@@ -1792,6 +1801,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
         kwargs['limit_condition'] = ''
         kwargs['random_order'] = ''
+        kwargs['random_select_list'] = ''
 
         add_random_condition = True
 
@@ -1842,7 +1852,12 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 ','.join([str(school_id) for school_id in kwargs['school_ids']])
             )
         elif len(kwargs.get('admin1_ids', [])) > 0:
-            add_random_condition = False
+            if settings.ADMIN_MAP_API_SAMPLING_LIMIT is not None:
+                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.ADMIN_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
+                add_random_condition = False
+
             kwargs['admin1_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
                 ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
             )
@@ -1850,7 +1865,12 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
             )
         elif len(kwargs.get('country_ids', [])) > 0:
-            add_random_condition = False
+            if settings.COUNTRY_MAP_API_SAMPLING_LIMIT:
+                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.COUNTRY_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
+                add_random_condition = False
+
             kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
@@ -1870,8 +1890,18 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
 
         if add_random_condition:
-            kwargs['limit_condition'] = 'LIMIT ' + request.query_params.get('limit', '50000')
-            kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+            if 'limit' in request.query_params:
+                limit = request.query_params['limit']
+                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+            elif kwargs.get('MAP_API_SAMPLING_LIMIT'):
+                limit = kwargs['MAP_API_SAMPLING_LIMIT']
+                kwargs['random_order'] = 'ORDER BY random()'
+            else:
+                limit = '50000'
+                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+
+            kwargs['limit_condition'] = 'LIMIT ' + str(limit)
+            kwargs['random_select_list'] = 'random(),'
 
         return query.format(**kwargs)
 
@@ -1889,6 +1919,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         ),
         mvtgeom AS (
             SELECT DISTINCT ST_AsMVTGeom(ST_Transform(schools_school.geopoint, 3857), bounds.b2d) AS geom,
+                {random_select_list}
                 schools_school.id,
                 sws."{col_name}" AS field_value,
                 CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
@@ -1924,6 +1955,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
         kwargs['limit_condition'] = ''
         kwargs['random_order'] = ''
+        kwargs['random_select_list'] = ''
 
         add_random_condition = True
 
@@ -1933,12 +1965,22 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 ','.join([str(school_id) for school_id in kwargs['school_ids']])
             )
         elif len(kwargs.get('admin1_ids', [])) > 0:
-            add_random_condition = False
+            if settings.ADMIN_MAP_API_SAMPLING_LIMIT:
+                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.ADMIN_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
+                add_random_condition = False
+
             kwargs['admin1_condition'] = 'AND schools_school."admin1_id" IN ({0})'.format(
                 ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
             )
         elif len(kwargs.get('country_ids', [])) > 0:
-            add_random_condition = False
+            if settings.COUNTRY_MAP_API_SAMPLING_LIMIT:
+                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.COUNTRY_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
+                add_random_condition = False
+
             kwargs['country_condition'] = 'AND schools_school."country_id" IN ({0})'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
@@ -1990,8 +2032,18 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         kwargs['label_case_statements'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
 
         if add_random_condition:
-            kwargs['limit_condition'] = 'LIMIT ' + request.query_params.get('limit', '50000')
-            kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+            if 'limit' in request.query_params:
+                limit = request.query_params['limit']
+                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+            elif kwargs.get('MAP_API_SAMPLING_LIMIT'):
+                limit = kwargs['MAP_API_SAMPLING_LIMIT']
+                kwargs['random_order'] = 'ORDER BY random()'
+            else:
+                limit = '50000'
+                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+
+            kwargs['limit_condition'] = 'LIMIT ' + str(limit)
+            kwargs['random_select_list'] = 'random(),'
 
         return query.format(**kwargs)
 
@@ -2075,10 +2127,9 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
             try:
                 response = self.generate_tile(request)
-                if self.cache_enabled(data_layer_instance):
+                if self.cache_enabled(data_layer_instance) and response.status_code == rest_status.HTTP_200_OK:
                     cache_manager.set(cache_key, response, request_path=request_path,
                                       soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
-
             except Exception as ex:
                 logger.error('Exception occurred for school connectivity tiles endpoint: {}'.format(ex))
                 response = Response({'error': 'An error occurred while processing the request'}, status=500)
