@@ -2196,18 +2196,19 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
                 INNER JOIN (
                     SELECT s.id AS school_id,
                         s.geopoint,
-                        EXTRACT(YEAR FROM CAST(t.date AS DATE)) AS year,
+                        EXTRACT(YEAR FROM CAST(sds.date AS DATE)) AS year,
                         {case_conditions}
                     FROM "schools_school" AS s
-                    INNER JOIN "connection_statistics_schooldailystatus" t ON (
-                        s."id" = t."school_id"
-                        AND EXTRACT(YEAR FROM CAST(t.date AS DATE)) >= {start_year}
-                        AND t."live_data_source" IN ({live_source_types}))
+                    INNER JOIN "connection_statistics_schooldailystatus" sds ON (
+                        s."id" = sds."school_id"
+                        AND EXTRACT(YEAR FROM CAST(sds.date AS DATE)) >= {start_year}
+                        AND sds."live_data_source" IN ({live_source_types}))
+                    INNER JOIN "connection_statistics_schoolweeklystatus" sws ON s."last_weekly_status_id" = sws."id"
                     WHERE s."deleted" IS NULL
-                        AND t."deleted" IS NULL
+                        AND sds."deleted" IS NULL
                         AND s."country_id" = {country_id}
-                    GROUP BY s."id", year
-                    ORDER BY s.id ASC, year ASC
+                    GROUP BY s."id", EXTRACT(YEAR FROM CAST(sds.date AS DATE)), field_status
+                    ORDER BY s.id ASC, year ASC, field_status
                 ) AS t1 ON ST_Intersects(t1.geopoint, ST_Transform(bounds.geom, 4326))
             LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = t1.school_id
             WHERE rt_status."deleted" IS NULL
@@ -2220,26 +2221,39 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
 
         kwargs['env'] = self.envelope_to_bounds_sql(env)
 
-        kwargs['case_conditions'] = """
-            CASE
-              WHEN AVG(t."{col_name}") > {benchmark_value} THEN 'good'
-              WHEN AVG(t."{col_name}") < {benchmark_value}
-                   and AVG(t."{col_name}") >= {base_benchmark} THEN 'moderate'
-              WHEN AVG(t."{col_name}") < {base_benchmark} THEN 'bad'
-              ELSE 'unknown'
-            END AS field_status
-        """.format(**kwargs)
+        legend_configs = kwargs['legend_configs']
+        if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
+            label_cases = []
+            for title, values_and_label in legend_configs.items():
+                values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
+                                     values_and_label.get('values', [])))
 
-        if kwargs['is_reverse'] is True:
+                if len(values) > 0:
+                    is_sql_value = 'SQL:' in values[0]
+                    if is_sql_value:
+                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
+                else:
+                    label_cases.append("ELSE '{label}'".format(label=title))
+
+            kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
+        else:
             kwargs['case_conditions'] = """
-            CASE
-                WHEN AVG(t."{col_name}") < {benchmark_value} THEN 'good'
-                WHEN AVG(t."{col_name}") >= {benchmark_value} AND AVG(t."{col_name}") <= {base_benchmark}
-                    THEN 'moderate'
-                WHEN AVG(t."{col_name}") > {base_benchmark} THEN 'bad'
-              ELSE 'unknown'
-            END AS field_status
-            """.format(**kwargs)
+                        CASE WHEN sds.{col_name} >  {benchmark_value} THEN 'good'
+                            WHEN sds.{col_name} < {benchmark_value} and sds.{col_name} >= {base_benchmark} THEN 'moderate'
+                            WHEN sds.{col_name} < {base_benchmark}  THEN 'bad'
+                            ELSE 'unknown'
+                        END AS field_status
+                    """.format(**kwargs)
+
+            if kwargs['is_reverse'] is True:
+                kwargs['case_conditions'] = """
+                        CASE WHEN sds.{col_name} < {benchmark_value}  THEN 'good'
+                            WHEN sds.{col_name} >= {benchmark_value} and sds.{col_name} <= {base_benchmark} THEN 'moderate'
+                            WHEN sds.{col_name} > {base_benchmark} THEN 'bad'
+                            ELSE 'unknown'
+                        END AS field_status
+                        """.format(**kwargs)
 
         return query.format(**kwargs)
 
@@ -2272,19 +2286,23 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
         parameter_column_name = str(parameter_col['name'])
         base_benchmark = str(parameter_col.get('base_benchmark', 1))
 
-        benchmark_val = data_layer_instance.global_benchmark.get('value')
+        self.kwargs['benchmark'] = 'national' if request.query_params.get('benchmark', 'global') == 'national' else 'global'
+        self.kwargs['country_id'] = country_id
+        self.kwargs['col_name'] = parameter_column_name
+
+        benchmark_value, _ = self.get_benchmark_value(data_layer_instance)
+        legend_configs = self.get_legend_configs(data_layer_instance)
 
         if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
             self.kwargs.update({
-                'country_id': country_id,
-                'col_name': parameter_column_name,
-                'benchmark_value': benchmark_val,
+                'benchmark_value': benchmark_value,
                 'base_benchmark': base_benchmark,
                 'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                 'parameter_col': parameter_col,
                 'layer_type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                 'start_year': request.query_params.get('start_year', date_utilities.get_current_year() - 4),
                 'is_reverse': data_layer_instance.is_reverse,
+                'legend_configs': legend_configs,
             })
 
         try:
