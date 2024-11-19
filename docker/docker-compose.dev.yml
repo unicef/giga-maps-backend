@@ -43,7 +43,7 @@ services:
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.dev
       DATABASE_URL: postgis://test:test@db/proco
-      READ_ONLY_DATABASE_URL: postgis://test:test@db/proco
+      READ_ONLY_DATABASE_URL: postgis://test:test@db/proco?options=-c statement_timeout=300000
 #      CELERY_BROKER_URL: amqp://rabbitmq:rabbitmq@rabbitmq/
       REDIS_URL: redis://redis:6379/0
     depends_on:
@@ -68,6 +68,7 @@ services:
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.dev
       DATABASE_URL: postgis://test:test@db/proco
+      READ_ONLY_DATABASE_URL: postgis://test:test@db/proco?options=-c statement_timeout=1800000
 #      CELERY_BROKER_URL: amqp://rabbitmq:rabbitmq@rabbitmq/
       REDIS_URL: redis://redis:6379/0
     volumes:
@@ -86,6 +87,7 @@ services:
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.dev
       DATABASE_URL: postgis://test:test@db/proco
+      READ_ONLY_DATABASE_URL: postgis://test:test@db/proco?options=-c statement_timeout=1800000
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND_URL: redis://redis:6379/2

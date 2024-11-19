@@ -3,6 +3,7 @@ import json
 import logging
 from datetime import timedelta
 
+from azure.core.pipeline.transport import HttpResponse
 from django.conf import settings
 from django.contrib.admin.models import LogEntry
 from django.db.models import Case, IntegerField, Value, When
@@ -38,6 +39,7 @@ from proco.utils.cache import cache_manager
 from proco.utils.filters import NullsAlwaysLastOrderingFilter
 from proco.utils.mixins import CachedListMixin
 from proco.utils.tasks import update_all_cached_values
+
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -986,14 +988,13 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 COUNT(DISTINCT CASE WHEN sds.{col_name} IS NULL THEN sds.school_id ELSE NULL END) AS "unknown",
                 """.format(**kwargs)
 
-        if len(kwargs.get('country_ids', [])) > 0:
-            kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
-                ','.join([str(country_id) for country_id in kwargs['country_ids']])
-            )
-
         if len(kwargs.get('admin1_ids', [])) > 0:
             kwargs['admin1_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
                 ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
+            )
+        elif len(kwargs.get('country_ids', [])) > 0:
+            kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
+                ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
 
         if len(kwargs['school_filters']) > 0:
@@ -1177,20 +1178,18 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs['school_weekly_join'] = ''
         kwargs['school_weekly_condition'] = ''
 
-        if len(kwargs.get('country_ids', [])) > 0:
-            kwargs['country_condition'] = '"schools_school"."country_id" IN ({0}) AND'.format(
-                ','.join([str(country_id) for country_id in kwargs['country_ids']])
-            )
-
-        if len(kwargs.get('admin1_ids', [])) > 0:
-            kwargs['admin1_condition'] = '"schools_school"."admin1_id" IN ({0}) AND'.format(
-                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
-            )
-
         if len(kwargs.get('school_ids', [])) > 0:
             kwargs['school_condition'] = '"schools_school"."id" IN ({0}) AND '.format(','.join(kwargs['school_ids']))
             kwargs['school_selection'] = '"schools_school"."id", '
             kwargs['school_group_by'] = ', "schools_school"."id"'
+        elif len(kwargs.get('admin1_ids', [])) > 0:
+            kwargs['admin1_condition'] = '"schools_school"."admin1_id" IN ({0}) AND'.format(
+                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
+            )
+        elif len(kwargs.get('country_ids', [])) > 0:
+            kwargs['country_condition'] = '"schools_school"."country_id" IN ({0}) AND'.format(
+                ','.join([str(country_id) for country_id in kwargs['country_ids']])
+            )
 
         if len(kwargs['school_filters']) > 0:
             kwargs['school_condition'] += kwargs['school_filters'] + ' AND '
@@ -1208,7 +1207,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs = copy.deepcopy(self.kwargs)
 
         # Get the daily connectivity_speed for the given country from SchoolDailyStatus model
-        data = db_utilities.sql_to_response(self.get_avg_query(**kwargs), label=self.__class__.__name__)
+        data = db_utilities.sql_to_response(self.get_avg_query(**kwargs), label=self.__class__.__name__, db_var=settings.READ_ONLY_DB_KEY)
 
         # Generate the graph data in the desired format
         graph_data = []
@@ -1291,14 +1290,13 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs['school_weekly_join'] = ''
         kwargs['school_weekly_condition'] = ''
 
-        if len(kwargs.get('country_ids', [])) > 0:
-            kwargs['country_condition'] = ' AND "schools_school"."country_id" IN ({0})'.format(
-                ','.join([str(country_id) for country_id in kwargs['country_ids']])
-            )
-
         if len(kwargs.get('admin1_ids', [])) > 0:
             kwargs['admin1_condition'] = ' AND "schools_school"."admin1_id" IN ({0})'.format(
                 ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
+            )
+        elif len(kwargs.get('country_ids', [])) > 0:
+            kwargs['country_condition'] = ' AND "schools_school"."country_id" IN ({0})'.format(
+                ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
 
         if len(kwargs['school_filters']) > 0:
@@ -1545,9 +1543,11 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
                 if len(self.kwargs.get('school_ids', [])) > 0:
                     info_panel_school_list = db_utilities.sql_to_response(self.get_school_view_info_query(),
-                                                                          label=self.__class__.__name__)
+                                                                          label=self.__class__.__name__,
+                                                                          db_var=settings.READ_ONLY_DB_KEY)
                     statistics = db_utilities.sql_to_response(self.get_school_view_statistics_info_query(),
-                                                              label=self.__class__.__name__)
+                                                              label=self.__class__.__name__,
+                                                              db_var=settings.READ_ONLY_DB_KEY)
                     graph_data, positive_speeds = self.generate_graph_data()
 
                     if len(info_panel_school_list) > 0:
@@ -1601,8 +1601,9 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     elif len(self.kwargs.get('country_ids', [])) > 0:
                         is_data_synced_qs = is_data_synced_qs.filter(school__country_id__in=self.kwargs['country_ids'])
 
-                    query_response = db_utilities.sql_to_response(self.get_info_query(), label=self.__class__.__name__)[
-                        -1]
+                    query_response = db_utilities.sql_to_response(self.get_info_query(),
+                                                                  label=self.__class__.__name__,
+                                                                  db_var=settings.READ_ONLY_DB_KEY)[-1]
 
                     graph_data, positive_speeds = self.generate_graph_data()
                     live_avg = round(sum(positive_speeds) / len(positive_speeds), 2) if len(positive_speeds) > 0 else 0
@@ -1669,9 +1670,11 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
                 if len(self.kwargs.get('school_ids', [])) > 0:
                     info_panel_school_list = db_utilities.sql_to_response(self.get_static_school_view_info_query(),
-                                                                          label=self.__class__.__name__)
+                                                                          label=self.__class__.__name__,
+                                                                          db_var=settings.READ_ONLY_DB_KEY)
                     statistics = db_utilities.sql_to_response(self.get_school_view_statistics_info_query(),
-                                                              label=self.__class__.__name__)
+                                                              label=self.__class__.__name__,
+                                                              db_var=settings.READ_ONLY_DB_KEY)
 
                     if len(info_panel_school_list) > 0:
                         for info_panel_school in info_panel_school_list:
@@ -1683,7 +1686,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 else:
                     query_labels = []
                     query_response = db_utilities.sql_to_response(self.get_static_info_query(query_labels),
-                                                                  label=self.__class__.__name__)[-1]
+                                                                  label=self.__class__.__name__,
+                                                                  db_var=settings.READ_ONLY_DB_KEY)[-1]
                     response = {
                         'total_schools': query_response['total_schools'],
                         'connected_schools': {label: query_response[label] for label in query_labels},
@@ -1723,6 +1727,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             ),
             mvtgeom AS (
                 SELECT DISTINCT ST_AsMVTGeom(ST_Transform("schools_school".geopoint, 3857), bounds.b2d) AS geom,
+                    {random_select_list}
                     "schools_school".id,
                     CASE WHEN rt_status.rt_registered = True AND rt_status.rt_registration_date::date <= '{end_date}'
                         THEN True ELSE False
@@ -1796,6 +1801,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
         kwargs['limit_condition'] = ''
         kwargs['random_order'] = ''
+        kwargs['random_select_list'] = ''
 
         add_random_condition = True
 
@@ -1836,24 +1842,6 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 END AS field_status,
                 """.format(**kwargs)
 
-        if len(kwargs.get('country_ids', [])) > 0:
-            add_random_condition = False
-            kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
-                ','.join([str(country_id) for country_id in kwargs['country_ids']])
-            )
-            kwargs['country_outer_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
-                ','.join([str(country_id) for country_id in kwargs['country_ids']])
-            )
-
-        if len(kwargs.get('admin1_ids', [])) > 0:
-            add_random_condition = False
-            kwargs['admin1_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
-                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
-            )
-            kwargs['admin1_outer_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
-                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
-            )
-
         if len(kwargs.get('school_ids', [])) > 0:
             add_random_condition = False
             kwargs['school_condition'] = 'AND "schools_school"."id" IN ({0})'.format(
@@ -1862,6 +1850,32 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
             kwargs['school_outer_condition'] = 'AND "schools_school"."id" IN ({0})'.format(
                 ','.join([str(school_id) for school_id in kwargs['school_ids']])
+            )
+        elif len(kwargs.get('admin1_ids', [])) > 0:
+            if settings.ADMIN_MAP_API_SAMPLING_LIMIT is not None:
+                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.ADMIN_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
+                add_random_condition = False
+
+            kwargs['admin1_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
+                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
+            )
+            kwargs['admin1_outer_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
+                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
+            )
+        elif len(kwargs.get('country_ids', [])) > 0:
+            if settings.COUNTRY_MAP_API_SAMPLING_LIMIT:
+                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.COUNTRY_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
+                add_random_condition = False
+
+            kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
+                ','.join([str(country_id) for country_id in kwargs['country_ids']])
+            )
+            kwargs['country_outer_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
+                ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
 
         if len(kwargs['school_filters']) > 0:
@@ -1876,8 +1890,18 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
 
         if add_random_condition:
-            kwargs['limit_condition'] = 'LIMIT ' + request.query_params.get('limit', '50000')
-            kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+            if 'limit' in request.query_params:
+                limit = request.query_params['limit']
+                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+            elif kwargs.get('MAP_API_SAMPLING_LIMIT'):
+                limit = kwargs['MAP_API_SAMPLING_LIMIT']
+                kwargs['random_order'] = 'ORDER BY random()'
+            else:
+                limit = '50000'
+                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+
+            kwargs['limit_condition'] = 'LIMIT ' + str(limit)
+            kwargs['random_select_list'] = 'random(),'
 
         return query.format(**kwargs)
 
@@ -1895,6 +1919,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         ),
         mvtgeom AS (
             SELECT DISTINCT ST_AsMVTGeom(ST_Transform(schools_school.geopoint, 3857), bounds.b2d) AS geom,
+                {random_select_list}
                 schools_school.id,
                 sws."{col_name}" AS field_value,
                 CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
@@ -1930,25 +1955,34 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
         kwargs['limit_condition'] = ''
         kwargs['random_order'] = ''
+        kwargs['random_select_list'] = ''
 
         add_random_condition = True
-
-        if len(kwargs.get('country_ids', [])) > 0:
-            add_random_condition = False
-            kwargs['country_condition'] = 'AND schools_school."country_id" IN ({0})'.format(
-                ','.join([str(country_id) for country_id in kwargs['country_ids']])
-            )
-
-        if len(kwargs.get('admin1_ids', [])) > 0:
-            add_random_condition = False
-            kwargs['admin1_condition'] = 'AND schools_school."admin1_id" IN ({0})'.format(
-                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
-            )
 
         if len(kwargs.get('school_ids', [])) > 0:
             add_random_condition = False
             kwargs['school_condition'] = 'AND schools_school."id" IN ({0})'.format(
                 ','.join([str(school_id) for school_id in kwargs['school_ids']])
+            )
+        elif len(kwargs.get('admin1_ids', [])) > 0:
+            if settings.ADMIN_MAP_API_SAMPLING_LIMIT:
+                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.ADMIN_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
+                add_random_condition = False
+
+            kwargs['admin1_condition'] = 'AND schools_school."admin1_id" IN ({0})'.format(
+                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
+            )
+        elif len(kwargs.get('country_ids', [])) > 0:
+            if settings.COUNTRY_MAP_API_SAMPLING_LIMIT:
+                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.COUNTRY_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
+                add_random_condition = False
+
+            kwargs['country_condition'] = 'AND schools_school."country_id" IN ({0})'.format(
+                ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
 
         if len(kwargs['school_filters']) > 0:
@@ -1998,8 +2032,18 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         kwargs['label_case_statements'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
 
         if add_random_condition:
-            kwargs['limit_condition'] = 'LIMIT ' + request.query_params.get('limit', '50000')
-            kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+            if 'limit' in request.query_params:
+                limit = request.query_params['limit']
+                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+            elif kwargs.get('MAP_API_SAMPLING_LIMIT'):
+                limit = kwargs['MAP_API_SAMPLING_LIMIT']
+                kwargs['random_order'] = 'ORDER BY random()'
+            else:
+                limit = '50000'
+                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+
+            kwargs['limit_condition'] = 'LIMIT ' + str(limit)
+            kwargs['random_select_list'] = 'random(),'
 
         return query.format(**kwargs)
 
@@ -2083,10 +2127,9 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
             try:
                 response = self.generate_tile(request)
-                if self.cache_enabled(data_layer_instance):
+                if self.cache_enabled(data_layer_instance) and response.status_code == rest_status.HTTP_200_OK:
                     cache_manager.set(cache_key, response, request_path=request_path,
                                       soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
-
             except Exception as ex:
                 logger.error('Exception occurred for school connectivity tiles endpoint: {}'.format(ex))
                 response = Response({'error': 'An error occurred while processing the request'}, status=500)
@@ -2153,18 +2196,19 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
                 INNER JOIN (
                     SELECT s.id AS school_id,
                         s.geopoint,
-                        EXTRACT(YEAR FROM CAST(t.date AS DATE)) AS year,
+                        EXTRACT(YEAR FROM CAST(sds.date AS DATE)) AS year,
                         {case_conditions}
                     FROM "schools_school" AS s
-                    INNER JOIN "connection_statistics_schooldailystatus" t ON (
-                        s."id" = t."school_id"
-                        AND EXTRACT(YEAR FROM CAST(t.date AS DATE)) >= {start_year}
-                        AND t."live_data_source" IN ({live_source_types}))
+                    INNER JOIN "connection_statistics_schooldailystatus" sds ON (
+                        s."id" = sds."school_id"
+                        AND EXTRACT(YEAR FROM CAST(sds.date AS DATE)) >= {start_year}
+                        AND sds."live_data_source" IN ({live_source_types}))
+                    INNER JOIN "connection_statistics_schoolweeklystatus" sws ON s."last_weekly_status_id" = sws."id"
                     WHERE s."deleted" IS NULL
-                        AND t."deleted" IS NULL
+                        AND sds."deleted" IS NULL
                         AND s."country_id" = {country_id}
-                    GROUP BY s."id", year
-                    ORDER BY s.id ASC, year ASC
+                    GROUP BY s."id", EXTRACT(YEAR FROM CAST(sds.date AS DATE)), field_status
+                    ORDER BY s.id ASC, year ASC, field_status
                 ) AS t1 ON ST_Intersects(t1.geopoint, ST_Transform(bounds.geom, 4326))
             LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = t1.school_id
             WHERE rt_status."deleted" IS NULL
@@ -2177,26 +2221,39 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
 
         kwargs['env'] = self.envelope_to_bounds_sql(env)
 
-        kwargs['case_conditions'] = """
-            CASE
-              WHEN AVG(t."{col_name}") > {benchmark_value} THEN 'good'
-              WHEN AVG(t."{col_name}") < {benchmark_value}
-                   and AVG(t."{col_name}") >= {base_benchmark} THEN 'moderate'
-              WHEN AVG(t."{col_name}") < {base_benchmark} THEN 'bad'
-              ELSE 'unknown'
-            END AS field_status
-        """.format(**kwargs)
+        legend_configs = kwargs['legend_configs']
+        if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
+            label_cases = []
+            for title, values_and_label in legend_configs.items():
+                values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
+                                     values_and_label.get('values', [])))
 
-        if kwargs['is_reverse'] is True:
+                if len(values) > 0:
+                    is_sql_value = 'SQL:' in values[0]
+                    if is_sql_value:
+                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
+                else:
+                    label_cases.append("ELSE '{label}'".format(label=title))
+
+            kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
+        else:
             kwargs['case_conditions'] = """
-            CASE
-                WHEN AVG(t."{col_name}") < {benchmark_value} THEN 'good'
-                WHEN AVG(t."{col_name}") >= {benchmark_value} AND AVG(t."{col_name}") <= {base_benchmark}
-                    THEN 'moderate'
-                WHEN AVG(t."{col_name}") > {base_benchmark} THEN 'bad'
-              ELSE 'unknown'
-            END AS field_status
-            """.format(**kwargs)
+                        CASE WHEN sds.{col_name} >  {benchmark_value} THEN 'good'
+                            WHEN sds.{col_name} < {benchmark_value} and sds.{col_name} >= {base_benchmark} THEN 'moderate'
+                            WHEN sds.{col_name} < {base_benchmark}  THEN 'bad'
+                            ELSE 'unknown'
+                        END AS field_status
+                    """.format(**kwargs)
+
+            if kwargs['is_reverse'] is True:
+                kwargs['case_conditions'] = """
+                        CASE WHEN sds.{col_name} < {benchmark_value}  THEN 'good'
+                            WHEN sds.{col_name} >= {benchmark_value} and sds.{col_name} <= {base_benchmark} THEN 'moderate'
+                            WHEN sds.{col_name} > {base_benchmark} THEN 'bad'
+                            ELSE 'unknown'
+                        END AS field_status
+                        """.format(**kwargs)
 
         return query.format(**kwargs)
 
@@ -2229,19 +2286,23 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
         parameter_column_name = str(parameter_col['name'])
         base_benchmark = str(parameter_col.get('base_benchmark', 1))
 
-        benchmark_val = data_layer_instance.global_benchmark.get('value')
+        self.kwargs['benchmark'] = 'national' if request.query_params.get('benchmark', 'global') == 'national' else 'global'
+        self.kwargs['country_id'] = country_id
+        self.kwargs['col_name'] = parameter_column_name
+
+        benchmark_value, _ = self.get_benchmark_value(data_layer_instance)
+        legend_configs = self.get_legend_configs(data_layer_instance)
 
         if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
             self.kwargs.update({
-                'country_id': country_id,
-                'col_name': parameter_column_name,
-                'benchmark_value': benchmark_val,
+                'benchmark_value': benchmark_value,
                 'base_benchmark': base_benchmark,
                 'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                 'parameter_col': parameter_col,
                 'layer_type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                 'start_year': request.query_params.get('start_year', date_utilities.get_current_year() - 4),
                 'is_reverse': data_layer_instance.is_reverse,
+                'legend_configs': legend_configs,
             })
 
         try:
