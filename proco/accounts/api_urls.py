@@ -21,7 +21,8 @@ urlpatterns = [
     }), name='request-api-key-extension'),
     path('validate_api_key/', api.ValidateAPIKeyViewSet.as_view(), name='validate-an-api-key'),
 
-    path('translate/text/<str:target>/', api.TranslateTextFromEnViewSet.as_view(), name='translate-a-text-to-given-target-language'),
+    path('translate/text/<str:target>/', api.TranslateTextFromEnViewSet.as_view(),
+         name='translate-a-text-to-given-target-language'),
 
     # Email Endpoints
     path('notifications/', api.NotificationViewSet.as_view({

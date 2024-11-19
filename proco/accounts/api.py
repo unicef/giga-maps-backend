@@ -1,10 +1,10 @@
 import copy
 import json
 import logging
+import uuid
 from datetime import timedelta
 
 import requests
-import uuid
 from django.conf import settings
 from django.contrib.admin.models import LogEntry
 from django.db.models import Case, IntegerField, Value, When
@@ -40,7 +40,6 @@ from proco.utils.cache import cache_manager, no_expiry_cache_manager
 from proco.utils.filters import NullsAlwaysLastOrderingFilter
 from proco.utils.mixins import CachedListMixin
 from proco.utils.tasks import update_all_cached_values
-
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -567,18 +566,18 @@ class DataLayerPreviewViewSet(APIView):
 
     def get_map_query(self, kwargs):
         query = """
-        SELECT schools_school.id,
+        SELECT s.id,
             CASE WHEN rt_status.rt_registered = True AND rt_status.rt_registration_date <= '{end_date}' THEN True
                     ELSE False
             END as is_rt_connected,
             {case_conditions}
-            CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
-                WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
+            CASE WHEN s.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                WHEN s.connectivity_status = 'no' THEN 'not_connected'
                 ELSE 'unknown'
             END as connectivity_status,
-            ST_AsGeoJSON(ST_Transform(schools_school.geopoint, 4326)) as geopoint
-        FROM schools_school
-        INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
+            ST_AsGeoJSON(ST_Transform(s.geopoint, 4326)) as geopoint
+        FROM schools_school s
+        LEFT JOIN connection_statistics_schoolweeklystatus sws ON s.last_weekly_status_id = sws.id
         LEFT JOIN (
             SELECT "schools_school"."id" AS school_id,
                 AVG(t."{col_name}") AS "{col_name}"
@@ -600,9 +599,9 @@ class DataLayerPreviewViewSet(APIView):
                 AND t."deleted" IS NULL)
             GROUP BY "schools_school"."id"
             ORDER BY "schools_school"."id" ASC
-        ) AS sds ON sds.school_id = schools_school.id
-        LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = schools_school.id
-        WHERE schools_school."deleted" IS NULL
+        ) AS sds ON sds.school_id = s.id
+        LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = s.id
+        WHERE s."deleted" IS NULL
         AND rt_status."deleted" IS NULL
         {country_condition_outer}
         ORDER BY random()
@@ -647,7 +646,7 @@ class DataLayerPreviewViewSet(APIView):
             kwargs['country_condition'] = '"schools_school"."country_id" IN ({0}) AND'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
-            kwargs['country_condition_outer'] = 'AND schools_school."country_id" IN ({0})'.format(
+            kwargs['country_condition_outer'] = 'AND s."country_id" IN ({0})'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
         else:
@@ -660,14 +659,18 @@ class DataLayerPreviewViewSet(APIView):
     def get_static_map_query(self, kwargs):
         query = """
             SELECT
-                schools_school.id,
-                schools_school.name,
-                {table_name}."{col_name}",
-                ST_AsGeoJSON(ST_Transform(schools_school.geopoint, 4326)) as geopoint,
+                s.id,
+                s.name,
+                sws."{col_name}",
+                CASE WHEN s.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                    WHEN s.connectivity_status = 'no' THEN 'not_connected'
+                    ELSE 'unknown'
+                END as connectivity_status,
+                ST_AsGeoJSON(ST_Transform(s.geopoint, 4326)) as geopoint,
                 {label_case_statements}
-            FROM schools_school
-            INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
-            WHERE schools_school."deleted" IS NULL {country_condition}
+            FROM schools_school as s
+            LEFT JOIN connection_statistics_schoolweeklystatus sws ON s.last_weekly_status_id = sws.id
+            WHERE s."deleted" IS NULL {country_condition}
             ORDER BY random()
             LIMIT 1000
             """
@@ -675,7 +678,7 @@ class DataLayerPreviewViewSet(APIView):
         kwargs['country_condition'] = ''
 
         if len(kwargs['country_ids']) > 0:
-            kwargs['country_condition'] = 'AND schools_school.country_id IN ({0})'.format(
+            kwargs['country_condition'] = 'AND s.country_id IN ({0})'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
 
@@ -683,8 +686,6 @@ class DataLayerPreviewViewSet(APIView):
         label_cases = []
         values_l = []
         parameter_col_type = kwargs['parameter_col'].get('type', 'str').lower()
-        kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'sws')
-
         for title, values_and_label in legend_configs.items():
             values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
                                  values_and_label.get('values', [])))
@@ -693,7 +694,6 @@ class DataLayerPreviewViewSet(APIView):
                 is_sql_value = 'SQL:' in values[0]
                 if is_sql_value:
                     sql_statement = str(','.join(values)).replace('SQL:', '').format(
-                        table_name=kwargs['table_name'],
                         col_name=kwargs['col_name'],
                     )
                     label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
@@ -701,16 +701,14 @@ class DataLayerPreviewViewSet(APIView):
                     values_l.extend(values)
                     if parameter_col_type == 'str':
                         label_cases.append(
-                            """WHEN LOWER({table_name}."{col_name}") IN ({value}) THEN '{label}'""".format(
-                                table_name=kwargs['table_name'],
+                            """WHEN LOWER(sws."{col_name}") IN ({value}) THEN '{label}'""".format(
                                 col_name=kwargs['col_name'],
                                 label=title,
                                 value=','.join(["'" + str(v).lower() + "'" for v in values])
                             ))
                     elif parameter_col_type == 'int':
                         label_cases.append(
-                            """WHEN {table_name}."{col_name}" IN ({value}) THEN '{label}'""".format(
-                                table_name=kwargs['table_name'],
+                            """WHEN sws."{col_name}" IN ({value}) THEN '{label}'""".format(
                                 col_name=kwargs['col_name'],
                                 label=title,
                                 value=','.join([str(v) for v in values])
@@ -1129,7 +1127,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         INNER JOIN public.locations_country c ON c."id" = schools_school."country_id"
             AND c."deleted" IS NULL
             AND schools_school."deleted" IS NULL
-        INNER JOIN "connection_statistics_schoolweeklystatus" sws ON schools_school."last_weekly_status_id" = sws."id"
         LEFT JOIN public.locations_countryadminmetadata AS adm1_metadata
             ON adm1_metadata."id" = schools_school.admin1_id
             AND adm1_metadata."layer_name" = 'adm1'
@@ -1158,6 +1155,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             GROUP BY "schools_school"."id"
             ORDER BY "schools_school"."id" ASC
         ) AS sds ON sds.school_id = schools_school.id
+        LEFT OUTER JOIN "connection_statistics_schoolweeklystatus" sws
+            ON schools_school."last_weekly_status_id" = sws."id"
         WHERE "schools_school"."id" IN ({ids})
         GROUP BY schools_school."id", srr."rt_registered", srr."rt_registration_date",
             adm1_metadata."name", adm1_metadata."description_ui_label",
@@ -1356,11 +1355,11 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
     def get_static_info_query(self, query_labels):
         query = """
         SELECT {label_case_statements}
-            COUNT(DISTINCT CASE WHEN {table_name}."{col_name}" IS NOT NULL THEN "schools_school"."id" ELSE NULL END)
+            COUNT(DISTINCT CASE WHEN sws."{col_name}" IS NOT NULL THEN "schools_school"."id" ELSE NULL END)
             AS "total_schools"
         FROM "schools_school"
-        INNER JOIN connection_statistics_schoolweeklystatus sws ON "schools_school"."last_weekly_status_id" = sws."id"
         {school_weekly_join}
+        LEFT JOIN connection_statistics_schoolweeklystatus sws ON "schools_school"."last_weekly_status_id" = sws."id"
         WHERE "schools_school"."deleted" IS NULL
         {country_condition}
         {admin1_condition}
@@ -1390,7 +1389,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
         if len(kwargs['school_static_filters']) > 0:
             kwargs['school_weekly_join'] = """
-            INNER JOIN "connection_statistics_schoolweeklystatus"
+            LEFT OUTER JOIN "connection_statistics_schoolweeklystatus"
                 ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
             """
             kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
@@ -1399,7 +1398,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         label_cases = []
         values_l = []
         parameter_col_type = kwargs['parameter_col'].get('type', 'str').lower()
-        kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'sws')
         is_sql_value = False
 
         for title, values_and_label in legend_configs.items():
@@ -1412,7 +1410,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 is_sql_value = 'SQL:' in values[0]
                 if is_sql_value:
                     sql_statement = str(','.join(values)).replace('SQL:', '').format(
-                        table_name=kwargs['table_name'],
                         col_name=kwargs['col_name'],
                     )
                     label_cases.append(
@@ -1424,18 +1421,16 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     values_l.extend(values)
                     if parameter_col_type == 'str':
                         label_cases.append(
-                            'COUNT(DISTINCT CASE WHEN LOWER({table_name}."{col_name}") IN ({value}) '
+                            'COUNT(DISTINCT CASE WHEN LOWER(sws."{col_name}") IN ({value}) '
                             'THEN schools_school."id" ELSE NULL END) AS "{label}",'.format(
-                                table_name=kwargs['table_name'],
                                 col_name=kwargs['col_name'],
                                 label=label,
                                 value=','.join(["'" + str(v).lower() + "'" for v in values])
                             ))
                     elif parameter_col_type == 'int':
                         label_cases.append(
-                            'COUNT(DISTINCT CASE WHEN {table_name}."{col_name}" IN ({value}) '
+                            'COUNT(DISTINCT CASE WHEN sws."{col_name}" IN ({value}) '
                             'THEN schools_school."id" ELSE NULL END) AS "{label}",'.format(
-                                table_name=kwargs['table_name'],
                                 col_name=kwargs['col_name'],
                                 label=label,
                                 value=','.join([str(v) for v in values])
@@ -1443,9 +1438,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             else:
                 if is_sql_value:
                     label_cases.append(
-                        'COUNT(DISTINCT CASE WHEN {table_name}."{col_name}" IS NULL THEN schools_school."id" ELSE NULL END) '
+                        'COUNT(DISTINCT CASE WHEN sws."{col_name}" IS NULL THEN schools_school."id" ELSE NULL END) '
                         'AS "{label}",'.format(
-                            table_name=kwargs['table_name'],
                             col_name=kwargs['col_name'],
                             label=label,
                         ))
@@ -1453,18 +1447,16 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     values = set(values_l)
                     if parameter_col_type == 'str':
                         label_cases.append(
-                            'COUNT(DISTINCT CASE WHEN LOWER({table_name}."{col_name}") NOT IN ({value}) '
+                            'COUNT(DISTINCT CASE WHEN LOWER(sws."{col_name}") NOT IN ({value}) '
                             'THEN schools_school."id" ELSE NULL END) AS "{label}",'.format(
-                                table_name=kwargs['table_name'],
                                 col_name=kwargs['col_name'],
                                 label=label,
                                 value=','.join(["'" + str(v).lower() + "'" for v in values])
                             ))
                     elif parameter_col_type == 'int':
                         label_cases.append(
-                            'COUNT(DISTINCT CASE WHEN {table_name}."{col_name}" NOT IN ({value}) '
+                            'COUNT(DISTINCT CASE WHEN sws."{col_name}" NOT IN ({value}) '
                             'THEN schools_school."id" ELSE NULL END) AS "{label}",'.format(
-                                table_name=kwargs['table_name'],
                                 col_name=kwargs['col_name'],
                                 label=label,
                                 value=','.join([str(v) for v in values])
@@ -1492,7 +1484,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             adm2_metadata."description_ui_label" AS admin2_description_ui_label,
             schools_school."environment",
             schools_school."education_level",
-            {table_name}."{col_name}" AS field_value,
+            sws."{col_name}" AS field_value,
             {label_case_statements}
             ST_AsGeoJSON(ST_Transform(schools_school."geopoint", 4326)) AS geopoint,
             CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
@@ -1502,7 +1494,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         FROM "schools_school"
         INNER JOIN locations_country c ON c.id = schools_school.country_id
             AND c."deleted" IS NULL
-        INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
         LEFT JOIN locations_countryadminmetadata AS adm1_metadata
             ON adm1_metadata."id" = schools_school.admin1_id
             AND adm1_metadata."layer_name" = 'adm1'
@@ -1511,6 +1502,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             ON adm2_metadata."id" = schools_school.admin2_id
             AND adm2_metadata."layer_name" = 'adm2'
             AND adm2_metadata."deleted" IS NULL
+        LEFT JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
         WHERE "schools_school"."id" IN ({ids})
         """
 
@@ -1521,8 +1513,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         label_cases = []
         values_l = []
         parameter_col_type = kwargs['parameter_col'].get('type', 'str').lower()
-        kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'sws')
-
         for title, values_and_label in legend_configs.items():
             values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
                                  values_and_label.get('values', [])))
@@ -1531,7 +1521,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 is_sql_value = 'SQL:' in values[0]
                 if is_sql_value:
                     sql_statement = str(','.join(values)).replace('SQL:', '').format(
-                        table_name=kwargs['table_name'],
                         col_name=kwargs['col_name'],
                     )
                     label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
@@ -1539,16 +1528,14 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     values_l.extend(values)
                     if parameter_col_type == 'str':
                         label_cases.append(
-                            """WHEN LOWER({table_name}."{col_name}") IN ({value}) THEN '{label}'""".format(
-                                table_name=kwargs['table_name'],
+                            """WHEN LOWER(sws."{col_name}") IN ({value}) THEN '{label}'""".format(
                                 col_name=kwargs['col_name'],
                                 label=title,
                                 value=','.join(["'" + str(v).lower() + "'" for v in values])
                             ))
                     elif parameter_col_type == 'int':
                         label_cases.append(
-                            """WHEN {table_name}."{col_name}" IN ({value}) THEN '{label}'""".format(
-                                table_name=kwargs['table_name'],
+                            """WHEN sws."{col_name}" IN ({value}) THEN '{label}'""".format(
                                 col_name=kwargs['col_name'],
                                 label=title,
                                 value=','.join([str(v) for v in values])
@@ -2019,7 +2006,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             SELECT DISTINCT ST_AsMVTGeom(ST_Transform(schools_school.geopoint, 3857), bounds.b2d) AS geom,
                 {random_select_list}
                 schools_school.id,
-                {table_name}."{col_name}" AS field_value,
+                sws."{col_name}" AS field_value,
                 CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
                     WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
                     ELSE 'unknown'
@@ -2027,8 +2014,8 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 {label_case_statements}
             FROM schools_school
             INNER JOIN bounds ON ST_Intersects(schools_school.geopoint, ST_Transform(bounds.geom, 4326))
-            INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
             {school_weekly_join}
+            LEFT JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
             WHERE schools_school."deleted" IS NULL
             {country_condition}
             {admin1_condition}
@@ -2097,8 +2084,6 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         label_cases = []
         values_l = []
         parameter_col_type = kwargs['parameter_col'].get('type', 'str').lower()
-        kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'sws')
-
         for title, values_and_label in legend_configs.items():
             values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
                                  values_and_label.get('values', [])))
@@ -2107,7 +2092,6 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 is_sql_value = 'SQL:' in values[0]
                 if is_sql_value:
                     sql_statement = str(','.join(values)).replace('SQL:', '').format(
-                        table_name=kwargs['table_name'],
                         col_name=kwargs['col_name'],
                     )
                     label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
@@ -2115,16 +2099,14 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     values_l.extend(values)
                     if parameter_col_type == 'str':
                         label_cases.append(
-                            """WHEN LOWER({table_name}."{col_name}") IN ({value}) THEN '{label}'""".format(
-                                table_name=kwargs['table_name'],
+                            """WHEN LOWER(sws."{col_name}") IN ({value}) THEN '{label}'""".format(
                                 col_name=kwargs['col_name'],
                                 label=title,
                                 value=','.join(["'" + str(v).lower() + "'" for v in values])
                             ))
                     elif parameter_col_type == 'int':
                         label_cases.append(
-                            """WHEN {table_name}."{col_name}" IN ({value}) THEN '{label}'""".format(
-                                table_name=kwargs['table_name'],
+                            """WHEN sws."{col_name}" IN ({value}) THEN '{label}'""".format(
                                 col_name=kwargs['col_name'],
                                 label=title,
                                 value=','.join([str(v) for v in values])
@@ -2297,21 +2279,21 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
                    t1.field_status
                 FROM bounds
                 INNER JOIN (
-                    SELECT schools_school.id AS school_id,
-                        schools_school.geopoint,
+                    SELECT s.id AS school_id,
+                        s.geopoint,
                         EXTRACT(YEAR FROM CAST(sds.date AS DATE)) AS year,
                         {case_conditions}
-                    FROM "schools_school"
+                    FROM "schools_school" AS s
                     INNER JOIN "connection_statistics_schooldailystatus" sds ON (
-                        schools_school."id" = sds."school_id"
+                        s."id" = sds."school_id"
                         AND EXTRACT(YEAR FROM CAST(sds.date AS DATE)) >= {start_year}
                         AND sds."live_data_source" IN ({live_source_types}))
-                    INNER JOIN "connection_statistics_schoolweeklystatus" sws ON schools_school."last_weekly_status_id" = sws."id"
-                    WHERE schools_school."deleted" IS NULL
+                    INNER JOIN "connection_statistics_schoolweeklystatus" sws ON s."last_weekly_status_id" = sws."id"
+                    WHERE s."deleted" IS NULL
                         AND sds."deleted" IS NULL
-                        AND schools_school."country_id" = {country_id}
-                    GROUP BY schools_school."id", EXTRACT(YEAR FROM CAST(sds.date AS DATE)), field_status
-                    ORDER BY schools_school.id ASC, year ASC, field_status
+                        AND s."country_id" = {country_id}
+                    GROUP BY s."id", EXTRACT(YEAR FROM CAST(sds.date AS DATE)), field_status
+                    ORDER BY s.id ASC, year ASC, field_status
                 ) AS t1 ON ST_Intersects(t1.geopoint, ST_Transform(bounds.geom, 4326))
             LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = t1.school_id
             WHERE rt_status."deleted" IS NULL
