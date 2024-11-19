@@ -120,7 +120,7 @@ class CountryViewSet(
                     SchoolMasterData.ROW_STATUS_DELETED_PUBLISHED,
                     SchoolMasterData.ROW_STATUS_DISCARDED,
                 ],
-                is_read=True,
+                # is_read=True, -- There are records where status manually updated but is_read = false
             ).values_list('country_id', flat=True).order_by('country_id').distinct('country_id'))
             if len(country_ids) > 0:
                 queryset = queryset.filter(id__in=country_ids)

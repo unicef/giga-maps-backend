@@ -92,19 +92,21 @@ class Command(BaseCommand):
                 )
 
                 if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+                    parameter_table_name = str(parameter_col.get('table_name', 'sds'))
                     sql = """
-                    SELECT DISTINCT s."country_id"
+                    SELECT DISTINCT schools_school."country_id"
                     FROM "connection_statistics_schooldailystatus" AS sds
-                    INNER JOIN "schools_school" AS s ON (sds."school_id" = s."id")
-                    WHERE s."deleted" IS NULL
+                    INNER JOIN "schools_school" ON (sds."school_id" = schools_school."id")
+                    WHERE schools_school."deleted" IS NULL
                       AND sds."deleted" IS NULL
                       AND sds."live_data_source" IN ({live_source_types})
-                      AND s."country_id" IN ({country_ids})
-                      AND sds.{col_name} IS NOT NULL
-                    ORDER BY s."country_id" ASC
+                      AND schools_school."country_id" IN ({country_ids})
+                      AND {table_name}.{col_name} IS NOT NULL
+                    ORDER BY schools_school."country_id" ASC
                     """.format(
                         live_source_types=','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                         country_ids=','.join([str(country_id) for country_id in all_country_ids]),
+                        table_name=parameter_table_name,
                         col_name=parameter_column_name
                     )
                     all_country_ids_has_layer_data = db_utilities.sql_to_response(sql,
@@ -138,21 +140,26 @@ class Command(BaseCommand):
                                     relationship_instance.__dict__))
                 elif data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_STATIC:
                     unknown_condition = ''
+                    parameter_table_name = str(parameter_col.get('table_name', 'sws'))
                     if parameter_column_type == 'str':
-                        unknown_condition = "AND sws.{col_name} != 'unknown'".format(col_name=parameter_column_name)
+                        unknown_condition = "AND {table_name}.{col_name} != 'unknown'".format(
+                            table_name=parameter_table_name,
+                            col_name=parameter_column_name
+                        )
 
                     sql = """
-                        SELECT DISTINCT s."country_id"
-                        FROM "connection_statistics_schoolweeklystatus" AS sws
-                        INNER JOIN "schools_school" AS s ON (sws."school_id" = s."id")
-                        WHERE s."deleted" IS NULL
-                          AND sws."deleted" IS NULL
-                          AND s."country_id" IN ({country_ids})
-                          AND sws.{col_name} IS NOT NULL
+                        SELECT DISTINCT schools_school."country_id"
+                        FROM "schools_school"
+                        INNER JOIN "connection_statistics_schoolweeklystatus" AS sws
+                            ON (sws."id" = schools_school."last_weekly_status_id")
+                        WHERE schools_school."deleted" IS NULL
+                          AND schools_school."country_id" IN ({country_ids})
+                          AND {table_name}.{col_name} IS NOT NULL
                           {unknown_condition}
-                        ORDER BY s."country_id" ASC
+                        ORDER BY schools_school."country_id" ASC
                     """.format(
                         country_ids=','.join([str(country_id) for country_id in all_country_ids]),
+                        table_name=parameter_table_name,
                         col_name=parameter_column_name,
                         unknown_condition=unknown_condition,
                     )

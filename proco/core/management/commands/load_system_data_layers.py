@@ -365,6 +365,16 @@ data_source_json = [
                 'display_unit': '',
                 'count_labels': ['good', 'moderate', 'bad'],
             },
+            {
+                'name': 'connectivity_status',
+                'type': 'str',
+                'is_parameter': True,
+                'alias': 'Connectivity Status (connectivity_status)',
+                'unit': '',
+                'display_unit': '',
+                'table_name': 'schools_school',
+                'count_labels': ['good', 'moderate', 'bad', 'unknown'],
+            },
         ],
         'status': 'PUBLISHED'
     }

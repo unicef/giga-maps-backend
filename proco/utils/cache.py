@@ -57,4 +57,5 @@ class SoftCacheManager(object):
 
 cache_manager = SoftCacheManager()
 
-
+no_expiry_cache_manager = SoftCacheManager()
+no_expiry_cache_manager.CACHE_PREFIX = settings.NO_EXPIRY_CACHE_PREFIX
