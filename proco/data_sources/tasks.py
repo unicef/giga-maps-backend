@@ -885,7 +885,7 @@ def data_loss_recovery_for_pcdc_weekly_task(start_week_no, end_week_no, year, pu
 
     task_id = current_task.request.id or str(uuid.uuid4())
     task_instance = background_task_utilities.task_on_start(
-        task_id, task_key, 'Recover the data fro PCDC live source')
+        task_id, task_key, 'Recover the data for PCDC live source')
 
     if task_instance:
         logger.debug('Not found running job: {}'.format(task_key))
@@ -899,6 +899,29 @@ def data_loss_recovery_for_pcdc_weekly_task(start_week_no, end_week_no, year, pu
             cmd_args.append('--pull_data')
 
         call_command('data_loss_recovery_for_pcdc_weekly', *cmd_args)
+
+        background_task_utilities.task_on_complete(task_instance)
+    else:
+        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+
+
+@app.task(soft_time_limit=1 * 60 * 60, time_limit=1 * 60 * 60)
+def clean_historic_data():
+    current_datetime = core_utilities.get_current_datetime_object()
+    task_key = 'clean_historic_data_status_{current_time}'.format(
+        current_time=format_date(current_datetime, frmt='%d%m%Y_%H%M%S'),
+    )
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(task_id, task_key, 'Clean historic data')
+
+    if task_instance:
+        logger.debug('Not found running job for historic data cleanup handler: {}'.format(task_key))
+        cmd_args = [
+            '--clean_school_master_historical_rows',
+        ]
+
+        call_command('data_source_additional_steps', *cmd_args)
+        task_instance.info('Completed school master historical record cleanup.')
 
         background_task_utilities.task_on_complete(task_instance)
     else:
