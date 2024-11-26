@@ -480,6 +480,7 @@ class DataLayersViewSet(BaseModelViewSet):
     filter_backends = (
         DjangoFilterBackend,
         NullsAlwaysLastOrderingFilter,
+        SearchFilter,
     )
 
     ordering_field_names = ['-last_modified_at', 'name']
@@ -491,6 +492,8 @@ class DataLayersViewSet(BaseModelViewSet):
         'published_by_id': ['exact', 'in'],
         'name': ['iexact', 'in', 'exact'],
     }
+
+    search_fields = ('name', 'code', 'type',)
 
     permit_list_expands = ['created_by', 'published_by', 'last_modified_by']
 
@@ -570,40 +573,35 @@ class DataLayerPreviewViewSet(APIView):
         SELECT schools_school.id,
             CASE WHEN rt_status.rt_registered = True AND rt_status.rt_registration_date <= '{end_date}' THEN True
                     ELSE False
-            END as is_rt_connected,
+            END AS is_rt_connected,
             {case_conditions}
             CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
                 WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
                 ELSE 'unknown'
-            END as connectivity_status,
-            ST_AsGeoJSON(ST_Transform(schools_school.geopoint, 4326)) as geopoint
+            END AS connectivity_status,
+            ST_AsGeoJSON(ST_Transform(schools_school.geopoint, 4326)) AS geopoint
         FROM schools_school
         INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
+        INNER JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = schools_school.id
         LEFT JOIN (
             SELECT "schools_school"."id" AS school_id,
                 AVG(t."{col_name}") AS "{col_name}"
             FROM "schools_school"
-            INNER JOIN "connection_statistics_schoolrealtimeregistration"
-                ON ("schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id")
-            LEFT OUTER JOIN "connection_statistics_schooldailystatus" t
-                ON (
-                    "schools_school"."id" = t."school_id"
-                    AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
-                    AND t."live_data_source" IN ({live_source_types})
-                )
+            INNER JOIN "connection_statistics_schooldailystatus" t ON "schools_school"."id" = t."school_id"
             WHERE (
                 {country_condition}
-                "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
-                AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date"::date <= '{end_date}'
-                AND "schools_school"."deleted" IS NULL
-                AND "connection_statistics_schoolrealtimeregistration"."deleted" IS NULL
-                AND t."deleted" IS NULL)
+                "schools_school"."deleted" IS NULL
+                AND t."deleted" IS NULL
+                AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
+                AND t."live_data_source" IN ({live_source_types})
+            )
             GROUP BY "schools_school"."id"
             ORDER BY "schools_school"."id" ASC
         ) AS sds ON sds.school_id = schools_school.id
-        LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = schools_school.id
         WHERE schools_school."deleted" IS NULL
-        AND rt_status."deleted" IS NULL
+            AND rt_status."deleted" IS NULL
+            AND rt_status."rt_registered" = True
+            AND rt_status."rt_registration_date"::date <= '{end_date}'
         {country_condition_outer}
         ORDER BY random()
         LIMIT 1000
@@ -627,7 +625,7 @@ class DataLayerPreviewViewSet(APIView):
             kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS connectivity,'
         else:
             kwargs['case_conditions'] = """
-                        CASE WHEN sds.{col_name} >  {benchmark_value} THEN 'good'
+                        CASE WHEN sds.{col_name} > {benchmark_value} THEN 'good'
                             WHEN sds.{col_name} <= {benchmark_value} and sds.{col_name} >= {base_benchmark} THEN 'moderate'
                             WHEN sds.{col_name} < {base_benchmark}  THEN 'bad'
                             ELSE 'unknown'
@@ -995,13 +993,13 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             FROM "schools_school"
             INNER JOIN "connection_statistics_schoolrealtimeregistration"
                 ON ("schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id")
+            {school_weekly_join}
             LEFT OUTER JOIN "connection_statistics_schooldailystatus" t
                 ON (
                     "schools_school"."id" = t."school_id"
                     AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
                     AND t."live_data_source" IN ({live_source_types})
                 )
-            {school_weekly_join}
             WHERE (
                 "schools_school"."deleted" IS NULL
                 AND "connection_statistics_schoolrealtimeregistration"."deleted" IS NULL
@@ -1055,7 +1053,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             kwargs['case_conditions'] = ' '.join(label_cases)
 
             kwargs['school_weekly_outer_join'] = """
-            LEFT OUTER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
+            INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
             """
         else:
             kwargs['case_conditions'] = """
@@ -1089,7 +1087,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
         if len(kwargs['school_static_filters']) > 0:
             kwargs['school_weekly_join'] = """
-            LEFT OUTER JOIN "connection_statistics_schoolweeklystatus"
+            INNER JOIN "connection_statistics_schoolweeklystatus"
                 ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
             """
             kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
@@ -1231,27 +1229,23 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         SELECT {school_selection}t."date" AS date,
             AVG(t."{col_name}") AS "field_avg"
         FROM "schools_school"
-        INNER JOIN "connection_statistics_schoolrealtimeregistration"
-            ON (
-                "schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id"
-                AND "connection_statistics_schoolrealtimeregistration"."deleted" IS NULL
-            )
-        INNER JOIN "connection_statistics_schooldailystatus" t
-            ON (
-                "schools_school"."id" = t."school_id"
-                AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
-                AND t."live_data_source" IN ({live_source_types})
-                AND t."deleted" IS NULL
-            )
+        INNER JOIN "connection_statistics_schoolrealtimeregistration" ON
+            "connection_statistics_schoolrealtimeregistration"."school_id" = "schools_school"."id"
+        INNER JOIN "connection_statistics_schooldailystatus" t ON "schools_school"."id" = t."school_id"
         {school_weekly_join}
         WHERE (
             {country_condition}
             {admin1_condition}
             {school_condition}
             {school_weekly_condition}
-            "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
+            "connection_statistics_schoolrealtimeregistration"."deleted" IS NULL
+            AND "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
             AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date"::date <= '{end_date}'
-            AND t."{col_name}" IS NOT NULL)
+            AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
+            AND t."live_data_source" IN ({live_source_types})
+            AND t."deleted" IS NULL
+            AND t."{col_name}" IS NOT NULL
+        )
         GROUP BY t."date"{school_group_by}
         ORDER BY t."date" ASC
         """
@@ -1282,7 +1276,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
         if len(kwargs['school_static_filters']) > 0:
             kwargs['school_weekly_join'] = """
-            LEFT OUTER JOIN "connection_statistics_schoolweeklystatus"
+            INNER JOIN "connection_statistics_schoolweeklystatus"
                 ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
             """
             kwargs['school_weekly_condition'] = kwargs['school_static_filters'] + ' AND '
@@ -1391,7 +1385,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         if len(kwargs['school_static_filters']) > 0:
             kwargs['school_weekly_join'] = """
             INNER JOIN "connection_statistics_schoolweeklystatus"
-                ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
+                ON sws."id" = "connection_statistics_schoolweeklystatus"."id"
             """
             kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
 
@@ -1846,13 +1840,13 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     FROM "schools_school"
                     INNER JOIN "connection_statistics_schoolrealtimeregistration"
                         ON ("schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id")
+                    {school_weekly_join}
                     LEFT OUTER JOIN "connection_statistics_schooldailystatus" t
                         ON (
                             "schools_school"."id" = t."school_id"
                             AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
                             AND t."live_data_source" IN ({live_source_types})
                         )
-                    {school_weekly_join}
                     WHERE (
                         "schools_school"."deleted" IS NULL
                         AND "connection_statistics_schoolrealtimeregistration"."deleted" IS NULL
@@ -1982,7 +1976,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
         if len(kwargs['school_static_filters']) > 0:
             kwargs['school_weekly_join'] = """
-            LEFT OUTER JOIN "connection_statistics_schoolweeklystatus"
+            INNER JOIN "connection_statistics_schoolweeklystatus"
                 ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
             """
             kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
@@ -2088,8 +2082,8 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
         if len(kwargs['school_static_filters']) > 0:
             kwargs['school_weekly_join'] = """
-            LEFT OUTER JOIN "connection_statistics_schoolweeklystatus"
-                ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
+            INNER JOIN "connection_statistics_schoolweeklystatus"
+                ON sws."id" = "connection_statistics_schoolweeklystatus"."id"
             """
             kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
 
