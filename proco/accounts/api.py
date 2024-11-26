@@ -493,7 +493,7 @@ class DataLayersViewSet(BaseModelViewSet):
         'name': ['iexact', 'in', 'exact'],
     }
 
-    search_fields = ('name', 'code', 'type', )
+    search_fields = ('name', 'code', 'type',)
 
     permit_list_expands = ['created_by', 'published_by', 'last_modified_by']
 
@@ -1053,7 +1053,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             kwargs['case_conditions'] = ' '.join(label_cases)
 
             kwargs['school_weekly_outer_join'] = """
-            LEFT OUTER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
+            INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
             """
         else:
             kwargs['case_conditions'] = """
@@ -1385,7 +1385,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         if len(kwargs['school_static_filters']) > 0:
             kwargs['school_weekly_join'] = """
             INNER JOIN "connection_statistics_schoolweeklystatus"
-                ON "sws"."id" = "connection_statistics_schoolweeklystatus"."id"
+                ON sws."id" = "connection_statistics_schoolweeklystatus"."id"
             """
             kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
 
@@ -1843,15 +1843,25 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     )
                     WHERE (
                         "schools_school"."deleted" IS NULL
-                        AND rt_status."deleted" IS NULL
-                        AND rt_status."rt_registered" = True
-                        AND rt_status."rt_registration_date"::date <= '{end_date}'
+                        AND "connection_statistics_schoolrealtimeregistration"."deleted" IS NULL
+                        AND t."deleted" IS NULL
                         {country_condition}
                         {admin1_condition}
                         {school_condition}
-                    )
+                        {school_weekly_condition}
+                        AND "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
+                        AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date"::date
+                        <= '{end_date}')
                     GROUP BY "schools_school"."id"
                 ) AS sds ON sds.school_id = "schools_school".id
+                {school_weekly_outer_join}
+                LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status
+                    ON rt_status.school_id = "schools_school".id
+                WHERE "schools_school"."deleted" IS NULL
+                AND rt_status."deleted" IS NULL
+                {country_outer_condition}
+                {admin1_outer_condition}
+                {school_outer_condition}
                 {school_weekly_condition}
                 {random_order}
                 {limit_condition}
@@ -1898,7 +1908,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
             kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status,'
             kwargs['school_weekly_outer_join'] = """
-            INNER JOIN "connection_statistics_schoolweeklystatus" sws ON "schools_school"."last_weekly_status_id" = sws."id"
+            LEFT OUTER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
             """
         else:
             kwargs['case_conditions'] = """
@@ -1963,7 +1973,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             INNER JOIN "connection_statistics_schoolweeklystatus"
                 ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
             """
-            kwargs['school_weekly_condition'] = ' WHERE ' + kwargs['school_static_filters']
+            kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
 
         if add_random_condition:
             if 'limit' in request.query_params:
@@ -1998,7 +2008,10 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 {random_select_list}
                 schools_school.id,
                 {table_name}."{col_name}" AS field_value,
-                'connected' AS connectivity_status,
+                CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                    WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
+                    ELSE 'unknown'
+                END as connectivity_status,
                 {label_case_statements}
             FROM schools_school
             INNER JOIN bounds ON ST_Intersects(schools_school.geopoint, ST_Transform(bounds.geom, 4326))
