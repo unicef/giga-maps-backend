@@ -1832,32 +1832,26 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 SELECT DISTINCT ST_AsMVTGeom(ST_Transform("schools_school".geopoint, 3857), bounds.b2d) AS geom,
                     {random_select_list}
                     "schools_school".id,
-                    CASE WHEN rt_status.rt_registered = True AND rt_status.rt_registration_date::date <= '{end_date}'
-                        THEN True ELSE False
-                    END AS is_rt_connected,
+                    True AS is_rt_connected,
                     sds.{col_name} AS field_avg,
                     {case_conditions}
-                    CASE WHEN "schools_school".connectivity_status IN ('good', 'moderate') THEN 'connected'
-                        WHEN "schools_school".connectivity_status = 'no' THEN 'not_connected'
-                        ELSE 'unknown'
-                    END as connectivity_status
+                    'connected' AS connectivity_status
                 FROM schools_school
                 INNER JOIN bounds ON ST_Intersects("schools_school".geopoint, ST_Transform(bounds.geom, 4326))
                 {school_weekly_join}
-                LEFT JOIN (
+                {school_weekly_outer_join}
+                INNER JOIN (
                     SELECT "schools_school"."id" AS school_id,
-                        "schools_school"."last_weekly_status_id",
                         AVG(t."{col_name}") AS "{col_name}"
                     FROM "schools_school"
-                    INNER JOIN "connection_statistics_schoolrealtimeregistration"
-                        ON ("schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id")
-                    {school_weekly_join}
-                    LEFT OUTER JOIN "connection_statistics_schooldailystatus" t
-                        ON (
-                            "schools_school"."id" = t."school_id"
-                            AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
-                            AND t."live_data_source" IN ({live_source_types})
-                        )
+                    INNER JOIN connection_statistics_schoolrealtimeregistration rt_status ON
+                        rt_status.school_id = "schools_school".id
+                    LEFT OUTER JOIN "connection_statistics_schooldailystatus" t ON (
+                        "schools_school"."id" = t."school_id"
+                        AND t."deleted" IS NULL
+                        AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
+                        AND t."live_data_source" IN ({live_source_types})
+                    )
                     WHERE (
                         "schools_school"."deleted" IS NULL
                         AND "connection_statistics_schoolrealtimeregistration"."deleted" IS NULL
