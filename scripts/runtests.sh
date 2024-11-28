@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # set -ex
-export DJANGO_SETTINGS_MODULE=config.settings.dev_tests
+export DJANGO_SETTINGS_MODULE=config.settings.dev_test
 # Ensure there are no errors.
 pipenv run python -W ignore manage.py check
 pipenv run python -W ignore manage.py makemigrations --dry-run --check
