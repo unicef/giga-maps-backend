@@ -36,7 +36,7 @@ from proco.core.viewsets import BaseModelViewSet
 from proco.custom_auth import models as auth_models
 from proco.locations.models import Country
 from proco.utils import dates as date_utilities
-from proco.utils.cache import cache_manager, no_expiry_cache_manager
+from proco.utils.cache import cache_manager, custom_cache_control, no_expiry_cache_manager
 from proco.utils.filters import NullsAlwaysLastOrderingFilter
 from proco.utils.mixins import CachedListMixin
 from proco.utils.tasks import update_all_cached_values
@@ -241,13 +241,12 @@ class TranslateTextFromEnViewSet(APIView):
     def get_cache_key(self, request):
         pk = self.kwargs.get('target')
 
-        payload = request.data
+        payload = str(request.data)
         if payload:
-            return '{0}_{1}_{2}'.format(
-                self.CACHE_KEY_PREFIX,
-                pk,
-                str(payload)[:2000]
-            )
+            if len(payload) <= settings.AI_TRANSLATION_CACHE_KEY_LIMIT:
+                return '{0}_{1}_{2}'.format(self.CACHE_KEY_PREFIX, pk, payload)
+            else:
+                return '{0}_{1}_{2}_{3}'.format(self.CACHE_KEY_PREFIX, pk, payload[:int(settings.AI_TRANSLATION_CACHE_KEY_LIMIT / 2)], payload[-int(settings.AI_TRANSLATION_CACHE_KEY_LIMIT / 2):])
 
     def prepare_azure_request(self, request, *args, **kwargs):
         # Add your key and endpoint
@@ -964,7 +963,13 @@ class BaseDataLayerAPIViewSet(APIView):
         return legend_configs
 
 
-@method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
+@method_decorator([
+    custom_cache_control(
+        public=True,
+        max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE,
+        cache_status_codes=[rest_status.HTTP_200_OK,],
+    )
+], name='dispatch')
 class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
     CACHE_KEY = 'cache'
     CACHE_KEY_PREFIX = 'DATA_LAYER_INFO'
@@ -1796,7 +1801,13 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         return Response(data=response)
 
 
-@method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
+@method_decorator([
+    custom_cache_control(
+        public=True,
+        max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE,
+        cache_status_codes=[rest_status.HTTP_200_OK,],
+    )
+], name='dispatch')
 class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGenerator):
     CACHE_KEY = 'cache'
     CACHE_KEY_PREFIX = 'DATA_LAYER_MAP'
