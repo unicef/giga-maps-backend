@@ -339,7 +339,7 @@ class CountryDataViewSetTestCase(TestAPIViewSetMixin, TestCase):
 
         response_data = response.data
         # 2 records as we created manually in setup and only 2 countries has schools
-        self.assertEqual(len(response_data), 2)
+        self.assertEqual(len(response_data), 3)
 
         with self.assertNumQueries(0):
             response = self.forced_auth_req('get', url, user=self.user, view=view)

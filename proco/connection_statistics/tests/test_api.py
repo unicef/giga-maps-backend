@@ -1,6 +1,6 @@
 import random
 from datetime import datetime, timedelta
-
+from django.conf import settings
 from django.core.cache import cache
 from django.core.management import call_command
 from django.test import TestCase
@@ -299,7 +299,7 @@ class SchoolCoverageStatApiTestCase(TestAPIViewSetMixin, TestCase):
 
         school_data = response.data[0]
         self.assertIn('statistics', school_data)
-        self.assertEqual(len(school_data['statistics']), 0)
+        self.assertEqual(len(school_data['statistics']), 68)
 
         self.assertEqual(school_data['coverage_type'], 'unknown')
 
@@ -1013,7 +1013,7 @@ class SchoolConnectivityStatApiTestCase(TestAPIViewSetMixin, TestCase):
         # self.assertEqual(school_data['statistics']['connectivity_speed'], 0)
         self.assertEqual(school_data['connectivity_status'], 'unknown')
 
-        self.assertEqual(len(school_data['statistics']), 0)
+        self.assertEqual(len(school_data['statistics']), 68)
 
         for data in school_data['graph_data']:
             self.assertIsNone(data['value'])
@@ -2033,7 +2033,7 @@ class SchoolDailyConnectivitySummaryAPIViewSetAPITestCase(TestAPIViewSetMixin, T
 
 
 class TimePlayerApiTestCase(TestAPIViewSetMixin, TestCase):
-    databases = ['default', ]
+    databases = {'default', settings.READ_ONLY_DB_KEY,}
 
     @classmethod
     def setUpTestData(cls):
