@@ -567,6 +567,11 @@ class DataLayerPreviewViewSet(APIView):
         core_permissions.CanPreviewDataLayer,
     )
 
+    def get_column_function_sql(self, parameter_col_function):
+        if isinstance(parameter_col_function, dict) and len(parameter_col_function) > 0:
+            return parameter_col_function.get('sql').format(col_name='t."{col_name}"')
+        return 'AVG(t."{col_name}")'
+
     def get_map_query(self, kwargs):
         query = """
         SELECT schools_school.id,
@@ -584,7 +589,7 @@ class DataLayerPreviewViewSet(APIView):
         INNER JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = schools_school.id
         LEFT JOIN (
             SELECT "schools_school"."id" AS school_id,
-                AVG(t."{col_name}") AS "{col_name}"
+                {col_function} AS "{col_name}"
             FROM "schools_school"
             INNER JOIN "connection_statistics_schooldailystatus" t ON "schools_school"."id" = t."school_id"
             WHERE (
@@ -650,6 +655,8 @@ class DataLayerPreviewViewSet(APIView):
         else:
             kwargs['country_condition'] = ''
             kwargs['country_condition_outer'] = ''
+
+        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
 
         return query.format(**kwargs)
 
@@ -726,6 +733,7 @@ class DataLayerPreviewViewSet(APIView):
 
         country_ids = data_layer_instance.applicable_countries
         parameter_col = data_sources.first().data_source_column
+        column_function_sql = self.get_column_function_sql(data_sources.first().data_source_column_function)
 
         parameter_column_name = str(parameter_col['name'])
         legend_configs = data_layer_instance.legend_configs
@@ -764,6 +772,7 @@ class DataLayerPreviewViewSet(APIView):
                 'end_date': end_date,
                 'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                 'parameter_col': parameter_col,
+                'parameter_col_function_sql': column_function_sql,
                 'is_reverse': data_layer_instance.is_reverse,
                 'legend_configs': legend_configs,
             }
