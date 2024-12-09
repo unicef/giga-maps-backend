@@ -29,6 +29,36 @@ data_source_json = [
                         'verbose': 'Avg',
                         'description': '',
                         'sql': 'AVG({col_name})'
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
                     }
                 ]
             }, {
@@ -45,6 +75,36 @@ data_source_json = [
                         'verbose': 'Avg',
                         'description': '',
                         'sql': 'AVG({col_name})'
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
                     }
                 ]
             }, {
@@ -63,14 +123,32 @@ data_source_json = [
                         'sql': 'AVG({col_name})'
                     },
                     {
-                        'name': 'median',
-                        'verbose': 'Median (0.9)',
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
                         'description': '',
                         'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
                     },
                     {
-                        'name': 'median',
-                        'verbose': 'Median (0.5)',
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
                         'description': '',
                         'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
                     }
@@ -99,7 +177,38 @@ data_source_json = [
                         'name': 'avg',
                         'verbose': 'Avg',
                         'description': '',
-                        'sql': 'AVG({col_name})'
+                        'sql': 'AVG({col_name})',
+                        'eval': ''
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
                     }
                 ]
             },
@@ -117,6 +226,36 @@ data_source_json = [
                         'verbose': 'Avg',
                         'description': '',
                         'sql': 'AVG({col_name})'
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
                     }
                 ]
             },
@@ -136,10 +275,34 @@ data_source_json = [
                         'sql': 'AVG({col_name})'
                     },
                     {
-                        'name': 'median',
-                        'verbose': 'Median (0.9)',
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
                         'description': '',
                         'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
                     }
                 ]
             },
