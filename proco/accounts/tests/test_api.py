@@ -607,7 +607,7 @@ class AppStaticConfigurationsApiTestCase(TestAPIViewSetMixin, TestCase):
 
 
 class TimePlayerApiTestCase(TestAPIViewSetMixin, TestCase):
-    databases = ['default', ]
+    databases = {'default', settings.READ_ONLY_DB_KEY,}
 
     @classmethod
     def setUpTestData(cls):
@@ -1421,7 +1421,7 @@ class LogActionApiTestCase(TestAPIViewSetMixin, TestCase):
 
 
 class DataLayerMapApiTestCase(TestAPIViewSetMixin, TestCase):
-    databases = ['default', ]
+    databases = {'default', settings.READ_ONLY_DB_KEY,}
 
     @classmethod
     def setUpTestData(cls):
@@ -1709,7 +1709,7 @@ class DataLayerMapApiTestCase(TestAPIViewSetMixin, TestCase):
 
 
 class DataLayerInfoApiTestCase(TestAPIViewSetMixin, TestCase):
-    databases = ['default', ]
+    databases = {'default', settings.READ_ONLY_DB_KEY,}
 
     @classmethod
     def setUpTestData(cls):

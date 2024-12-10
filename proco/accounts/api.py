@@ -36,7 +36,7 @@ from proco.core.viewsets import BaseModelViewSet
 from proco.custom_auth import models as auth_models
 from proco.locations.models import Country
 from proco.utils import dates as date_utilities
-from proco.utils.cache import cache_manager, no_expiry_cache_manager
+from proco.utils.cache import cache_manager, custom_cache_control, no_expiry_cache_manager
 from proco.utils.filters import NullsAlwaysLastOrderingFilter
 from proco.utils.mixins import CachedListMixin
 from proco.utils.tasks import update_all_cached_values
@@ -241,13 +241,12 @@ class TranslateTextFromEnViewSet(APIView):
     def get_cache_key(self, request):
         pk = self.kwargs.get('target')
 
-        payload = request.data
+        payload = str(request.data)
         if payload:
-            return '{0}_{1}_{2}'.format(
-                self.CACHE_KEY_PREFIX,
-                pk,
-                str(payload)[:2000]
-            )
+            if len(payload) <= settings.AI_TRANSLATION_CACHE_KEY_LIMIT:
+                return '{0}_{1}_{2}'.format(self.CACHE_KEY_PREFIX, pk, payload)
+            else:
+                return '{0}_{1}_{2}_{3}'.format(self.CACHE_KEY_PREFIX, pk, payload[:int(settings.AI_TRANSLATION_CACHE_KEY_LIMIT / 2)], payload[-int(settings.AI_TRANSLATION_CACHE_KEY_LIMIT / 2):])
 
     def prepare_azure_request(self, request, *args, **kwargs):
         # Add your key and endpoint
@@ -568,6 +567,11 @@ class DataLayerPreviewViewSet(APIView):
         core_permissions.CanPreviewDataLayer,
     )
 
+    def get_column_function_sql(self, parameter_col_function):
+        if isinstance(parameter_col_function, dict) and len(parameter_col_function) > 0:
+            return parameter_col_function.get('sql').format(col_name='t."{col_name}"')
+        return 'AVG(t."{col_name}")'
+
     def get_map_query(self, kwargs):
         query = """
         SELECT schools_school.id,
@@ -585,7 +589,7 @@ class DataLayerPreviewViewSet(APIView):
         INNER JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = schools_school.id
         LEFT JOIN (
             SELECT "schools_school"."id" AS school_id,
-                AVG(t."{col_name}") AS "{col_name}"
+                {col_function} AS "{col_name}"
             FROM "schools_school"
             INNER JOIN "connection_statistics_schooldailystatus" t ON "schools_school"."id" = t."school_id"
             WHERE (
@@ -651,6 +655,8 @@ class DataLayerPreviewViewSet(APIView):
         else:
             kwargs['country_condition'] = ''
             kwargs['country_condition_outer'] = ''
+
+        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
 
         return query.format(**kwargs)
 
@@ -727,6 +733,7 @@ class DataLayerPreviewViewSet(APIView):
 
         country_ids = data_layer_instance.applicable_countries
         parameter_col = data_sources.first().data_source_column
+        column_function_sql = self.get_column_function_sql(data_sources.first().data_source_column_function)
 
         parameter_column_name = str(parameter_col['name'])
         legend_configs = data_layer_instance.legend_configs
@@ -765,6 +772,7 @@ class DataLayerPreviewViewSet(APIView):
                 'end_date': end_date,
                 'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                 'parameter_col': parameter_col,
+                'parameter_col_function_sql': column_function_sql,
                 'is_reverse': data_layer_instance.is_reverse,
                 'legend_configs': legend_configs,
             }
@@ -963,8 +971,19 @@ class BaseDataLayerAPIViewSet(APIView):
 
         return legend_configs
 
+    def get_column_function_sql(self, parameter_col_function):
+        if isinstance(parameter_col_function, dict) and len(parameter_col_function) > 0:
+            return parameter_col_function.get('sql').format(col_name='t."{col_name}"')
+        return 'AVG(t."{col_name}")'
 
-@method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
+
+@method_decorator([
+    custom_cache_control(
+        public=True,
+        max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE,
+        cache_status_codes=[rest_status.HTTP_200_OK,],
+    )
+], name='dispatch')
 class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
     CACHE_KEY = 'cache'
     CACHE_KEY_PREFIX = 'DATA_LAYER_INFO'
@@ -989,7 +1008,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         FROM (
             SELECT "schools_school"."id" AS school_id,
                 "schools_school"."last_weekly_status_id",
-                AVG(t."{col_name}") AS "{col_name}"
+                {col_function} AS "{col_name}"
             FROM "schools_school"
             INNER JOIN "connection_statistics_schoolrealtimeregistration"
                 ON ("schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id")
@@ -1091,6 +1110,9 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
             """
             kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
+
+        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
+
         return query.format(**kwargs)
 
     def get_school_view_info_query(self):
@@ -1141,7 +1163,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             AND srr."deleted" IS NULL
         LEFT JOIN (
             SELECT "schools_school"."id" AS school_id,
-                AVG(t."{col_name}") AS "{col_name}"
+                {col_function} AS "{col_name}"
             FROM "schools_school"
             LEFT OUTER JOIN "connection_statistics_schooldailystatus" t
                 ON (
@@ -1210,6 +1232,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     ELSE 'unknown' END AS live_avg_connectivity
                 """.format(**kwargs)
 
+        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
+
         return query.format(**kwargs)
 
     def get_school_view_statistics_info_query(self):
@@ -1224,10 +1248,37 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
         return query
 
+    def get_live_avg(self, function_name, positive_speeds):
+        live_avg = 0
+
+        if len(positive_speeds) == 0:
+            return live_avg
+
+        if function_name == 'avg':
+            live_avg = round(sum(positive_speeds) / len(positive_speeds), 2)
+        elif function_name == 'min':
+            live_avg = round(min(positive_speeds), 2)
+        elif function_name == 'max':
+            live_avg = round(max(positive_speeds), 2)
+        elif function_name == 'sum':
+            live_avg = round(sum(positive_speeds), 2)
+        elif str(function_name).startswith('median'):
+            import numpy as np
+
+            positive_speeds = list(sorted(positive_speeds))
+
+            percentile_val = (str(function_name.split('|')[-1])).strip()
+            if percentile_val:
+                live_avg = round(np.percentile(positive_speeds, int(percentile_val)), 2)
+            else:
+                live_avg = np.median(positive_speeds)
+
+        return live_avg
+
     def get_avg_query(self, **kwargs):
         query = """
         SELECT {school_selection}t."date" AS date,
-            AVG(t."{col_name}") AS "field_avg"
+            {col_function} AS "field_avg"
         FROM "schools_school"
         INNER JOIN "connection_statistics_schoolrealtimeregistration" ON
             "connection_statistics_schoolrealtimeregistration"."school_id" = "schools_school"."id"
@@ -1280,6 +1331,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
             """
             kwargs['school_weekly_condition'] = kwargs['school_static_filters'] + ' AND '
+
+        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
 
         return query.format(**kwargs)
 
@@ -1583,6 +1636,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
             country_ids = data_layer_instance.applicable_countries
             parameter_col = data_sources.first().data_source_column
+            parameter_col_function = data_sources.first().data_source_column_function
+            column_function_sql = self.get_column_function_sql(parameter_col_function)
 
             parameter_column_name = str(parameter_col['name'])
             parameter_column_unit = str(parameter_col.get('unit', '')).lower()
@@ -1629,6 +1684,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     'base_benchmark': base_benchmark,
                     'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                     'parameter_col': parameter_col,
+                    'parameter_col_function_sql': column_function_sql,
                     'is_reverse': data_layer_instance.is_reverse,
                     'legend_configs': legend_configs,
                 })
@@ -1648,11 +1704,14 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                             info_panel_school['statistics'] = list(filter(
                                 lambda s: s['school_id'] == info_panel_school['id'], statistics))[-1]
 
-                            live_avg = (round(sum(positive_speeds[str(info_panel_school['id'])]) / len(
-                                positive_speeds[str(info_panel_school['id'])]), 2) if len(
-                                positive_speeds[str(info_panel_school['id'])]) > 0 else 0)
+                            # live_avg = (round(sum(positive_speeds[str(info_panel_school['id'])]) / len(
+                            #     positive_speeds[str(info_panel_school['id'])]), 2) if len(
+                            #     positive_speeds[str(info_panel_school['id'])]) > 0 else 0)
 
-                            info_panel_school['live_avg'] = live_avg
+                            info_panel_school['live_avg'] = self.get_live_avg(
+                                parameter_col_function.get('name', 'avg'),
+                                positive_speeds[str(info_panel_school['id'])]
+                            )
                             info_panel_school['graph_data'] = graph_data[str(info_panel_school['id'])]
 
                             benchmark_value_from_sql = info_panel_school.get('benchmark_sql_value', None)
@@ -1698,7 +1757,10 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                                                                   db_var=settings.READ_ONLY_DB_KEY)[-1]
 
                     graph_data, positive_speeds = self.generate_graph_data()
-                    live_avg = round(sum(positive_speeds) / len(positive_speeds), 2) if len(positive_speeds) > 0 else 0
+                    live_avg = self.get_live_avg(
+                        parameter_col_function.get('name', 'avg'),
+                        positive_speeds
+                    )
 
                     live_avg_connectivity = 'unknown'
 
@@ -1796,7 +1858,13 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         return Response(data=response)
 
 
-@method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
+@method_decorator([
+    custom_cache_control(
+        public=True,
+        max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE,
+        cache_status_codes=[rest_status.HTTP_200_OK,],
+    )
+], name='dispatch')
 class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGenerator):
     CACHE_KEY = 'cache'
     CACHE_KEY_PREFIX = 'DATA_LAYER_MAP'
@@ -1831,7 +1899,8 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 {school_weekly_outer_join}
                 INNER JOIN (
                     SELECT "schools_school"."id" AS school_id,
-                        AVG(t."{col_name}") AS "{col_name}"
+                        "schools_school"."last_weekly_status_id",
+                        {col_function} AS "{col_name}"
                     FROM "schools_school"
                     INNER JOIN connection_statistics_schoolrealtimeregistration rt_status ON
                         rt_status.school_id = "schools_school".id
@@ -1988,6 +2057,8 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
             kwargs['limit_condition'] = 'LIMIT ' + str(limit)
             kwargs['random_select_list'] = 'random(),'
+
+        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
 
         return query.format(**kwargs)
 
@@ -2186,6 +2257,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
             country_ids = data_layer_instance.applicable_countries
             parameter_col = data_sources.first().data_source_column
+            column_function_sql = self.get_column_function_sql(data_sources.first().data_source_column_function)
 
             parameter_column_name = str(parameter_col['name'])
             base_benchmark = str(parameter_col.get('base_benchmark', 1))
@@ -2205,6 +2277,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     'base_benchmark': base_benchmark,
                     'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                     'parameter_col': parameter_col,
+                    'parameter_col_function_sql': column_function_sql,
                     'layer_type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                     'legend_configs': legend_configs,
                 })
@@ -2274,36 +2347,34 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
                 {env}::box2d AS b2d
             ),
             mvtgeom AS (
-                SELECT DISTINCT ST_AsMVTGeom(ST_Transform(t1.geopoint, 3857), bounds.b2d) AS geom,
-                   t1.school_id,
-                   t1.year,
+                SELECT DISTINCT ST_AsMVTGeom(ST_Transform(sds.geopoint, 3857), bounds.b2d) AS geom,
+                   sds.school_id,
+                   sds.year,
                    CASE
                        WHEN rt_status.rt_registered = True
-                            AND EXTRACT(YEAR FROM CAST(rt_status.rt_registration_date AS DATE)) <= t1.year THEN True
+                            AND EXTRACT(YEAR FROM CAST(rt_status.rt_registration_date AS DATE)) <= sds.year THEN True
                        ELSE False
-                   END as is_rt_connected,
-                   t1.field_status
+                   END AS is_rt_connected,
+                   {case_conditions}
                 FROM bounds
                 INNER JOIN (
                     SELECT schools_school.id AS school_id,
                         schools_school.geopoint,
-                        EXTRACT(YEAR FROM CAST(sds.date AS DATE)) AS year,
-                        {case_conditions}
+                        EXTRACT(YEAR FROM CAST(t.date AS DATE)) AS year,
+                        schools_school."last_weekly_status_id",
+                        {col_function} AS "{col_name}"
                     FROM "schools_school"
-                    INNER JOIN "connection_statistics_schooldailystatus" sds ON (
-                        schools_school."id" = sds."school_id"
-                        AND EXTRACT(YEAR FROM CAST(sds.date AS DATE)) >= {start_year}
-                        AND sds."live_data_source" IN ({live_source_types}))
-                    INNER JOIN "connection_statistics_schoolweeklystatus" sws ON schools_school."last_weekly_status_id" = sws."id"
+                    INNER JOIN "connection_statistics_schooldailystatus" t ON schools_school."id" = t."school_id"
                     WHERE schools_school."deleted" IS NULL
-                        AND sds."deleted" IS NULL
+                        AND t."deleted" IS NULL
                         AND schools_school."country_id" = {country_id}
-                    GROUP BY schools_school."id", EXTRACT(YEAR FROM CAST(sds.date AS DATE)), field_status
-                    ORDER BY schools_school.id ASC, year ASC, field_status
-                ) AS t1 ON ST_Intersects(t1.geopoint, ST_Transform(bounds.geom, 4326))
-            LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = t1.school_id
+                        AND EXTRACT(YEAR FROM CAST(t.date AS DATE)) >= {start_year}
+                        AND t."live_data_source" IN ({live_source_types})
+                    GROUP BY schools_school."id", EXTRACT(YEAR FROM CAST(t.date AS DATE))
+                ) AS sds ON ST_Intersects(sds.geopoint, ST_Transform(bounds.geom, 4326))
+            INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
+            LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = sds.school_id
             WHERE rt_status."deleted" IS NULL
-            ORDER BY t1.school_id ASC, t1.year ASC
         )
         SELECT ST_AsMVT(DISTINCT mvtgeom.*) FROM mvtgeom;
         """
@@ -2346,6 +2417,8 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
                         END AS field_status
                         """.format(**kwargs)
 
+        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
+
         return query.format(**kwargs)
 
     def envelope_to_sql(self, env, request):
@@ -2373,6 +2446,7 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
                 live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
 
         parameter_col = data_sources.first().data_source_column
+        column_function_sql = self.get_column_function_sql(data_sources.first().data_source_column_function)
 
         parameter_column_name = str(parameter_col['name'])
         base_benchmark = str(parameter_col.get('base_benchmark', 1))
@@ -2390,6 +2464,7 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
                 'base_benchmark': base_benchmark,
                 'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                 'parameter_col': parameter_col,
+                'parameter_col_function_sql': column_function_sql,
                 'layer_type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                 'start_year': request.query_params.get('start_year', date_utilities.get_current_year() - 4),
                 'is_reverse': data_layer_instance.is_reverse,
