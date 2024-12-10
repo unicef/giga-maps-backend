@@ -380,6 +380,62 @@ class InvalidateCache(APIView):
         return Response(data={'message': message})
 
 
+class InvalidateCacheByPattern(APIView):
+    permission_classes = (
+        core_permissions.IsUserAuthenticated,
+        core_permissions.CanCleanCache,
+    )
+
+    def delete(self, request, *args, **kwargs):
+        hard_delete = request.query_params.get('hard', settings.INVALIDATE_CACHE_HARD).lower() == 'true'
+        payload = request.data
+        if payload:
+            cache_key_name = payload.get('key', 'all')
+        else:
+            cache_key_name = 'all'
+
+        if cache_key_name == 'all':
+            if hard_delete:
+                cache_manager.invalidate(hard=True)
+                message = 'Cache cleared. Map is updated in real time.'
+            else:
+                cache_manager.invalidate()
+                message = 'Cache invalidation started. Maps will be updated in a few minutes.'
+
+            update_all_cached_values.delay()
+        else:
+            keys = []
+
+            if cache_key_name == 'country':
+                country_id = payload.get('id', None)
+                country_code = payload.get('code', None)
+                keys = [
+                    "*COUNTRIES_LIST_",
+                    "*PUBLISHED_LAYERS_LIST_*",
+                    "*country_id_\['{0}'\]*".format(country_id),
+                    "*country_id_{0}*".format(country_id),
+                    "*COUNTRY_INFO_pk_{0}".format(country_code),
+                ]
+            elif cache_key_name == 'layer':
+                layer_id = payload.get('id', None)
+                keys = [
+                    "*PUBLISHED_LAYERS_LIST_*",
+                    "*DATA_LAYER_INFO_{0}*".format(layer_id),
+                    "*DATA_LAYER_MAP_{0}*".format(layer_id),
+                    "*layer_id_\['{0}'\]*".format(layer_id),
+                    "*layer_id_{0}*".format(layer_id),
+                ]
+
+            if hard_delete:
+                cache_manager.invalidate_many(keys=keys, hard=True)
+                message = 'Cache cleared. Map is updated in real time.'
+            else:
+                cache_manager.invalidate_many(keys=keys)
+                message = 'Cache invalidation started. Maps will be updated in a few minutes.'
+
+        return Response(data={'message': message})
+
+
 class AppStaticConfigurationsViewSet(APIView):
     base_auth_permissions = (
         permissions.AllowAny,
