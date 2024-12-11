@@ -412,6 +412,7 @@ class InvalidateCacheByPattern(APIView):
                 keys = [
                     "*COUNTRIES_LIST_",
                     "*PUBLISHED_LAYERS_LIST_*",
+                    "*GLOBAL_COUNTRY_SEARCH_MAPPING_",
                     "*country_id_\['{0}'\]*".format(country_id),
                     "*country_id_{0}*".format(country_id),
                     "*COUNTRY_INFO_pk_{0}".format(country_code),
