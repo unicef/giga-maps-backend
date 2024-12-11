@@ -2071,10 +2071,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 {random_select_list}
                 schools_school.id,
                 {table_name}."{col_name}" AS field_value,
-                CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
-                    WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
-                    ELSE 'unknown'
-                END as connectivity_status,
+                'connected' AS connectivity_status,
                 {label_case_statements}
             FROM schools_school
             INNER JOIN bounds ON ST_Intersects(schools_school.geopoint, ST_Transform(bounds.geom, 4326))
