@@ -85,9 +85,9 @@ class SchoolsViewSet(
     def get_country(self):
         if not hasattr(self, '_country'):
             self._country = get_object_or_404(
-                Country.objects.defer(
-                    'geometry', 'geometry_simplified',
-                ).select_related('last_weekly_status').annotate(code_lower=Lower('code')),
+                Country.objects.defer('geometry').select_related('last_weekly_status').annotate(
+                    code_lower=Lower('code'),
+                ),
                 code_lower=self.kwargs.get('country_code').lower(),
             )
         return self._country
@@ -121,7 +121,7 @@ class RandomSchoolsListAPIView(CachedListMixin, ListAPIView):
     pagination_class = None
 
     def get_serializer(self, *args, **kwargs):
-        countries_statuses = Country.objects.all().defer('geometry', 'geometry_simplified').select_related(
+        countries_statuses = Country.objects.all().defer('geometry').select_related(
             'last_weekly_status',
         ).values_list(
             'id', 'last_weekly_status__integration_status',
@@ -570,7 +570,6 @@ class AdminViewSchoolAPIViewSet(BaseModelViewSet):
     filterset_fields = {
         'country_id': ['exact', 'in'],
         'name': ['exact', 'in'],
-        'location__name': ['exact', 'in'],
     }
 
     def get_serializer_class(self):
@@ -594,7 +593,7 @@ class AdminViewSchoolAPIViewSet(BaseModelViewSet):
         :return queryset:
         """
         qs = super().get_queryset()
-        return qs.prefetch_related('country').defer('location')
+        return qs.prefetch_related('country')
 
     def create(self, request, *args, **kwargs):
         try:

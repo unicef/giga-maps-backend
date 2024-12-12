@@ -17,7 +17,7 @@ def populate_school_new_fields(school_id, start_school_id, end_school_id, countr
     schools_qry = School.objects.all()
 
     schools_qry = schools_qry.prefetch_related(
-        Prefetch('country', Country.objects.defer('geometry', 'geometry_simplified')),
+        Prefetch('country', Country.objects.defer('geometry')),
     )
     if school_id and isinstance(school_id, int):
         schools_qry = schools_qry.filter(id=school_id, )

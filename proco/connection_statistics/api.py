@@ -214,9 +214,7 @@ class SchoolConnectivityStatsListAPIView(ListAPIView):
     def get_country(self):
         if not hasattr(self, '_country'):
             self._country = get_object_or_404(
-                Country.objects.defer(
-                    'geometry', 'geometry_simplified',
-                ).select_related('last_weekly_status'),
+                Country.objects.defer('geometry').select_related('last_weekly_status'),
                 id=self.kwargs.get('country_id'),
             )
         return self._country
