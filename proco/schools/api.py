@@ -7,6 +7,7 @@ from django.contrib import messages
 from django.core.exceptions import PermissionDenied
 from django.core.management import call_command
 from django.db import connections
+from django.db.models import Prefetch
 from django.db.models.functions.text import Lower
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
@@ -593,7 +594,9 @@ class AdminViewSchoolAPIViewSet(BaseModelViewSet):
         :return queryset:
         """
         qs = super().get_queryset()
-        return qs.prefetch_related('country')
+        return qs.prefetch_related(
+            Prefetch('country', Country.objects.defer('geometry')),
+        )
 
     def create(self, request, *args, **kwargs):
         try:
