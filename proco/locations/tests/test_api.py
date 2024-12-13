@@ -132,7 +132,6 @@ class CountryBoundaryApiTestCase(TestAPIViewSetMixin, TestCase):
         with self.assertNumQueries(3):
             response = self.forced_auth_req('get', reverse(self.base_view))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        # self.assertIn('geometry_simplified', response.data[0])
 
     def test_country_list_cached(self):
         with self.assertNumQueries(3):

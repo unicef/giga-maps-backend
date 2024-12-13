@@ -11,7 +11,7 @@ from timezone_field import TimeZoneField
 
 from proco.core.managers import BaseManager
 from proco.core.models import CustomDateTimeField
-from proco.locations.models import Country, Location, CountryAdminMetadata
+from proco.locations.models import Country, CountryAdminMetadata
 from proco.schools.utils import get_imported_file_path
 
 
@@ -27,7 +27,6 @@ class School(TimeStampedModel):
     name_lower = models.CharField(max_length=1000, blank=True, editable=False, db_index=True)
 
     country = models.ForeignKey(Country, related_name='schools', on_delete=models.CASCADE)
-    location = models.ForeignKey(Location, null=True, blank=True, related_name='schools', on_delete=models.CASCADE)
     admin1 = models.ForeignKey(
         CountryAdminMetadata,
         related_name='admin1_schools',
@@ -42,10 +41,6 @@ class School(TimeStampedModel):
         blank=True,
         on_delete=models.SET_NULL,
     )
-    # admin_1_name = models.CharField(max_length=100, blank=True)
-    # admin_2_name = models.CharField(max_length=100, blank=True)
-    # admin_3_name = models.CharField(max_length=100, blank=True)
-    # admin_4_name = models.CharField(max_length=100, blank=True)
     geopoint = PointField(verbose_name=_('Point'), null=True, blank=True)
 
     timezone = TimeZoneField(blank=True, null=True)
