@@ -78,6 +78,7 @@ LOCAL_APPS = [
     'proco.background',
     'proco.proco_data_migrations',
     'proco.data_sources',
+    'proco.daily_check_app',
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -346,6 +347,7 @@ ADMIN_REORDER = (
     'contact',
     'accounts',
     'data_sources',
+    'daily_check_app',
 )
 
 RANDOM_SCHOOLS_DEFAULT_AMOUNT = env('RANDOM_SCHOOLS_DEFAULT_AMOUNT', default=20000)
@@ -438,10 +440,12 @@ DATA_SOURCE_CONFIG = {
 
 INVALIDATE_CACHE_HARD = env('INVALIDATE_CACHE_HARD', default='false')
 
+DAILY_CHECK_APP_DB_KEY = 'dailycheckapp_database'
 READ_ONLY_DB_KEY = 'read_only_database'
 
 DATABASE_ROUTERS = [
     'proco.utils.db_routers.ReadOnlyDBRouter',
+    'proco.daily_check_app.db_router.DailyCheckAppDBRouter',
     'dynamic_db_router.DynamicDbRouter',
 ]
 

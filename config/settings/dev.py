@@ -24,6 +24,7 @@ MANAGERS = ADMINS
 DATABASES = {
     'default': env.db(default='postgis://localhost/proco'),
     READ_ONLY_DB_KEY: env.db(var='READ_ONLY_DATABASE_URL'),
+    DAILY_CHECK_APP_DB_KEY: env.db(var='DAILY_CHECK_APP_DATABASE_URL'),
 }
 
 # Email settings
