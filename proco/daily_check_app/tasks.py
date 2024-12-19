@@ -5,7 +5,7 @@ import uuid
 
 from celery import current_task
 from django.conf import settings
-from django.contrib.gis.geos import Point
+from django.db.models import Count
 from django.db.utils import DataError
 from requests.exceptions import HTTPError
 
@@ -16,7 +16,6 @@ from proco.daily_check_app import utils as daily_check_app_utilities
 from proco.data_sources import utils as data_sources_utilities
 from proco.taskapp import app
 from proco.utils.dates import format_date
-from django.db.models import Count
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -95,7 +94,7 @@ def daily_check_app_load_data_from_school_master_apis(country_iso3_format=None):
 
 
 @app.task(soft_time_limit=3 * 55 * 60, time_limit=3 * 55 * 60)
-def daily_check_app_handle_published_school_master_data_row(country_ids=None):
+def daily_check_app_handle_published_school_master_data_row(country_ids=None, force_tasks=False):
     """
     Background task to handle all the published rows of school master data source for Daily Check App Sync
 
@@ -111,15 +110,19 @@ def daily_check_app_handle_published_school_master_data_row(country_ids=None):
 
     true_choices = ['true', 'yes', '1']
 
+    timestamp_str = format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H')
+    if force_tasks:
+        timestamp_str = format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H%M%S')
+
     if country_ids and len(country_ids) > 0:
         task_key = 'daily_check_app_handle_published_school_master_data_row_status_{current_time}_country_ids_{ids}'.format(
-            current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'),
+            current_time=timestamp_str,
             ids='_'.join([str(c_id) for c_id in country_ids]),
         )
         task_description = 'Daily Check App - Handle published school master data rows for countries'
     else:
         task_key = 'daily_check_app_handle_published_school_master_data_row_status_{current_time}'.format(
-            current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
+            current_time=timestamp_str)
         task_description = 'Daily Check App - Handle published school master data rows'
 
     task_id = current_task.request.id or str(uuid.uuid4())
@@ -152,7 +155,7 @@ def daily_check_app_handle_published_school_master_data_row(country_ids=None):
                             'name': row.school_name,
                             'country_code': row.country.code,
                             # 'timezone': row.timezone,
-                            'geopoint': str(Point(x=row.longitude, y=row.latitude)),
+                            # 'geopoint': Point(x=row.longitude, y=row.latitude),
                             # 'gps_confidence': row.gps_confidence,
                             # 'altitude' : row.altitude,
                             # 'address': row.address,
@@ -175,6 +178,8 @@ def daily_check_app_handle_published_school_master_data_row(country_ids=None):
                         school=school,
                         version=row.version,
                         defaults={
+                            'latitude': row.latitude,
+                            'longitude': row.longitude,
                             'admin1_id_giga': row.admin1_id_giga,
                             'admin2_id_giga': row.admin2_id_giga,
                             'school_establishment_year': row.school_establishment_year,
@@ -260,22 +265,26 @@ def daily_check_app_handle_published_school_master_data_row(country_ids=None):
 
 
 @app.task(soft_time_limit=2 * 55 * 60, time_limit=2 * 55 * 60)
-def daily_check_app_handle_deleted_school_master_data_row(country_ids=None):
+def daily_check_app_handle_deleted_school_master_data_row(country_ids=None, force_tasks=False):
     """
     Background task to handle all the deleted rows of school master data source for Daily Check App DB
 
     Execution Frequency: Every day
     """
     logger.info('Daily Check App - Handling the deleted school master data rows.')
+    timestamp_str = format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H')
+    if force_tasks:
+        timestamp_str = format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H%M%S')
+
     if country_ids and len(country_ids) > 0:
         task_key = 'daily_check_app_handle_deleted_school_master_data_row_status_{current_time}_country_ids_{ids}'.format(
-            current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H%M'),
+            current_time=timestamp_str,
             ids='_'.join([str(c_id) for c_id in country_ids]),
         )
         task_description = 'Daily Check App - Handle deleted school master data rows for countries'
     else:
         task_key = 'daily_check_app_handle_deleted_school_master_data_row_status_{current_time}'.format(
-            current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
+            current_time=timestamp_str)
         task_description = 'Daily Check App - Handle deleted school master data rows'
 
     task_id = current_task.request.id or str(uuid.uuid4())
@@ -318,14 +327,17 @@ def daily_check_app_handle_deleted_school_master_data_row(country_ids=None):
 
 
 @app.task(soft_time_limit=6 * 60 * 60, time_limit=6 * 60 * 60)
-def daily_check_app_update_static_data(*args, country_iso3_format=None):
+def daily_check_app_update_static_data(*args, country_iso3_format=None, force_tasks=False):
     """
     Background task to Get Static data to Daily Check App DB
 
     Execution Frequency: Once in a day
     """
-    task_key = 'update_static_data_status_{current_time}'.format(
-        current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
+    timestamp_str = format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H')
+    if force_tasks:
+        timestamp_str = format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H%M%S')
+
+    task_key = 'update_static_data_status_{current_time}'.format(current_time=timestamp_str)
     task_id = current_task.request.id or str(uuid.uuid4())
     task_instance = background_task_utilities.task_on_start(
         task_id, task_key, 'Sync Static Data from School Master sources', check_previous=True)

@@ -13,23 +13,35 @@ class Command(BaseCommand):
 
         parser.add_argument(
             '-country_iso3_format', dest='iso3_format', type=str,
-            required=True,
+            required=False,
             help='Country ISO3 Format Code.'
+        )
+
+        parser.add_argument(
+            '--force', action='store_true', dest='force_tasks', default=False,
+            help='If provided, it will skip the duplicate task check.'
         )
 
 
     def handle(self, **options):
         iso3_format = options.get('iso3_format')
-        country = DailyCheckApp_Country.objects.get(iso3_format=iso3_format)
-        logger.info('Executing School Master Data Sync utility for country: "{}".'.format(country.name))
+        force_tasks = options.get('force_tasks')
 
-        daily_check_app_tasks.daily_check_app_update_static_data(country_iso3_format=iso3_format)
+        country = None
+        country_id = None
+
+        if iso3_format:
+            country = DailyCheckApp_Country.objects.get(iso3_format=iso3_format)
+            logger.info('Executing School Master Data Sync utility for country: "{}".'.format(country.name))
+            country_id = [country.id,]
+
+        daily_check_app_tasks.daily_check_app_update_static_data(country_iso3_format=iso3_format, force_tasks=force_tasks)
         logger.info('Data Sync Completed.')
 
-        daily_check_app_tasks.daily_check_app_handle_published_school_master_data_row([country.id,])
+        daily_check_app_tasks.daily_check_app_handle_published_school_master_data_row(country_id, force_tasks=force_tasks)
         logger.info('Published rows Sync Completed.')
 
-        daily_check_app_tasks.daily_check_app_handle_deleted_school_master_data_row([country.id,])
+        daily_check_app_tasks.daily_check_app_handle_deleted_school_master_data_row(country_id, force_tasks=force_tasks)
         logger.info('Deleted rows Sync Completed.')
 
         logger.info('Completed School Master Data Sync utility for country: "{}" successfully.\n'.format(country.name))

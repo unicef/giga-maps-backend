@@ -101,8 +101,8 @@ class DailyCheckApp_SchoolMasterData(TimeStampedModel, models.Model):
     admin1_id_giga = models.CharField(max_length=50, null=True, blank=True)
     admin2 = models.CharField(max_length=255, blank=True, null=True)  # school.admin2
     admin2_id_giga = models.CharField(max_length=50, null=True, blank=True)
-    latitude = models.FloatField(blank=True, default=None, null=True)  # school.geopoint
-    longitude = models.FloatField(blank=True, default=None, null=True)  # school.geopoint
+    latitude = models.FloatField(blank=True, default=None, null=True)
+    longitude = models.FloatField(blank=True, default=None, null=True)
     education_level = models.CharField(blank=True, null=True, max_length=255)  # school.education_level
     school_area_type = models.CharField(blank=True, null=True, max_length=255)  # school.environment
     school_funding_type = models.CharField(blank=True, null=True, max_length=255)  # school.school_type
@@ -224,6 +224,9 @@ class DailyCheckApp_SchoolStatic(TimeStampedModel, models.Model):
         on_delete=models.SET_NULL,
         verbose_name='Daily Check App School'
     )
+
+    latitude = models.FloatField(blank=True, default=None, null=True)
+    longitude = models.FloatField(blank=True, default=None, null=True)
 
     admin1_id_giga = models.CharField(max_length=50, null=True, blank=True)
     admin2_id_giga = models.CharField(max_length=50, null=True, blank=True)
