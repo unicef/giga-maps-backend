@@ -1946,56 +1946,43 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 SELECT DISTINCT ST_AsMVTGeom(ST_Transform("schools_school".geopoint, 3857), bounds.b2d) AS geom,
                     {random_select_list}
                     "schools_school".id,
-                    CASE WHEN rt_status.rt_registered = True AND rt_status.rt_registration_date::date <= '{end_date}'
-                        THEN True ELSE False
-                    END AS is_rt_connected,
+                    True AS is_rt_connected,
                     sds.{col_name} AS field_avg,
                     {case_conditions}
-                    CASE WHEN "schools_school".connectivity_status IN ('good', 'moderate') THEN 'connected'
-                        WHEN "schools_school".connectivity_status = 'no' THEN 'not_connected'
-                        ELSE 'unknown'
-                    END as connectivity_status
+                    'connected' AS connectivity_status
                 FROM schools_school
                 INNER JOIN bounds ON ST_Intersects("schools_school".geopoint, ST_Transform(bounds.geom, 4326))
-                {school_weekly_join}
-                LEFT JOIN (
+                INNER JOIN (
                     SELECT "schools_school"."id" AS school_id,
                         "schools_school"."last_weekly_status_id",
                         {col_function} AS "{col_name}"
                     FROM "schools_school"
-                    INNER JOIN "connection_statistics_schoolrealtimeregistration"
-                        ON ("schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id")
+                    INNER JOIN connection_statistics_schoolrealtimeregistration rt_status ON
+                        rt_status."school_id" = "schools_school".id
                     {school_weekly_join}
-                    LEFT OUTER JOIN "connection_statistics_schooldailystatus" t
-                        ON (
-                            "schools_school"."id" = t."school_id"
-                            AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
-                            AND t."live_data_source" IN ({live_source_types})
-                        )
+                    LEFT OUTER JOIN "connection_statistics_schooldailystatus" t ON (
+                        "schools_school"."id" = t."school_id"
+                        AND t."deleted" IS NULL
+                        AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
+                        AND t."live_data_source" IN ({live_source_types})
+                    )
                     WHERE (
                         "schools_school"."deleted" IS NULL
-                        AND "connection_statistics_schoolrealtimeregistration"."deleted" IS NULL
+                        AND rt_status."deleted" IS NULL
                         AND t."deleted" IS NULL
                         {country_condition}
                         {admin1_condition}
                         {school_condition}
                         {school_weekly_condition}
-                        AND "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
-                        AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date"::date
+                        AND rt_status."rt_registered" = True
+                        AND rt_status."rt_registration_date"::date
                         <= '{end_date}')
                     GROUP BY "schools_school"."id"
                 ) AS sds ON sds.school_id = "schools_school".id
                 {school_weekly_outer_join}
-                LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status
-                    ON rt_status.school_id = "schools_school".id
                 WHERE "schools_school"."deleted" IS NULL
-                AND rt_status."deleted" IS NULL
-                {country_outer_condition}
-                {admin1_outer_condition}
-                {school_outer_condition}
-                {school_weekly_condition}
-                {random_order}
-                {limit_condition}
+                    {random_order}
+                    {limit_condition}
             )
             SELECT ST_AsMVT(DISTINCT mvtgeom.*) FROM mvtgeom;
         """
@@ -2006,9 +1993,9 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         kwargs['admin1_condition'] = ''
         kwargs['school_condition'] = ''
 
-        kwargs['country_outer_condition'] = ''
-        kwargs['admin1_outer_condition'] = ''
-        kwargs['school_outer_condition'] = ''
+        # kwargs['country_outer_condition'] = ''
+        # kwargs['admin1_outer_condition'] = ''
+        # kwargs['school_outer_condition'] = ''
 
         kwargs['school_weekly_join'] = ''
         kwargs['school_weekly_condition'] = ''
@@ -2039,7 +2026,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
             kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status,'
             kwargs['school_weekly_outer_join'] = """
-            LEFT OUTER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
+            INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
             """
         else:
             kwargs['case_conditions'] = """
@@ -2065,9 +2052,9 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 ','.join([str(school_id) for school_id in kwargs['school_ids']])
             )
 
-            kwargs['school_outer_condition'] = 'AND "schools_school"."id" IN ({0})'.format(
-                ','.join([str(school_id) for school_id in kwargs['school_ids']])
-            )
+            # kwargs['school_outer_condition'] = 'AND "schools_school"."id" IN ({0})'.format(
+            #     ','.join([str(school_id) for school_id in kwargs['school_ids']])
+            # )
         elif len(kwargs.get('admin1_ids', [])) > 0:
             if settings.ADMIN_MAP_API_SAMPLING_LIMIT is not None:
                 kwargs['MAP_API_SAMPLING_LIMIT'] = settings.ADMIN_MAP_API_SAMPLING_LIMIT
@@ -2078,9 +2065,9 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             kwargs['admin1_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
                 ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
             )
-            kwargs['admin1_outer_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
-                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
-            )
+            # kwargs['admin1_outer_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
+            #     ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
+            # )
         elif len(kwargs.get('country_ids', [])) > 0:
             if settings.COUNTRY_MAP_API_SAMPLING_LIMIT:
                 kwargs['MAP_API_SAMPLING_LIMIT'] = settings.COUNTRY_MAP_API_SAMPLING_LIMIT
@@ -2091,13 +2078,13 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
-            kwargs['country_outer_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
-                ','.join([str(country_id) for country_id in kwargs['country_ids']])
-            )
+            # kwargs['country_outer_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
+            #     ','.join([str(country_id) for country_id in kwargs['country_ids']])
+            # )
 
         if len(kwargs['school_filters']) > 0:
             kwargs['school_condition'] += ' AND ' + kwargs['school_filters']
-            kwargs['school_outer_condition'] += ' AND ' + kwargs['school_filters']
+            # kwargs['school_outer_condition'] += ' AND ' + kwargs['school_filters']
 
         if len(kwargs['school_static_filters']) > 0:
             kwargs['school_weekly_join'] = """
@@ -2141,10 +2128,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 {random_select_list}
                 schools_school.id,
                 {table_name}."{col_name}" AS field_value,
-                CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
-                    WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
-                    ELSE 'unknown'
-                END as connectivity_status,
+                'connected' AS connectivity_status,
                 {label_case_statements}
             FROM schools_school
             INNER JOIN bounds ON ST_Intersects(schools_school.geopoint, ST_Transform(bounds.geom, 4326))

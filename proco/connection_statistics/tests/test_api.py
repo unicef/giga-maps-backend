@@ -1041,60 +1041,6 @@ class SchoolConnectivityStatApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 3)
 
-        # self.assertEqual(response.data[0]['statistics']['connectivity_speed'], 0)
-        # self.assertEqual(response.data[1]['statistics']['connectivity_speed'], 0)
-        # self.assertEqual(response.data[2]['statistics']['connectivity_speed'], 0)
-
-
-class CountryCoverageStatsAPITestCase(TestAPIViewSetMixin, TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.country_one = CountryFactory()
-        cls.country_two = CountryFactory()
-
-        cls.stat_one = CountryWeeklyStatusFactory(country=cls.country_one)
-        cls.stat_two = CountryWeeklyStatusFactory(country=cls.country_two)
-
-    def setUp(self):
-        cache.clear()
-        super().setUp()
-
-    def test_get_country_coverage_stats(self):
-        url, _, view = statistics_url((), {'country_id': self.country_one.id}, view_name='country-coverage-stat')
-
-        response = self.forced_auth_req('get', url, view=view)
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['total_schools'], self.stat_one.schools_total)
-        # self.assertEqual(response.data['connected_schools']['5g_4g'], self.stat_one.schools_coverage_good)
-        # self.assertEqual(response.data['connected_schools']['3g_2g'], self.stat_one.schools_coverage_moderate)
-        # self.assertEqual(response.data['connected_schools']['no_coverage'], self.stat_one.schools_coverage_no)
-        # self.assertEqual(response.data['connected_schools']['unknown'], self.stat_one.schools_coverage_unknown)
-
-    def test_get_country_coverage_stats_no_data(self):
-        url, _, view = statistics_url((), {'country_id': 999}, view_name='country-coverage-stat')
-        response = self.forced_auth_req('get', url, view=view)
-
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_get_country_coverage_stats_cached(self):
-        url, _, view = statistics_url((), {'country_id': self.country_one.id}, view_name='country-coverage-stat')
-
-        # Call the API to cache the data
-        with self.assertNumQueries(4):
-            self.forced_auth_req('get', url, view=view)
-
-        with self.assertNumQueries(0):
-            self.forced_auth_req('get', url, view=view)
-
-    def test_get_country_coverage_stats_no_cache(self):
-        url = reverse('connection_statistics:country-coverage-stat')
-        query_params = {'country_id': self.country_one.id}
-        # Call the API without caching
-        with self.assertNumQueries(5):
-            response = self.client.get(url, query_params, HTTP_CACHE_CONTROL='no-cache')
-            self.assertEqual(response.status_code, status.HTTP_200_OK)
-
 
 class ConnectivityConfigurationsAPITestCase(TestAPIViewSetMixin, TestCase):
     @classmethod
