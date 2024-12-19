@@ -3,6 +3,8 @@ import json
 import logging
 from datetime import timedelta
 
+import requests
+import uuid
 from django.conf import settings
 from django.contrib.admin.models import LogEntry
 from django.db.models import Case, IntegerField, Value, When
@@ -34,7 +36,7 @@ from proco.core.viewsets import BaseModelViewSet
 from proco.custom_auth import models as auth_models
 from proco.locations.models import Country
 from proco.utils import dates as date_utilities
-from proco.utils.cache import cache_manager
+from proco.utils.cache import cache_manager, custom_cache_control, no_expiry_cache_manager
 from proco.utils.filters import NullsAlwaysLastOrderingFilter
 from proco.utils.mixins import CachedListMixin
 from proco.utils.tasks import update_all_cached_values
@@ -227,6 +229,90 @@ class ValidateAPIKeyViewSet(APIView):
         if queryset.exists():
             return Response(status=rest_status.HTTP_200_OK)
         return Response(status=rest_status.HTTP_404_NOT_FOUND, data={'detail': 'Please enter valid api key.'})
+
+
+class TranslateTextFromEnViewSet(APIView):
+    permission_classes = (
+        permissions.AllowAny,
+    )
+    CACHE_KEY = 'cache'
+    CACHE_KEY_PREFIX = 'TRANSLATED_TEXT'
+
+    def get_cache_key(self, request):
+        pk = self.kwargs.get('target')
+
+        payload = str(request.data)
+        if payload:
+            if len(payload) <= settings.AI_TRANSLATION_CACHE_KEY_LIMIT:
+                return '{0}_{1}_{2}'.format(self.CACHE_KEY_PREFIX, pk, payload)
+            else:
+                return '{0}_{1}_{2}_{3}'.format(self.CACHE_KEY_PREFIX, pk, payload[:int(settings.AI_TRANSLATION_CACHE_KEY_LIMIT / 2)], payload[-int(settings.AI_TRANSLATION_CACHE_KEY_LIMIT / 2):])
+
+    def prepare_azure_request(self, request, *args, **kwargs):
+        # Add your key and endpoint
+        key = settings.AI_TRANSLATION_KEY
+        endpoint = settings.AI_TRANSLATION_ENDPOINT
+
+        if not key or not endpoint:
+            logger.error('Required environment variables are missing for Azure AI translation. AI_TRANSLATION_ENDPOINT, AI_TRANSLATION_KEY')
+            return Response({'error': 'An error occurred while processing the request'}, status=500)
+
+        if len(settings.AI_TRANSLATION_SUPPORTED_TARGETS) > 0 and self.kwargs.get('target') not in settings.AI_TRANSLATION_SUPPORTED_TARGETS:
+            return Response({'error': 'Requested language target is not supported by the application.'}, status=500)
+
+        payload = request.data
+        if not payload:
+            return Response({'error': 'Empty text can not be translated.'}, status=500)
+        elif isinstance(payload, dict):
+            text = request.data.get('text')
+            if not text:
+                return Response({'error': 'Empty text can not be translated.'}, status=500)
+            payload = [payload,]
+
+        path = 'translate'
+        constructed_url = str(endpoint if str(endpoint).endswith('/') else endpoint + '/') + path
+
+        params = {
+            'api-version': '3.0',
+            'from': 'en',
+            'to': [self.kwargs.get('target', 'fr'),]
+        }
+
+        headers = {
+            'Ocp-Apim-Subscription-Key': key,
+            'Content-type': 'application/json',
+            'X-ClientTraceId': str(uuid.uuid4())
+        }
+
+        # location, also known as region.
+        # required if you're using a multi-service or regional (not global) resource. It can be found in the Azure portal on the Keys and Endpoint page.
+        if settings.AI_TRANSLATION_REGION:
+            headers['Ocp-Apim-Subscription-Region'] = settings.AI_TRANSLATION_REGION
+
+        return requests.post(constructed_url, params=params, headers=headers, json=payload)
+
+    def put(self, request, *args, **kwargs):
+        use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
+        request_path = remove_query_param(request.get_full_path(), 'cache')
+        cache_key = self.get_cache_key(request)
+
+        response = None
+        if use_cached_data and cache_key:
+            response = no_expiry_cache_manager.get(cache_key)
+
+        if not response:
+            response = self.prepare_azure_request(request, *args, **kwargs)
+            if response.status_code == rest_status.HTTP_200_OK:
+                try:
+                    response_json = response.json()
+                    no_expiry_cache_manager.set(cache_key, response_json, request_path=request_path,
+                                      soft_timeout=None)
+                    response  = Response(data=response_json, status=rest_status.HTTP_200_OK)
+                except requests.exceptions.InvalidJSONError as ex:
+                    response = Response(data=ex.strerror, status=rest_status.HTTP_400_BAD_REQUEST)
+        else:
+            response = Response(data=response)
+        return response
 
 
 class NotificationViewSet(BaseModelViewSet):
@@ -877,7 +963,13 @@ class BaseDataLayerAPIViewSet(APIView):
         return legend_configs
 
 
-@method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
+@method_decorator([
+    custom_cache_control(
+        public=True,
+        max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE,
+        cache_status_codes=[rest_status.HTTP_200_OK,],
+    )
+], name='dispatch')
 class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
     CACHE_KEY = 'cache'
     CACHE_KEY_PREFIX = 'DATA_LAYER_INFO'
@@ -1709,7 +1801,13 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         return Response(data=response)
 
 
-@method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
+@method_decorator([
+    custom_cache_control(
+        public=True,
+        max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE,
+        cache_status_codes=[rest_status.HTTP_200_OK,],
+    )
+], name='dispatch')
 class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGenerator):
     CACHE_KEY = 'cache'
     CACHE_KEY_PREFIX = 'DATA_LAYER_MAP'

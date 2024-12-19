@@ -1,6 +1,9 @@
+from functools import wraps
+
 from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
+from django.utils.cache import add_never_cache_headers, patch_cache_control
 
 from proco.utils.tasks import update_cached_value
 
@@ -57,4 +60,22 @@ class SoftCacheManager(object):
 
 cache_manager = SoftCacheManager()
 
+no_expiry_cache_manager = SoftCacheManager()
+no_expiry_cache_manager.CACHE_PREFIX = settings.NO_EXPIRY_CACHE_PREFIX
 
+
+def custom_cache_control(**kwargs):
+    def _cache_controller(viewfunc):
+        @wraps(viewfunc)
+        def _cache_controlled(request, *args, **kw):
+            response = viewfunc(request, *args, **kw)
+            if 'cache_status_codes' in kwargs:
+                if response.status_code in kwargs['cache_status_codes']:
+                    patch_cache_control(response, **kwargs)
+                else:
+                    add_never_cache_headers(response)
+            else:
+                patch_cache_control(response, **kwargs)
+            return response
+        return _cache_controlled
+    return _cache_controller
