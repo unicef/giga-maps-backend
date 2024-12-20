@@ -23,6 +23,7 @@ SECRET_KEY = env('SECRET_KEY')
 DATABASES = {
     'default': env.db(),
     READ_ONLY_DB_KEY: env.db_url(var='READ_ONLY_DATABASE_URL'),
+    GIGA_METER_DB_KEY: env.db_url(var='GIGA_METER_DATABASE_URL'),
 }
 
 # Template
