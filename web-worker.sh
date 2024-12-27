@@ -98,3 +98,5 @@ pipenv run gunicorn config.wsgi:application -b 0.0.0.0:8000 -w 8 --timeout=300
 
 # pipenv run python manage.py populate_school_master_data_for_all_schools --populate_country_latest_school_master_data_version
 # pipenv run python manage.py populate_school_master_data_for_all_schools --populate_school_master_status_model_data -country_id=222
+# pipenv run python manage.py load_system_data_layers --update_data_sources
+# pipenv run python manage.py load_column_configurations --update_configurations

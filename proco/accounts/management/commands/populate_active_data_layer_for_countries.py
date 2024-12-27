@@ -151,7 +151,9 @@ class Command(BaseCommand):
                         SELECT DISTINCT schools_school."country_id"
                         FROM "schools_school"
                         INNER JOIN "connection_statistics_schoolweeklystatus" AS sws
-                            ON (sws."id" = schools_school."last_weekly_status_id")
+                            ON (schools_school."last_weekly_status_id" = sws."id")
+                        LEFT JOIN "schools_schoolmasterstatus" AS sms
+                            ON (schools_school."last_master_status_id" = sms."id")
                         WHERE schools_school."deleted" IS NULL
                           AND schools_school."country_id" IN ({country_ids})
                           AND {table_name}.{col_name} IS NOT NULL

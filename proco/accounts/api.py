@@ -40,6 +40,7 @@ from proco.utils.cache import cache_manager, custom_cache_control, no_expiry_cac
 from proco.utils.filters import NullsAlwaysLastOrderingFilter
 from proco.utils.mixins import CachedListMixin
 from proco.utils.tasks import update_all_cached_values
+from proco.schools.models import School
 
 
 logger = logging.getLogger('gigamaps.' + __name__)
@@ -642,7 +643,7 @@ class DataLayerPreviewViewSet(APIView):
             END AS connectivity_status,
             ST_AsGeoJSON(ST_Transform(schools_school.geopoint, 4326)) AS geopoint
         FROM schools_school
-        INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
+        INNER JOIN schools_schoolmasterstatus sms ON schools_school.last_master_status_id = sms.id
         INNER JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = schools_school.id
         LEFT JOIN (
             SELECT "schools_school"."id" AS school_id,
@@ -728,6 +729,7 @@ class DataLayerPreviewViewSet(APIView):
                 {label_case_statements}
             FROM schools_school
             INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
+            INNER JOIN schools_schoolmasterstatus sms ON schools_school.last_master_status_id = sms.id
             WHERE schools_school."deleted" IS NULL {country_condition}
             ORDER BY random()
             LIMIT 1000
@@ -985,6 +987,8 @@ class BaseDataLayerAPIViewSet(APIView):
             self.request, 'schools', 'schools_school')
         self.kwargs['school_static_filters'] = core_utilities.get_filter_sql(
             self.request, 'school_static', 'connection_statistics_schoolweeklystatus')
+        self.kwargs['school_master_filters'] = core_utilities.get_filter_sql(
+            self.request, 'school_master', 'schools_schoolmasterstatus')
 
     def get_benchmark_value(self, data_layer_instance):
         benchmark_val = data_layer_instance.global_benchmark.get('value')
@@ -1065,11 +1069,13 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         FROM (
             SELECT "schools_school"."id" AS school_id,
                 "schools_school"."last_weekly_status_id",
+                "schools_school"."last_master_status_id",
                 {col_function} AS "{col_name}"
             FROM "schools_school"
             INNER JOIN "connection_statistics_schoolrealtimeregistration"
                 ON ("schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id")
             {school_weekly_join}
+            {school_master_join}
             LEFT OUTER JOIN "connection_statistics_schooldailystatus" t
                 ON (
                     "schools_school"."id" = t."school_id"
@@ -1084,12 +1090,14 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 {admin1_condition}
                 {school_condition}
                 {school_weekly_condition}
+                {school_master_condition}
                 AND "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
                 AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date"::date <= '{end_date}')
             GROUP BY "schools_school"."id"
             ORDER BY "schools_school"."id" ASC
         ) AS sds
         {school_weekly_outer_join}
+        {school_master_outer_join}
         """
 
         kwargs = copy.deepcopy(self.kwargs)
@@ -1100,6 +1108,9 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs['school_weekly_join'] = ''
         kwargs['school_weekly_condition'] = ''
         kwargs['school_weekly_outer_join'] = ''
+        kwargs['school_master_join'] = ''
+        kwargs['school_master_condition'] = ''
+        kwargs['school_master_outer_join'] = ''
         kwargs['benchmark_value_sql'] = ''
 
         benchmark_value = kwargs['benchmark_value']
@@ -1130,6 +1141,9 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
             kwargs['school_weekly_outer_join'] = """
             INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
+            """
+            kwargs['school_master_outer_join'] = """
+            INNER JOIN "schools_schoolmasterstatus" sms ON sds."last_master_status_id" = sms."id"
             """
         else:
             kwargs['case_conditions'] = """
@@ -1168,6 +1182,13 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             """
             kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
 
+        if len(kwargs['school_master_filters']) > 0:
+            kwargs['school_master_join'] = """
+            INNER JOIN "schools_schoolmasterstatus"
+                ON "schools_school"."last_master_status_id" = "schools_schoolmasterstatus"."id"
+            """
+            kwargs['school_master_condition'] = ' AND ' + kwargs['school_master_filters']
+
         kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
 
         return query.format(**kwargs)
@@ -1193,7 +1214,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             schools_school."environment",
             schools_school."education_level",
             ROUND(sds."{col_name}"::numeric, 2) AS "live_avg",
-            sws."download_speed_benchmark",
+            sms."download_speed_benchmark",
             CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
                 WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
                 ELSE 'unknown'
@@ -1206,7 +1227,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         INNER JOIN public.locations_country c ON c."id" = schools_school."country_id"
             AND c."deleted" IS NULL
             AND schools_school."deleted" IS NULL
-        INNER JOIN "connection_statistics_schoolweeklystatus" sws ON schools_school."last_weekly_status_id" = sws."id"
+        INNER JOIN "schools_schoolmasterstatus" sms ON schools_school."last_master_status_id" = sms."id"
         LEFT JOIN public.locations_countryadminmetadata AS adm1_metadata
             ON adm1_metadata."id" = schools_school.admin1_id
             AND adm1_metadata."layer_name" = 'adm1'
@@ -1240,7 +1261,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             adm1_metadata."name", adm1_metadata."description_ui_label",
             adm2_metadata."name", adm2_metadata."description_ui_label",
             c."name", adm1_metadata."giga_id_admin", adm2_metadata."giga_id_admin",
-            sds."{col_name}", sws."download_speed_benchmark"
+            sds."{col_name}", sms."download_speed_benchmark"
         ORDER BY schools_school."id" ASC
         """
 
@@ -1295,10 +1316,16 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
     def get_school_view_statistics_info_query(self):
         query = """
-        SELECT sws.*
+        SELECT sms.*, sws.connectivity_type, sws.connectivity_latency, sws.connectivity_speed,
+        sws.coverage_availability, sws.coverage_type, sws.connectivity_upload_speed,
+        sws.jitter_download, sws.jitter_upload, sws.roundtrip_time, sws.rtt_packet_loss_pct,
+        sws.connectivity_latency_probe, sws.connectivity_speed_probe, sws.connectivity_upload_speed_probe,
+        sws.connectivity_speed_mean, sws.connectivity_upload_speed_mean
         FROM "schools_school"
-        INNER JOIN connection_statistics_schoolweeklystatus sws
+        INNER JOIN "connection_statistics_schoolweeklystatus" sws
             ON "schools_school"."last_weekly_status_id" = sws."id"
+        INNER JOIN schools_schoolmasterstatus sms
+            ON "schools_school"."last_master_status_id" = sms."id"
         WHERE "schools_school"."deleted" IS NULL
             AND "schools_school"."id" IN ({ids})
         """.format(ids=','.join(self.kwargs['school_ids']))
@@ -1341,11 +1368,13 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             "connection_statistics_schoolrealtimeregistration"."school_id" = "schools_school"."id"
         INNER JOIN "connection_statistics_schooldailystatus" t ON "schools_school"."id" = t."school_id"
         {school_weekly_join}
+        {school_master_join}
         WHERE (
             {country_condition}
             {admin1_condition}
             {school_condition}
             {school_weekly_condition}
+            {school_master_condition}
             "connection_statistics_schoolrealtimeregistration"."deleted" IS NULL
             AND "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
             AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date"::date <= '{end_date}'
@@ -1365,6 +1394,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs['school_group_by'] = ''
         kwargs['school_weekly_join'] = ''
         kwargs['school_weekly_condition'] = ''
+        kwargs['school_master_join'] = ''
+        kwargs['school_master_condition'] = ''
 
         if len(kwargs.get('school_ids', [])) > 0:
             kwargs['school_condition'] = '"schools_school"."id" IN ({0}) AND '.format(','.join(kwargs['school_ids']))
@@ -1388,6 +1419,13 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
             """
             kwargs['school_weekly_condition'] = kwargs['school_static_filters'] + ' AND '
+
+        if len(kwargs['school_master_filters']) > 0:
+            kwargs['school_master_join'] = """
+            INNER JOIN "schools_schoolmasterstatus"
+                ON "schools_school"."last_master_status_id" = "schools_schoolmasterstatus"."id"
+            """
+            kwargs['school_master_condition'] = kwargs['school_master_filters'] + ' AND '
 
         kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
 
@@ -1464,12 +1502,15 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             AS "total_schools"
         FROM "schools_school"
         INNER JOIN connection_statistics_schoolweeklystatus sws ON "schools_school"."last_weekly_status_id" = sws."id"
+        INNER JOIN schools_schoolmasterstatus sms ON "schools_school"."last_master_status_id" = sms."id"
         {school_weekly_join}
+        {school_master_join}
         WHERE "schools_school"."deleted" IS NULL
         {country_condition}
         {admin1_condition}
         {school_condition}
         {school_weekly_condition}
+        {school_master_condition}
         """
 
         kwargs = copy.deepcopy(self.kwargs)
@@ -1479,6 +1520,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs['school_condition'] = ''
         kwargs['school_weekly_join'] = ''
         kwargs['school_weekly_condition'] = ''
+        kwargs['school_master_join'] = ''
+        kwargs['school_master_condition'] = ''
 
         if len(kwargs.get('admin1_ids', [])) > 0:
             kwargs['admin1_condition'] = ' AND "schools_school"."admin1_id" IN ({0})'.format(
@@ -1498,6 +1541,13 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 ON sws."id" = "connection_statistics_schoolweeklystatus"."id"
             """
             kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
+
+        if len(kwargs['school_master_filters']) > 0:
+            kwargs['school_master_join'] = """
+            INNER JOIN "schools_schoolmasterstatus"
+                ON schools_school."last_master_status_id" = "schools_schoolmasterstatus"."id"
+            """
+            kwargs['school_master_condition'] = ' AND ' + kwargs['school_master_filters']
 
         legend_configs = kwargs['legend_configs']
         label_cases = []
@@ -1606,7 +1656,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         FROM "schools_school"
         INNER JOIN locations_country c ON c.id = schools_school.country_id
             AND c."deleted" IS NULL
-        INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
+        INNER JOIN schools_schoolmasterstatus sms ON schools_school.last_master_status_id = sms.id
         LEFT JOIN locations_countryadminmetadata AS adm1_metadata
             ON adm1_metadata."id" = schools_school.admin1_id
             AND adm1_metadata."layer_name" = 'adm1'
@@ -1794,20 +1844,23 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
                     response = info_panel_school_list
                 else:
-                    is_data_synced_qs = SchoolWeeklyStatus.objects.filter(
-                        school__realtime_registration_status__rt_registered=True,
-                    )
+                    is_data_synced_qs = School.objects.filter(realtime_registration_status__rt_registered=True)
 
                     if len(self.kwargs['school_filters']) > 0:
                         is_data_synced_qs = is_data_synced_qs.extra(where=[self.kwargs['school_filters']])
 
                     if len(self.kwargs['school_static_filters']) > 0:
+                        is_data_synced_qs = is_data_synced_qs.select_related('last_weekly_status')
                         is_data_synced_qs = is_data_synced_qs.extra(where=[self.kwargs['school_static_filters']])
 
+                    if len(self.kwargs['school_master_filters']) > 0:
+                        is_data_synced_qs = is_data_synced_qs.select_related('last_master_status')
+                        is_data_synced_qs = is_data_synced_qs.extra(where=[self.kwargs['school_master_filters']])
+
                     if len(self.kwargs.get('admin1_ids', [])) > 0:
-                        is_data_synced_qs = is_data_synced_qs.filter(school__admin1_id__in=self.kwargs['admin1_ids'])
+                        is_data_synced_qs = is_data_synced_qs.filter(admin1_id__in=self.kwargs['admin1_ids'])
                     elif len(self.kwargs.get('country_ids', [])) > 0:
-                        is_data_synced_qs = is_data_synced_qs.filter(school__country_id__in=self.kwargs['country_ids'])
+                        is_data_synced_qs = is_data_synced_qs.filter(country_id__in=self.kwargs['country_ids'])
 
                     query_response = db_utilities.sql_to_response(self.get_info_query(),
                                                                   label=self.__class__.__name__,
@@ -1857,7 +1910,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                             'no_internet': query_response['bad'],
                             'unknown': query_response['unknown'],
                         },
-                        'is_data_synced': is_data_synced_qs.exists(),
+                        'is_data_synced': len(is_data_synced_qs[:1]) > 0,
                         'live_avg': live_avg,
                         'live_avg_connectivity': live_avg_connectivity,
                         'graph_data': graph_data,
@@ -1954,12 +2007,13 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 INNER JOIN bounds ON ST_Intersects("schools_school".geopoint, ST_Transform(bounds.geom, 4326))
                 INNER JOIN (
                     SELECT "schools_school"."id" AS school_id,
-                        "schools_school"."last_weekly_status_id",
+                        "schools_school"."last_master_status_id",
                         {col_function} AS "{col_name}"
                     FROM "schools_school"
                     INNER JOIN connection_statistics_schoolrealtimeregistration rt_status ON
                         rt_status."school_id" = "schools_school".id
                     {school_weekly_join}
+                    {school_master_join}
                     LEFT OUTER JOIN "connection_statistics_schooldailystatus" t ON (
                         "schools_school"."id" = t."school_id"
                         AND t."deleted" IS NULL
@@ -1974,12 +2028,13 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                         {admin1_condition}
                         {school_condition}
                         {school_weekly_condition}
+                        {school_master_condition}
                         AND rt_status."rt_registered" = True
                         AND rt_status."rt_registration_date"::date
                         <= '{end_date}')
                     GROUP BY "schools_school"."id"
                 ) AS sds ON sds.school_id = "schools_school".id
-                {school_weekly_outer_join}
+                {school_master_outer_join}
                 WHERE "schools_school"."deleted" IS NULL
                     {random_order}
                     {limit_condition}
@@ -1999,7 +2054,10 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
         kwargs['school_weekly_join'] = ''
         kwargs['school_weekly_condition'] = ''
-        kwargs['school_weekly_outer_join'] = ''
+
+        kwargs['school_master_join'] = ''
+        kwargs['school_master_condition'] = ''
+        kwargs['school_master_outer_join'] = ''
 
         kwargs['env'] = self.envelope_to_bounds_sql(env)
 
@@ -2025,8 +2083,9 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     label_cases.append("ELSE '{label}'".format(label=title))
 
             kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status,'
-            kwargs['school_weekly_outer_join'] = """
-            INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
+
+            kwargs['school_master_outer_join'] = """
+            INNER JOIN "schools_schoolmasterstatus" sms ON sds."last_master_status_id" = sms."id"
             """
         else:
             kwargs['case_conditions'] = """
@@ -2093,6 +2152,13 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             """
             kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
 
+        if len(kwargs['school_master_filters']) > 0:
+            kwargs['school_master_join'] = """
+            INNER JOIN "schools_schoolmasterstatus"
+                ON "schools_school"."last_master_status_id" = "schools_schoolmasterstatus"."id"
+            """
+            kwargs['school_master_condition'] = ' AND ' + kwargs['school_master_filters']
+
         if add_random_condition:
             if 'limit' in request.query_params:
                 limit = request.query_params['limit']
@@ -2132,13 +2198,18 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 {label_case_statements}
             FROM schools_school
             INNER JOIN bounds ON ST_Intersects(schools_school.geopoint, ST_Transform(bounds.geom, 4326))
-            INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
+            INNER JOIN connection_statistics_schoolweeklystatus sws
+                ON "schools_school"."last_weekly_status_id" = sws."id"
+            INNER JOIN schools_schoolmasterstatus sms
+                ON schools_school.last_master_status_id = sms.id
             {school_weekly_join}
+            {school_master_join}
             WHERE schools_school."deleted" IS NULL
             {country_condition}
             {admin1_condition}
             {school_condition}
             {school_weekly_condition}
+            {school_master_condition}
             {random_order}
             {limit_condition}
         )
@@ -2153,6 +2224,9 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
         kwargs['school_weekly_join'] = ''
         kwargs['school_weekly_condition'] = ''
+
+        kwargs['school_master_join'] = ''
+        kwargs['school_master_condition'] = ''
 
         kwargs['env'] = self.envelope_to_bounds_sql(env)
 
@@ -2197,6 +2271,13 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 ON sws."id" = "connection_statistics_schoolweeklystatus"."id"
             """
             kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
+
+        if len(kwargs['school_master_filters']) > 0:
+            kwargs['school_master_join'] = """
+            INNER JOIN "schools_schoolmasterstatus"
+                ON schools_school."last_master_status_id" = "schools_schoolmasterstatus"."id"
+            """
+            kwargs['school_master_condition'] = ' AND ' + kwargs['school_master_filters']
 
         legend_configs = kwargs['legend_configs']
         label_cases = []
@@ -2407,7 +2488,7 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
                     SELECT schools_school.id AS school_id,
                         schools_school.geopoint,
                         EXTRACT(YEAR FROM CAST(t.date AS DATE)) AS year,
-                        schools_school."last_weekly_status_id",
+                        schools_school."last_master_status_id",
                         {col_function} AS "{col_name}"
                     FROM "schools_school"
                     INNER JOIN "connection_statistics_schooldailystatus" t ON schools_school."id" = t."school_id"
@@ -2418,7 +2499,7 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
                         AND t."live_data_source" IN ({live_source_types})
                     GROUP BY schools_school."id", EXTRACT(YEAR FROM CAST(t.date AS DATE))
                 ) AS sds ON ST_Intersects(sds.geopoint, ST_Transform(bounds.geom, 4326))
-            INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
+            INNER JOIN "schools_schoolmasterstatus" sms ON sds."last_master_status_id" = sms."id"
             LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = sds.school_id
             WHERE rt_status."deleted" IS NULL
         )

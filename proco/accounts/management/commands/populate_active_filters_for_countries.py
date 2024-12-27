@@ -72,8 +72,6 @@ class Command(BaseCommand):
                 parameter_table = parameter_details.table_alias
                 param_options = parameter_details.options
 
-                last_weekly_status_field = 'last_weekly_status__{}'.format(parameter_field)
-
                 if isinstance(param_options, dict) and 'active_countries_filter' in param_options:
                     active_countries_sql_filter = param_options['active_countries_filter']
 
@@ -81,7 +79,13 @@ class Command(BaseCommand):
                         country_qs = School.objects.all()
                         if parameter_table == 'school_static':
                             country_qs = country_qs.select_related('last_weekly_status').annotate(**{
-                                parameter_table + '_' + parameter_field: F(last_weekly_status_field)
+                                parameter_table + '_' + parameter_field: F('last_weekly_status__{}'.format(
+                                    parameter_field))
+                            })
+                        elif parameter_table == 'school_master':
+                            country_qs = country_qs.select_related('last_master_status').annotate(**{
+                                parameter_table + '_' + parameter_field: F('last_master_status__{}'.format(
+                                    parameter_field))
                             })
 
                         all_country_ids_has_filter_data = list(country_qs.extra(

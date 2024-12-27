@@ -18,7 +18,10 @@ def create_and_execute_update_query(stmt):
 
 
 # 1. Set the latest version in country table for all countries
-def populate_country_latest_school_master_data_version(country_id):
+def populate_country_latest_school_master_data_version(country_id, start_country_id, end_country_id):
+    logger.info(f'Running the UPDATE query on Country table to set the "latest_school_master_data_version" '
+                f'field for country: {country_id}')
+
     ts = timezone.now()
 
     query = """
@@ -29,17 +32,25 @@ def populate_country_latest_school_master_data_version(country_id):
             FROM data_sources_schoolmasterdata
             {country_condition}
             GROUP BY country_id
-            ORDER BY country_id
+            ORDER BY country_id ASC
         )
         UPDATE locations_country AS t
             SET latest_school_master_data_version = r.max_version
         FROM r
         WHERE t.deleted IS NULL AND t.id = r.country_id
-        """
+    """
 
     country_condition = ''
     if country_id:
         country_condition = f' WHERE country_id = {country_id}'
+
+    elif start_country_id:
+        country_condition = f' WHERE country_id >= {start_country_id}'
+
+        if end_country_id:
+            country_condition += f' AND country_id <= {end_country_id}'
+    elif end_country_id:
+        country_condition = f' WHERE country_id <= {end_country_id}'
 
     query = query.format(country_condition=country_condition)
 
@@ -51,7 +62,9 @@ def populate_country_latest_school_master_data_version(country_id):
 
 # 2. Copy all published rows into SchoolMasterStatus table and set latest field id into School table
 def populate_last_master_status_id_field_for_schools(country_id):
-    logger.info(f'Running the UPDATE query to set the "last_master_status_id" field for country: {country_id}')
+    logger.info(f'Running the UPDATE query on School table to set the "last_master_status_id" field'
+                f' for country: {country_id}')
+
     ts = timezone.now()
 
     query = """
@@ -80,18 +93,28 @@ def populate_last_master_status_id_field_for_schools(country_id):
     te = timezone.now()
     logger.debug('Executed the function in {} seconds'.format((te - ts).seconds))
 
-def populate_school_master_status_model_data(country_id, exclude_country_ids):
+def populate_school_master_status_model_data(country_id, start_country_id, end_country_id, exclude_country_ids):
+    logger.info(f'Running the INSERT query on SchoolMasterStatus table to set the fields for country: {country_id}')
+
     ts = timezone.now()
 
     country_ids = []
     if country_id:
         country_ids.append(country_id)
     else:
-        country_ids = list(SchoolMasterData.objects.filter(
+        country_id_qs = SchoolMasterData.objects.filter(
             status = 'PUBLISHED',
             is_read = True,
             school_id__isnull=False,
-        ).values_list('country_id', flat=True).order_by('country_id').distinct('country_id'))
+        ).values_list('country_id', flat=True).order_by('country_id').distinct('country_id')
+
+        if start_country_id:
+            country_id_qs = country_id_qs.filter(country_id__gte=start_country_id)
+
+        if end_country_id:
+            country_id_qs = country_id_qs.filter(country_id__lte=end_country_id)
+
+        country_ids = list(country_id_qs)
 
     for c_id in country_ids:
         if country_id in exclude_country_ids:
@@ -200,7 +223,7 @@ def populate_school_master_status_model_data(country_id, exclude_country_ids):
                 AND country_id = {country_id}
             ORDER BY school_id ASC, VERSION DESC
             ON CONFLICT DO NOTHING;
-            """
+        """
 
         query = query.format(country_id=c_id)
 
@@ -219,6 +242,15 @@ class Command(BaseCommand):
         parser.add_argument(
             '-country_id', dest='country_id', required=False, type=int,
             help='Pass the Country ID in case want to control the update.'
+        )
+
+        parser.add_argument(
+            '-start_country_id', dest='start_country_id', required=False, type=int,
+            help='Pass the country id in case want to control the update.'
+        )
+        parser.add_argument(
+            '-end_country_id', dest='end_country_id', required=False, type=int,
+            help='Pass the country id in case want to control the update.'
         )
 
         parser.add_argument(
@@ -247,6 +279,9 @@ class Command(BaseCommand):
         logger.info('Options: {}\n\n'.format(options))
 
         country_id = options.get('country_id', None)
+        start_country_id = options.get('start_country_id', None)
+        end_country_id = options.get('end_country_id', None)
+
         exclude_country_ids = options.get('exclude_country_ids', None)
         if exclude_country_ids:
             exclude_country_ids = [int(val) for val in str(exclude_country_ids).split(',')]
@@ -255,12 +290,12 @@ class Command(BaseCommand):
 
         if options.get('populate_country_latest_school_master_data_version'):
             logger.info('Populating country latest school master data version field from SchoolMasterData table.')
-            populate_country_latest_school_master_data_version(country_id)
+            populate_country_latest_school_master_data_version(country_id, start_country_id, end_country_id)
             logger.info('Completed country latest school master data version field from SchoolMasterData table.\n\n')
 
         if options.get('populate_school_master_status_model_data'):
             logger.info('Populating populate_school_master_status_model_data from SchoolMasterData table.')
-            populate_school_master_status_model_data(country_id, exclude_country_ids)
+            populate_school_master_status_model_data(country_id, start_country_id, end_country_id, exclude_country_ids)
             logger.info('Completed country latest school master data version field from SchoolMasterData table.\n\n')
 
         logger.info('Completed utility successfully.\n')
