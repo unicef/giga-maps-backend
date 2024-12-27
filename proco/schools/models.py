@@ -9,6 +9,7 @@ from model_utils import Choices
 from model_utils.models import TimeStampedModel
 from timezone_field import TimeZoneField
 
+from proco.core import models as core_models
 from proco.core.managers import BaseManager
 from proco.core.models import CustomDateTimeField
 from proco.locations.models import Country, CountryAdminMetadata
@@ -64,11 +65,17 @@ class School(TimeStampedModel):
         on_delete=models.SET_NULL, related_name='_school',
     )
 
+    last_master_status = models.ForeignKey(
+        'SchoolMasterStatus',
+        related_name='_school',
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+    )
+
     coverage_type = models.CharField(max_length=10, blank=True, default='unknown')
     connectivity_status = models.CharField(max_length=10, blank=True, default='unknown')
     coverage_status = models.CharField(max_length=10, blank=True, default='unknown')
-
-    establishment_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
 
     deleted = CustomDateTimeField(db_index=True, null=True, blank=True)
 
@@ -108,6 +115,7 @@ class School(TimeStampedModel):
 
         self.daily_status.all().update(deleted=timezone.now())
         self.weekly_status.all().update(deleted=timezone.now())
+        self.master_status.all().update(deleted=timezone.now())
 
 
 class FileImport(TimeStampedModel):
@@ -138,3 +146,65 @@ class FileImport(TimeStampedModel):
     @property
     def filename(self):
         return self.uploaded_file.name.split('/')[-1]
+
+
+class SchoolMasterStatus(core_models.BaseModelMixin, core_models.BaseSchoolMaster):
+    """
+    SchoolMasterStatus
+        This class define model used to store School Master Data.
+    Inherits : `BaseModelMixin`
+    """
+
+    school = models.ForeignKey(
+        School,
+        blank=False,
+        null=False,
+        related_name='master_status',
+        on_delete=models.DO_NOTHING,
+        verbose_name='School Master Sync'
+    )
+
+    establishment_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
+
+    water_availability = models.NullBooleanField(default=None)
+    electricity_availability = models.NullBooleanField(default=None)
+    computer_lab = models.NullBooleanField(default=None)
+    teachers_trained = models.NullBooleanField(default=None)
+    sustainable_business_model = models.NullBooleanField(default=None)
+    computer_availability = models.NullBooleanField(default=None)
+    device_availability = models.NullBooleanField(default=None)
+
+    disputed_region = models.BooleanField(default=False)
+
+    connectivity_govt = models.NullBooleanField(default=None)
+    connectivity_type_govt = models.CharField(blank=True, null=True, max_length=255)
+    connectivity_type = models.CharField(blank=True, null=True, max_length=255)
+    connectivity_type_root = models.CharField(blank=True, null=True, max_length=255)
+
+    nearest_lte_distance = models.FloatField(blank=True, default=None, null=True)
+    nearest_umts_distance = models.FloatField(blank=True, default=None, null=True)
+    nearest_gsm_distance = models.FloatField(blank=True, default=None, null=True)
+    nearest_nr_distance = models.FloatField(blank=True, default=None, null=True)
+
+    data_source = models.CharField(blank=True, null=True, max_length=255)
+    data_collection_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
+    data_collection_modality = models.CharField(blank=True, null=True, max_length=255)
+    location_ingestion_timestamp = core_models.CustomDateTimeField(null=True, blank=True)
+    connectivity_govt_ingestion_timestamp = core_models.CustomDateTimeField(null=True, blank=True)
+
+    connectivity = models.NullBooleanField(default=None)
+
+    version = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    class Meta:
+        ordering = ('id',)
+        constraints = [
+            UniqueConstraint(fields=['school', 'version', 'deleted'],
+                             name='schools_master_status_unique_with_deleted'),
+            UniqueConstraint(fields=['school', 'version'],
+                             condition=Q(deleted=None),
+                             name='schools_master_status_unique_without_deleted'),
+        ]
+
+    def __str__(self):
+        return f'{self.school} - {self.school} - {self.version}'

@@ -94,3 +94,7 @@ pipenv run gunicorn config.wsgi:application -b 0.0.0.0:8000 -w 8 --timeout=300
 # pipenv run python manage.py data_source_additional_steps --clean_school_master_historical_rows -country_id=144
 # pipenv run python manage.py data_loss_recovery_for_pcdc_weekly -start_week_no=46 -end_week_no=46 -year=2024 --pull_data
 # pipenv run python manage.py data_cleanup --data_loss_recovery_for_pcdc_weekly_with_scheduler -start_week_no=46 -end_week_no=46 -year=2024 --pull_data
+
+
+# pipenv run python manage.py populate_school_master_data_for_all_schools --populate_country_latest_school_master_data_version
+# pipenv run python manage.py populate_school_master_data_for_all_schools --populate_school_master_status_model_data -country_id=222

@@ -117,3 +117,46 @@ class BaseModel(BaseModelMixin, models.Model):
     class Meta:
         abstract = True
         ordering = ['last_modified_at']
+
+
+class BaseSchoolMaster(models.Model):
+    download_speed_benchmark = models.FloatField(blank=True, default=None, null=True)
+    download_speed_contracted = models.FloatField(blank=True, default=None, null=True)
+    num_computers_desired = models.PositiveIntegerField(blank=True, default=None, null=True)
+    electricity_type = models.CharField(blank=True, null=True, max_length=255)
+    num_adm_personnel = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_students = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_teachers = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_classrooms = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_latrines = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    num_computers = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    num_students_girls = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_students_boys = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_students_other = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_teachers_female = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_teachers_male = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    fiber_node_distance = models.FloatField(blank=True, default=None, null=True)
+    microwave_node_distance = models.FloatField(blank=True, default=None, null=True)
+
+    schools_within_1km = models.PositiveIntegerField(blank=True, default=None, null=True)
+    schools_within_2km = models.PositiveIntegerField(blank=True, default=None, null=True)
+    schools_within_3km = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    pop_within_1km = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_within_2km = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_within_3km = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    connectivity_govt_collection_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
+    connectivity_govt_ingestion_timestamp = CustomDateTimeField(null=True, blank=True)
+
+    num_tablets = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_robotic_equipment = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    building_id_govt = models.CharField(blank=True, null=True, max_length=255)
+    num_schools_per_building = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    class Meta:
+        abstract = True
