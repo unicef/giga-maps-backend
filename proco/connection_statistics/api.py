@@ -1025,7 +1025,13 @@ class CountryDailyConnectivitySummaryAPIViewSet(BaseModelViewSet):
 
 class SchoolSummaryAPIViewSet(BaseModelViewSet):
     model = SchoolWeeklyStatus
-    serializer_class = statistics_serializers.SchoolWeeklyStatusSerializer
+    serializer_class = statistics_serializers.SchoolWeeklySummaryListSerializer
+
+    action_serializers = {
+        'retrieve': statistics_serializers.SchoolWeeklySummaryRetrieveSerializer,
+        'create': statistics_serializers.SchoolWeeklySummaryUpdateCreateSerializer,
+        'update': statistics_serializers.SchoolWeeklySummaryUpdateCreateSerializer,
+    }
 
     permission_classes = (
         core_permissions.IsUserAuthenticated,
@@ -1036,7 +1042,9 @@ class SchoolSummaryAPIViewSet(BaseModelViewSet):
     )
 
     filter_backends = (
-        NullsAlwaysLastOrderingFilter, SearchFilter, DjangoFilterBackend
+        NullsAlwaysLastOrderingFilter,
+        SearchFilter,
+        DjangoFilterBackend,
     )
 
     ordering_field_names = ['-year', '-week', 'school__name']
@@ -1051,19 +1059,6 @@ class SchoolSummaryAPIViewSet(BaseModelViewSet):
         'week': ['exact', 'in'],
     }
 
-    def get_serializer_class(self):
-        if self.action == 'list':
-            ser_class = statistics_serializers.ListSchoolWeeklySummarySerializer
-        elif self.action in ['create', 'update', 'destroy']:
-            ser_class = statistics_serializers.SchoolWeeklySummaryUpdateRetrieveSerializer
-        else:
-            ser_class = statistics_serializers.DetailSchoolWeeklySummarySerializer
-        return (ser_class)
-
-    def get_object(self):
-        if self.action == 'list':
-            return get_object_or_404(self.queryset.filter(pk=self.kwargs.get('pk').lower()))
-
     def get_queryset(self):
         queryset = super(SchoolSummaryAPIViewSet, self).get_queryset()
         if self.action == 'list' and self.request.query_params.get('country_id'):
@@ -1072,7 +1067,10 @@ class SchoolSummaryAPIViewSet(BaseModelViewSet):
 
     def create(self, request, *args, **kwargs):
         try:
-            data = statistics_serializers.SchoolWeeklySummaryUpdateRetrieveSerializer(data=request.data)
+            data = statistics_serializers.SchoolWeeklySummaryUpdateCreateSerializer(
+                data=request.data,
+                context={'request': request},
+            )
             if data.is_valid():
                 data.save()
                 action_log(request, [data.data], 1, '', self.model, field_name='id')
@@ -1085,9 +1083,12 @@ class SchoolSummaryAPIViewSet(BaseModelViewSet):
         if pk is not None:
             try:
                 school_weekly_status = SchoolWeeklyStatus.objects.get(pk=pk)
-                data = statistics_serializers.SchoolWeeklySummaryUpdateRetrieveSerializer(instance=school_weekly_status,
-                                                                                          data=request.data,
-                                                                                          partial=True)
+                data = statistics_serializers.SchoolWeeklySummaryUpdateCreateSerializer(
+                    instance=school_weekly_status,
+                    data=request.data,
+                    context={'request': request},
+                    partial=True,
+                )
                 if data.is_valid(raise_exception=True):
                     change_message = changed_fields(school_weekly_status, request.data)
                     action_log(request, [school_weekly_status], 2, change_message, self.model, field_name='id')
@@ -1097,20 +1098,6 @@ class SchoolSummaryAPIViewSet(BaseModelViewSet):
             except SchoolWeeklyStatus.DoesNotExist:
                 return Response(data=error_mess, status=rest_status.HTTP_502_BAD_GATEWAY)
         return Response(data=id_missing_error_mess, status=rest_status.HTTP_502_BAD_GATEWAY)
-
-    def retrieve(self, request, pk):
-        if pk is not None:
-            try:
-                school_weekly_status = SchoolWeeklyStatus.objects.get(id=pk)
-                if school_weekly_status:
-                    serializer = statistics_serializers.SchoolWeeklySummaryUpdateRetrieveSerializer(
-                        school_weekly_status, partial=True,
-                        context={'request': request}, )
-                    return Response(serializer.data)
-                return Response(status=rest_status.HTTP_404_NOT_FOUND, data=error_mess)
-            except SchoolWeeklyStatus.DoesNotExist:
-                return Response(status=rest_status.HTTP_502_BAD_GATEWAY, data=error_mess)
-        return Response(status=rest_status.HTTP_502_BAD_GATEWAY, data=id_missing_error_mess)
 
     def destroy(self, request, *args, **kwargs):
         try:
