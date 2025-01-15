@@ -1832,9 +1832,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 SELECT DISTINCT ST_AsMVTGeom(ST_Transform("schools_school".geopoint, 3857), bounds.b2d) AS geom,
                     {random_select_list}
                     "schools_school".id,
-                    CASE WHEN rt_status.rt_registered = True AND rt_status.rt_registration_date::date <= '{end_date}'
-                        THEN True ELSE False
-                    END AS is_rt_connected,
+                    CASE WHEN sds.rt_connected = True THEN True ELSE False END AS is_rt_connected,
                     sds.{col_name} AS field_avg,
                     {case_conditions}
                     CASE WHEN "schools_school".connectivity_status IN ('good', 'moderate') THEN 'connected'
@@ -1847,7 +1845,8 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 LEFT JOIN (
                     SELECT "schools_school"."id" AS school_id,
                         "schools_school"."last_weekly_status_id",
-                        AVG(t."{col_name}") AS "{col_name}"
+                        AVG(t."{col_name}") AS "{col_name}",
+                        TRUE AS rt_connected
                     FROM "schools_school"
                     INNER JOIN "connection_statistics_schoolrealtimeregistration"
                         ON ("schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id")
@@ -1872,14 +1871,11 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     GROUP BY "schools_school"."id"
                 ) AS sds ON sds.school_id = "schools_school".id
                 {school_weekly_outer_join}
-                LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status
-                    ON rt_status.school_id = "schools_school".id
                 WHERE "schools_school"."deleted" IS NULL
-                AND rt_status."deleted" IS NULL
-                {country_outer_condition}
-                {admin1_outer_condition}
-                {school_outer_condition}
-                {school_weekly_condition}
+                    {country_outer_condition}
+                    {admin1_outer_condition}
+                    {school_outer_condition}
+                    {school_weekly_condition}
                 {random_order}
                 {limit_condition}
             )
