@@ -286,7 +286,8 @@ class TranslateTextFromEnViewSet(APIView):
         }
 
         # location, also known as region.
-        # required if you're using a multi-service or regional (not global) resource. It can be found in the Azure portal on the Keys and Endpoint page.
+        # required if you're using a multi service or regional (not global) resource.
+        # It can be found in the Azure portal on the Keys and Endpoint page.
         if settings.AI_TRANSLATION_REGION:
             headers['Ocp-Apim-Subscription-Region'] = settings.AI_TRANSLATION_REGION
 
@@ -688,7 +689,7 @@ class DataLayerPreviewViewSet(APIView):
         else:
             kwargs['case_conditions'] = """
                         CASE WHEN sds.{col_name} > {benchmark_value} THEN 'good'
-                            WHEN sds.{col_name} <= {benchmark_value} and sds.{col_name} >= {base_benchmark} THEN 'moderate'
+                            WHEN sds.{col_name} <= {benchmark_value} AND sds.{col_name} >= {base_benchmark} THEN 'moderate'
                             WHEN sds.{col_name} < {base_benchmark}  THEN 'bad'
                             ELSE 'unknown'
                         END AS connectivity,
@@ -2030,8 +2031,8 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                         {school_weekly_condition}
                         {school_master_condition}
                         AND rt_status."rt_registered" = True
-                        AND rt_status."rt_registration_date"::date
-                        <= '{end_date}')
+                        AND rt_status."rt_registration_date"::date <= '{end_date}'
+                    )
                     GROUP BY "schools_school"."id"
                 ) AS sds ON sds.school_id = "schools_school".id
                 {school_master_outer_join}
@@ -2090,7 +2091,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         else:
             kwargs['case_conditions'] = """
                 CASE WHEN sds.{col_name} >  {benchmark_value} THEN 'good'
-                    WHEN sds.{col_name} < {benchmark_value} and sds.{col_name} >= {base_benchmark} THEN 'moderate'
+                    WHEN sds.{col_name} < {benchmark_value} AND sds.{col_name} >= {base_benchmark} THEN 'moderate'
                     WHEN sds.{col_name} < {base_benchmark}  THEN 'bad'
                     ELSE 'unknown'
                 END AS field_status,
@@ -2099,7 +2100,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             if kwargs['is_reverse'] is True:
                 kwargs['case_conditions'] = """
                 CASE WHEN sds.{col_name} < {benchmark_value}  THEN 'good'
-                    WHEN sds.{col_name} >= {benchmark_value} and sds.{col_name} <= {base_benchmark} THEN 'moderate'
+                    WHEN sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark} THEN 'moderate'
                     WHEN sds.{col_name} > {base_benchmark} THEN 'bad'
                     ELSE 'unknown'
                 END AS field_status,
@@ -2529,7 +2530,7 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
         else:
             kwargs['case_conditions'] = """
                         CASE WHEN sds.{col_name} >  {benchmark_value} THEN 'good'
-                            WHEN sds.{col_name} < {benchmark_value} and sds.{col_name} >= {base_benchmark} THEN 'moderate'
+                            WHEN sds.{col_name} < {benchmark_value} AND sds.{col_name} >= {base_benchmark} THEN 'moderate'
                             WHEN sds.{col_name} < {base_benchmark}  THEN 'bad'
                             ELSE 'unknown'
                         END AS field_status
@@ -2538,7 +2539,7 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
             if kwargs['is_reverse'] is True:
                 kwargs['case_conditions'] = """
                         CASE WHEN sds.{col_name} < {benchmark_value}  THEN 'good'
-                            WHEN sds.{col_name} >= {benchmark_value} and sds.{col_name} <= {base_benchmark} THEN 'moderate'
+                            WHEN sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark} THEN 'moderate'
                             WHEN sds.{col_name} > {base_benchmark} THEN 'bad'
                             ELSE 'unknown'
                         END AS field_status
