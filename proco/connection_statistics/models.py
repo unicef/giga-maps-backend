@@ -18,8 +18,8 @@ from proco.utils.dates import get_current_week, get_current_year
 
 
 class ConnectivityStatistics(models.Model):
-    connectivity_speed = models.PositiveIntegerField(help_text=_('bps'), blank=True, null=True, default=None)
-    connectivity_upload_speed = models.PositiveIntegerField(help_text=_('bps'), blank=True, null=True, default=None)
+    connectivity_speed = core_models.PositiveBigIntegerField(help_text=_('bps'), blank=True, null=True, default=None)
+    connectivity_upload_speed = core_models.PositiveBigIntegerField(help_text=_('bps'), blank=True, null=True, default=None)
 
     connectivity_latency = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
 
