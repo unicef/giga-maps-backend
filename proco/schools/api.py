@@ -352,7 +352,7 @@ class ConnectivityTileGenerator(BaseTileGenerator):
             elif zoom_level == 1:
                 table_configs['limit_condition'] = 'LIMIT ' + '30000'
 
-            table_configs['random_order'] = 'ORDER BY random()'
+            table_configs['random_order'] = 'ORDER BY schools_school.giga_id_school ASC'
 
         if 'is_weekly' in request.query_params:
             is_weekly = request.query_params.get('is_weekly', 'true') == 'true'
@@ -422,23 +422,26 @@ class ConnectivityTileGenerator(BaseTileGenerator):
                     WHEN c.connectivity_speed <= {benchmark} and c.connectivity_speed >= 1000000 THEN 'moderate'
                     WHEN c.connectivity_speed < 1000000  THEN 'bad'
                     ELSE 'unknown'
-                END as connectivity,
+                END AS connectivity,
                 CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
                     WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
                     ELSE 'unknown'
-                END as connectivity_status,
+                END AS connectivity_status,
                 CASE WHEN rt_status.rt_registered = True {rt_date_condition} THEN True
                     ELSE False
-                END as is_rt_connected
+                END AS is_rt_connected
                 FROM schools_school
                 INNER JOIN bounds ON ST_Intersects(schools_school.geopoint, ST_Transform(bounds.geom, {srid}))
-                    AND schools_school."deleted" IS NULL {country_condition}{admin1_condition}{school_condition}
                 {school_weekly_join}
                 LEFT JOIN connection_statistics_schoolweeklystatus c {weekly_lookup_condition}
                     AND c."deleted" IS NULL
-                LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = schools_school.id
-                    AND rt_status."deleted" IS NULL
-                {school_weekly_condition}
+                LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status
+                    ON rt_status.school_id = schools_school.id AND rt_status."deleted" IS NULL
+                WHERE schools_school."deleted" IS NULL
+                    {country_condition}
+                    {admin1_condition}
+                    {school_condition}
+                    {school_weekly_condition}
                 {random_order}
                 {limit_condition}
             )
@@ -456,10 +459,10 @@ class ConnectivityTileGenerator(BaseTileGenerator):
                                                               'connection_statistics_schoolweeklystatus')
         if len(school_static_filters) > 0:
             tbl['school_weekly_join'] = """
-                    LEFT OUTER JOIN connection_statistics_schoolweeklystatus
-                        ON schools_school."last_weekly_status_id" = connection_statistics_schoolweeklystatus."id"
-                    """
-            tbl['school_weekly_condition'] = 'WHERE ' + school_static_filters
+            LEFT OUTER JOIN connection_statistics_schoolweeklystatus
+                ON schools_school."last_weekly_status_id" = connection_statistics_schoolweeklystatus."id"
+            """
+            tbl['school_weekly_condition'] = 'AND ' + school_static_filters
 
         return sql_tmpl.format(**tbl)
 

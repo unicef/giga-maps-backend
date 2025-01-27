@@ -497,17 +497,17 @@ ADMIN_MAP_API_SAMPLING_LIMIT = env('ADMIN_MAP_API_SAMPLING_LIMIT', default=None)
 READ_ONLY_DATABASE_ALLOWED_REQUESTS = [
     'global-stat',
     'get-time-player-data',
-    'tiles-connectivity-view',
-    'tiles-school-connectivity-status-view',
+    # 'tiles-connectivity-view',
+    # 'tiles-school-connectivity-status-view',
     'get-latest-week-and-month',
     'list-published-advance-filters',
     'list-published-data-layers',
     'info-data-layer',
-    'map-data-layer',
+    # 'map-data-layer',
     'download-schools',
     'download-countries',
     'search-countries-admin-schools',
-    'get-time-player-data-v2',
+    # 'get-time-player-data-v2',
     'tiles-view',
 ]
 
