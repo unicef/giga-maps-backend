@@ -7,6 +7,22 @@ from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
 from proco.core.managers import BaseManager
+from django.utils.translation import gettext_lazy as _
+
+
+class PositiveBigIntegerField(models.IntegerField):
+    description = _("Big (8 byte) integer")
+    MAX_BIGINT = 9223372036854775807
+
+    def get_internal_type(self):
+        return "BigIntegerField"
+
+    def formfield(self, **kwargs):
+        return super().formfield(**{
+            'min_value': 0,
+            'max_value': PositiveBigIntegerField.MAX_BIGINT,
+            **kwargs,
+        })
 
 
 class CustomDateTimeField(models.DateTimeField):
