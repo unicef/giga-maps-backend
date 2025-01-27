@@ -494,6 +494,7 @@ READ_ONLY_DATABASE_ALLOWED_REQUESTS = [
     'global-stat',
     'get-time-player-data',
     # 'tiles-connectivity-view',
+    # 'tiles-school-connectivity-status-view',
     'get-latest-week-and-month',
     'list-published-advance-filters',
     'list-published-data-layers',

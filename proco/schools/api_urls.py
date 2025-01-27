@@ -13,6 +13,7 @@ urlpatterns = [
     path('schools/random/', api.RandomSchoolsListAPIView.as_view(), name='random-schools'),
     path('schools/tiles/', api.SchoolTileRequestHandler.as_view(), name='tiles-view'),
     path('schools/tiles/connectivity/', api.ConnectivityTileRequestHandler.as_view(), name='tiles-connectivity-view'),
+    path('schools/tiles/connectivity_status/', api.SchoolConnectivityStatusTileRequestHandler.as_view(), name='tiles-school-connectivity-status-view'),
     path('schools-download/', api.DownloadSchoolsViewSet.as_view({
         'get': 'list',
     }), name='download-schools'),

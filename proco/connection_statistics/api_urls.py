@@ -13,7 +13,6 @@ urlpatterns = [
     path('schoolconnectivity/', api.SchoolConnectivityStatsListAPIView.as_view(), name='school-connectivity-stat'),
 
     path('coverage/', api.CoverageAPIView.as_view(), name='global-coverage-stat'),
-    path('countrycoverage/', api.CoverageAPIView.as_view(), name='country-coverage-stat'),
     path('schoolcoverage/', api.SchoolCoverageStatsListAPIView.as_view(), name='school-coverage-stat'),
 
     path(

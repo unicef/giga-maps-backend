@@ -6,6 +6,7 @@ from django.db import transaction
 from proco.accounts import models as accounts_models
 from proco.core.utils import get_current_datetime_object, normalize_str
 
+
 data_source_json = [
     {
         'name': 'Daily Check APP and MLab',
@@ -22,6 +23,44 @@ data_source_json = [
                 'alias': 'Download Speed',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})'
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
+                    }
+                ]
             }, {
                 'name': 'connectivity_upload_speed',
                 'type': 'int',
@@ -30,6 +69,44 @@ data_source_json = [
                 'alias': 'Upload Speed',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})'
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
+                    }
+                ]
             }, {
                 'name': 'connectivity_latency',
                 'type': 'int',
@@ -38,6 +115,44 @@ data_source_json = [
                 'alias': 'Latency',
                 'base_benchmark': 1,
                 'display_unit': 'ms',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})'
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
+                    }
+                ]
             }
         ],
         'status': 'PUBLISHED'
@@ -57,6 +172,45 @@ data_source_json = [
                 'alias': 'Download Speed',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})',
+                        'eval': ''
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
+                    }
+                ]
             },
             {
                 'name': 'connectivity_upload_speed',
@@ -66,6 +220,44 @@ data_source_json = [
                 'alias': 'Upload Speed',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})'
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
+                    }
+                ]
             },
             {
                 'name': 'connectivity_latency',
@@ -75,6 +267,44 @@ data_source_json = [
                 'alias': 'Latency',
                 'base_benchmark': 1,
                 'display_unit': 'ms',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})'
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
+                    }
+                ]
             },
             {
                 'name': 'connectivity_speed_probe',
@@ -84,6 +314,14 @@ data_source_json = [
                 'alias': 'Download Speed Probe',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})'
+                    }
+                ]
             },
             {
                 'name': 'connectivity_upload_speed_probe',
@@ -93,6 +331,14 @@ data_source_json = [
                 'alias': 'Upload Speed Probe',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})'
+                    }
+                ]
             },
             {
                 'name': 'connectivity_latency_probe',
@@ -102,6 +348,14 @@ data_source_json = [
                 'alias': 'Latency Probe',
                 'base_benchmark': 1,
                 'display_unit': 'ms',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})'
+                    }
+                ]
             },
             {
                 'name': 'connectivity_speed_mean',
@@ -111,6 +365,14 @@ data_source_json = [
                 'alias': 'Download Speed Mean',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})'
+                    }
+                ]
             },
             {
                 'name': 'connectivity_upload_speed_mean',
@@ -120,6 +382,14 @@ data_source_json = [
                 'alias': 'Upload Speed Mean',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})'
+                    }
+                ]
             },
             {
                 'name': 'roundtrip_time',
@@ -129,6 +399,14 @@ data_source_json = [
                 'alias': 'Roundtrip Time',
                 'base_benchmark': 1,
                 'display_unit': 'ms',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})'
+                    }
+                ]
             },
             {
                 'name': 'jitter_download',
@@ -138,6 +416,14 @@ data_source_json = [
                 'alias': 'Jitter Download',
                 'base_benchmark': 1,
                 'display_unit': 'ms',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})'
+                    }
+                ]
             },
             {
                 'name': 'jitter_upload',
@@ -147,6 +433,14 @@ data_source_json = [
                 'alias': 'Jitter Upload',
                 'base_benchmark': 1,
                 'display_unit': 'ms',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})'
+                    }
+                ]
             },
             {
                 'name': 'rtt_packet_loss_pct',
@@ -156,6 +450,14 @@ data_source_json = [
                 'alias': 'RTT Packet Loss',
                 'base_benchmark': 1,
                 'display_unit': '%',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})'
+                    }
+                ]
             }
         ],
         'status': 'PUBLISHED'
@@ -379,7 +681,6 @@ data_source_json = [
         'status': 'PUBLISHED'
     }
 ]
-
 download_and_coverage_data_layer_json = [
     {
         'code': 'DEFAULT_DOWNLOAD',

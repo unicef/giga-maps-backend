@@ -4,7 +4,7 @@ from factory import SubFactory
 from factory import django as django_factory
 from factory import fuzzy
 
-from proco.locations.models import Country, CountryAdminMetadata, Location
+from proco.locations.models import Country, CountryAdminMetadata
 
 
 class CountryFactory(django_factory.DjangoModelFactory):
@@ -18,16 +18,6 @@ class CountryFactory(django_factory.DjangoModelFactory):
 
     class Meta:
         model = Country
-
-
-class LocationFactory(django_factory.DjangoModelFactory):
-    name = fuzzy.FuzzyText(length=20)
-    country = SubFactory(CountryFactory)
-
-    geometry = GEOSGeometry('MultiPolygon(((0 0, 0 1, 1 1, 1 0, 0 0)), ((1 1, 1 2, 2 2, 2 1, 1 1)))')
-
-    class Meta:
-        model = Location
 
 
 class Admin1Factory(django_factory.DjangoModelFactory):

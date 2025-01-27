@@ -6,9 +6,7 @@ from django.utils import timezone
 from django.utils.translation import ugettext as _
 from jsonfield import JSONField
 from model_utils.models import TimeStampedModel
-from mptt.models import MPTTModel, TreeForeignKey
 from sklearn.cluster import MiniBatchKMeans
-# from sklearn.neighbors import DistanceMetric
 from sklearn.metrics import DistanceMetric
 
 from proco.core.models import BaseModelMixin, CustomDateTimeField
@@ -27,38 +25,9 @@ class BBoxMixin(models.Model):
 
 class GeometryMixin(models.Model):
     geometry = MultiPolygonField(verbose_name=_('Country border geometry'), null=True, blank=True)
-    geometry_simplified = MultiPolygonField(verbose_name=_('Simplified Geometry'), null=True, blank=True)
 
     class Meta:
         abstract = True
-
-    @classmethod
-    def to_multipolygon(cls, geos_geom: [MultiPolygon, Polygon]) -> MultiPolygon:
-        return MultiPolygon(geos_geom) if isinstance(geos_geom, Polygon) else geos_geom
-
-    @classmethod
-    def optimize_geometry(cls, geometry: [GEOSGeometry]) -> [MultiPolygon]:
-        if geometry is None:
-            return geometry
-
-        # magic numbers
-        tolerance = 0.03
-        tolerance_divider = 4
-        max_attempts = 5
-
-        for _i in range(max_attempts):
-            geometry_simplified = geometry.simplify(tolerance=tolerance)
-            if not geometry_simplified.empty:
-                return cls.to_multipolygon(geometry_simplified)
-
-            tolerance = tolerance / tolerance_divider
-
-        return geometry
-
-    def save(self, *args, **kwargs):
-        self.geometry_simplified = self.optimize_geometry(self.geometry)
-
-        super().save(*args, **kwargs)
 
 
 class Country(GeometryMixin, TimeStampedModel):
@@ -168,25 +137,6 @@ class Country(GeometryMixin, TimeStampedModel):
         first_weekly_status = CountryWeeklyStatus.objects.create(country=self)
         self.last_weekly_status = first_weekly_status
         self.save(update_fields=('last_weekly_status',))
-
-
-class Location(GeometryMixin, TimeStampedModel, MPTTModel):
-    name = models.CharField(max_length=255)
-    country = models.ForeignKey(Country, related_name='country_location', on_delete=models.CASCADE)
-    parent = TreeForeignKey(
-        'self',
-        related_name='children',
-        null=True,
-        blank=True,
-        db_index=True,
-        on_delete=models.CASCADE,
-    )
-
-    class Meta:
-        ordering = ('id',)
-
-    def __str__(self):
-        return f'{self.name} - {self.country}'
 
 
 class CountryAdminMetadata(BaseModelMixin, BBoxMixin):
