@@ -96,4 +96,10 @@ def finalize_setup(sender, **kwargs):
             'schedule': crontab(day_of_week='0,6', hour=5, minute=20),
             'args': (),
         },
+        'proco.giga_meter.tasks.handle_giga_meter_school_master_data_sync': {
+            'task': 'proco.giga_meter.tasks.handle_giga_meter_school_master_data_sync',
+            # Executes once in a day at 10:30 AM
+            'schedule': crontab(hour=10, minute=30),
+            'args': (),
+        },
     })

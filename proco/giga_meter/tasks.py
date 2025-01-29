@@ -161,9 +161,11 @@ def giga_meter_handle_published_school_master_data_row(country_ids=None, force_t
                             # 'address': row.address,
                             # 'postal_code': row.postal_code,
                             # 'email': row.email,
-                            'education_level': '' if core_utilities.is_blank_string(row.education_level) else row.education_level,
+                            'education_level': ''
+                            if core_utilities.is_blank_string(row.education_level) else row.education_level,
                             'environment': environment,
-                            'school_type': '' if core_utilities.is_blank_string(row.school_funding_type) else row.school_funding_type,
+                            'school_type': ''
+                            if core_utilities.is_blank_string(row.school_funding_type) else row.school_funding_type,
                             'admin_1_name': row.admin1,
                             'admin_2_name': row.admin2,
                             # 'admin_3_name': row.admin_3_name,
@@ -191,15 +193,25 @@ def giga_meter_handle_published_school_master_data_row(country_ids=None, force_t
                             'num_teachers' : row.num_teachers,
                             'num_classrooms' : row.num_classrooms,
                             'num_latrines' : row.num_latrines,
-                            'water_availability' : None if core_utilities.is_blank_string(row.water_availability) else str(row.water_availability).lower() in true_choices,
-                            'electricity_availability' : None if core_utilities.is_blank_string(row.electricity_availability) else str(row.electricity_availability).lower() in true_choices,
-                            'computer_lab' : None if core_utilities.is_blank_string(row.computer_lab) else str(row.computer_lab).lower() in true_choices,
+                            'water_availability' : None
+                            if core_utilities.is_blank_string(row.water_availability)
+                            else str(row.water_availability).lower() in true_choices,
+                            'electricity_availability' : None
+                            if core_utilities.is_blank_string(row.electricity_availability)
+                            else str(row.electricity_availability).lower() in true_choices,
+                            'computer_lab' : None
+                            if core_utilities.is_blank_string(row.computer_lab)
+                            else str(row.computer_lab).lower() in true_choices,
                             'num_computers' : row.num_computers,
-                            'connectivity_govt': None if core_utilities.is_blank_string(row.connectivity_govt) else str(row.connectivity_govt).lower() in true_choices,
+                            'connectivity_govt': None
+                            if core_utilities.is_blank_string(row.connectivity_govt)
+                            else str(row.connectivity_govt).lower() in true_choices,
                             'connectivity_type_govt': row.connectivity_type_govt,
                             'connectivity_type':  row.connectivity_type,
                             'connectivity_type_root': row.connectivity_type_root,
-                            'cellular_coverage_availability': None if core_utilities.is_blank_string(row.cellular_coverage_availability) else str(row.cellular_coverage_availability).lower() in true_choices,
+                            'cellular_coverage_availability': None
+                            if core_utilities.is_blank_string(row.cellular_coverage_availability)
+                            else str(row.cellular_coverage_availability).lower() in true_choices,
                             'cellular_coverage_type': str(row.cellular_coverage_type).lower(),
                             'fiber_node_distance': row.fiber_node_distance,
                             'microwave_node_distance': row.microwave_node_distance,
@@ -226,7 +238,8 @@ def giga_meter_handle_published_school_master_data_row(country_ids=None, force_t
                             'connectivity_rt_ingestion_timestamp': row.connectivity_RT_ingestion_timestamp,
                             'connectivity': None if core_utilities.is_blank_string(
                                 row.connectivity_RT) else str(row.connectivity_RT).lower() in true_choices,
-                            'download_speed_benchmark': row.download_speed_benchmark * 1000 * 1000 if row.download_speed_benchmark else None,
+                            'download_speed_benchmark': row.download_speed_benchmark * 1000 * 1000
+                            if row.download_speed_benchmark else None,
                             'computer_availability': None if core_utilities.is_blank_string(
                                 row.computer_availability) else str(row.computer_availability).lower() in true_choices,
                             'num_students_girls': row.num_students_girls,
@@ -367,3 +380,31 @@ def giga_meter_update_static_data(*args, country_iso3_format=None, force_tasks=F
         background_task_utilities.task_on_complete(task_instance)
     else:
         logger.error('Found Job with "{0}" name so skipping current iteration'.format(task_key))
+
+
+@app.task(soft_time_limit=6 * 60 * 60, time_limit=6 * 60 * 60)
+def handle_giga_meter_school_master_data_sync(*args):
+    if settings.GIGA_METER_ENABLE_AUTO_SYNC:
+        timestamp_str = format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H')
+        task_key = 'handle_giga_meter_school_master_data_sync_status_{current_time}'.format(current_time=timestamp_str)
+        task_id = current_task.request.id or str(uuid.uuid4())
+        task_instance = background_task_utilities.task_on_start(
+            task_id, task_key, 'Auto task to handle GigaMeter - School Master data sync', check_previous=True)
+
+        if task_instance:
+            logger.debug('Not found running job for data sync handler: {}'.format(task_key))
+            giga_meter_update_static_data()
+            task_instance.info('GigaMeter - School Master Data pull completed.')
+
+            giga_meter_handle_published_school_master_data_row()
+            task_instance.info('GigaMeter - School Master Data published record handle completed.')
+
+            giga_meter_handle_deleted_school_master_data_row()
+            task_instance.info('GigaMeter - School Master Data deleted record handle completed.')
+
+            background_task_utilities.task_on_complete(task_instance)
+        else:
+            logger.error('Found Job with "{0}" name so skipping current iteration'.format(task_key))
+    else:
+        logger.warning('Giga Meter - School Master data synch disabled from config. '
+                     'To enable it, please update "GIGA_METER_ENABLE_AUTO_SYNC" configuration.')
