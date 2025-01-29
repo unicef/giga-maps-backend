@@ -1,6 +1,6 @@
 [run]
 source = proco
-omit = *migrations*,*tests*,*proco_data_migrations*,*/proco/*/admin.py,*dailycheckapp_contact*,*realtime_dailycheckapp*,*realtime_unicef*
+omit = *migrations*,*tests*,*proco_data_migrations*,*/proco/*/admin.py,*dailycheckapp_contact*,*realtime_dailycheckapp*,*realtime_unicef*,*giga_meter*
 
 [report]
 fail_under = 70
