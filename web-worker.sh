@@ -95,4 +95,4 @@ pipenv run gunicorn config.wsgi:application -b 0.0.0.0:8000 -w 8 --timeout=300
 # pipenv run python manage.py data_loss_recovery_for_pcdc_weekly -start_week_no=46 -end_week_no=46 -year=2024 --pull_data
 # pipenv run python manage.py data_cleanup --data_loss_recovery_for_pcdc_weekly_with_scheduler -start_week_no=46 -end_week_no=46 -year=2024 --pull_data
 
-# pipenv run python manage.py sync_school_master_data_with_giga_meter_db -country_iso3_format=AIA --force
+# pipenv run python manage.py sync_school_master_data_with_giga_meter_db -country_iso3_format=AIA --force --schedule

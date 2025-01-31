@@ -94,7 +94,7 @@ def giga_meter_load_data_from_school_master_apis(country_iso3_format=None):
 
 
 @app.task(soft_time_limit=10 * 55 * 60, time_limit=10 * 55 * 60)
-def giga_meter_handle_published_school_master_data_row(country_ids=None, force_tasks=False):
+def giga_meter_handle_published_school_master_data_row(*args, country_ids=None, force_tasks=False):
     """
     Background task to handle all the published rows of school master data source for Giga Meter Sync
 
@@ -278,7 +278,7 @@ def giga_meter_handle_published_school_master_data_row(country_ids=None, force_t
 
 
 @app.task(soft_time_limit=10 * 55 * 60, time_limit=10 * 55 * 60)
-def giga_meter_handle_deleted_school_master_data_row(country_ids=None, force_tasks=False):
+def giga_meter_handle_deleted_school_master_data_row(*args, country_ids=None, force_tasks=False):
     """
     Background task to handle all the deleted rows of school master data source for Giga Meter DB
 
@@ -350,10 +350,10 @@ def giga_meter_update_static_data(*args, country_iso3_format=None, force_tasks=F
     if force_tasks:
         timestamp_str = format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H%M%S')
 
-    task_key = 'update_static_data_status_{current_time}'.format(current_time=timestamp_str)
+    task_key = 'giga_meter_update_static_data_status_{current_time}'.format(current_time=timestamp_str)
     task_id = current_task.request.id or str(uuid.uuid4())
     task_instance = background_task_utilities.task_on_start(
-        task_id, task_key, 'Sync Static Data from School Master sources', check_previous=True)
+        task_id, task_key, 'Giga Meter - Sync Static Data from School Master sources', check_previous=True)
 
     if task_instance:
         logger.debug('Not found running job for static data pull handler: {}'.format(task_key))
