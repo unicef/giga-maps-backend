@@ -78,6 +78,7 @@ LOCAL_APPS = [
     'proco.background',
     'proco.proco_data_migrations',
     'proco.data_sources',
+    'proco.giga_meter',
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -347,6 +348,7 @@ ADMIN_REORDER = (
     'contact',
     'accounts',
     'data_sources',
+    'giga_meter',
 )
 
 RANDOM_SCHOOLS_DEFAULT_AMOUNT = env('RANDOM_SCHOOLS_DEFAULT_AMOUNT', default=20000)
@@ -439,10 +441,12 @@ DATA_SOURCE_CONFIG = {
 
 INVALIDATE_CACHE_HARD = env('INVALIDATE_CACHE_HARD', default='false')
 
+GIGA_METER_DB_KEY = 'gigameter_database'
 READ_ONLY_DB_KEY = 'read_only_database'
 
 DATABASE_ROUTERS = [
     'proco.utils.db_routers.ReadOnlyDBRouter',
+    'proco.giga_meter.db_router.GigaMeterDBRouter',
     'dynamic_db_router.DynamicDbRouter',
 ]
 
@@ -513,3 +517,5 @@ AI_TRANSLATION_KEY = env('AI_TRANSLATION_KEY', default=None)
 AI_TRANSLATION_REGION = env('AI_TRANSLATION_REGION', default=None)
 AI_TRANSLATION_SUPPORTED_TARGETS = env.list('AI_TRANSLATION_SUPPORTED_TARGETS', default=[])
 AI_TRANSLATION_CACHE_KEY_LIMIT = env('AI_TRANSLATION_CACHE_KEY_LIMIT', default=2000)
+
+GIGA_METER_ENABLE_AUTO_SYNC = env.bool('GIGA_METER_ENABLE_AUTO_SYNC', default=True)
