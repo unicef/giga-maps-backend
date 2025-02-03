@@ -3,6 +3,7 @@ import logging
 import os
 import uuid
 
+from celery import chain
 from celery import current_task
 from django.conf import settings
 from django.db.models import Count
@@ -11,9 +12,9 @@ from requests.exceptions import HTTPError
 
 from proco.background import utils as background_task_utilities
 from proco.core import utils as core_utilities
+from proco.data_sources import utils as data_sources_utilities
 from proco.giga_meter import models as giga_meter_models
 from proco.giga_meter import utils as giga_meter_utilities
-from proco.data_sources import utils as data_sources_utilities
 from proco.taskapp import app
 from proco.utils.dates import format_date
 
@@ -382,7 +383,7 @@ def giga_meter_update_static_data(*args, country_iso3_format=None, force_tasks=F
         logger.error('Found Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
-@app.task(soft_time_limit=6 * 60 * 60, time_limit=6 * 60 * 60)
+@app.task(soft_time_limit=10 * 60 * 60, time_limit=10 * 60 * 60)
 def handle_giga_meter_school_master_data_sync(*args):
     if settings.GIGA_METER_ENABLE_AUTO_SYNC:
         timestamp_str = format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H')
@@ -394,14 +395,11 @@ def handle_giga_meter_school_master_data_sync(*args):
 
         if task_instance:
             logger.debug('Not found running job for data sync handler: {}'.format(task_key))
-            giga_meter_update_static_data()
-            task_instance.info('GigaMeter - School Master Data pull completed.')
-
-            giga_meter_handle_published_school_master_data_row.s()
-            task_instance.info('GigaMeter - School Master Data published record handle scheduled.')
-
-            giga_meter_handle_deleted_school_master_data_row.s()
-            task_instance.info('GigaMeter - School Master Data deleted record handle scheduled.')
+            chain(
+                giga_meter_update_static_data.s(),
+                giga_meter_handle_published_school_master_data_row.s(),
+                giga_meter_handle_deleted_school_master_data_row.s(),
+            ).delay()
 
             background_task_utilities.task_on_complete(task_instance)
         else:
