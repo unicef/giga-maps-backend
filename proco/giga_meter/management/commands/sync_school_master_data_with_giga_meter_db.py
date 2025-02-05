@@ -47,19 +47,21 @@ class Command(BaseCommand):
                 giga_meter_tasks.giga_meter_update_static_data.s(
                     country_iso3_format=iso3_format, force_tasks=force_tasks),
                 giga_meter_tasks.giga_meter_handle_published_school_master_data_row.s(
-                    country_id, force_tasks=force_tasks),
+                    country_ids=country_id, force_tasks=force_tasks),
                 giga_meter_tasks.giga_meter_handle_deleted_school_master_data_row.s(
-                    country_id, force_tasks=force_tasks),
+                    country_ids=country_id, force_tasks=force_tasks),
             ).delay()
 
         else:
             giga_meter_tasks.giga_meter_update_static_data(country_iso3_format=iso3_format, force_tasks=force_tasks)
             logger.info('Data Sync Completed.')
 
-            giga_meter_tasks.giga_meter_handle_published_school_master_data_row(country_id, force_tasks=force_tasks)
+            giga_meter_tasks.giga_meter_handle_published_school_master_data_row(country_ids=country_id,
+                                                                                force_tasks=force_tasks)
             logger.info('Published rows Sync Completed.')
 
-            giga_meter_tasks.giga_meter_handle_deleted_school_master_data_row(country_id, force_tasks=force_tasks)
+            giga_meter_tasks.giga_meter_handle_deleted_school_master_data_row(country_ids=country_id,
+                                                                              force_tasks=force_tasks)
             logger.info('Deleted rows Sync Completed.')
 
         logger.info('Completed School Master Data Sync utility for country: "{}" successfully.\n'.format(country.name))
