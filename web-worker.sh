@@ -95,4 +95,15 @@ pipenv run gunicorn config.wsgi:application -b 0.0.0.0:8000 -w 8 --timeout=300
 # pipenv run python manage.py data_loss_recovery_for_pcdc_weekly -start_week_no=46 -end_week_no=46 -year=2024 --pull_data
 # pipenv run python manage.py data_cleanup --data_loss_recovery_for_pcdc_weekly_with_scheduler -start_week_no=46 -end_week_no=46 -year=2024 --pull_data
 
-# pipenv run python manage.py sync_school_master_data_with_giga_meter_db -country_iso3_format=AIA --force --schedule
+# pipenv run python manage.py sync_school_master_data_with_giga_meter_db  --force --schedule -country_iso3_format=USA
+
+
+
+# To sync the QoS missed data based on dates:
+#   Step 1: Check missing date list:
+#       For all QoS countries: pipenv run python manage.py data_loss_recovery_for_qos_daily --check_missing_dates -start_date='01-01-2025' -end_date='31-01-2025'
+#       For 1 country: pipenv run python manage.py data_loss_recovery_for_qos_daily --check_missing_dates -start_date='01-01-2025' -end_date='31-01-2025' -country_code='MNG'
+#   Step 2: Sync the QoS API data to QoSData table based on version.
+#       pipenv run python manage.py data_loss_recovery_for_qos_daily --pull_data -country_code='MNG' -start_date='02-01-2025' -end_date='03-01-2025'
+#   Step 3: Update the proco tables with new aggregation
+#       pipenv run python manage.py data_loss_recovery_for_qos_daily --aggregate -country_code='MNG' -aggregate_start_version=11 -aggregate_end_version=20
