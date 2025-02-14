@@ -61,7 +61,8 @@ def load_qos_data_source_response_to_model(country, data_pull_date):
     ).exists():
         logger.warning('QoSData table has given date data already in the table. '
                        'To re collect, please clean this date data first then retry again.'
-                       'Country code: {0}, \t\tDate: {1}'.format(table_name, data_pull_date))
+                       'Country code: {0}, \t\tDate: {1}'.format(
+            table_name, date_utilities.format_date(data_pull_date)))
         return
 
     # Create an url to access a shared table.
@@ -147,9 +148,9 @@ def load_qos_data_source_response_to_model(country, data_pull_date):
         logger.error('Exception caught for "{0}": {1}'.format(table_name, str(ex)))
 
 
-def sync_qos_realtime_data(date, country):
+def sync_qos_realtime_data(country, aggr_date):
     qos_measurements = QoSData.objects.filter(
-        timestamp__date=date,
+        timestamp__date=aggr_date,
         country=country,
     ).values(
         'school'
@@ -169,10 +170,12 @@ def sync_qos_realtime_data(date, country):
     ).order_by('school')
 
     if not qos_measurements.exists():
-        logger.info('No records to aggregate on provided date: "{0}". Hence skipping for the given date.'.format(date))
+        logger.info('No records to aggregate on provided date: "{0}". Hence skipping for the given date.'.format(
+            date_utilities.format_date(aggr_date)))
         return
 
-    logger.info('Migrating the records from "QoSData" to "RealTimeConnectivity" with date: {0} '.format(date))
+    logger.info('Migrating the records from "QoSData" to "RealTimeConnectivity" with date: {0} '.format(
+        date_utilities.format_date(aggr_date)))
 
     realtime = []
 
@@ -208,7 +211,7 @@ def sync_qos_realtime_data(date, country):
             connectivity_upload_speed_mean = connectivity_upload_speed_mean * 1000 * 1000
 
         realtime.append(RealTimeConnectivity(
-            created=date,
+            created=aggr_date,
             connectivity_speed=connectivity_speed,
             connectivity_upload_speed=connectivity_upload_speed,
             connectivity_latency=qos_measurement.get('latency_avg'),
@@ -372,51 +375,52 @@ class Command(BaseCommand):
                 logger.info('\nLoading the api data to "data_sources_qosdata" table ***\n')
 
                 for data_pull_date in date_list:
-                    logger.info('Deleting QoS data for date: {0}'.format(data_pull_date))
+                    logger.info('Deleting QoS data for date: {0}'.format(date_utilities.format_date(data_pull_date)))
                     delete_qos_realtime_data(country, data_pull_date)
                     logger.info('Data deleted successfully.\n\n')
 
-                    logger.info('Syncing the QoS api data to QoSData table for date: "{0}"'.format(data_pull_date))
+                    logger.info('Syncing the QoS api data to QoSData table for date: "{0}"'.format(
+                        date_utilities.format_date(data_pull_date)))
                     load_qos_data_source_response_to_model(country, data_pull_date)
-                    logger.info('Data synced successfully for date "{0}".\n\n'.format(data_pull_date))
+                    logger.info('Data synced successfully for date "{0}".\n\n'.format(
+                        date_utilities.format_date(data_pull_date)))
 
                 logger.info('\nData load completed successfully for all dates.\n')
 
 
             aggregate_data = options.get('aggregate_data')
             if aggregate_data:
-                if len(date_list) > 0:
-                    week_no_with_week_date_mapping = {}
+                week_no_with_week_date_mapping = {}
 
-                    for pull_data_date in date_list:
-                        logger.info('\nSyncing the "data_sources_qosdata" data to '
-                                    '"connection_statistics_realtimeconnectivity" for country: "{0}" '
-                                    'and date: "{1}"'.format(country, pull_data_date))
-                        sync_qos_realtime_data(country, pull_data_date)
-                        logger.info('Data synced successfully.\n\n')
+                for aggr_date in date_list:
+                    logger.info('\nSyncing the "data_sources_qosdata" data to '
+                                '"connection_statistics_realtimeconnectivity" for country: "{0}" '
+                                'and date: "{1}"'.format(country, date_utilities.format_date(aggr_date)))
+                    sync_qos_realtime_data(country, aggr_date)
+                    logger.info('Data synced successfully.\n\n')
 
-                        pull_data_date_week_no = date_utilities.get_week_from_date(pull_data_date)
-                        week_no_with_week_date_mapping[pull_data_date_week_no] = pull_data_date
+                    aggr_date_week_no = date_utilities.get_week_from_date(aggr_date)
+                    week_no_with_week_date_mapping[aggr_date_week_no] = aggr_date
 
-                    logger.info('Starting finalizing the records to actual tables.')
-                    for aggregate_data_date in date_list:
-                        aggregate_real_time_data_to_school_daily_status(country, aggregate_data_date)
-                        aggregate_school_daily_to_country_daily(country, aggregate_data_date)
+                logger.info('Starting finalizing the records to Daily, Weekly tables.')
+                for aggregate_daily_date in date_list:
+                    aggregate_real_time_data_to_school_daily_status(country, aggregate_daily_date)
+                    aggregate_school_daily_to_country_daily(country, aggregate_daily_date)
 
-                    for week_no, any_week_date in week_no_with_week_date_mapping.items():
-                        year = date_utilities.get_year_from_date(any_week_date)
-                        logger.info('Weekly record details. \tWeek No: {0}\tYear: {1}'.format(week_no, year))
+                for week_no, any_week_date in week_no_with_week_date_mapping.items():
+                    year = date_utilities.get_year_from_date(any_week_date)
+                    logger.info('Weekly record details. \tWeek No: {0}\tYear: {1}'.format(week_no, year))
 
-                        weekly_data_available = aggregate_school_daily_status_to_school_weekly_status(
-                            country, any_week_date)
-                        if weekly_data_available:
-                            update_country_weekly_status(country, any_week_date)
-                        logger.info('Finalized records successfully to actual proco tables.\n\n')
+                    weekly_data_available = aggregate_school_daily_status_to_school_weekly_status(
+                        country, any_week_date)
+                    if weekly_data_available:
+                        update_country_weekly_status(country, any_week_date)
+                    logger.info('Finalized records successfully to actual DB tables.\n\n')
 
-                    cmd_args = ['--reset', f'-country_id={country.id}']
-                    call_command('populate_school_registration_data', *cmd_args)
+                cmd_args = ['--reset', f'-country_id={country.id}']
+                call_command('populate_school_registration_data', *cmd_args)
 
-                    country.invalidate_country_related_cache()
+                country.invalidate_country_related_cache()
 
         try:
             os.remove(profile_file)
