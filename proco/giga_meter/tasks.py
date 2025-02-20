@@ -12,6 +12,7 @@ from requests.exceptions import HTTPError
 
 from proco.background import utils as background_task_utilities
 from proco.core import utils as core_utilities
+from proco.core.config import app_config as core_configs
 from proco.data_sources import utils as data_sources_utilities
 from proco.giga_meter import models as giga_meter_models
 from proco.giga_meter import utils as giga_meter_utilities
@@ -109,8 +110,6 @@ def giga_meter_handle_published_school_master_data_row(*args, country_ids=None, 
         'rural': 'rural',
     }
 
-    true_choices = ['true', 'yes', '1']
-
     timestamp_str = format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H')
     if force_tasks:
         timestamp_str = format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H%M%S')
@@ -196,23 +195,23 @@ def giga_meter_handle_published_school_master_data_row(*args, country_ids=None, 
                             'num_latrines' : row.num_latrines,
                             'water_availability' : None
                             if core_utilities.is_blank_string(row.water_availability)
-                            else str(row.water_availability).lower() in true_choices,
+                            else str(row.water_availability).lower() in core_configs.true_choices,
                             'electricity_availability' : None
                             if core_utilities.is_blank_string(row.electricity_availability)
-                            else str(row.electricity_availability).lower() in true_choices,
+                            else str(row.electricity_availability).lower() in core_configs.true_choices,
                             'computer_lab' : None
                             if core_utilities.is_blank_string(row.computer_lab)
-                            else str(row.computer_lab).lower() in true_choices,
+                            else str(row.computer_lab).lower() in core_configs.true_choices,
                             'num_computers' : row.num_computers,
                             'connectivity_govt': None
                             if core_utilities.is_blank_string(row.connectivity_govt)
-                            else str(row.connectivity_govt).lower() in true_choices,
+                            else str(row.connectivity_govt).lower() in core_configs.true_choices,
                             'connectivity_type_govt': row.connectivity_type_govt,
                             'connectivity_type':  row.connectivity_type,
                             'connectivity_type_root': row.connectivity_type_root,
                             'cellular_coverage_availability': None
                             if core_utilities.is_blank_string(row.cellular_coverage_availability)
-                            else str(row.cellular_coverage_availability).lower() in true_choices,
+                            else str(row.cellular_coverage_availability).lower() in core_configs.true_choices,
                             'cellular_coverage_type': str(row.cellular_coverage_type).lower(),
                             'fiber_node_distance': row.fiber_node_distance,
                             'microwave_node_distance': row.microwave_node_distance,
@@ -232,29 +231,32 @@ def giga_meter_handle_published_school_master_data_row(*args, country_ids=None, 
                             'school_location_ingestion_timestamp': row.school_location_ingestion_timestamp,
                             'connectivity_govt_ingestion_timestamp': row.connectivity_govt_ingestion_timestamp,
                             'connectivity_govt_collection_year': row.connectivity_govt_collection_year,
-                            'disputed_region': str(row.disputed_region).lower() in true_choices,
+                            'disputed_region': str(row.disputed_region).lower() in core_configs.true_choices,
                             'connectivity_rt': None if core_utilities.is_blank_string(
-                                row.connectivity_RT) else str(row.connectivity_RT).lower() in true_choices,
+                                row.connectivity_RT) else str(row.connectivity_RT).lower() in core_configs.true_choices,
                             'connectivity_rt_datasource': row.connectivity_RT_datasource,
                             'connectivity_rt_ingestion_timestamp': row.connectivity_RT_ingestion_timestamp,
                             'connectivity': None if core_utilities.is_blank_string(
-                                row.connectivity_RT) else str(row.connectivity_RT).lower() in true_choices,
+                                row.connectivity_RT) else str(row.connectivity_RT).lower() in core_configs.true_choices,
                             'download_speed_benchmark': row.download_speed_benchmark * 1000 * 1000
                             if row.download_speed_benchmark else None,
-                            'computer_availability': None if core_utilities.is_blank_string(
-                                row.computer_availability) else str(row.computer_availability).lower() in true_choices,
+                            'computer_availability': None
+                            if core_utilities.is_blank_string(row.computer_availability)
+                            else str(row.computer_availability).lower() in core_configs.true_choices,
                             'num_students_girls': row.num_students_girls,
                             'num_students_boys': row.num_students_boys,
                             'num_students_other': row.num_students_other,
                             'num_teachers_female': row.num_teachers_female,
                             'num_teachers_male': row.num_teachers_male,
-                            'teachers_trained': None if core_utilities.is_blank_string(
-                                row.teachers_trained) else str(row.teachers_trained).lower() in true_choices,
-                            'sustainable_business_model': None if core_utilities.is_blank_string(
-                                row.sustainable_business_model) else str(
-                                row.sustainable_business_model).lower() in true_choices,
-                            'device_availability': None if core_utilities.is_blank_string(
-                                row.device_availability) else str(row.device_availability).lower() in true_choices,
+                            'teachers_trained': None
+                            if core_utilities.is_blank_string(row.teachers_trained)
+                            else str(row.teachers_trained).lower() in core_configs.true_choices,
+                            'sustainable_business_model': None
+                            if core_utilities.is_blank_string(row.sustainable_business_model)
+                            else str(row.sustainable_business_model).lower() in core_configs.true_choices,
+                            'device_availability': None
+                            if core_utilities.is_blank_string(row.device_availability)
+                            else str(row.device_availability).lower() in core_configs.true_choices,
                             'num_tablets': row.num_tablets,
                             'num_robotic_equipment': row.num_robotic_equipment,
                             'building_id_govt': row.building_id_govt,

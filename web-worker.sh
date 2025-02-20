@@ -21,7 +21,7 @@ pipenv run gunicorn config.wsgi:application -b 0.0.0.0:8000 -w 8 --timeout=300
 # pipenv run python manage.py index_rebuild_schools --delete_index --create_index --clean_index --update_index
 # pipenv run python manage.py populate_school_new_fields -start_school_id=1 -end_school_id=1000000
 # pipenv run python manage.py populate_school_new_fields -country_id=5
-# pipenv run python manage.py populate_school_registration_data
+# pipenv run python manage.py populate_school_registration_data -country_id=222
 # pipenv run python manage.py load_iso3_format_code_for_countries --country-file /code/proco/core/resources/locations_country_processed.csv
 # pipenv run python manage.py update_system_role_permissions
 # pipenv run python manage.py load_system_data_layers --delete_data_sources --update_data_sources --update_data_layers

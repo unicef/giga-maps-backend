@@ -2,7 +2,9 @@ from django.db import transaction
 from rest_flex_fields.serializers import FlexFieldsModelSerializer
 from rest_framework import serializers
 
+from proco.connection_statistics.models import SchoolRealTimeRegistration
 from proco.core import utils as core_utilities
+from proco.core.config import app_config as core_configs
 from proco.custom_auth import models as auth_models
 from proco.custom_auth.serializers import ExpandUserSerializer
 from proco.data_sources import exceptions as source_exceptions
@@ -178,6 +180,27 @@ class ListSchoolMasterDataSerializer(FlexFieldsModelSerializer):
                 updated_values['education_level'] = {
                     'old': row.school.education_level,
                     'new': row.education_level
+                }
+
+            school_rt_instance = SchoolRealTimeRegistration.objects.filter(
+                school=row.school,
+            ).order_by('-created').first()
+            old_connectivity_rt = school_rt_instance.rt_registered if school_rt_instance else None
+
+            new_connectivity_rt = None
+            if not core_utilities.is_blank_string(row.connectivity_RT):
+                new_connectivity_rt = str(row.connectivity_RT).lower() in core_configs.true_choices
+
+            if old_connectivity_rt != new_connectivity_rt:
+                old_rt_value = None
+                if str(old_connectivity_rt) == 'true':
+                    old_rt_value = 'Yes'
+                elif str(old_connectivity_rt) == 'false':
+                    old_rt_value = 'No'
+
+                updated_values['connectivity_RT'] = {
+                    'old': old_rt_value,
+                    'new': row.connectivity_RT
                 }
 
         return updated_values
