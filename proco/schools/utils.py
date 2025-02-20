@@ -1,12 +1,13 @@
+import logging
 import os
 import uuid
-import logging
 from datetime import timedelta
 
 from django.db import transaction
 from django.db.models import Q
 
 from proco.core import utils as core_utilities
+from proco.core.config import app_config as core_configs
 from proco.schools.constants import statuses_schema
 
 logger = logging.getLogger('gigamaps.' + __name__)
@@ -64,20 +65,19 @@ def get_connectivity_status_by_master_api(school_instance):
 
     if school_row:
         status = 'unknown'
-        true_choices = ['true', 'yes', '1']
         if core_utilities.is_blank_string(school_row.connectivity_govt):
             connectivity_govt = None
-        elif str(school_row.connectivity_govt).lower() in true_choices:
+        elif str(school_row.connectivity_govt).lower() in core_configs.true_choices:
             connectivity_govt = 'yes'
         else:
             connectivity_govt = 'no'
         connectivity_rt = None
         if not core_utilities.is_blank_string(school_row.connectivity_RT):
-            connectivity_rt = 'yes' if str(school_row.connectivity_RT).lower() in true_choices else 'no'
+            connectivity_rt = 'yes' if str(school_row.connectivity_RT).lower() in core_configs.true_choices else 'no'
 
         connectivity = None
         if not core_utilities.is_blank_string(school_row.connectivity):
-            connectivity = 'yes' if str(school_row.connectivity).lower() in true_choices else 'no'
+            connectivity = 'yes' if str(school_row.connectivity).lower() in core_configs.true_choices else 'no'
 
         if connectivity_govt == 'yes' or connectivity_rt == 'yes' or connectivity == 'yes':
             status = 'good'

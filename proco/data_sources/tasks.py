@@ -22,6 +22,7 @@ from proco.connection_statistics.utils import (
     update_country_weekly_status,
 )
 from proco.core import utils as core_utilities
+from proco.core.config import app_config as core_configs
 from proco.custom_auth import models as auth_models
 from proco.custom_auth.utils import get_user_emails_for_permissions
 from proco.data_sources import models as sources_models
@@ -190,7 +191,6 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
     }
 
     coverage_type_choices = dict(statistics_models.SchoolWeeklyStatus.COVERAGE_TYPES).keys()
-    true_choices = ['true', 'yes', '1']
 
     if country_ids and len(country_ids) > 0:
         task_key = 'handle_published_school_master_data_row_status_{current_time}_country_ids_{ids}'.format(
@@ -310,18 +310,21 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                     school_weekly.num_teachers = row.num_teachers
                     school_weekly.num_classroom = row.num_classrooms
                     school_weekly.num_latrines = row.num_latrines
-                    school_weekly.running_water = False if core_utilities.is_blank_string(
-                        row.water_availability) else str(row.water_availability).lower() in true_choices
-                    school_weekly.electricity_availability = False if core_utilities.is_blank_string(
-                        row.electricity_availability) else str(row.electricity_availability).lower() in true_choices
-                    school_weekly.computer_lab = False if core_utilities.is_blank_string(
-                        row.computer_lab) else str(row.computer_lab).lower() in true_choices
+                    school_weekly.running_water = False \
+                        if core_utilities.is_blank_string(row.water_availability) \
+                        else str(row.water_availability).lower() in core_configs.true_choices
+                    school_weekly.electricity_availability = False \
+                        if core_utilities.is_blank_string(row.electricity_availability) \
+                        else str(row.electricity_availability).lower() in core_configs.true_choices
+                    school_weekly.computer_lab = False \
+                        if core_utilities.is_blank_string(row.computer_lab) \
+                        else str(row.computer_lab).lower() in core_configs.true_choices
                     school_weekly.num_computers = row.num_computers
 
                     if core_utilities.is_blank_string(row.connectivity_govt):
                         school_weekly.connectivity = None
                     else:
-                        school_weekly.connectivity = str(row.connectivity_govt).lower() in true_choices
+                        school_weekly.connectivity = str(row.connectivity_govt).lower() in core_configs.true_choices
 
                     school_weekly.connectivity_type = row.connectivity_type_govt or 'unknown'
 
@@ -329,7 +332,7 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                         school_weekly.coverage_availability = None
                     else:
                         school_weekly.coverage_availability = str(
-                            row.cellular_coverage_availability).lower() in true_choices
+                            row.cellular_coverage_availability).lower() in core_configs.true_choices
 
                     coverage_type = statistics_models.SchoolWeeklyStatus.COVERAGE_UNKNOWN
                     if not core_utilities.is_blank_string(row.cellular_coverage_type):
@@ -369,7 +372,7 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                     school_weekly.connectivity_govt_ingestion_timestamp = row.connectivity_govt_ingestion_timestamp
                     school_weekly.connectivity_govt_collection_year = row.connectivity_govt_collection_year
                     school_weekly.disputed_region = False if core_utilities.is_blank_string(
-                        row.disputed_region) else str(row.disputed_region).lower() in true_choices
+                        row.disputed_region) else str(row.disputed_region).lower() in core_configs.true_choices
 
                     download_speed_benchmark = row.download_speed_benchmark
                     if download_speed_benchmark:
@@ -384,14 +387,18 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                     school_weekly.num_tablets = row.num_tablets
                     school_weekly.num_robotic_equipment = row.num_robotic_equipment
 
-                    school_weekly.computer_availability = None if core_utilities.is_blank_string(
-                        row.computer_availability) else str(row.computer_availability).lower() in true_choices
-                    school_weekly.teachers_trained = None if core_utilities.is_blank_string(
-                        row.teachers_trained) else str(row.teachers_trained).lower() in true_choices
-                    school_weekly.sustainable_business_model = None if core_utilities.is_blank_string(
-                        row.sustainable_business_model) else str(row.sustainable_business_model).lower() in true_choices
-                    school_weekly.device_availability = None if core_utilities.is_blank_string(
-                        row.device_availability) else str(row.device_availability).lower() in true_choices
+                    school_weekly.computer_availability = None \
+                        if core_utilities.is_blank_string(row.computer_availability) \
+                        else str(row.computer_availability).lower() in core_configs.true_choices
+                    school_weekly.teachers_trained = None \
+                        if core_utilities.is_blank_string(row.teachers_trained) \
+                        else str(row.teachers_trained).lower() in core_configs.true_choices
+                    school_weekly.sustainable_business_model = None \
+                        if core_utilities.is_blank_string(row.sustainable_business_model) \
+                        else str(row.sustainable_business_model).lower() in core_configs.true_choices
+                    school_weekly.device_availability = None \
+                        if core_utilities.is_blank_string(row.device_availability) \
+                        else str(row.device_availability).lower() in core_configs.true_choices
 
                     school_weekly.building_id_govt = row.building_id_govt
                     school_weekly.num_schools_per_building = row.num_schools_per_building
@@ -400,7 +407,7 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
 
                     rt_registered = None
                     if not core_utilities.is_blank_string(row.connectivity_RT):
-                        rt_registered = str(row.connectivity_RT).lower() in true_choices
+                        rt_registered = str(row.connectivity_RT).lower() in core_configs.true_choices
 
                     if rt_registered is not None and row.connectivity_RT_ingestion_timestamp is not None:
                         school_rt_qs = statistics_models.SchoolRealTimeRegistration.objects.filter(school=school)

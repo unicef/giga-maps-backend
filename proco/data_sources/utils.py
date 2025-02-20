@@ -17,8 +17,9 @@ from rest_framework import status
 
 from proco.accounts.models import APIKey
 from proco.connection_statistics.config import app_config as statistics_configs
-from proco.connection_statistics.models import RealTimeConnectivity
+from proco.connection_statistics.models import RealTimeConnectivity, SchoolRealTimeRegistration
 from proco.core import utils as core_utilities
+from proco.core.config import app_config as core_configs
 from proco.custom_auth.models import ApplicationUser
 from proco.data_sources import models as sources_models
 from proco.locations.models import Country
@@ -154,6 +155,16 @@ def has_changes_for_review(row, school):
             if core_utilities.is_blank_string(row['education_level']) else str(row['education_level']).lower()
 
         if old_education_level != new_education_level:
+            return True
+
+        school_rt_instance = SchoolRealTimeRegistration.objects.filter(school=school).order_by('-created').first()
+        old_connectivity_rt = school_rt_instance.rt_registered if school_rt_instance else None
+
+        new_connectivity_rt = None
+        if not core_utilities.is_blank_string(row['connectivity_RT']):
+            new_connectivity_rt = str(row['connectivity_RT']).lower() in core_configs.true_choices
+
+        if old_connectivity_rt != new_connectivity_rt:
             return True
         return False
     return True
