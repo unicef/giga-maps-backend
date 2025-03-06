@@ -682,7 +682,7 @@ class DownloadSchoolsViewSet(BaseModelViewSet, core_mixins.DownloadAPIDataToCSVM
         # NullsAlwaysLastOrderingFilter,
     )
 
-    ordering_field_names = ['name']
+    ordering_field_names = ['name_lower']
     apply_query_pagination = True
 
     filterset_fields = {
@@ -720,7 +720,7 @@ class AdminViewSchoolAPIViewSet(BaseModelViewSet):
         SearchFilter, DjangoFilterBackend,
     )
 
-    ordering_field_names = ['country', 'name']
+    ordering_field_names = ['country', 'name_lower']
     apply_query_pagination = True
     search_fields = ('=school_type', '=environment', 'name', 'country__name', '=giga_id_school', '=external_id')
 

@@ -933,3 +933,45 @@ def clean_historic_data():
         background_task_utilities.task_on_complete(task_instance)
     else:
         logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+
+
+@app.task(soft_time_limit=2 * 60 * 60, time_limit=2 * 60 * 60)
+def scheduler_for_data_loss_recovery_for_qos_dates(
+    country_iso3_format,
+    start_date,
+    end_date,
+    check_missing_dates,
+    pull_data,
+    aggregate_data
+):
+    current_datetime = core_utilities.get_current_datetime_object()
+    task_key = 'scheduler_for_data_loss_recovery_for_qos_dates_{current_time}'.format(
+        current_time=format_date(current_datetime, frmt='%d%m%Y_%H%M%S'),
+    )
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(task_id, task_key, 'Data loss recovery for QoS dates')
+
+    if task_instance:
+        logger.debug('Not found running job for qos data loss utility handler: {}'.format(task_key))
+        cmd_args = []
+        if country_iso3_format:
+            cmd_args.append('-country_code={}'.format(country_iso3_format))
+
+        if start_date:
+            cmd_args.append('-start_date={}'.format(start_date))
+        if end_date:
+            cmd_args.append('-end_date={}'.format(end_date))
+
+        if check_missing_dates is True:
+            cmd_args.append('--check_missing_dates')
+        if pull_data is True:
+            cmd_args.append('--pull_data')
+        if aggregate_data is True:
+            cmd_args.append('--aggregate')
+
+        call_command('data_loss_recovery_for_qos_dates', *cmd_args)
+        task_instance.info('Completed QoS data loss recovery utility handler.')
+
+        background_task_utilities.task_on_complete(task_instance)
+    else:
+        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))

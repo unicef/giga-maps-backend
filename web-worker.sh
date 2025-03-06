@@ -21,7 +21,7 @@ pipenv run gunicorn config.wsgi:application -b 0.0.0.0:8000 -w 8 --timeout=300
 # pipenv run python manage.py index_rebuild_schools --delete_index --create_index --clean_index --update_index
 # pipenv run python manage.py populate_school_new_fields -start_school_id=1 -end_school_id=1000000
 # pipenv run python manage.py populate_school_new_fields -country_id=5
-# pipenv run python manage.py populate_school_registration_data -country_id=222
+# pipenv run python manage.py populate_school_registration_data --reset -country_id=144
 # pipenv run python manage.py load_iso3_format_code_for_countries --country-file /code/proco/core/resources/locations_country_processed.csv
 # pipenv run python manage.py update_system_role_permissions
 # pipenv run python manage.py load_system_data_layers --delete_data_sources --update_data_sources --update_data_layers
@@ -111,3 +111,5 @@ pipenv run gunicorn config.wsgi:application -b 0.0.0.0:8000 -w 8 --timeout=300
 #       For all QoS countries: pipenv run python manage.py data_loss_recovery_for_qos_dates --pull_data --aggregate -start_date='01-01-2025' -end_date='07-01-2025'
 #       For 1 country:  pipenv run python manage.py data_loss_recovery_for_qos_dates --pull_data --aggregate -start_date='01-01-2025' -end_date='07-01-2025' -country_code='MNG'
 #
+# To sync the QoS missed data based on dates via scheduler:
+# pipenv run python manage.py data_loss_recovery_for_qos_dates --pull_data --aggregate -start_date='01-03-2025' -end_date='02-03-2025' -country_code='MNG' --schedule

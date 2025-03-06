@@ -19,6 +19,7 @@ from proco.connection_statistics.utils import (
 )
 from proco.core.utils import get_current_datetime_object, bulk_create_or_update
 from proco.data_sources import utils as sources_utilities
+from proco.data_sources import tasks as sources_tasks
 from proco.data_sources.models import QoSData
 from proco.locations.models import Country
 from proco.schools.models import School
@@ -315,8 +316,26 @@ class Command(BaseCommand):
             help='If provided, aggregation on QoS data will be performed and all the related tables will be updated.'
         )
 
+        parser.add_argument(
+            '--schedule', action='store_true', dest='schedule_tasks', default=False,
+            help='If provided, it will schedule the task on Celery.'
+        )
+
     def handle(self, **options):
         logger.info('Executing data loss recovery for QoS for given dates" ....\n')
+        schedule_tasks = options.get('schedule_tasks')
+
+        if schedule_tasks:
+            sources_tasks.scheduler_for_data_loss_recovery_for_qos_dates.delay(
+                options.get('country_iso3_format'),
+                options.get('start_date'),
+                options.get('end_date'),
+                options.get('check_missing_dates'),
+                options.get('pull_data'),
+                options.get('aggregate_data')
+            )
+            logger.info('Completed scheduling the data loss recovery for qos successfully.\n')
+            exit(0)
 
         country_iso3_format = options.get('country_iso3_format')
         countries = []
