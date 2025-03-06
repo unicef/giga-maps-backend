@@ -1076,11 +1076,11 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     "schools_school"."id" = t."school_id"
                     AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
                     AND t."live_data_source" IN ({live_source_types})
+                    AND t."deleted" IS NULL
                 )
             WHERE (
                 "schools_school"."deleted" IS NULL
                 AND "connection_statistics_schoolrealtimeregistration"."deleted" IS NULL
-                AND t."deleted" IS NULL
                 {country_condition}
                 {admin1_condition}
                 {school_condition}
@@ -1205,8 +1205,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             {case_conditions}
         FROM "schools_school" schools_school
         INNER JOIN public.locations_country c ON c."id" = schools_school."country_id"
-            AND c."deleted" IS NULL
-            AND schools_school."deleted" IS NULL
         INNER JOIN "connection_statistics_schoolweeklystatus" sws ON schools_school."last_weekly_status_id" = sws."id"
         LEFT JOIN public.locations_countryadminmetadata AS adm1_metadata
             ON adm1_metadata."id" = schools_school.admin1_id
@@ -1228,15 +1226,16 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     "schools_school"."id" = t."school_id"
                     AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
                     AND t."live_data_source" IN ({live_source_types})
+                    AND t."deleted" IS NULL
                 )
-            WHERE (
-                "schools_school"."id" IN ({ids})
-                AND "schools_school"."deleted" IS NULL
-                AND t."deleted" IS NULL)
+            WHERE ("schools_school"."id" IN ({ids})
+                AND "schools_school"."deleted" IS NULL)
             GROUP BY "schools_school"."id"
             ORDER BY "schools_school"."id" ASC
         ) AS sds ON sds.school_id = schools_school.id
         WHERE "schools_school"."id" IN ({ids})
+            AND c."deleted" IS NULL
+            AND schools_school."deleted" IS NULL
         GROUP BY schools_school."id", srr."rt_registered", srr."rt_registration_date",
             adm1_metadata."name", adm1_metadata."description_ui_label",
             adm2_metadata."name", adm2_metadata."description_ui_label",
@@ -1606,7 +1605,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             END as connectivity_status
         FROM "schools_school"
         INNER JOIN locations_country c ON c.id = schools_school.country_id
-            AND c."deleted" IS NULL
         INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
         LEFT JOIN locations_countryadminmetadata AS adm1_metadata
             ON adm1_metadata."id" = schools_school.admin1_id
@@ -1617,6 +1615,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             AND adm2_metadata."layer_name" = 'adm2'
             AND adm2_metadata."deleted" IS NULL
         WHERE "schools_school"."id" IN ({ids})
+            AND c."deleted" IS NULL
         """
 
         kwargs = copy.deepcopy(self.kwargs)
@@ -1970,7 +1969,6 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     WHERE (
                         "schools_school"."deleted" IS NULL
                         AND rt_status."deleted" IS NULL
-                        AND t."deleted" IS NULL
                         {country_condition}
                         {admin1_condition}
                         {school_condition}
