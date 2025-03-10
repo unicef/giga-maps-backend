@@ -33,9 +33,9 @@ class SchoolsApiTestCase(TestAPIViewSetMixin, TestCase):
 
         cls.admin1_one = Admin1Factory(country=cls.country)
 
-        cls.school_one = SchoolFactory(country=cls.country, location__country=cls.country, admin1=cls.admin1_one)
-        cls.school_two = SchoolFactory(country=cls.country, location__country=cls.country, admin1=cls.admin1_one)
-        cls.school_three = SchoolFactory(country=cls.country, location__country=cls.country, admin1=cls.admin1_one)
+        cls.school_one = SchoolFactory(country=cls.country, admin1=cls.admin1_one)
+        cls.school_two = SchoolFactory(country=cls.country, admin1=cls.admin1_one)
+        cls.school_three = SchoolFactory(country=cls.country, admin1=cls.admin1_one)
 
         cls.school_weekly_one = SchoolWeeklyStatusFactory(
             school=cls.school_one,

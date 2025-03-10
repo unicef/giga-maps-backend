@@ -36,8 +36,8 @@ class CountryApiTestCase(TestAPIViewSetMixin, TestCase):
 
         cls.admin1_one = Admin1Factory(country=cls.country_one)
 
-        SchoolFactory(country=cls.country_one, location__country=cls.country_one, admin1=cls.admin1_one)
-        SchoolFactory(country=cls.country_one, location__country=cls.country_one, admin1=cls.admin1_one)
+        SchoolFactory(country=cls.country_one, admin1=cls.admin1_one)
+        SchoolFactory(country=cls.country_one, admin1=cls.admin1_one)
 
         CountryWeeklyStatusFactory(country=cls.country_one)
 
@@ -121,8 +121,8 @@ class CountryBoundaryApiTestCase(TestAPIViewSetMixin, TestCase):
 
         cls.admin1_one = Admin1Factory(country=cls.country_one)
 
-        SchoolFactory(country=cls.country_one, location__country=cls.country_one, admin1=cls.admin1_one)
-        SchoolFactory(country=cls.country_one, location__country=cls.country_one, admin1=cls.admin1_one)
+        SchoolFactory(country=cls.country_one, admin1=cls.admin1_one)
+        SchoolFactory(country=cls.country_one, admin1=cls.admin1_one)
 
     def setUp(self):
         cache.clear()
@@ -160,12 +160,12 @@ class CountryDataViewSetTestCase(TestAPIViewSetMixin, TestCase):
 
         cls.admin1_one = Admin1Factory(country=cls.country_one)
 
-        cls.school_one = SchoolFactory(country=cls.country_one, location__country=cls.country_one,
+        cls.school_one = SchoolFactory(country=cls.country_one,
                                        admin1=cls.admin1_one)
-        cls.school_two = SchoolFactory(country=cls.country_one, location__country=cls.country_one,
+        cls.school_two = SchoolFactory(country=cls.country_one,
                                        admin1=cls.admin1_one)
 
-        cls.school_three = SchoolFactory(country=cls.country_two, location__country=cls.country_two, admin1=None)
+        cls.school_three = SchoolFactory(country=cls.country_two, admin1=None)
 
         cls.user = test_utilities.setup_admin_user_by_role()
 

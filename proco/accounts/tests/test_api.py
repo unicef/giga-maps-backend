@@ -642,11 +642,13 @@ class TimePlayerApiTestCase(TestAPIViewSetMixin, TestCase):
             data={
                 'icon': '<icon>',
                 'name': 'Test data layer 3',
+                'code': 'TEST_DATA_LAYER_{0}'.format(pcdc_data_source.id),
                 'description': 'Test data layer 3 description',
                 'version': '1.0.0',
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                 'data_sources_list': [pcdc_data_source.id, ],
                 'data_source_column': pcdc_data_source.column_config[0],
+                'data_source_column_function': {},
                 'global_benchmark': {
                     'value': '20000000',
                     'unit': 'bps',
@@ -988,11 +990,13 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
             data={
                 'icon': '<icon>',
                 'name': 'Test data layer',
+                'code': 'TEST_DATA_LAYER_{0}'.format(pcdc_data_source.id),
                 'description': 'Test data layer description',
                 'version': '1.0.0',
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                 'data_sources_list': [pcdc_data_source.id, ],
                 'data_source_column': pcdc_data_source.column_config[0],
+                'data_source_column_function': {},
                 'global_benchmark': {
                     'value': '20000000',
                     'unit': 'bps',
@@ -1020,6 +1024,8 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
             }
         )
 
+        print(response.__dict__)
+
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
     def test_publish_in_draft_data_layer_by_admin(self):
@@ -1037,11 +1043,13 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
             data={
                 'icon': '<icon>',
                 'name': 'Test data layer 2',
+                'code': 'TEST_DATA_LAYER_{0}'.format(pcdc_data_source.id),
                 'description': 'Test data layer 2 description',
                 'version': '1.0.0',
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                 'data_sources_list': [pcdc_data_source.id, ],
                 'data_source_column': pcdc_data_source.column_config[0],
+                'data_source_column_function': {},
                 'global_benchmark': {
                     'value': '20000000',
                     'unit': 'bps',
@@ -1104,11 +1112,13 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
             data={
                 'icon': '<icon>',
                 'name': 'Test data layer 2',
+                'code': 'TEST_DATA_LAYER_{0}'.format(pcdc_data_source.id),
                 'description': 'Test data layer 2 description',
                 'version': '1.0.0',
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                 'data_sources_list': [pcdc_data_source.id, ],
                 'data_source_column': pcdc_data_source.column_config[0],
+                'data_source_column_function': {},
                 'global_benchmark': {
                     'value': '20000000',
                     'unit': 'bps',
@@ -1168,11 +1178,13 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
             data={
                 'icon': '<icon>',
                 'name': 'Test data layer 3',
+                'code': 'TEST_DATA_LAYER_{0}'.format(pcdc_data_source.id),
                 'description': 'Test data layer 3 description',
                 'version': '1.0.0',
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                 'data_sources_list': [pcdc_data_source.id, ],
                 'data_source_column': pcdc_data_source.column_config[0],
+                'data_source_column_function': {},
                 'global_benchmark': {
                     'value': '20000000',
                     'unit': 'bps',
@@ -1249,11 +1261,13 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
             data={
                 'icon': '<icon>',
                 'name': 'Test data layer',
+                'code': 'TEST_DATA_LAYER_{0}'.format(pcdc_data_source.id),
                 'description': 'Test data layer description',
                 'version': '1.0.0',
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                 'data_sources_list': [pcdc_data_source.id, ],
                 'data_source_column': pcdc_data_source.column_config[0],
+                'data_source_column_function': {},
                 'global_benchmark': {
                     'value': '20000000',
                     'unit': 'bps',
@@ -1313,11 +1327,13 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
             data={
                 'icon': '<icon>',
                 'name': 'Test data layer',
+                'code': 'TEST_DATA_LAYER_{0}'.format(qos_data_source.id),
                 'description': 'Test data layer description',
                 'version': '1.0.0',
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                 'data_sources_list': [qos_data_source.id, ],
                 'data_source_column': qos_data_source.column_config[0],
+                'data_source_column_function': {},
                 'global_benchmark': {
                     'value': '20000000',
                     'unit': 'bps',

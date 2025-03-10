@@ -176,7 +176,7 @@ class DailyCheckAppMeasurementData(models.Model):
     giga_id_school = models.TextField(blank=True, null=True)
     download = models.FloatField(blank=True, null=True)
     upload = models.FloatField(blank=True, null=True)
-    latency = models.IntegerField(blank=True, null=True)
+    latency = models.BigIntegerField(blank=True, null=True)
     country_code = models.TextField(blank=True, null=True, db_index=True)
     ip_address = models.TextField(blank=True, null=True)
     app_version = models.TextField(blank=True, null=True)

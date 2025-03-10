@@ -42,6 +42,7 @@ def static_coverage_layer_data():
         },
         "data_sources_list": [master_data_source.id, ],
         "data_source_column": master_data_source.column_config[0],
+        "data_source_column_function": {},
     }
 
 
@@ -84,6 +85,7 @@ def live_download_layer_data_pcdc():
         "is_reverse": False,
         "data_sources_list": [pcdc_data_source.id,],
         "data_source_column": pcdc_data_source.column_config[0],
+        "data_source_column_function": {},
         "benchmark_metadata": {
             "benchmark_value": "20000000",
             "benchmark_unit": "bps",

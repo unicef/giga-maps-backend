@@ -53,8 +53,8 @@ class GlobalStatisticsApiTestCase(TestAPIViewSetMixin, TestCase):
     def setUpTestData(cls):
         cls.country_one = CountryFactory()
 
-        cls.school_one = SchoolFactory(country=cls.country_one, location__country=cls.country_one, geopoint=None)
-        cls.school_two = SchoolFactory(country=cls.country_one, location__country=cls.country_one)
+        cls.school_one = SchoolFactory(country=cls.country_one, geopoint=None)
+        cls.school_two = SchoolFactory(country=cls.country_one)
 
         SchoolWeeklyStatusFactory(school=cls.school_one, connectivity=True)
         SchoolWeeklyStatusFactory(school=cls.school_two, connectivity=False)
@@ -161,9 +161,9 @@ class SchoolCoverageStatApiTestCase(TestAPIViewSetMixin, TestCase):
     def setUpTestData(cls):
         cls.country = CountryFactory()
 
-        cls.school_one = SchoolFactory(country=cls.country, location__country=cls.country)
-        cls.school_two = SchoolFactory(country=cls.country, location__country=cls.country)
-        cls.school_three = SchoolFactory(country=cls.country, location__country=cls.country)
+        cls.school_one = SchoolFactory(country=cls.country)
+        cls.school_two = SchoolFactory(country=cls.country)
+        cls.school_three = SchoolFactory(country=cls.country)
 
         cls.school_weekly_one = SchoolWeeklyStatusFactory(
             school=cls.school_one,
@@ -285,7 +285,7 @@ class SchoolCoverageStatApiTestCase(TestAPIViewSetMixin, TestCase):
         Expected: HTTP_200_OK - 1 school data with empty statistics json.
         coverage_type == unknown
         """
-        school_four = SchoolFactory(country=self.country, location__country=self.country)
+        school_four = SchoolFactory(country=self.country)
 
         url, _, view = statistics_url((), {
             'country_id': self.country.id,
@@ -364,9 +364,9 @@ class ConnectivityStatApiTestCase(TestAPIViewSetMixin, TestCase):
 
         cls.admin1_one = Admin1Factory(country=cls.country, layer_name='adm1')
 
-        cls.school_one = SchoolFactory(country=cls.country, location__country=cls.country, admin1=cls.admin1_one)
-        cls.school_two = SchoolFactory(country=cls.country, location__country=cls.country, admin1=cls.admin1_one)
-        cls.school_three = SchoolFactory(country=cls.country, location__country=cls.country, admin1=cls.admin1_one)
+        cls.school_one = SchoolFactory(country=cls.country, admin1=cls.admin1_one)
+        cls.school_two = SchoolFactory(country=cls.country, admin1=cls.admin1_one)
+        cls.school_three = SchoolFactory(country=cls.country, admin1=cls.admin1_one)
 
         cls.school_weekly_one = SchoolWeeklyStatusFactory(
             school=cls.school_one,
@@ -665,9 +665,9 @@ class SchoolConnectivityStatApiTestCase(TestAPIViewSetMixin, TestCase):
     def setUpTestData(cls):
         cls.country = CountryFactory()
 
-        cls.school_one = SchoolFactory(country=cls.country, location__country=cls.country)
-        cls.school_two = SchoolFactory(country=cls.country, location__country=cls.country)
-        cls.school_three = SchoolFactory(country=cls.country, location__country=cls.country)
+        cls.school_one = SchoolFactory(country=cls.country)
+        cls.school_two = SchoolFactory(country=cls.country)
+        cls.school_three = SchoolFactory(country=cls.country)
 
         cls.school_weekly_one = SchoolWeeklyStatusFactory(
             school=cls.school_one,
@@ -989,7 +989,7 @@ class SchoolConnectivityStatApiTestCase(TestAPIViewSetMixin, TestCase):
         Expected: HTTP_200_OK - 1 school data with empty statistics json and filled graph_data json.
         Connectivity_speed == 0, as for download speed is calculated based on graph data aggregation.
         """
-        school_four = SchoolFactory(country=self.country, location__country=self.country)
+        school_four = SchoolFactory(country=self.country)
 
         today = datetime.now().date()
         date_7_days_back = today - timedelta(days=6)
@@ -1583,8 +1583,8 @@ class SchoolSummaryAPIViewSetAPITestCase(TestAPIViewSetMixin, TestCase):
     def setUpTestData(cls):
         cls.country = CountryFactory()
 
-        cls.school_one = SchoolFactory(country=cls.country, location__country=cls.country, geopoint=None)
-        cls.school_two = SchoolFactory(country=cls.country, location__country=cls.country)
+        cls.school_one = SchoolFactory(country=cls.country, geopoint=None)
+        cls.school_two = SchoolFactory(country=cls.country)
 
         cls.stat_one = SchoolWeeklyStatusFactory(
             school=cls.school_one,
@@ -1795,8 +1795,8 @@ class SchoolDailyConnectivitySummaryAPIViewSetAPITestCase(TestAPIViewSetMixin, T
     def setUpTestData(cls):
         cls.country = CountryFactory()
 
-        cls.school_one = SchoolFactory(country=cls.country, location__country=cls.country, geopoint=None)
-        cls.school_two = SchoolFactory(country=cls.country, location__country=cls.country)
+        cls.school_one = SchoolFactory(country=cls.country, geopoint=None)
+        cls.school_two = SchoolFactory(country=cls.country)
 
         today = datetime.now().date()
 
@@ -2014,11 +2014,13 @@ class TimePlayerApiTestCase(TestAPIViewSetMixin, TestCase):
             data={
                 'icon': '<icon>',
                 'name': 'Test data layer 3',
+                'code': 'TEST_DATA_LAYER_{0}'.format(pcdc_data_source.id),
                 'description': 'Test data layer 3 description',
                 'version': '1.0.0',
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                 'data_sources_list': [pcdc_data_source.id, ],
                 'data_source_column': pcdc_data_source.column_config[0],
+                'data_source_column_function': {},
                 'global_benchmark': {
                     'value': '20000000',
                     'unit': 'bps',

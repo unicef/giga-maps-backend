@@ -51,5 +51,9 @@ class AppConfig(object):
         """Length of valid mobile number"""
         return 10
 
+    @property
+    def true_choices(self):
+        return ['true', 'yes', '1']
+
 
 app_config = AppConfig()

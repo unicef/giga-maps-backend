@@ -43,6 +43,7 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
             'latitude': 1234567,
             'longitude': 1234567,
             'education_level': 'Education Level',
+            'connectivity_RT': None,
         }, school))
 
         self.assertTrue(sources_utilities.has_changes_for_review({
@@ -53,6 +54,7 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
             'latitude': 1234567,
             'longitude': 1234567,
             'education_level': 'Education Level',
+            'connectivity_RT': None,
         }, school))
 
         self.assertTrue(sources_utilities.has_changes_for_review({
@@ -63,6 +65,7 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
             'latitude': 1234567,
             'longitude': 1234567,
             'education_level': 'Education Level',
+            'connectivity_RT': None,
         }, school))
 
         self.assertTrue(sources_utilities.has_changes_for_review({
@@ -73,6 +76,7 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
             'latitude': 1234567,
             'longitude': 1234567,
             'education_level': 'Education Level',
+            'connectivity_RT': None,
         }, school))
 
         self.assertTrue(sources_utilities.has_changes_for_review({
@@ -83,6 +87,7 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
             'latitude': school.geopoint.y,
             'longitude': 1234567,
             'education_level': 'Education Level',
+            'connectivity_RT': None,
         }, school))
 
         self.assertTrue(sources_utilities.has_changes_for_review({
@@ -93,6 +98,7 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
             'latitude': school.geopoint.y,
             'longitude': school.geopoint.x,
             'education_level': 'Education Level',
+            'connectivity_RT': None,
         }, school))
 
         self.assertFalse(sources_utilities.has_changes_for_review({
@@ -103,6 +109,7 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
             'latitude': school.geopoint.y,
             'longitude': school.geopoint.x,
             'education_level': school.education_level,
+            'connectivity_RT': None,
         }, school))
 
         self.assertTrue(sources_utilities.has_changes_for_review({
@@ -113,6 +120,7 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
             'latitude': school.geopoint.y,
             'longitude': school.geopoint.x,
             'education_level': school.education_level,
+            'connectivity_RT': None,
         }, school))
 
         self.assertTrue(sources_utilities.has_changes_for_review({
@@ -123,6 +131,7 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
             'latitude': school.geopoint.y,
             'longitude': school.geopoint.x,
             'education_level': school.education_level,
+            'connectivity_RT': None,
         }, None))
 
     def test_parse_row(self):
