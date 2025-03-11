@@ -642,7 +642,7 @@ class DataLayerPreviewViewSet(APIView):
                 WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
                 ELSE 'unknown'
             END AS connectivity_status,
-            ST_AsGeoJSON(ST_Transform(schools_school.geopoint, 4326)) AS geopoint
+            ST_AsGeoJSON(ST_Transform(schools_school.geopoint, 4326), 20) AS geopoint
         FROM schools_school
         INNER JOIN schools_schoolmasterstatus sms ON schools_school.last_master_status_id = sms.id
         INNER JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = schools_school.id
@@ -726,7 +726,7 @@ class DataLayerPreviewViewSet(APIView):
                 schools_school.id,
                 schools_school.name,
                 {table_name}."{col_name}",
-                ST_AsGeoJSON(ST_Transform(schools_school.geopoint, 4326)) as geopoint,
+                ST_AsGeoJSON(ST_Transform(schools_school.geopoint, 4326), 20) as geopoint,
                 {label_case_statements}
             FROM schools_school
             INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
@@ -1211,7 +1211,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             adm2_metadata."description_ui_label" AS admin2_description_ui_label,
             schools_school."country_id",
             c."name" AS country_name,
-            ST_AsGeoJSON(ST_Transform(schools_school."geopoint", 4326)) AS geopoint,
+            ST_AsGeoJSON(ST_Transform(schools_school."geopoint", 4326), 20) AS geopoint,
             schools_school."environment",
             schools_school."education_level",
             ROUND(sds."{col_name}"::numeric, 2) AS "live_avg",
@@ -1648,14 +1648,14 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             schools_school."education_level",
             {table_name}."{col_name}" AS field_value,
             {label_case_statements}
-            ST_AsGeoJSON(ST_Transform(schools_school."geopoint", 4326)) AS geopoint,
+            ST_AsGeoJSON(ST_Transform(schools_school."geopoint", 4326), 20) AS geopoint,
             CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
                 WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
                 ELSE 'unknown'
-            END as connectivity_status
+            END AS connectivity_status
         FROM "schools_school"
         INNER JOIN locations_country c ON c.id = schools_school.country_id
-        INNER JOIN schools_schoolmasterstatus sms ON schools_school.last_master_status_id = sms.id
+        {master_static_table_join}
         LEFT JOIN locations_countryadminmetadata AS adm1_metadata
             ON adm1_metadata."id" = schools_school.admin1_id
             AND adm1_metadata."layer_name" = 'adm1'
@@ -1670,12 +1670,19 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
         kwargs = copy.deepcopy(self.kwargs)
         kwargs['ids'] = ','.join(kwargs['school_ids'])
+        kwargs['master_static_table_join'] = ''
 
         legend_configs = kwargs['legend_configs']
         label_cases = []
         values_l = []
         parameter_col_type = kwargs['parameter_col'].get('type', 'str').lower()
         kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'sws')
+        if kwargs['table_name'] == 'sws':
+            kwargs['master_static_table_join'] = """INNER JOIN connection_statistics_schoolweeklystatus sws
+                ON schools_school.last_weekly_status_id = sws.id
+            """
+        elif kwargs['table_name'] == 'sms':
+            kwargs['master_static_table_join'] = 'INNER JOIN schools_schoolmasterstatus sms ON schools_school.last_master_status_id = sms.id'
 
         for title, values_and_label in legend_configs.items():
             values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
@@ -2498,7 +2505,7 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
                         AND t."live_data_source" IN ({live_source_types})
                     GROUP BY schools_school."id", EXTRACT(YEAR FROM CAST(t.date AS DATE))
                 ) AS sds ON ST_Intersects(sds.geopoint, ST_Transform(bounds.geom, 4326))
-            INNER JOIN "schools_schoolmasterstatus" sms ON sds."last_master_status_id" = sms."id"
+            INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
             LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = sds.school_id
             WHERE rt_status."deleted" IS NULL
         )

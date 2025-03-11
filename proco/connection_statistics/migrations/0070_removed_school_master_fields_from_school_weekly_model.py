@@ -5,7 +5,7 @@ from django.db import migrations
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('connection_statistics', '0067_added_new_school_master_fields_for_honduras_v2'),
+        ('connection_statistics', '0069_increased_upload_field_size'),
     ]
 
     operations = [
