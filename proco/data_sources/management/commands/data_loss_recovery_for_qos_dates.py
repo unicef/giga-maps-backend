@@ -447,4 +447,3 @@ class Command(BaseCommand):
             pass
 
         logger.info('Completed data loss recovery for qos successfully.\n')
-        exit(0)
