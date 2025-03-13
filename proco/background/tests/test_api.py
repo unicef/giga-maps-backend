@@ -1,16 +1,13 @@
-import uuid
-from datetime import datetime
-
-import pytz
 from django.core.cache import cache
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework import status
 
 from proco.background.models import BackgroundTask
+from proco.background.tests.factories import BackgroundTaskFactory
 from proco.custom_auth.tests import test_utils as test_utilities
 from proco.utils.tests import TestAPIViewSetMixin
-from proco.background.tests.factories import BackgroundTaskFactory
+
 
 class BackgroundTaskTestCase(TestAPIViewSetMixin, TestCase):
     base_view = 'background:'
