@@ -1282,18 +1282,19 @@ class TimePlayerViewSet(ListAPIView):
 
     def _format_result(self, qry_data):
         data = OrderedDict()
-        for resp_data in qry_data:
-            school_id = resp_data.get('school_id')
+        if qry_data:
+            for resp_data in qry_data:
+                school_id = resp_data.get('school_id')
 
-            school_data = data.get(school_id, {
-                'school_id': school_id,
-                'geopoint': resp_data.get('geopoint'),
-            })
-            school_data[int(resp_data.get('year'))] = {
-                'field_status': resp_data.get('field_status'),
-                'is_rt_connected': resp_data.get('is_rt_connected'),
-            }
-            data[school_id] = school_data
+                school_data = data.get(school_id, {
+                    'school_id': school_id,
+                    'geopoint': resp_data.get('geopoint'),
+                })
+                school_data[int(resp_data.get('year'))] = {
+                    'field_status': resp_data.get('field_status'),
+                    'is_rt_connected': resp_data.get('is_rt_connected'),
+                }
+                data[school_id] = school_data
         return list(data.values())
 
     def list(self, request, *args, **kwargs):
