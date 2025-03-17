@@ -42,8 +42,8 @@ steps:
     script: |
       sudo systemctl start postgresql.service
       sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'root';"
-      sudo -u postgres psql -c "CREATE DATABASE postgres;"
-      sudo -u postgres psql -c "CREATE DATABASE postgres1;"
+      sudo -u postgres psql -c "CREATE DATABASE test_postgres;"
+      sudo -u postgres psql -c "CREATE DATABASE test_postgres1;"
       wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
       echo "deb http://apt.postgresql.org/pub/repos/apt/ `lsb_release -cs`-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
       curl -fsSL https://packages.redis.io/gpg | sudo gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg
