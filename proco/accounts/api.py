@@ -72,6 +72,54 @@ class APIsListAPIView(BaseModelViewSet):
     }
 
 
+class APICategoriesViewSet(BaseModelViewSet):
+    """
+    APICategoriesViewSet
+        This class is used to do CRUD on API Categories.
+        Inherits: BaseModelViewSet
+    """
+    model = accounts_models.APICategory
+    serializer_class = serializers.APICategoriesCRUDSerializer
+
+    action_serializers = {
+        'create': serializers.APICategoriesCRUDSerializer,
+        'partial_update': serializers.APICategoriesCRUDSerializer,
+    }
+
+    permission_classes = (
+        core_permissions.IsUserAuthenticated,
+        core_permissions.CanDoCRUDonAPICategories,
+    )
+
+    filter_backends = (
+        DjangoFilterBackend,
+        SearchFilter,
+    )
+
+    ordering_fields = ( 'api__name', 'name', 'last_modified_at')
+    apply_query_pagination = True
+
+    filterset_fields = {
+        'name': ['iexact', 'in', 'exact'],
+        'api_id': ['exact', 'in'],
+    }
+
+    search_fields = ['api__name', 'name', 'description']
+    permit_list_expands = ['created_by', 'api', 'last_modified_by']
+
+    def update_serializer_context(self, context):
+        api_instance = None
+
+        if self.kwargs.get('pk'):
+            api_instance = accounts_models.APICategory.objects.filter(id=self.kwargs.get('pk')).first().api
+        elif self.request.data.get('api'):
+            api_instance = accounts_models.API.objects.filter(id=self.request.data.get('api')).first()
+
+        if api_instance is not None:
+            context['api_instance'] = api_instance
+        return context
+
+
 class APIKeysViewSet(BaseModelViewSet):
     """
     APIKeysViewSet

@@ -197,6 +197,52 @@ class APIKeyCountryRelationshipSerializer(serializers.ModelSerializer):
         return instance
 
 
+class APICategoriesCRUDSerializer(FlexFieldsModelSerializer):
+    """
+    APICategoriesCRUDSerializer
+        Serializer to list all API Categories.
+    """
+
+    class Meta:
+        model = accounts_models.APICategory
+        read_only_fields = (
+            'id',
+        )
+        fields = read_only_fields + (
+            'code',
+            'name',
+            'description',
+            'api',
+            'created_by',
+            'last_modified_by',
+        )
+
+        expandable_fields = {
+            'api': (ExpandAPISerializer, {'source': 'api'}),
+            'last_modified_by': (ExpandUserSerializer, {'source': 'last_modified_by'}),
+            'created_by': (ExpandUserSerializer, {'source': 'created_by'}),
+        }
+
+    def validate_code(self, code):
+        if re.match(r'[A-Za-z0-9-\' _]*$', code):
+            code = str(code).upper()
+            # If its Existing API Category, then code should match. Else raise error
+            if self.instance and code != self.instance.code:
+                raise accounts_exceptions.InvalidAPICategoryCodeError(message_kwargs={'code': code})
+
+            # If its new API Category, then code should be unique. Else raise error
+            if not self.instance and accounts_models.APICategory.objects.filter(code__iexact=code).exists():
+                raise accounts_exceptions.DuplicateAPICategoryCodeError(message_kwargs={'code': code})
+            return code
+
+        raise accounts_exceptions.InvalidAPICategoryCodeError()
+
+    def validate_name(self, name):
+        if re.match(account_config.valid_name_pattern, name):
+            return name
+        raise accounts_exceptions.InvalidAPICategoryNameError()
+
+
 class APIKeysListSerializer(FlexFieldsModelSerializer):
     """
     APIKeysListSerializer

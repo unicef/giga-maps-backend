@@ -49,6 +49,35 @@ class API(core_models.BaseModel):
         ordering = ['last_modified_at']
 
 
+class APICategory(core_models.BaseModel):
+    """
+    APICategory
+        This class define model used to store all the API categories added for documentation or download.
+    Inherits : `BaseModel`
+    """
+
+    code = models.CharField(max_length=32)
+
+    name = models.CharField(
+        max_length=255,
+        null=False,
+        verbose_name='API Category Name',
+        db_index=True,
+    )
+    description = models.CharField(max_length=500, null=True, blank=True)
+
+    api = models.ForeignKey(API, related_name='api_categories', on_delete=models.DO_NOTHING)
+
+    class Meta:
+        ordering = ['last_modified_at']
+        constraints = [
+            UniqueConstraint(fields=['code', 'deleted'],
+                             name='unique_with_deleted_for_api_category'),
+            UniqueConstraint(fields=['code'],
+                             condition=Q(deleted=None),
+                             name='unique_without_deleted_for_api_category'),
+        ]
+
 class APIKey(core_models.BaseModel):
     """
     APIKey
@@ -138,6 +167,25 @@ class APIKeyCountryRelationship(core_models.BaseModelMixin):
             UniqueConstraint(fields=['api_key', 'country'],
                              condition=Q(deleted=None),
                              name='unique_without_deleted_for_api_key_country'),
+        ]
+
+
+class APIKeyAPICategoryRelationship(core_models.BaseModelMixin):
+    """
+    APIKeyAPICategoryRelationship
+        This model is used to store the Api Key and API category relationship.
+    """
+    api_key = models.ForeignKey(APIKey, related_name='active_categories', on_delete=models.DO_NOTHING)
+    api_category = models.ForeignKey(APICategory, related_name='active_api_keys', on_delete=models.DO_NOTHING)
+
+    class Meta:
+        ordering = ['last_modified_at']
+        constraints = [
+            UniqueConstraint(fields=['api_key', 'api_category', 'deleted'],
+                             name='unique_with_deleted_for_api_key_api_category'),
+            UniqueConstraint(fields=['api_key', 'api_category'],
+                             condition=Q(deleted=None),
+                             name='unique_without_deleted_for_api_key_api_category'),
         ]
 
 

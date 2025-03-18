@@ -307,3 +307,20 @@ class InvalidAdvanceFilterDeleteError(BaseInvalidValidationError):
     """
     message = _("Advance filter '{filter}' can't be deleted in current status '{status}'.")
     code = 'invalid_filter_delete'
+
+
+class InvalidAPICategoryCodeError(BaseInvalidValidationError):
+    message = _('Invalid API Category code.')
+    description = _('Provide valid api category code')
+    code = 'invalid_api_category_code'
+
+
+class DuplicateAPICategoryCodeError(BaseInvalidValidationError):
+    message = _("API Category with code '{code}' already exists.")
+    code = 'duplicate_api_category_code'
+
+
+class InvalidAPICategoryNameError(BaseInvalidValidationError):
+    message = _('Invalid API Category name.')
+    description = _('Provide valid API Category name')
+    code = 'invalid_api_category_name'

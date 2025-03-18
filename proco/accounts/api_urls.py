@@ -8,6 +8,14 @@ urlpatterns = [
     path('apis/', api.APIsListAPIView.as_view({
         'get': 'list',
     }), name='list-apis'),
+    path('api_categories/', api.APICategoriesViewSet.as_view({
+        'get': 'list',
+        'post': 'create',
+    }), name='list-or-create-api-categories'),
+    path('api_categories/<int:pk>/', api.APICategoriesViewSet.as_view({
+        'put': 'partial_update',
+        'delete': 'destroy',
+    }), name='update-and-delete-api-category'),
     path('api_keys/', api.APIKeysViewSet.as_view({
         'get': 'list',
         'post': 'create',
