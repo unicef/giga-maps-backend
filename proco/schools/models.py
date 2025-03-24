@@ -58,6 +58,9 @@ class School(TimeStampedModel):
     education_level = models.CharField(blank=True, max_length=255)
     education_level_lower = models.CharField(blank=True, max_length=255, editable=False, db_index=True)
 
+    education_level_govt = models.CharField(blank=True, null=True, max_length=255)
+    education_level_govt_lower = models.CharField(blank=True, null=True, max_length=255, editable=False, db_index=True)
+
     education_level_regional = models.CharField(max_length=6400007, blank=True)
     environment = models.CharField(choices=ENVIRONMENT_STATUSES, blank=True, max_length=64)
 
@@ -96,6 +99,8 @@ class School(TimeStampedModel):
         self.name_lower = str(self.name).lower()
         if self.education_level:
             self.education_level_lower = str(self.education_level).lower()
+        if self.education_level_govt:
+            self.education_level_govt_lower = str(self.education_level_govt).lower()
         if self.school_type:
             self.school_type_lower = str(self.school_type).lower()
 

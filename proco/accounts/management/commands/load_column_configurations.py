@@ -133,6 +133,30 @@ configuration_json = [
         }
     },
     {
+        'name': 'education_level_govt_lower',
+        'label': 'Education Level Govt (education_level_govt_lower)',
+        'type': accounts_models.ColumnConfiguration.TYPE_STR,
+        'description': None,
+        'table_name': 'schools_school',
+        'table_alias': 'schools',
+        'table_label': 'School',
+        'is_filter_applicable': True,
+        'options': {
+            'active_countries_filter': "education_level_govt_lower IS NOT NULL",
+            'applicable_filter_types': {
+                accounts_models.AdvanceFilter.TYPE_DROPDOWN: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_EXACT
+                ],
+                accounts_models.AdvanceFilter.TYPE_DROPDOWN_MULTISELECT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IN
+                ],
+                accounts_models.AdvanceFilter.TYPE_INPUT: [
+                    accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_CONTAINS,
+                ],
+            },
+        }
+    },
+    {
         'name': 'num_computers',
         'label': 'Number of Computers (num_computers)',
         'type': accounts_models.ColumnConfiguration.TYPE_INT,
