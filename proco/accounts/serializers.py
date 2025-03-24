@@ -254,6 +254,7 @@ class APIKeysListSerializer(FlexFieldsModelSerializer):
     has_active_extension_request = serializers.SerializerMethodField()
 
     active_countries_list = serializers.JSONField()
+    active_api_categories_list = serializers.JSONField()
 
     class Meta:
         model = accounts_models.APIKey
@@ -276,6 +277,7 @@ class APIKeysListSerializer(FlexFieldsModelSerializer):
             'extension_status_updated_by',
             'has_active_extension_request',
             'active_countries_list',
+            'active_api_categories_list',
         )
 
         expandable_fields = {
@@ -307,6 +309,15 @@ class APIKeysListSerializer(FlexFieldsModelSerializer):
                 api_key_instance.status == accounts_models.APIKey.APPROVED)
 
     def to_representation(self, api_key):
+        all_category_ids = list(api_key.active_categories.all().values_list('api_category_id', flat=True))
+        if len(all_category_ids) > 0:
+            active_category_list = list(
+                accounts_models.APICategory.objects.filter(id__in=all_category_ids).values('id', 'name', 'code'))
+        else:
+            active_category_list = []
+
+        setattr(api_key, 'active_api_categories_list', active_category_list)
+
         all_country_ids = list(api_key.active_countries.all().values_list('country_id', flat=True))
         if len(all_country_ids) > 0:
             active_countries_list = list(
