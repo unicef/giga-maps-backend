@@ -456,6 +456,25 @@ def populate_school_new_lowercase_fields(country_id, start_school_id, end_school
     )
 
 
+def populate_school_education_level_govt_lower(country_id, start_school_id, end_school_id):
+    schools_qry = School.objects.all()
+
+    if start_school_id:
+        schools_qry = schools_qry.filter(id__gte=start_school_id, )
+
+    if end_school_id:
+        schools_qry = schools_qry.filter(id__lte=end_school_id, )
+
+    if country_id:
+        schools_qry = schools_qry.filter(country_id=country_id, )
+
+    schools_qry.filter(education_level_govt__isnull=False).update(
+        education_level_govt_lower=Lower('education_level_govt'),
+    )
+
+    schools_qry.filter(education_level_govt__isnull=True).update(education_level_govt_lower=None)
+
+
 class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument(
@@ -624,6 +643,12 @@ class Command(BaseCommand):
             help='If provided, recalculate the School table lowercase fields.'
         )
 
+        parser.add_argument(
+            '--populate_school_education_level_govt_lower', action='store_true',
+            dest='populate_school_education_level_govt_lower', default=False,
+            help='If provided, recalculate the School table "education_level_govt_lower" field.'
+        )
+
     def handle(self, **options):
         logger.info('Executing data cleanup utility.\n')
         logger.info('Options: {}\n\n'.format(options))
@@ -752,7 +777,12 @@ class Command(BaseCommand):
             populate_default_layer_from_active_layer_list(country_id)
 
         if options.get('populate_school_lowercase_fields'):
-            logger.info('Re-calculating the School table lower case fields: name_lower, education_level_lower, school_type_lower')
+            logger.info('Re-calculating the School table lower case fields: '
+                        'name_lower, education_level_lower, school_type_lower')
             populate_school_new_lowercase_fields(country_id, start_school_id, end_school_id)
+
+        if options.get('populate_school_education_level_govt_lower'):
+            logger.info('Re-calculating the School table lower case field: education_level_govt_lower')
+            populate_school_education_level_govt_lower(country_id, start_school_id, end_school_id)
 
         logger.info('Completed data cleanup utility successfully.\n')

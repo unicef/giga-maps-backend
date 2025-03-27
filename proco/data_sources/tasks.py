@@ -262,6 +262,7 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                             'geopoint': Point(x=row.longitude, y=row.latitude),
                             'education_level': '' if core_utilities.is_blank_string(
                                 row.education_level) else row.education_level,
+                            'education_level_govt': row.education_level_govt,
                             'environment': environment,
                             'school_type': '' if core_utilities.is_blank_string(
                                 row.school_funding_type) else row.school_funding_type,

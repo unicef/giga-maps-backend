@@ -49,6 +49,7 @@ class SchoolMasterData(TimeStampedModel, models.Model):
     latitude = models.FloatField(blank=True, default=None, null=True)  # School.geopoint
     longitude = models.FloatField(blank=True, default=None, null=True)  # School.geopoint
     education_level = models.CharField(blank=True, null=True, max_length=255)  # School.education_level
+    education_level_govt = models.CharField(blank=True, null=True, max_length=255)  # School.education_level_govt
     school_area_type = models.CharField(blank=True, null=True, max_length=255)  # School.environment
     school_funding_type = models.CharField(blank=True, null=True, max_length=255)  # School.school_type
     school_establishment_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)

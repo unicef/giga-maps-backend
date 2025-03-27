@@ -677,6 +677,26 @@ data_source_json = [
                 'table_name': 'schools_school',
                 'count_labels': ['good', 'moderate', 'bad', 'unknown'],
             },
+            {
+                'name': 'education_level_govt',
+                'type': 'str',
+                'is_parameter': True,
+                'alias': 'Education Level Govt (education_level_govt)',
+                'unit': '',
+                'display_unit': '',
+                'table_name': 'schools_school',
+                'count_labels': ['good', 'moderate', 'bad', 'unknown'],
+            },
+            {
+                'name': 'education_level_govt_lower',
+                'type': 'str',
+                'is_parameter': True,
+                'alias': 'Education Level Govt (education_level_govt_lower)',
+                'unit': '',
+                'display_unit': '',
+                'table_name': 'schools_school',
+                'count_labels': ['good', 'moderate', 'bad', 'unknown'],
+            },
         ],
         'status': 'PUBLISHED'
     }
