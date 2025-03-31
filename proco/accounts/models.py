@@ -67,6 +67,7 @@ class APICategory(core_models.BaseModel):
     description = models.CharField(max_length=500, null=True, blank=True)
 
     api = models.ForeignKey(API, related_name='api_categories', on_delete=models.DO_NOTHING)
+    is_default = models.BooleanField(default=False)
 
     class Meta:
         ordering = ['last_modified_at']

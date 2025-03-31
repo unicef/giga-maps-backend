@@ -217,22 +217,28 @@ class APIKeyAPICategoryRelationshipSerializer(serializers.ModelSerializer):
             'api_category': {'required': True},
         }
 
-    def create(self, validated_data):
-        with transaction.atomic():
-            request_user = core_utilities.get_current_user(context=self.context)
-            # set created_by and last_modified_by value
-            if request_user is not None:
-                validated_data['created_by'] = validated_data.get('created_by') or request_user
-                validated_data['last_modified_by'] = validated_data.get('last_modified_by') or request_user
+    def validate_api_category(self, api_category):
+        api_instance = self.context.get('api_instance')
 
-            instance = super().create(validated_data)
+        if api_instance and api_instance.api_categories.filter(id=api_category.id, deleted__isnull=True).exists():
+            return api_category
+        raise accounts_exceptions.InvalidAPICategoryAssignedError()
+
+    def create(self, validated_data):
+        request_user = core_utilities.get_current_user(context=self.context)
+        # set created_by and last_modified_by value
+        if request_user is not None:
+            validated_data['created_by'] = validated_data.get('created_by') or request_user
+            validated_data['last_modified_by'] = validated_data.get('last_modified_by') or request_user
+
+        instance = super().create(validated_data)
         return instance
 
 
 class APICategoriesCRUDSerializer(FlexFieldsModelSerializer):
     """
     APICategoriesCRUDSerializer
-        Serializer to list all API Categories.
+        Serializer to list/create/update all API Categories.
     """
 
     class Meta:
@@ -245,6 +251,7 @@ class APICategoriesCRUDSerializer(FlexFieldsModelSerializer):
             'name',
             'description',
             'api',
+            'is_default',
             'created_by',
             'last_modified_by',
         )
@@ -273,6 +280,15 @@ class APICategoriesCRUDSerializer(FlexFieldsModelSerializer):
         if re.match(account_config.valid_name_pattern, name):
             return name
         raise accounts_exceptions.InvalidAPICategoryNameError()
+
+    def validate_is_default(self, is_default):
+        if is_default:
+            api_instance = self.context.get('api_instance')
+            if api_instance and accounts_models.APICategory.objects.filter(api_id=api_instance.id,
+                                                                           is_default=True).exists():
+                raise accounts_exceptions.InvalidDefaultAPICategoryError()
+
+        return is_default
 
 
 class APIKeysListSerializer(FlexFieldsModelSerializer):
@@ -343,8 +359,8 @@ class APIKeysListSerializer(FlexFieldsModelSerializer):
     def to_representation(self, api_key):
         all_category_ids = list(api_key.active_categories.all().values_list('api_category_id', flat=True))
         if len(all_category_ids) > 0:
-            active_category_list = list(
-                accounts_models.APICategory.objects.filter(id__in=all_category_ids).values('id', 'name', 'code'))
+            active_category_list = list(accounts_models.APICategory.objects.filter(
+                id__in=all_category_ids).values('id', 'name', 'code', 'is_default'))
         else:
             active_category_list = []
 
@@ -894,8 +910,8 @@ class UpdateAPIKeysForAPICategoriesSerializer(serializers.ModelSerializer):
     def to_representation(self, api_key):
         all_category_ids = list(api_key.active_categories.all().values_list('api_category_id', flat=True))
         if len(all_category_ids) > 0:
-            active_api_categories_list = list(
-                accounts_models.APICategory.objects.filter(id__in=all_category_ids).values('id', 'name'))
+            active_api_categories_list = list(accounts_models.APICategory.objects.filter(
+                id__in=all_category_ids).values('id', 'code', 'name', 'is_default'))
         else:
             active_api_categories_list = []
 

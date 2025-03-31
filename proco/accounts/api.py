@@ -284,6 +284,18 @@ class APIKeysAPICategoriesViewSet(BaseModelViewSet):
         core_permissions.CanApproveRejectAPIKeyorAPIKeyExtension,
     )
 
+    def update_serializer_context(self, context):
+        api_instance = None
+
+        if self.kwargs.get('pk'):
+            api_instance = accounts_models.APIKey.objects.filter(id=self.kwargs.get('pk')).first().api
+        elif self.request.data.get('api'):
+            api_instance = accounts_models.API.objects.filter(id=self.request.data.get('api')).first()
+
+        if api_instance is not None:
+            context['api_instance'] = api_instance
+        return context
+
 
 class ValidateAPIKeyViewSet(APIView):
     permission_classes = (

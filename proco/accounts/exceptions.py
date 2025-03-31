@@ -324,3 +324,15 @@ class InvalidAPICategoryNameError(BaseInvalidValidationError):
     message = _('Invalid API Category name.')
     description = _('Provide valid API Category name')
     code = 'invalid_api_category_name'
+
+
+class InvalidDefaultAPICategoryError(BaseInvalidValidationError):
+    message = _('Multiple default API Category for same API.')
+    description = _('Provide valid default API Category')
+    code = 'invalid_default_api_category'
+
+
+class InvalidAPICategoryAssignedError(BaseInvalidValidationError):
+    message = _('Invalid API Category updated to current API Key.')
+    description = _('Provide valid API Category ids')
+    code = 'invalid_api_category_ids'
