@@ -27,6 +27,9 @@ urlpatterns = [
     path('api_keys/<int:pk>/request_extension/', api.APIKeysRequestExtensionViewSet.as_view({
         'put': 'partial_update',
     }), name='request-api-key-extension'),
+    path('api_keys/<int:pk>/categories/', api.APIKeysAPICategoriesViewSet.as_view({
+        'put': 'partial_update',
+    }), name='api-key-api-categories-crud'),
     path('validate_api_key/', api.ValidateAPIKeyViewSet.as_view(), name='validate-an-api-key'),
 
     path('translate/text/<str:target>/', api.TranslateTextFromEnViewSet.as_view(),

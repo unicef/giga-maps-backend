@@ -179,6 +179,19 @@ class APIKeysViewSet(BaseModelViewSet):
                 active_countries__deleted__isnull=True,
             )
 
+        if 'api_category_id' in query_param_keys:
+            queryset = queryset.filter(
+                active_categories__api_category_id=query_params['api_category_id'],
+                active_categories__deleted__isnull=True,
+            )
+        elif 'api_category__in' in query_param_keys:
+            queryset = queryset.filter(
+                active_categories__api_category_id__in=[
+                    c_id.strip() for c_id in query_params['api_category__in'].split(',')
+                ],
+                active_categories__deleted__isnull=True,
+            )
+
         if not core_utilities.is_superuser(request_user) and not has_approval_permission:
             queryset = queryset.filter(user=request_user)
 
@@ -246,7 +259,7 @@ class APIKeysViewSet(BaseModelViewSet):
 class APIKeysRequestExtensionViewSet(BaseModelViewSet):
     """
     APIKeysRequestExtensionViewSet
-        This class is used to list all API keys.
+        This class is used to update the API key valid_to date value.
         Inherits: BaseModelViewSet
     """
     model = accounts_models.APIKey
@@ -254,6 +267,21 @@ class APIKeysRequestExtensionViewSet(BaseModelViewSet):
 
     permission_classes = (
         core_permissions.IsUserAuthenticated,
+    )
+
+
+class APIKeysAPICategoriesViewSet(BaseModelViewSet):
+    """
+    APIKeysAPICategoriesViewSet
+        This class is used to assign an API category to the API key.
+        Inherits: BaseModelViewSet
+    """
+    model = accounts_models.APIKey
+    serializer_class = serializers.UpdateAPIKeysForAPICategoriesSerializer
+
+    permission_classes = (
+        core_permissions.IsUserAuthenticated,
+        core_permissions.CanApproveRejectAPIKeyorAPIKeyExtension,
     )
 
 

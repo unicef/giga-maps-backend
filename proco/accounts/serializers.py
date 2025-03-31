@@ -197,6 +197,38 @@ class APIKeyCountryRelationshipSerializer(serializers.ModelSerializer):
         return instance
 
 
+class APIKeyAPICategoryRelationshipSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = accounts_models.APIKeyAPICategoryRelationship
+
+        read_only_fields = (
+            'id',
+            'created',
+            'last_modified_at',
+        )
+
+        fields = read_only_fields + (
+            'api_key',
+            'api_category',
+        )
+
+        extra_kwargs = {
+            'api_key': {'required': True},
+            'api_category': {'required': True},
+        }
+
+    def create(self, validated_data):
+        with transaction.atomic():
+            request_user = core_utilities.get_current_user(context=self.context)
+            # set created_by and last_modified_by value
+            if request_user is not None:
+                validated_data['created_by'] = validated_data.get('created_by') or request_user
+                validated_data['last_modified_by'] = validated_data.get('last_modified_by') or request_user
+
+            instance = super().create(validated_data)
+        return instance
+
+
 class APICategoriesCRUDSerializer(FlexFieldsModelSerializer):
     """
     APICategoriesCRUDSerializer
@@ -798,6 +830,77 @@ class UpdateAPIKeysForExtensionSerializer(serializers.ModelSerializer):
             if len(request_approvers) > 0:
                 account_utilities.send_email_over_mailjet_service(request_approvers, **email_content)
         return instance
+
+
+class UpdateAPIKeysForAPICategoriesSerializer(serializers.ModelSerializer):
+    """
+    UpdateAPIKeysForAPICategoriesSerializer
+        Serializer to add the API category to an API key.
+    """
+
+    active_api_categories_list = serializers.JSONField(required=True)
+
+    class Meta:
+        model = accounts_models.APIKey
+        read_only_fields = (
+            'id',
+            'status',
+            'api',
+            'user',
+        )
+
+        fields = read_only_fields + (
+            'active_api_categories_list',
+        )
+
+    def update(self, instance, validated_data):
+        """
+        update
+            This method is used to update API key + API Category relationship
+        :param instance:
+        :param validated_data:
+        :return:
+        """
+        request_user = core_utilities.get_current_user(context=self.context)
+        active_api_categories_list = validated_data.pop('active_api_categories_list', [])
+        instance.active_categories.all().update(
+            deleted=core_utilities.get_current_datetime_object(),
+            last_modified_by=request_user,
+        )
+
+        for category_id in active_api_categories_list:
+            api_key_category_data = {
+                'api_key': instance.id,
+                'api_category': category_id,
+            }
+
+            api_key_category_relationships = APIKeyAPICategoryRelationshipSerializer(
+                data=api_key_category_data,
+                context=self.context,
+            )
+            api_key_category_relationships.is_valid(raise_exception=True)
+            api_key_category_relationships.save()
+
+        # Once API Key - Category relationship is created, send the status email to the user
+        if request_user is not None:
+            email_subject = account_config.api_key_api_category_on_update_email_subject_format % (
+                core_utilities.get_project_title(), instance.api.name,
+            )
+            email_message = account_config.api_key_api_category_on_update_email_message_format
+            email_content = {'subject': email_subject, 'message': email_message}
+            account_utilities.send_standard_email(request_user, email_content)
+        return instance
+
+    def to_representation(self, api_key):
+        all_category_ids = list(api_key.active_categories.all().values_list('api_category_id', flat=True))
+        if len(all_category_ids) > 0:
+            active_api_categories_list = list(
+                accounts_models.APICategory.objects.filter(id__in=all_category_ids).values('id', 'name'))
+        else:
+            active_api_categories_list = []
+
+        setattr(api_key, 'active_api_categories_list', active_api_categories_list)
+        return super().to_representation(api_key)
 
 
 class MessageListSerializer(serializers.ModelSerializer):
