@@ -8,7 +8,7 @@ import uuid
 from django.conf import settings
 from django.contrib.admin.models import LogEntry
 from django.db.models import Case, IntegerField, Value, When
-from django.db.models import Q
+from django.db.models import Q, F
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_control
@@ -315,7 +315,16 @@ class ValidateAPIKeyViewSet(APIView):
         )
 
         if queryset.exists():
-            return Response(status=rest_status.HTTP_200_OK)
+            all_categories = list(queryset.filter(
+                active_categories__deleted__isnull=True,
+                active_categories__api_category__deleted__isnull=True,
+            ).annotate(
+                api_category_id=F('active_categories__api_category__id'),
+                api_category_name=F('active_categories__api_category__name'),
+                api_category_code=F('active_categories__api_category__code'),
+                api_category_is_default=F('active_categories__api_category__is_default'),
+            ).values('api_category_id', 'api_category_name', 'api_category_code', 'api_category_is_default'))
+            return Response(status=rest_status.HTTP_200_OK, data=all_categories)
         return Response(status=rest_status.HTTP_404_NOT_FOUND, data={'detail': 'Please enter valid api key.'})
 
 
