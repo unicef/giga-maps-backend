@@ -50,7 +50,8 @@ class InvalidActiveAPIKeyCountForSingleAPIError(BaseInvalidValidationError):
 
     This class overrides both 'message' and 'code' variables.
     """
-    message = _('You can create up-to {limit} Active API Key for one API. 1 key for same API already Exists: {details}')
+    message = _('You can create up-to {limit} Active API Key for one API. {count} key for same API already Exists: {'
+                'details}')
     description = _('New key can be created once existing one expires.')
     code = 'invalid_active_api_key_count_for_one_api'
 
@@ -74,9 +75,21 @@ class CountryRequiredForPrivateAPIKeyError(BaseInvalidValidationError):
 
     This class overrides both 'message' and 'code' variables.
     """
-    message = _("'active_countries_list' field is required for Private API Key.'")
+    message = _("'active_countries_list' field is required for Private API Key.")
     description = _('Provide valid country list for Private API Key')
     code = 'invalid_private_api_key_countries'
+
+
+class CountryRequiredForGigaMeterAPIKeyError(BaseInvalidValidationError):
+    """
+    An exception class that extends BaseInvalidValidationError. This exception should
+    be raised when GigaMeter API key is created without country list.
+
+    This class overrides both 'message' and 'code' variables.
+    """
+    message = _("'active_countries_list' field is required for Giga Meter API Key.")
+    description = _('Provide valid country list for Giga Meter API Key')
+    code = 'invalid_giga_meter_api_key_countries'
 
 
 class InvalidAPIKeyStatusForPublicAPIError(BaseInvalidValidationError):

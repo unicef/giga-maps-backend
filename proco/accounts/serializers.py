@@ -95,6 +95,7 @@ class APIsListSerializer(FlexFieldsModelSerializer):
                 user=request_user,
                 status=accounts_models.APIKey.APPROVED,
                 valid_to__gte=core_utilities.get_current_datetime_object().date(),
+                has_write_access=False,
             ).exists()
         return False
 
@@ -137,22 +138,26 @@ class APIsListSerializer(FlexFieldsModelSerializer):
         return filters if isinstance(filters, dict) > 0 else {}
 
     def get_download_url(self, api_instance):
-        request_user = core_utilities.get_current_user(context=self.context)
+        if api_instance.download_url:
+            request_user = core_utilities.get_current_user(context=self.context)
 
-        if request_user and not request_user.is_anonymous:
-            valid_api_key = api_instance.api_keys.all().filter(
-                user=request_user,
-                status=accounts_models.APIKey.APPROVED,
-                valid_to__gte=core_utilities.get_current_datetime_object().date(),
-            ).first()
+            if request_user and not request_user.is_anonymous:
+                valid_api_key = api_instance.api_keys.all().filter(
+                    user=request_user,
+                    status=accounts_models.APIKey.APPROVED,
+                    valid_to__gte=core_utilities.get_current_datetime_object().date(),
+                    has_write_access=False,
+                ).first()
 
-            if valid_api_key:
-                filters = self.apply_api_key_filters(valid_api_key.filters)
-                return api_instance.download_url.format(**filters)
-
+                if valid_api_key:
+                    filters = self.apply_api_key_filters(valid_api_key.filters)
+                    return api_instance.download_url.format(**filters)
         return api_instance.download_url
 
     def get_report_title(self, api_instance):
+        if account_utilities.is_giga_meter_api(api_instance):
+            return
+
         report_file_name = api_instance.report_title
         if (
             api_instance.category == accounts_models.API.API_CATEGORY_PUBLIC and
@@ -429,11 +434,30 @@ class CreateAPIKeysSerializer(serializers.ModelSerializer):
 
         return filters
 
-    def _validate_active_api_key_count_error(self, data):
-        api_instance = self.context.get('api_instance')
+    def _validate_active_api_key_count_for_giga_meter(self, data, api_instance, request_user, active_countries_list):
+        if not active_countries_list or len(active_countries_list) == 0:
+            raise accounts_exceptions.CountryRequiredForGigaMeterAPIKeyError()
 
+        total_active_giga_meter_api_keys = accounts_models.APIKey.objects.filter(
+            api=data['api'],
+            user=request_user,
+            status__in=[accounts_models.APIKey.INITIATED, accounts_models.APIKey.APPROVED],
+            valid_to__gte=core_utilities.get_current_datetime_object().date(),
+            has_write_access=False,
+        ).count()
+
+        if total_active_giga_meter_api_keys > 100:
+            message_kwargs = {
+                'limit': 100,
+                'count': total_active_giga_meter_api_keys,
+                'details': 'Name - "{0}"'.format(api_instance.name)
+            }
+            raise accounts_exceptions.InvalidActiveAPIKeyCountForSingleAPIError(message_kwargs=message_kwargs)
+
+        return True
+
+    def _validate_active_api_key_count_error(self, data, api_instance, request_user, active_countries_list):
         if api_instance and api_instance.category == accounts_models.API.API_CATEGORY_PUBLIC:
-            request_user = core_utilities.get_current_user(context=self.context)
             api_key_instance = accounts_models.APIKey.objects.filter(
                 api=data['api'],
                 user=request_user,
@@ -445,6 +469,7 @@ class CreateAPIKeysSerializer(serializers.ModelSerializer):
             if api_key_instance:
                 message_kwargs = {
                     'limit': 1,
+                    'count': 1,
                     'details': 'Name - "{0}", Valid Till - "{1}"'.format(
                         api_instance.name,
                         date_utilities.format_date(api_key_instance.valid_to),
@@ -452,17 +477,12 @@ class CreateAPIKeysSerializer(serializers.ModelSerializer):
                 }
                 raise accounts_exceptions.InvalidActiveAPIKeyCountForSingleAPIError(message_kwargs=message_kwargs)
         else:
-            active_countries_list = data.get('active_countries_list', [])
-
             if not active_countries_list or len(active_countries_list) == 0:
                 raise accounts_exceptions.CountryRequiredForPrivateAPIKeyError()
 
         return True
 
-    def _get_status_by_api_category(self):
-        api_instance = self.context.get('api_instance')
-        request_user = core_utilities.get_current_user(context=self.context)
-
+    def _get_status_by_api_category(self, api_instance, request_user):
         # If API key is created for a Public API, then update status as APPROVED
         # If API key is created by Admin/Superuser, then also mark it as APPROVED
         if (
@@ -474,16 +494,31 @@ class CreateAPIKeysSerializer(serializers.ModelSerializer):
         return accounts_models.APIKey.INITIATED
 
     def create(self, validated_data):
-        self._validate_active_api_key_count_error(validated_data)
+        api_instance = self.context.get('api_instance')
         active_countries_list = validated_data.pop('active_countries_list', [])
+        request_user = core_utilities.get_current_user(context=self.context)
+
+        if account_utilities.is_giga_meter_api(api_instance):
+            self._validate_active_api_key_count_for_giga_meter(
+                validated_data,
+                api_instance,
+                request_user,
+                active_countries_list
+            )
+        else:
+            self._validate_active_api_key_count_error(
+                validated_data,
+                api_instance,
+                request_user,
+                active_countries_list
+            )
 
         with transaction.atomic():
-            request_user = core_utilities.get_current_user(context=self.context)
             # set created_by and last_modified_by value
             if request_user is not None:
                 validated_data['user'] = request_user
                 validated_data['api_key'] = core_utilities.get_random_string(264)
-                validated_data['status'] = self._get_status_by_api_category()
+                validated_data['status'] = self._get_status_by_api_category(api_instance, request_user)
                 validated_data['created_by'] = validated_data.get('created_by') or request_user
                 validated_data['last_modified_by'] = validated_data.get('last_modified_by') or request_user
                 validated_data['valid_to'] = core_utilities.get_current_datetime_object().date() + timedelta(days=90)

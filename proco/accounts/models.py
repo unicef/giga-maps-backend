@@ -47,6 +47,13 @@ class API(core_models.BaseModel):
 
     class Meta:
         ordering = ['last_modified_at']
+        constraints = [
+            UniqueConstraint(fields=['code', 'deleted'],
+                             name='unique_api_code_with_deleted'),
+            UniqueConstraint(fields=['code'],
+                             condition=Q(deleted=None),
+                             name='unique_api_code_without_deleted'),
+        ]
 
 
 class APICategory(core_models.BaseModel):

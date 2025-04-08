@@ -78,6 +78,10 @@ def send_email_over_mailjet_service(recipient_list, cc=None, bcc=None, fail_sile
     return response
 
 
+def is_giga_meter_api(api_instance):
+    return api_instance.code == settings.DATA_SOURCE_CONFIG.get('DAILY_CHECK_APP').get('API_CODE')
+
+
 class BaseTileGenerator:
     def path_to_tile(self, request):
         path = "/" + request.query_params.get('z') + "/" + request.query_params.get(
