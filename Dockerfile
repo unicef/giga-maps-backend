@@ -31,7 +31,8 @@ RUN pip install --upgrade \
     pipenv
 
 # ssh
-ENV SSH_PASSWD "root:Docker!"
+ARG SSH_PASSWD
+ENV SSH_PASSWD $SSH_PASSWD
 RUN apt-get update \
         && apt-get install -y --no-install-recommends dialog \
         && apt-get update \
