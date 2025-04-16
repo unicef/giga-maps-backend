@@ -101,6 +101,18 @@ class AppConfig(object):
                 'regarding the rejection.')
 
     @property
+    def api_key_api_category_on_update_email_subject_format(self):
+        """format for the email subject when an API Category is updated to the API key."""
+        return '%s - API Key Category updated for "%s" API'
+
+    @property
+    def api_key_api_category_on_update_email_message_format(self):
+        """format for the email message when an API Key category is updated the API."""
+        return ('API key category has been updated by Admin.\n\n'
+                'We kindly request that you reach out to our support team to obtain more details '
+                'regarding the update.')
+
+    @property
     def standard_email_template_name(self):
         """template for standard emails"""
         return 'email/standard_email.html'

@@ -8,6 +8,14 @@ urlpatterns = [
     path('apis/', api.APIsListAPIView.as_view({
         'get': 'list',
     }), name='list-apis'),
+    path('api_categories/', api.APICategoriesViewSet.as_view({
+        'get': 'list',
+        'post': 'create',
+    }), name='list-or-create-api-categories'),
+    path('api_categories/<int:pk>/', api.APICategoriesViewSet.as_view({
+        'put': 'partial_update',
+        'delete': 'destroy',
+    }), name='update-and-delete-api-category'),
     path('api_keys/', api.APIKeysViewSet.as_view({
         'get': 'list',
         'post': 'create',
@@ -19,6 +27,9 @@ urlpatterns = [
     path('api_keys/<int:pk>/request_extension/', api.APIKeysRequestExtensionViewSet.as_view({
         'put': 'partial_update',
     }), name='request-api-key-extension'),
+    path('api_keys/<int:pk>/categories/', api.APIKeysAPICategoriesViewSet.as_view({
+        'put': 'partial_update',
+    }), name='api-key-api-categories-crud'),
     path('validate_api_key/', api.ValidateAPIKeyViewSet.as_view(), name='validate-an-api-key'),
 
     path('translate/text/<str:target>/', api.TranslateTextFromEnViewSet.as_view(),

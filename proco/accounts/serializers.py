@@ -95,6 +95,7 @@ class APIsListSerializer(FlexFieldsModelSerializer):
                 user=request_user,
                 status=accounts_models.APIKey.APPROVED,
                 valid_to__gte=core_utilities.get_current_datetime_object().date(),
+                has_write_access=False,
             ).exists()
         return False
 
@@ -137,22 +138,26 @@ class APIsListSerializer(FlexFieldsModelSerializer):
         return filters if isinstance(filters, dict) > 0 else {}
 
     def get_download_url(self, api_instance):
-        request_user = core_utilities.get_current_user(context=self.context)
+        if api_instance.download_url:
+            request_user = core_utilities.get_current_user(context=self.context)
 
-        if request_user and not request_user.is_anonymous:
-            valid_api_key = api_instance.api_keys.all().filter(
-                user=request_user,
-                status=accounts_models.APIKey.APPROVED,
-                valid_to__gte=core_utilities.get_current_datetime_object().date(),
-            ).first()
+            if request_user and not request_user.is_anonymous:
+                valid_api_key = api_instance.api_keys.all().filter(
+                    user=request_user,
+                    status=accounts_models.APIKey.APPROVED,
+                    valid_to__gte=core_utilities.get_current_datetime_object().date(),
+                    has_write_access=False,
+                ).first()
 
-            if valid_api_key:
-                filters = self.apply_api_key_filters(valid_api_key.filters)
-                return api_instance.download_url.format(**filters)
-
+                if valid_api_key:
+                    filters = self.apply_api_key_filters(valid_api_key.filters)
+                    return api_instance.download_url.format(**filters)
         return api_instance.download_url
 
     def get_report_title(self, api_instance):
+        if account_utilities.is_giga_meter_api(api_instance):
+            return
+
         report_file_name = api_instance.report_title
         if (
             api_instance.category == accounts_models.API.API_CATEGORY_PUBLIC and
@@ -197,6 +202,100 @@ class APIKeyCountryRelationshipSerializer(serializers.ModelSerializer):
         return instance
 
 
+class APIKeyAPICategoryRelationshipSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = accounts_models.APIKeyAPICategoryRelationship
+
+        read_only_fields = (
+            'id',
+            'created',
+            'last_modified_at',
+        )
+
+        fields = read_only_fields + (
+            'api_key',
+            'api_category',
+        )
+
+        extra_kwargs = {
+            'api_key': {'required': True},
+            'api_category': {'required': True},
+        }
+
+    def validate_api_category(self, api_category):
+        api_instance = self.context.get('api_instance')
+
+        if api_instance and api_instance.api_categories.filter(id=api_category.id, deleted__isnull=True).exists():
+            return api_category
+        raise accounts_exceptions.InvalidAPICategoryAssignedError()
+
+    def create(self, validated_data):
+        request_user = core_utilities.get_current_user(context=self.context)
+        # set created_by and last_modified_by value
+        if request_user is not None:
+            validated_data['created_by'] = validated_data.get('created_by') or request_user
+            validated_data['last_modified_by'] = validated_data.get('last_modified_by') or request_user
+
+        instance = super().create(validated_data)
+        return instance
+
+
+class APICategoriesCRUDSerializer(FlexFieldsModelSerializer):
+    """
+    APICategoriesCRUDSerializer
+        Serializer to list/create/update all API Categories.
+    """
+
+    class Meta:
+        model = accounts_models.APICategory
+        read_only_fields = (
+            'id',
+        )
+        fields = read_only_fields + (
+            'code',
+            'name',
+            'description',
+            'api',
+            'is_default',
+            'created_by',
+            'last_modified_by',
+        )
+
+        expandable_fields = {
+            'api': (ExpandAPISerializer, {'source': 'api'}),
+            'last_modified_by': (ExpandUserSerializer, {'source': 'last_modified_by'}),
+            'created_by': (ExpandUserSerializer, {'source': 'created_by'}),
+        }
+
+    def validate_code(self, code):
+        if re.match(r'[A-Za-z0-9-\' _]*$', code):
+            code = str(code).upper()
+            # If its Existing API Category, then code should match. Else raise error
+            if self.instance and code != self.instance.code:
+                raise accounts_exceptions.InvalidAPICategoryCodeError(message_kwargs={'code': code})
+
+            # If its new API Category, then code should be unique. Else raise error
+            if not self.instance and accounts_models.APICategory.objects.filter(code__iexact=code).exists():
+                raise accounts_exceptions.DuplicateAPICategoryCodeError(message_kwargs={'code': code})
+            return code
+
+        raise accounts_exceptions.InvalidAPICategoryCodeError()
+
+    def validate_name(self, name):
+        if re.match(account_config.valid_name_pattern, name):
+            return name
+        raise accounts_exceptions.InvalidAPICategoryNameError()
+
+    def validate_is_default(self, is_default):
+        if is_default:
+            api_instance = self.context.get('api_instance')
+            if api_instance and accounts_models.APICategory.objects.filter(api_id=api_instance.id,
+                                                                           is_default=True).exists():
+                raise accounts_exceptions.InvalidDefaultAPICategoryError()
+
+        return is_default
+
+
 class APIKeysListSerializer(FlexFieldsModelSerializer):
     """
     APIKeysListSerializer
@@ -208,6 +307,7 @@ class APIKeysListSerializer(FlexFieldsModelSerializer):
     has_active_extension_request = serializers.SerializerMethodField()
 
     active_countries_list = serializers.JSONField()
+    active_api_categories_list = serializers.JSONField()
 
     class Meta:
         model = accounts_models.APIKey
@@ -230,6 +330,7 @@ class APIKeysListSerializer(FlexFieldsModelSerializer):
             'extension_status_updated_by',
             'has_active_extension_request',
             'active_countries_list',
+            'active_api_categories_list',
         )
 
         expandable_fields = {
@@ -261,6 +362,15 @@ class APIKeysListSerializer(FlexFieldsModelSerializer):
                 api_key_instance.status == accounts_models.APIKey.APPROVED)
 
     def to_representation(self, api_key):
+        all_category_ids = list(api_key.active_categories.all().values_list('api_category_id', flat=True))
+        if len(all_category_ids) > 0:
+            active_category_list = list(accounts_models.APICategory.objects.filter(
+                id__in=all_category_ids).values('id', 'name', 'code', 'is_default'))
+        else:
+            active_category_list = []
+
+        setattr(api_key, 'active_api_categories_list', active_category_list)
+
         all_country_ids = list(api_key.active_countries.all().values_list('country_id', flat=True))
         if len(all_country_ids) > 0:
             active_countries_list = list(
@@ -324,11 +434,30 @@ class CreateAPIKeysSerializer(serializers.ModelSerializer):
 
         return filters
 
-    def _validate_active_api_key_count_error(self, data):
-        api_instance = self.context.get('api_instance')
+    def _validate_active_api_key_count_for_giga_meter(self, data, api_instance, request_user, active_countries_list):
+        if not active_countries_list or len(active_countries_list) == 0:
+            raise accounts_exceptions.CountryRequiredForGigaMeterAPIKeyError()
 
+        total_active_giga_meter_api_keys = accounts_models.APIKey.objects.filter(
+            api=data['api'],
+            user=request_user,
+            status__in=[accounts_models.APIKey.INITIATED, accounts_models.APIKey.APPROVED],
+            valid_to__gte=core_utilities.get_current_datetime_object().date(),
+            has_write_access=False,
+        ).count()
+
+        if total_active_giga_meter_api_keys > 100:
+            message_kwargs = {
+                'limit': 100,
+                'count': total_active_giga_meter_api_keys,
+                'details': 'Name - "{0}"'.format(api_instance.name)
+            }
+            raise accounts_exceptions.InvalidActiveAPIKeyCountForSingleAPIError(message_kwargs=message_kwargs)
+
+        return True
+
+    def _validate_active_api_key_count_error(self, data, api_instance, request_user, active_countries_list):
         if api_instance and api_instance.category == accounts_models.API.API_CATEGORY_PUBLIC:
-            request_user = core_utilities.get_current_user(context=self.context)
             api_key_instance = accounts_models.APIKey.objects.filter(
                 api=data['api'],
                 user=request_user,
@@ -340,6 +469,7 @@ class CreateAPIKeysSerializer(serializers.ModelSerializer):
             if api_key_instance:
                 message_kwargs = {
                     'limit': 1,
+                    'count': 1,
                     'details': 'Name - "{0}", Valid Till - "{1}"'.format(
                         api_instance.name,
                         date_utilities.format_date(api_key_instance.valid_to),
@@ -347,17 +477,12 @@ class CreateAPIKeysSerializer(serializers.ModelSerializer):
                 }
                 raise accounts_exceptions.InvalidActiveAPIKeyCountForSingleAPIError(message_kwargs=message_kwargs)
         else:
-            active_countries_list = data.get('active_countries_list', [])
-
             if not active_countries_list or len(active_countries_list) == 0:
                 raise accounts_exceptions.CountryRequiredForPrivateAPIKeyError()
 
         return True
 
-    def _get_status_by_api_category(self):
-        api_instance = self.context.get('api_instance')
-        request_user = core_utilities.get_current_user(context=self.context)
-
+    def _get_status_by_api_category(self, api_instance, request_user):
         # If API key is created for a Public API, then update status as APPROVED
         # If API key is created by Admin/Superuser, then also mark it as APPROVED
         if (
@@ -369,16 +494,31 @@ class CreateAPIKeysSerializer(serializers.ModelSerializer):
         return accounts_models.APIKey.INITIATED
 
     def create(self, validated_data):
-        self._validate_active_api_key_count_error(validated_data)
+        api_instance = self.context.get('api_instance')
         active_countries_list = validated_data.pop('active_countries_list', [])
+        request_user = core_utilities.get_current_user(context=self.context)
+
+        if account_utilities.is_giga_meter_api(api_instance):
+            self._validate_active_api_key_count_for_giga_meter(
+                validated_data,
+                api_instance,
+                request_user,
+                active_countries_list
+            )
+        else:
+            self._validate_active_api_key_count_error(
+                validated_data,
+                api_instance,
+                request_user,
+                active_countries_list
+            )
 
         with transaction.atomic():
-            request_user = core_utilities.get_current_user(context=self.context)
             # set created_by and last_modified_by value
             if request_user is not None:
                 validated_data['user'] = request_user
                 validated_data['api_key'] = core_utilities.get_random_string(264)
-                validated_data['status'] = self._get_status_by_api_category()
+                validated_data['status'] = self._get_status_by_api_category(api_instance, request_user)
                 validated_data['created_by'] = validated_data.get('created_by') or request_user
                 validated_data['last_modified_by'] = validated_data.get('last_modified_by') or request_user
                 validated_data['valid_to'] = core_utilities.get_current_datetime_object().date() + timedelta(days=90)
@@ -741,6 +881,77 @@ class UpdateAPIKeysForExtensionSerializer(serializers.ModelSerializer):
             if len(request_approvers) > 0:
                 account_utilities.send_email_over_mailjet_service(request_approvers, **email_content)
         return instance
+
+
+class UpdateAPIKeysForAPICategoriesSerializer(serializers.ModelSerializer):
+    """
+    UpdateAPIKeysForAPICategoriesSerializer
+        Serializer to add the API category to an API key.
+    """
+
+    active_api_categories_list = serializers.JSONField(required=True)
+
+    class Meta:
+        model = accounts_models.APIKey
+        read_only_fields = (
+            'id',
+            'status',
+            'api',
+            'user',
+        )
+
+        fields = read_only_fields + (
+            'active_api_categories_list',
+        )
+
+    def update(self, instance, validated_data):
+        """
+        update
+            This method is used to update API key + API Category relationship
+        :param instance:
+        :param validated_data:
+        :return:
+        """
+        request_user = core_utilities.get_current_user(context=self.context)
+        active_api_categories_list = validated_data.pop('active_api_categories_list', [])
+        instance.active_categories.all().update(
+            deleted=core_utilities.get_current_datetime_object(),
+            last_modified_by=request_user,
+        )
+
+        for category_id in active_api_categories_list:
+            api_key_category_data = {
+                'api_key': instance.id,
+                'api_category': category_id,
+            }
+
+            api_key_category_relationships = APIKeyAPICategoryRelationshipSerializer(
+                data=api_key_category_data,
+                context=self.context,
+            )
+            api_key_category_relationships.is_valid(raise_exception=True)
+            api_key_category_relationships.save()
+
+        # Once API Key - Category relationship is created, send the status email to the user
+        if request_user is not None:
+            email_subject = account_config.api_key_api_category_on_update_email_subject_format % (
+                core_utilities.get_project_title(), instance.api.name,
+            )
+            email_message = account_config.api_key_api_category_on_update_email_message_format
+            email_content = {'subject': email_subject, 'message': email_message}
+            account_utilities.send_standard_email(request_user, email_content)
+        return instance
+
+    def to_representation(self, api_key):
+        all_category_ids = list(api_key.active_categories.all().values_list('api_category_id', flat=True))
+        if len(all_category_ids) > 0:
+            active_api_categories_list = list(accounts_models.APICategory.objects.filter(
+                id__in=all_category_ids).values('id', 'code', 'name', 'is_default'))
+        else:
+            active_api_categories_list = []
+
+        setattr(api_key, 'active_api_categories_list', active_api_categories_list)
+        return super().to_representation(api_key)
 
 
 class MessageListSerializer(serializers.ModelSerializer):

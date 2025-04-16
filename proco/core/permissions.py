@@ -459,3 +459,21 @@ class CanUpdateAdvanceFilter(ProcoBasePermission):
 class CanPublishAdvanceFilter(ProcoBasePermission):
     method = 'PUT'
     permission_name = RolePermission.CAN_PUBLISH_ADVANCE_FILTER
+
+
+class CanDoCRUDonAPICategories(ProcoBasePermission):
+    method = None
+    permission_name = RolePermission.CAN_APPROVE_REJECT_API_KEY
+
+    def has_permission(self, request, view):
+        if request.user.is_anonymous:
+            return False
+
+        if request.user.is_staff or request.user.is_superuser:
+            return True
+
+        is_super_allowed = self._is_super_allowed(request, view)
+        if is_super_allowed:
+            return True
+
+        return self.check_permission(request, view)

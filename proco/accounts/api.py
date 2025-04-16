@@ -8,7 +8,7 @@ import uuid
 from django.conf import settings
 from django.contrib.admin.models import LogEntry
 from django.db.models import Case, IntegerField, Value, When
-from django.db.models import Q
+from django.db.models import Q, F
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_control
@@ -72,6 +72,54 @@ class APIsListAPIView(BaseModelViewSet):
     }
 
 
+class APICategoriesViewSet(BaseModelViewSet):
+    """
+    APICategoriesViewSet
+        This class is used to do CRUD on API Categories.
+        Inherits: BaseModelViewSet
+    """
+    model = accounts_models.APICategory
+    serializer_class = serializers.APICategoriesCRUDSerializer
+
+    action_serializers = {
+        'create': serializers.APICategoriesCRUDSerializer,
+        'partial_update': serializers.APICategoriesCRUDSerializer,
+    }
+
+    permission_classes = (
+        core_permissions.IsUserAuthenticated,
+        core_permissions.CanDoCRUDonAPICategories,
+    )
+
+    filter_backends = (
+        DjangoFilterBackend,
+        SearchFilter,
+    )
+
+    ordering_fields = ( 'api__name', 'name', 'last_modified_at')
+    apply_query_pagination = True
+
+    filterset_fields = {
+        'name': ['iexact', 'in', 'exact'],
+        'api_id': ['exact', 'in'],
+    }
+
+    search_fields = ['api__name', 'name', 'description']
+    permit_list_expands = ['created_by', 'api', 'last_modified_by']
+
+    def update_serializer_context(self, context):
+        api_instance = None
+
+        if self.kwargs.get('pk'):
+            api_instance = accounts_models.APICategory.objects.filter(id=self.kwargs.get('pk')).first().api
+        elif self.request.data.get('api'):
+            api_instance = accounts_models.API.objects.filter(id=self.request.data.get('api')).first()
+
+        if api_instance is not None:
+            context['api_instance'] = api_instance
+        return context
+
+
 class APIKeysViewSet(BaseModelViewSet):
     """
     APIKeysViewSet
@@ -129,6 +177,19 @@ class APIKeysViewSet(BaseModelViewSet):
             queryset = queryset.filter(
                 active_countries__country_id__in=[c_id.strip() for c_id in query_params['country_id__in'].split(',')],
                 active_countries__deleted__isnull=True,
+            )
+
+        if 'api_category_id' in query_param_keys:
+            queryset = queryset.filter(
+                active_categories__api_category_id=query_params['api_category_id'],
+                active_categories__deleted__isnull=True,
+            )
+        elif 'api_category__in' in query_param_keys:
+            queryset = queryset.filter(
+                active_categories__api_category_id__in=[
+                    c_id.strip() for c_id in query_params['api_category__in'].split(',')
+                ],
+                active_categories__deleted__isnull=True,
             )
 
         if not core_utilities.is_superuser(request_user) and not has_approval_permission:
@@ -198,7 +259,7 @@ class APIKeysViewSet(BaseModelViewSet):
 class APIKeysRequestExtensionViewSet(BaseModelViewSet):
     """
     APIKeysRequestExtensionViewSet
-        This class is used to list all API keys.
+        This class is used to update the API key valid_to date value.
         Inherits: BaseModelViewSet
     """
     model = accounts_models.APIKey
@@ -207,6 +268,33 @@ class APIKeysRequestExtensionViewSet(BaseModelViewSet):
     permission_classes = (
         core_permissions.IsUserAuthenticated,
     )
+
+
+class APIKeysAPICategoriesViewSet(BaseModelViewSet):
+    """
+    APIKeysAPICategoriesViewSet
+        This class is used to assign an API category to the API key.
+        Inherits: BaseModelViewSet
+    """
+    model = accounts_models.APIKey
+    serializer_class = serializers.UpdateAPIKeysForAPICategoriesSerializer
+
+    permission_classes = (
+        core_permissions.IsUserAuthenticated,
+        core_permissions.CanApproveRejectAPIKeyorAPIKeyExtension,
+    )
+
+    def update_serializer_context(self, context):
+        api_instance = None
+
+        if self.kwargs.get('pk'):
+            api_instance = accounts_models.APIKey.objects.filter(id=self.kwargs.get('pk')).first().api
+        elif self.request.data.get('api'):
+            api_instance = accounts_models.API.objects.filter(id=self.request.data.get('api')).first()
+
+        if api_instance is not None:
+            context['api_instance'] = api_instance
+        return context
 
 
 class ValidateAPIKeyViewSet(APIView):
@@ -227,7 +315,16 @@ class ValidateAPIKeyViewSet(APIView):
         )
 
         if queryset.exists():
-            return Response(status=rest_status.HTTP_200_OK)
+            all_categories = list(queryset.filter(
+                active_categories__deleted__isnull=True,
+                active_categories__api_category__deleted__isnull=True,
+            ).annotate(
+                api_category_id=F('active_categories__api_category__id'),
+                api_category_name=F('active_categories__api_category__name'),
+                api_category_code=F('active_categories__api_category__code'),
+                api_category_is_default=F('active_categories__api_category__is_default'),
+            ).values('api_category_id', 'api_category_name', 'api_category_code', 'api_category_is_default'))
+            return Response(status=rest_status.HTTP_200_OK, data=all_categories)
         return Response(status=rest_status.HTTP_404_NOT_FOUND, data={'detail': 'Please enter valid api key.'})
 
 
