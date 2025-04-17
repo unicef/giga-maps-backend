@@ -78,9 +78,20 @@ steps:
 
 # Docker build and push
 - task: Docker@2
-  displayName: Dev - Build and Push image
+  displayName: Dev - Build image
   inputs:
-    command: buildAndPush
+    command: 'build'
+    repository: $(imageRepositoryDev)
+    dockerfile: $(dockerfilePath)
+    containerRegistry: $(dockerRegistryServiceConnection)
+    tags: |
+      $(tag)
+    arguments: 
+      --build-arg=SSH_PASSWD=$(SSH_PASSWD)
+- task: Docker@2
+  displayName: Dev - Push image
+  inputs:
+    command: 'push'
     repository: $(imageRepositoryDev)
     dockerfile: $(dockerfilePath)
     containerRegistry: $(dockerRegistryServiceConnection)
@@ -88,14 +99,30 @@ steps:
       $(tag)
 
 - task: Docker@2
-  displayName: Stg - Build and Push image
+  displayName: Stg - Build image
   condition:
       and(
         succeeded(),
         eq(variables['Build.SourceBranch'], 'refs/heads/staging')
       )
   inputs:
-    command: buildAndPush
+    command: 'build'
+    repository: $(imageRepositoryStg)
+    dockerfile: $(dockerfilePath)
+    containerRegistry: $(dockerRegistryServiceConnection)
+    tags: |
+      $(tag)
+    arguments: 
+      --build-arg=SSH_PASSWD=$(SSH_PASSWD)
+- task: Docker@2
+  displayName: Stg - Push image
+  condition:
+      and(
+        succeeded(),
+        eq(variables['Build.SourceBranch'], 'refs/heads/staging')
+      )
+  inputs:
+    command: 'push'
     repository: $(imageRepositoryStg)
     dockerfile: $(dockerfilePath)
     containerRegistry: $(dockerRegistryServiceConnection)
@@ -103,14 +130,30 @@ steps:
       $(tag)
 
 - task: Docker@2
-  displayName: Prod - Build and Push image
+  displayName: Prod - Build image
   condition:
       and(
         succeeded(),
         startsWith(variables['Build.SourceBranch'], 'refs/tags/release-')
       )
   inputs:
-    command: buildAndPush
+    command: 'build'
+    repository: $(imageRepositoryProd)
+    dockerfile: $(dockerfilePath)
+    containerRegistry: $(dockerRegistryServiceConnection)
+    tags: |
+      $(tag)
+    arguments: 
+      --build-arg=SSH_PASSWD=$(SSH_PASSWD)
+- task: Docker@2
+  displayName: Prod - Push image
+  condition:
+      and(
+        succeeded(),
+        startsWith(variables['Build.SourceBranch'], 'refs/tags/release-')
+      )
+  inputs:
+    command: 'push'
     repository: $(imageRepositoryProd)
     dockerfile: $(dockerfilePath)
     containerRegistry: $(dockerRegistryServiceConnection)
