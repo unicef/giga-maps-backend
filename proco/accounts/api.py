@@ -324,7 +324,20 @@ class ValidateAPIKeyViewSet(APIView):
                 api_category_code=F('active_categories__api_category__code'),
                 api_category_is_default=F('active_categories__api_category__is_default'),
             ).values('api_category_id', 'api_category_name', 'api_category_code', 'api_category_is_default'))
-            return Response(status=rest_status.HTTP_200_OK, data=all_categories)
+
+            if len(all_categories) > 0 and all_categories[0]['api_category_id']:
+                return Response(status=rest_status.HTTP_200_OK, data=all_categories)
+            else:
+                default_categories = list(accounts_models.APICategory.objects.filter(
+                    is_default=True,
+                    api_id=request.data.get('api_id'),
+                ).annotate(
+                    api_category_id=F('id'),
+                    api_category_name=F('name'),
+                    api_category_code=F('code'),
+                    api_category_is_default=F('is_default'),
+                ).values('api_category_id', 'api_category_name', 'api_category_code', 'api_category_is_default'))
+                return Response(status=rest_status.HTTP_200_OK, data=default_categories)
         return Response(status=rest_status.HTTP_404_NOT_FOUND, data={'detail': 'Please enter valid api key.'})
 
 
