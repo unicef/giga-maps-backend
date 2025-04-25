@@ -367,7 +367,10 @@ class APIKeysListSerializer(FlexFieldsModelSerializer):
             active_category_list = list(accounts_models.APICategory.objects.filter(
                 id__in=all_category_ids).values('id', 'name', 'code', 'is_default'))
         else:
-            active_category_list = []
+            active_category_list = list(accounts_models.APICategory.objects.filter(
+                is_default=True,
+                api=api_key.api,
+            ).values('id', 'name', 'code', 'is_default'))
 
         setattr(api_key, 'active_api_categories_list', active_category_list)
 
@@ -948,7 +951,10 @@ class UpdateAPIKeysForAPICategoriesSerializer(serializers.ModelSerializer):
             active_api_categories_list = list(accounts_models.APICategory.objects.filter(
                 id__in=all_category_ids).values('id', 'code', 'name', 'is_default'))
         else:
-            active_api_categories_list = []
+            active_api_categories_list = list(accounts_models.APICategory.objects.filter(
+                is_default=True,
+                api=api_key.api,
+            ).values('id', 'name', 'code', 'is_default'))
 
         setattr(api_key, 'active_api_categories_list', active_api_categories_list)
         return super().to_representation(api_key)
