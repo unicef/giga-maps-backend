@@ -113,3 +113,10 @@ pipenv run gunicorn config.wsgi:application -b 0.0.0.0:8000 -w 8 --timeout=300
 #
 # To sync the QoS missed data based on dates via scheduler:
 # pipenv run python manage.py data_loss_recovery_for_qos_dates --pull_data --aggregate -start_date='01-03-2025' -end_date='02-03-2025' -country_code='MNG' --schedule
+
+
+
+# pipenv run python manage.py populate_school_master_data_for_all_schools --populate_country_latest_school_master_data_version
+# pipenv run python manage.py populate_school_master_data_for_all_schools --populate_school_master_status_model_data -country_id=222
+# pipenv run python manage.py load_system_data_layers --update_data_sources
+# pipenv run python manage.py load_column_configurations --update_configurations

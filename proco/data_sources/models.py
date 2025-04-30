@@ -12,7 +12,7 @@ from proco.locations.models import Country
 from proco.schools import models as school_models
 
 
-class SchoolMasterData(TimeStampedModel, models.Model):
+class SchoolMasterData(TimeStampedModel, core_models.BaseSchoolMaster):
     """
     SchoolMasterData
         This class define model used to store School Master Data.
@@ -52,79 +52,43 @@ class SchoolMasterData(TimeStampedModel, models.Model):
     education_level_govt = models.CharField(blank=True, null=True, max_length=255)  # School.education_level_govt
     school_area_type = models.CharField(blank=True, null=True, max_length=255)  # School.environment
     school_funding_type = models.CharField(blank=True, null=True, max_length=255)  # School.school_type
-    school_establishment_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
 
-    # SchoolWeeklyStatus Fields
-    download_speed_contracted = models.FloatField(blank=True, default=None, null=True)  # download_speed_contracted
-    num_computers_desired = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_computers_desired
-    electricity_type = models.CharField(blank=True, null=True, max_length=255)  # electricity_type
-    num_adm_personnel = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_adm_personnel
-    num_students = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_students
-    num_teachers = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_teachers
-    num_classrooms = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_classroom
-    num_latrines = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_latrines
-    water_availability = models.CharField(blank=True, null=True, max_length=255)  # running_water
-    electricity_availability = models.CharField(blank=True, null=True, max_length=255)  # electricity_availability
-    computer_lab = models.CharField(blank=True, null=True, max_length=255)  # computer_lab
-    num_computers = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_computers
-    connectivity_govt = models.CharField(blank=True, null=True, max_length=255)  # connectivity
-    connectivity_type_govt = models.CharField(blank=True, null=True, max_length=255)  # connectivity_type
-    cellular_coverage_availability = models.CharField(blank=True, null=True, max_length=255)  # coverage_availability
-    cellular_coverage_type = models.CharField(blank=True, null=True, max_length=255)  # coverage_type
-    fiber_node_distance = models.FloatField(blank=True, default=None, null=True)  # fiber_node_distance
-    microwave_node_distance = models.FloatField(blank=True, default=None, null=True)  # microwave_node_distance
+    school_establishment_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True) # SchoolMasterStatus.establishment_year
+    water_availability = models.CharField(blank=True, null=True, max_length=255)  # SchoolMasterStatus.running_water
+    electricity_availability = models.CharField(blank=True, null=True, max_length=255)  # SchoolMasterStatus.electricity_availability
+    computer_lab = models.CharField(blank=True, null=True, max_length=255)  # SchoolMasterStatus.computer_lab
 
-    schools_within_1km = models.PositiveIntegerField(blank=True, default=None, null=True)  # schools_within_1km
-    schools_within_2km = models.PositiveIntegerField(blank=True, default=None, null=True)  # schools_within_2km
-    schools_within_3km = models.PositiveIntegerField(blank=True, default=None, null=True)  # schools_within_3km
+    connectivity_govt = models.CharField(blank=True, null=True, max_length=255)  # SchoolWeeklyStatus.connectivity
+    connectivity_type_govt = models.CharField(blank=True, null=True, max_length=255)  # SchoolWeeklyStatus.connectivity_type
+    cellular_coverage_availability = models.CharField(blank=True, null=True, max_length=255)  # SchoolWeeklyStatus.coverage_availability
+    cellular_coverage_type = models.CharField(blank=True, null=True, max_length=255)  # SchoolWeeklyStatus.coverage_type
 
-    nearest_LTE_distance = models.FloatField(blank=True, default=None, null=True)  # nearest_lte_distance
-    nearest_UMTS_distance = models.FloatField(blank=True, default=None, null=True)  # nearest_umts_distance
-    nearest_GSM_distance = models.FloatField(blank=True, default=None, null=True)  # nearest_gsm_distance
-    nearest_NR_distance = models.FloatField(blank=True, default=None, null=True)  # nearest_nr_distance
+    nearest_LTE_distance = models.FloatField(blank=True, default=None, null=True)  # SchoolMasterStatus.nearest_lte_distance
+    nearest_UMTS_distance = models.FloatField(blank=True, default=None, null=True)  # SchoolMasterStatus.nearest_umts_distance
+    nearest_GSM_distance = models.FloatField(blank=True, default=None, null=True)  # SchoolMasterStatus.nearest_gsm_distance
+    nearest_NR_distance = models.FloatField(blank=True, default=None, null=True)  # SchoolMasterStatus.nearest_nr_distance
 
-    pop_within_1km = models.PositiveIntegerField(blank=True, default=None, null=True)  # pop_within_1km
-    pop_within_2km = models.PositiveIntegerField(blank=True, default=None, null=True)  # pop_within_2km
-    pop_within_3km = models.PositiveIntegerField(blank=True, default=None, null=True)  # pop_within_3km
-
-    school_data_source = models.CharField(blank=True, null=True, max_length=255)  # school_data_source
-    # school_data_collection_year
+    school_data_source = models.CharField(blank=True, null=True, max_length=255)  # SchoolMasterStatus.data_source
+    # SchoolMasterStatus.data_collection_year
     school_data_collection_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
-    # school_data_collection_modality
+    # SchoolMasterStatus.data_collection_modality
     school_data_collection_modality = models.CharField(blank=True, null=True, max_length=255)
-    # school_location_ingestion_timestamp
+    # SchoolMasterStatus.location_ingestion_timestamp
     school_location_ingestion_timestamp = core_models.CustomDateTimeField(null=True, blank=True)
-    # connectivity_govt_ingestion_timestamp
-    connectivity_govt_ingestion_timestamp = core_models.CustomDateTimeField(null=True, blank=True)
-    # connectivity_govt_collection_year
-    connectivity_govt_collection_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
-    disputed_region = models.CharField(blank=True, null=True, max_length=255)  # disputed_region
+
+    disputed_region = models.CharField(blank=True, null=True, max_length=255)  # SchoolMasterStatus.disputed_region
 
     # SchoolRealTimeRegistration
     connectivity_RT = models.CharField(blank=True, null=True, max_length=255)  # rt_registered
     connectivity_RT_datasource = models.CharField(blank=True, null=True, max_length=255)  # rt_source
     connectivity_RT_ingestion_timestamp = core_models.CustomDateTimeField(null=True, blank=True)  # rt_registration_date
 
-    download_speed_benchmark = models.FloatField(blank=True, default=None, null=True)  # download_speed_benchmark
-
     # New fields on 23rd Sept
-    computer_availability = models.CharField(blank=True, null=True, max_length=255)  # computer_availability
+    computer_availability = models.CharField(blank=True, null=True, max_length=255)  # SchoolMasterStatus.computer_availability
 
-    num_students_girls = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_students_girls
-    num_students_boys = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_students_boys
-    num_students_other = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_students_other
-    num_teachers_female = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_teachers_female
-    num_teachers_male = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_teachers_male
-
-    teachers_trained  = models.CharField(blank=True, null=True, max_length=255)  # teachers_trained
-    sustainable_business_model = models.CharField(blank=True, null=True, max_length=255)  # sustainable_business_model
-    device_availability = models.CharField(blank=True, null=True, max_length=255)  # device_availability
-
-    num_tablets = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_tablets
-    num_robotic_equipment = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_robotic_equipment
-
-    building_id_govt = models.CharField(blank=True, null=True, max_length=255)  # building_id_govt
-    num_schools_per_building = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_schools_per_building
+    teachers_trained  = models.CharField(blank=True, null=True, max_length=255)  # SchoolMasterStatus.teachers_trained
+    sustainable_business_model = models.CharField(blank=True, null=True, max_length=255)  # SchoolMasterStatus.sustainable_business_model
+    device_availability = models.CharField(blank=True, null=True, max_length=255)  # SchoolMasterStatus.device_availability
 
     # No Mapping
     connectivity = models.CharField(blank=True, null=True, max_length=255)
@@ -191,14 +155,16 @@ class SchoolMasterData(TimeStampedModel, models.Model):
     def get_last_version(cls, iso3_format):
         last_data_version = cache.get(cls.DATA_VERSION_CACHE_KEY.format(iso3_format))
         if not last_data_version:
-            latest_records = cls.objects.filter(country__iso3_format=iso3_format).order_by('-created').first()
-            if latest_records:
-                last_data_version = latest_records.version
+            country_object = Country.objects.get(iso3_format=iso3_format)
+            last_data_version = country_object.latest_school_master_data_version
         return last_data_version
 
     @classmethod
     def set_last_version(cls, value, iso3_format):
         cache.set(cls.DATA_VERSION_CACHE_KEY.format(iso3_format), value)
+        country_object = Country.objects.get(iso3_format=iso3_format)
+        country_object.latest_school_master_data_version = value
+        country_object.save(update_fields=['latest_school_master_data_version', ])
 
 
 class DailyCheckAppMeasurementData(models.Model):

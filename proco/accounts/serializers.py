@@ -27,7 +27,7 @@ from proco.custom_auth import models as auth_models
 from proco.custom_auth.serializers import ExpandUserSerializer
 from proco.custom_auth.utils import get_user_emails_for_permissions
 from proco.locations import models as locations_models
-from proco.schools.models import School
+from proco.schools.models import School, SchoolMasterStatus
 from proco.utils import dates as date_utilities
 
 
@@ -2111,6 +2111,7 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
     def include_none_filter(self, parameter_table, parameter_field):
         select_qs = School.objects.filter(country_id=self.context['country_id'])
         none_check_sql = f'"schools_school"."{parameter_field}" IS NULL'
+
         if parameter_table == 'school_static':
             last_weekly_status_field = 'last_weekly_status__{}'.format(parameter_field)
             select_qs = select_qs.select_related('last_weekly_status').annotate(**{
@@ -2118,21 +2119,37 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
             })
 
             none_check_sql = f'"connection_statistics_schoolweeklystatus"."{parameter_field}" IS NULL'
+
+        elif parameter_table == 'school_master':
+            last_master_status_field = 'last_master_status__{}'.format(parameter_field)
+            select_qs = select_qs.select_related('last_master_status').annotate(**{
+                parameter_table + '_' + parameter_field: F(last_master_status_field)
+            })
+
+            none_check_sql = f'"schools_schoolmasterstatus"."{parameter_field}" IS NULL'
+
         return select_qs.extra(where=[none_check_sql]).exists()
 
     def update_range_filter_options(self, options, parameter_table, parameter_field, parameter_options):
-        last_weekly_status_field = 'last_weekly_status__{}'.format(parameter_field)
-
         options['include_none_filter'] = self.include_none_filter(parameter_table, parameter_field)
 
         if options.get('range_auto_compute', False):
             select_qs = School.objects.filter(country_id=self.context['country_id'])
             if parameter_table == 'school_static':
+                last_weekly_status_field = 'last_weekly_status__{}'.format(parameter_field)
                 parameter_field_props = SchoolWeeklyStatus._meta.get_field(parameter_field)
 
                 select_qs = select_qs.select_related('last_weekly_status').values('country_id').annotate(
                     min_value=Min(F(last_weekly_status_field)),
                     max_value=Max(F(last_weekly_status_field)),
+                )
+            elif parameter_table == 'school_master':
+                last_master_status_field = 'last_master_status__{}'.format(parameter_field)
+                parameter_field_props = SchoolMasterStatus._meta.get_field(parameter_field)
+
+                select_qs = select_qs.select_related('last_master_status').values('country_id').annotate(
+                    min_value=Min(F(last_master_status_field)),
+                    max_value=Max(F(last_master_status_field)),
                 )
             else:
                 parameter_field_props = School._meta.get_field(parameter_field)
@@ -2145,7 +2162,11 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
             country_range_json = list(
                 select_qs.values('country_id', 'min_value', 'max_value').order_by('country_id').distinct())[-1]
 
-            if country_range_json and country_range_json['min_value'] is not None and country_range_json['max_value'] is not None:
+            if (
+                country_range_json and
+                country_range_json['min_value'] is not None and
+                country_range_json['max_value'] is not None
+            ):
                 del country_range_json['country_id']
 
                 country_range_json['min_value'] = floor(country_range_json['min_value'])
@@ -2174,7 +2195,6 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
 
     def update_boolean_filter_options(self, options, parameter_table, parameter_field):
         join_condition = ''
-        filter_condition = ''
 
         select_qry = """
         SELECT DISTINCT {col} AS {col_name}
@@ -2182,21 +2202,23 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
         {join_condition}
         WHERE schools.deleted IS NULL
             AND schools.country_id = {c_id}
-            {filter_condition}
         ORDER BY {col_name} DESC NULLS LAST
         """
 
         if parameter_table == 'school_static':
             join_condition = ('INNER JOIN connection_statistics_schoolweeklystatus AS school_static '
                               'ON schools.last_weekly_status_id = school_static.id')
-            filter_condition = 'AND school_static.deleted IS NULL'
+
+        elif parameter_table == 'school_master':
+            join_condition = ('INNER JOIN schools_schoolmasterstatus AS school_master '
+                              'ON schools.last_master_status_id = school_master.id')
 
         sql_qry = select_qry.format(
             col_name=parameter_field,
             col=parameter_table + '.' + parameter_field,
             c_id=self.context['country_id'],
             join_condition=join_condition,
-            filter_condition=filter_condition)
+        )
         choices = []
         data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__)
         for value in data:
@@ -2226,7 +2248,6 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
 
             if options.get('live_choices', False):
                 join_condition = ''
-                filter_condition = ''
 
                 select_qry = """
                 SELECT DISTINCT {col} AS {col_name}
@@ -2234,21 +2255,24 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
                 {join_condition}
                 WHERE schools.deleted IS NULL
                     AND schools.country_id = {c_id}
-                    {filter_condition}
                 ORDER BY {col_name} ASC NULLS LAST
                 """
 
                 if parameter_table == 'school_static':
                     join_condition = ('INNER JOIN connection_statistics_schoolweeklystatus AS school_static '
                                       'ON schools.last_weekly_status_id = school_static.id')
-                    filter_condition = 'AND school_static.deleted IS NULL'
+
+                elif parameter_table == 'school_master':
+                    join_condition = ('INNER JOIN schools_schoolmasterstatus AS school_master '
+                                      'ON schools.last_master_status_id = school_master.id')
 
                 sql_qry = select_qry.format(
                     col_name=parameter_field,
-                    col=f"LOWER(NULLIF({parameter_table + '.' + parameter_field}, ''))" if field_type == 'str' else parameter_table + '.' + parameter_field,
+                    col=f"LOWER(NULLIF({parameter_table + '.' + parameter_field}, ''))"
+                        if field_type == 'str' else parameter_table + '.' + parameter_field,
                     c_id=self.context['country_id'],
                     join_condition=join_condition,
-                    filter_condition=filter_condition)
+                )
                 choices = []
                 data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__)
                 for value in data:

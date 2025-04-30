@@ -190,65 +190,9 @@ def aggregate_school_daily_status_to_school_weekly_status(country, date) -> bool
             ).last()
 
             if prev_weekly:
-                school_weekly.num_students = prev_weekly.num_students
-                school_weekly.num_teachers = prev_weekly.num_teachers
-                school_weekly.num_classroom = prev_weekly.num_classroom
-                school_weekly.num_latrines = prev_weekly.num_latrines
-                school_weekly.running_water = prev_weekly.running_water
-                school_weekly.electricity_availability = prev_weekly.electricity_availability
-                school_weekly.computer_lab = prev_weekly.computer_lab
-                school_weekly.num_computers = prev_weekly.num_computers
-
                 school_weekly.connectivity_type = prev_weekly.connectivity_type
                 school_weekly.coverage_availability = prev_weekly.coverage_availability
                 school_weekly.coverage_type = prev_weekly.coverage_type
-
-                school_weekly.download_speed_contracted = prev_weekly.download_speed_contracted
-                school_weekly.num_computers_desired = prev_weekly.num_computers_desired
-                school_weekly.electricity_type = prev_weekly.electricity_type
-                school_weekly.num_adm_personnel = prev_weekly.num_adm_personnel
-
-                school_weekly.fiber_node_distance = prev_weekly.fiber_node_distance
-                school_weekly.microwave_node_distance = prev_weekly.microwave_node_distance
-
-                school_weekly.schools_within_1km = prev_weekly.schools_within_1km
-                school_weekly.schools_within_2km = prev_weekly.schools_within_2km
-                school_weekly.schools_within_3km = prev_weekly.schools_within_3km
-
-                school_weekly.nearest_lte_distance = prev_weekly.nearest_lte_distance
-                school_weekly.nearest_umts_distance = prev_weekly.nearest_umts_distance
-                school_weekly.nearest_gsm_distance = prev_weekly.nearest_gsm_distance
-                school_weekly.nearest_nr_distance = prev_weekly.nearest_nr_distance
-
-                school_weekly.pop_within_1km = prev_weekly.pop_within_1km
-                school_weekly.pop_within_2km = prev_weekly.pop_within_2km
-                school_weekly.pop_within_3km = prev_weekly.pop_within_3km
-
-                school_weekly.school_data_source = prev_weekly.school_data_source
-                school_weekly.school_data_collection_year = prev_weekly.school_data_collection_year
-                school_weekly.school_data_collection_modality = prev_weekly.school_data_collection_modality
-                school_weekly.school_location_ingestion_timestamp = prev_weekly.school_location_ingestion_timestamp
-                school_weekly.connectivity_govt_ingestion_timestamp = prev_weekly.connectivity_govt_ingestion_timestamp
-                school_weekly.connectivity_govt_collection_year = prev_weekly.connectivity_govt_collection_year
-                school_weekly.disputed_region = prev_weekly.disputed_region
-
-                school_weekly.download_speed_benchmark = prev_weekly.download_speed_benchmark
-
-                school_weekly.num_students_girls = prev_weekly.num_students_girls
-                school_weekly.num_students_boys = prev_weekly.num_students_boys
-                school_weekly.num_students_other = prev_weekly.num_students_other
-                school_weekly.num_teachers_female = prev_weekly.num_teachers_female
-                school_weekly.num_teachers_male = prev_weekly.num_teachers_male
-                school_weekly.num_tablets = prev_weekly.num_tablets
-                school_weekly.num_robotic_equipment = prev_weekly.num_robotic_equipment
-
-                school_weekly.computer_availability = prev_weekly.computer_availability
-                school_weekly.teachers_trained = prev_weekly.teachers_trained
-                school_weekly.sustainable_business_model = prev_weekly.sustainable_business_model
-                school_weekly.device_availability = prev_weekly.device_availability
-
-                school_weekly.building_id_govt = prev_weekly.building_id_govt
-                school_weekly.num_schools_per_building = prev_weekly.num_schools_per_building
 
         school_weekly.save()
 

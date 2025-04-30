@@ -56,6 +56,8 @@ class Country(GeometryMixin, TimeStampedModel):
         related_name='_country',
     )
 
+    latest_school_master_data_version = models.PositiveIntegerField(blank=True, default=None, null=True)
+
     deleted = CustomDateTimeField(db_index=True, null=True, blank=True)
 
     objects = CountryManager()
