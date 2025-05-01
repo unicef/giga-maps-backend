@@ -2815,3 +2815,20 @@ class PublishedAdvanceFiltersViewSet(CachedListMixin, BaseModelViewSet):
     def update_serializer_context(self, context):
         context['country_id'] = self.kwargs.get('country_id')
         return context
+
+
+class AdvanceFilterChoicesViewSet(BaseModelViewSet):
+    """
+    AdvanceFilterChoicesViewSet
+    Cache Attr:
+        Auto Cache: Not required
+        Call Cache: Yes
+    """
+
+    model = accounts_models.AdvanceFilter
+    serializer_class = serializers.AdvanceFilterChoicesListSerializer
+
+    base_auth_permissions = (
+        core_permissions.IsUserAuthenticated,
+        core_permissions.CanPublishAdvanceFilter,
+    )
