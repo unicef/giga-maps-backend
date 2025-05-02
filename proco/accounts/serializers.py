@@ -2484,65 +2484,63 @@ class PublishAdvanceFilterSerializer(serializers.ModelSerializer):
         return instance
 
 
-class AdvanceFilterChoicesListSerializer(FlexFieldsModelSerializer):
+class ColumnConfigurationChoicesSerializer(FlexFieldsModelSerializer):
     values = serializers.SerializerMethodField()
 
     class Meta:
-        model = accounts_models.AdvanceFilter
+        model = accounts_models.ColumnConfiguration
         read_only_fields = fields = (
             'name',
+            'label',
             'type',
             'description',
             'values',
         )
 
     def get_values(self, instance):
-        options = instance.options
         choices = []
 
-        if isinstance(options, dict):
-            parameter_details = instance.column_configuration
-            parameter_field = parameter_details.name
-            field_type = parameter_details.type
-            parameter_table = parameter_details.table_alias
+        parameter_field = instance.name
+        field_type = instance.type
+        parameter_table = instance.table_alias
 
-            if options.get('live_choices', False):
-                join_condition = ''
-                filter_condition = ''
+        join_condition = ''
+        filter_condition = ''
 
-                select_qry = """
-                SELECT DISTINCT {col} AS {col_name}
-                FROM schools_school AS schools
-                {join_condition}
-                WHERE schools.deleted IS NULL
-                    {filter_condition}
-                ORDER BY {col_name} ASC NULLS LAST
-                """
+        select_qry = """
+        SELECT DISTINCT {col} AS {col_name}
+        FROM schools_school AS schools
+        {join_condition}
+        WHERE schools.deleted IS NULL
+            {filter_condition}
+        ORDER BY {col_name} ASC NULLS LAST
+        """
 
-                if parameter_table == 'school_static':
-                    join_condition = ('INNER JOIN connection_statistics_schoolweeklystatus AS school_static '
-                                      'ON schools.last_weekly_status_id = school_static.id')
-                    filter_condition = 'AND school_static.deleted IS NULL'
+        if parameter_table == 'school_static':
+            join_condition = ('INNER JOIN connection_statistics_schoolweeklystatus AS school_static '
+                              'ON schools.last_weekly_status_id = school_static.id')
+            filter_condition = 'AND school_static.deleted IS NULL'
 
-                sql_qry = select_qry.format(
-                    col_name=parameter_field,
-                    col=f"LOWER(NULLIF({parameter_table + '.' + parameter_field}, ''))" if field_type == 'str' else parameter_table + '.' + parameter_field,
-                    join_condition=join_condition,
-                    filter_condition=filter_condition)
+        sql_qry = select_qry.format(
+            col_name=parameter_field,
+            col=f"LOWER(NULLIF({parameter_table + '.' + parameter_field}, ''))"
+            if field_type == 'str' else parameter_table + '.' + parameter_field,
+            join_condition=join_condition,
+            filter_condition=filter_condition)
 
-                data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__)
-                for value in data:
-                    field_value = value[parameter_field]
-                    if core_utilities.is_blank_string(field_value):
-                        choices.append({
-                            'label': 'Unknown',
-                            'value': 'none'
-                        })
-                    else:
-                        choices.append({
-                            'label': field_value.title()
-                            if field_type == accounts_models.ColumnConfiguration.TYPE_STR else field_value,
-                            'value': field_value
-                        })
+        data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__)
+        for value in data:
+            field_value = value[parameter_field]
+            if core_utilities.is_blank_string(field_value):
+                choices.append({
+                    'label': 'Unknown',
+                    'value': 'none'
+                })
+            else:
+                choices.append({
+                    'label': field_value.title()
+                    if field_type == accounts_models.ColumnConfiguration.TYPE_STR else field_value,
+                    'value': field_value
+                })
 
         return choices

@@ -99,7 +99,7 @@ urlpatterns = [
     path('adv_filters/<int:pk>/publish/', api.AdvanceFiltersPublishViewSet.as_view({
         'put': 'partial_update',
     }), name='publish-advance-filter'),
-    path('adv_filters/<int:pk>/choices/', api.AdvanceFilterChoicesViewSet.as_view({
+    path('column_configurations/<int:pk>/choices/', api.ColumnConfigurationChoicesViewSet.as_view({
         'get': 'retrieve',
     }), name='retrieve-advance-filter-live-choices'),
     path('adv_filters/<str:status>/<int:country_id>/', api.PublishedAdvanceFiltersViewSet.as_view({

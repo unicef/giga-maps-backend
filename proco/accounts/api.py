@@ -2817,16 +2817,16 @@ class PublishedAdvanceFiltersViewSet(CachedListMixin, BaseModelViewSet):
         return context
 
 
-class AdvanceFilterChoicesViewSet(BaseModelViewSet):
+class ColumnConfigurationChoicesViewSet(BaseModelViewSet):
     """
-    AdvanceFilterChoicesViewSet
+    ColumnConfigurationChoicesViewSet
     Cache Attr:
         Auto Cache: Not required
         Call Cache: Yes
     """
 
-    model = accounts_models.AdvanceFilter
-    serializer_class = serializers.AdvanceFilterChoicesListSerializer
+    model = accounts_models.ColumnConfiguration
+    serializer_class = serializers.ColumnConfigurationChoicesSerializer
 
     base_auth_permissions = (
         core_permissions.IsUserAuthenticated,
