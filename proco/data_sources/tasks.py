@@ -29,7 +29,7 @@ from proco.data_sources import models as sources_models
 from proco.data_sources import utils as source_utilities
 from proco.data_sources.config import app_config as sources_config
 from proco.locations.models import Country, CountryAdminMetadata
-from proco.schools.models import School
+from proco.schools.models import School, SchoolMasterStatus
 from proco.taskapp import app
 from proco.utils.dates import format_date
 from proco.utils.tasks import populate_school_new_fields_task
@@ -266,11 +266,88 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                             'environment': environment,
                             'school_type': '' if core_utilities.is_blank_string(
                                 row.school_funding_type) else row.school_funding_type,
-                            'establishment_year': row.school_establishment_year,
                             'admin1': admin1_instance,
                             'admin2': admin2_instance,
                         },
                     )
+
+                    school_master_status, school_master_status_created = SchoolMasterStatus.objects.update_or_create(
+                        school=school,
+                        version=row.version,
+                        defaults={
+                            'establishment_year': row.school_establishment_year,
+                            'download_speed_contracted': row.download_speed_contracted,
+                            'num_computers_desired': row.num_computers_desired,
+                            'electricity_type': row.electricity_type,
+                            'num_adm_personnel': row.num_adm_personnel,
+                            'num_students': row.num_students,
+                            'num_teachers': row.num_teachers,
+                            'num_classrooms': row.num_classrooms,
+                            'num_latrines': row.num_latrines,
+                            'water_availability': None if core_utilities.is_blank_string(
+                                row.water_availability) else str(
+                                row.water_availability).lower() in core_configs.true_choices,
+                            'electricity_availability': None if core_utilities.is_blank_string(
+                                row.electricity_availability) else str(
+                                row.electricity_availability).lower() in core_configs.true_choices,
+                            'computer_lab': None if core_utilities.is_blank_string(row.computer_lab) else str(
+                                row.computer_lab).lower() in core_configs.true_choices,
+                            'num_computers': row.num_computers,
+                            'connectivity_govt': None if core_utilities.is_blank_string(row.connectivity_govt) else str(
+                                row.connectivity_govt).lower() in core_configs.true_choices,
+                            'connectivity_type_govt': row.connectivity_type_govt,
+                            'connectivity_type': row.connectivity_type,
+                            'connectivity_type_root': row.connectivity_type_root,
+                            'fiber_node_distance': row.fiber_node_distance,
+                            'microwave_node_distance': row.microwave_node_distance,
+                            'schools_within_1km': row.schools_within_1km,
+                            'schools_within_2km': row.schools_within_2km,
+                            'schools_within_3km': row.schools_within_3km,
+                            'nearest_lte_distance': row.nearest_LTE_distance,
+                            'nearest_umts_distance': row.nearest_UMTS_distance,
+                            'nearest_gsm_distance': row.nearest_GSM_distance,
+                            'nearest_nr_distance': row.nearest_NR_distance,
+                            'pop_within_1km': row.pop_within_1km,
+                            'pop_within_2km': row.pop_within_2km,
+                            'pop_within_3km': row.pop_within_3km,
+                            'school_data_source': row.school_data_source,
+                            'school_data_collection_year': row.school_data_collection_year,
+                            'school_data_collection_modality': row.school_data_collection_modality,
+                            'school_location_ingestion_timestamp': row.school_location_ingestion_timestamp,
+                            'connectivity_govt_ingestion_timestamp': row.connectivity_govt_ingestion_timestamp,
+                            'connectivity_govt_collection_year': row.connectivity_govt_collection_year,
+                            'disputed_region': str(row.disputed_region).lower() in core_configs.true_choices,
+                            'connectivity': None if core_utilities.is_blank_string(
+                                row.connectivity) else str(row.connectivity).lower() in core_configs.true_choices,
+                            'download_speed_benchmark': row.download_speed_benchmark * 1000 * 1000
+                            if row.download_speed_benchmark else None,
+                            'computer_availability': None if core_utilities.is_blank_string(
+                                row.computer_availability) else str(
+                                row.computer_availability).lower() in core_configs.true_choices,
+                            'num_students_girls': row.num_students_girls,
+                            'num_students_boys': row.num_students_boys,
+                            'num_students_other': row.num_students_other,
+                            'num_teachers_female': row.num_teachers_female,
+                            'num_teachers_male': row.num_teachers_male,
+                            'teachers_trained': None if core_utilities.is_blank_string(
+                                row.teachers_trained) else str(
+                                row.teachers_trained).lower() in core_configs.true_choices,
+                            'sustainable_business_model': None if core_utilities.is_blank_string(
+                                row.sustainable_business_model) else str(
+                                row.sustainable_business_model).lower() in core_configs.true_choices,
+                            'device_availability': None if core_utilities.is_blank_string(
+                                row.device_availability) else str(
+                                row.device_availability).lower() in core_configs.true_choices,
+                            'num_tablets': row.num_tablets,
+                            'num_robotic_equipment': row.num_robotic_equipment,
+                            'building_id_govt': row.building_id_govt,
+                            'num_schools_per_building': row.num_schools_per_building,
+                        },
+                    )
+
+                    if school_master_status_created:
+                        school.last_master_status = school_master_status
+                        school.save(update_fields=['last_master_status', ])
 
                     date = core_utilities.get_current_datetime_object().date()
                     school_weekly = statistics_models.SchoolWeeklyStatus.objects.filter(
@@ -307,21 +384,6 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                                 week=date.isocalendar()[1],
                             )
 
-                    school_weekly.num_students = row.num_students
-                    school_weekly.num_teachers = row.num_teachers
-                    school_weekly.num_classroom = row.num_classrooms
-                    school_weekly.num_latrines = row.num_latrines
-                    school_weekly.running_water = False \
-                        if core_utilities.is_blank_string(row.water_availability) \
-                        else str(row.water_availability).lower() in core_configs.true_choices
-                    school_weekly.electricity_availability = False \
-                        if core_utilities.is_blank_string(row.electricity_availability) \
-                        else str(row.electricity_availability).lower() in core_configs.true_choices
-                    school_weekly.computer_lab = False \
-                        if core_utilities.is_blank_string(row.computer_lab) \
-                        else str(row.computer_lab).lower() in core_configs.true_choices
-                    school_weekly.num_computers = row.num_computers
-
                     if core_utilities.is_blank_string(row.connectivity_govt):
                         school_weekly.connectivity = None
                     else:
@@ -344,66 +406,6 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                             coverage_type = statistics_models.SchoolWeeklyStatus.COVERAGE_NO
 
                     school_weekly.coverage_type = coverage_type
-
-                    school_weekly.download_speed_contracted = row.download_speed_contracted
-                    school_weekly.num_computers_desired = row.num_computers_desired
-                    school_weekly.electricity_type = row.electricity_type
-                    school_weekly.num_adm_personnel = row.num_adm_personnel
-
-                    school_weekly.fiber_node_distance = row.fiber_node_distance
-                    school_weekly.microwave_node_distance = row.microwave_node_distance
-
-                    school_weekly.schools_within_1km = row.schools_within_1km
-                    school_weekly.schools_within_2km = row.schools_within_2km
-                    school_weekly.schools_within_3km = row.schools_within_3km
-
-                    school_weekly.nearest_lte_distance = row.nearest_LTE_distance
-                    school_weekly.nearest_umts_distance = row.nearest_UMTS_distance
-                    school_weekly.nearest_gsm_distance = row.nearest_GSM_distance
-                    school_weekly.nearest_nr_distance = row.nearest_NR_distance
-
-                    school_weekly.pop_within_1km = row.pop_within_1km
-                    school_weekly.pop_within_2km = row.pop_within_2km
-                    school_weekly.pop_within_3km = row.pop_within_3km
-
-                    school_weekly.school_data_source = row.school_data_source
-                    school_weekly.school_data_collection_year = row.school_data_collection_year
-                    school_weekly.school_data_collection_modality = row.school_data_collection_modality
-                    school_weekly.school_location_ingestion_timestamp = row.school_location_ingestion_timestamp
-                    school_weekly.connectivity_govt_ingestion_timestamp = row.connectivity_govt_ingestion_timestamp
-                    school_weekly.connectivity_govt_collection_year = row.connectivity_govt_collection_year
-                    school_weekly.disputed_region = False if core_utilities.is_blank_string(
-                        row.disputed_region) else str(row.disputed_region).lower() in core_configs.true_choices
-
-                    download_speed_benchmark = row.download_speed_benchmark
-                    if download_speed_benchmark:
-                        # convert Mbps to bps
-                        school_weekly.download_speed_benchmark = download_speed_benchmark * 1000 * 1000
-
-                    school_weekly.num_students_girls = row.num_students_girls
-                    school_weekly.num_students_boys = row.num_students_boys
-                    school_weekly.num_students_other = row.num_students_other
-                    school_weekly.num_teachers_female = row.num_teachers_female
-                    school_weekly.num_teachers_male = row.num_teachers_male
-                    school_weekly.num_tablets = row.num_tablets
-                    school_weekly.num_robotic_equipment = row.num_robotic_equipment
-
-                    school_weekly.computer_availability = None \
-                        if core_utilities.is_blank_string(row.computer_availability) \
-                        else str(row.computer_availability).lower() in core_configs.true_choices
-                    school_weekly.teachers_trained = None \
-                        if core_utilities.is_blank_string(row.teachers_trained) \
-                        else str(row.teachers_trained).lower() in core_configs.true_choices
-                    school_weekly.sustainable_business_model = None \
-                        if core_utilities.is_blank_string(row.sustainable_business_model) \
-                        else str(row.sustainable_business_model).lower() in core_configs.true_choices
-                    school_weekly.device_availability = None \
-                        if core_utilities.is_blank_string(row.device_availability) \
-                        else str(row.device_availability).lower() in core_configs.true_choices
-
-                    school_weekly.building_id_govt = row.building_id_govt
-                    school_weekly.num_schools_per_building = row.num_schools_per_building
-
                     school_weekly.save()
 
                     rt_registered = None

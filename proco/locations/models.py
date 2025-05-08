@@ -1,6 +1,5 @@
 import numpy as np
 from django.contrib.gis.db.models import MultiPolygonField
-from django.contrib.gis.geos import GEOSGeometry, MultiPolygon, Polygon
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import ugettext as _
@@ -55,6 +54,8 @@ class Country(GeometryMixin, TimeStampedModel):
         on_delete=models.SET_NULL,
         related_name='_country',
     )
+
+    latest_school_master_data_version = models.PositiveIntegerField(blank=True, default=None, null=True)
 
     deleted = CustomDateTimeField(db_index=True, null=True, blank=True)
 

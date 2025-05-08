@@ -7,7 +7,8 @@ from proco.connection_statistics.models import (
     SchoolWeeklyStatus,
     SchoolRealTimeRegistration,
 )
-from proco.schools.models import School
+from proco.core import utils as core_utilities
+from proco.schools.models import School, SchoolMasterStatus
 
 
 class CountryWeeklyStatusSerializer(serializers.ModelSerializer):
@@ -378,19 +379,198 @@ class DetailCountryDailyStatusSerializer(CountryDailyStatusSerializer):
         fields = CountryDailyStatusUpdateRetrieveSerializer.Meta.fields
 
 
-class SchoolWeeklySummaryUpdateRetrieveSerializer(serializers.ModelSerializer):
+class SchoolMasterStatusSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = SchoolMasterStatus
+        fields = (
+            'download_speed_benchmark',
+            'num_students',
+            'num_teachers',
+            'num_classrooms',
+            'num_latrines',
+            'num_computers',
+            'water_availability',
+            'electricity_availability',
+            'computer_lab',
+        )
+
+
+class SchoolWeeklySummaryRetrieveSerializer(serializers.ModelSerializer):
     """
-    SchoolWeeklySummaryUpdateRetrieveSerializer
-        Serializer to create Country.
+    SchoolWeeklySummaryRetrieveSerializer
+        Serializer to retrieve a single record.
     """
+    school = serializers.IntegerField(source='school.id', read_only=True)
+
+    download_speed_benchmark = serializers.FloatField(
+        source='school.last_master_status.download_speed_benchmark', read_only=True)
+    num_students = serializers.IntegerField(
+        source='school.last_master_status.num_students', read_only=True)
+    num_teachers = serializers.IntegerField(
+        source='school.last_master_status.num_teachers', read_only=True)
+    num_classroom = serializers.IntegerField(
+        source='school.last_master_status.num_classrooms', read_only=False, default=None)
+    num_latrines = serializers.IntegerField(
+        source='school.last_master_status.num_latrines', read_only=True)
+    num_computers = serializers.IntegerField(
+        source='school.last_master_status.num_computers', read_only=True)
+    running_water = serializers.NullBooleanField(
+        source='school.last_master_status.water_availability', read_only=True)
+    electricity_availability = serializers.NullBooleanField(
+        source='school.last_master_status.electricity_availability', read_only=True)
+    computer_lab = serializers.NullBooleanField(
+        source='school.last_master_status.computer_lab', read_only=True)
 
     class Meta:
         model = SchoolWeeklyStatus
-        fields = '__all__'
+        fields = (
+            'id',
+            'year',
+            'week',
+            'date',
+            'connectivity_type',
+            'connectivity_latency',
+            'school',
+            'connectivity',
+            'connectivity_speed',
+            'download_speed_benchmark',
+            'coverage_availability',
+            'coverage_type',
+            'connectivity_upload_speed',
+            'num_students',
+            'num_teachers',
+            'num_classroom',
+            'num_latrines',
+            'num_computers',
+            'running_water',
+            'electricity_availability',
+            'computer_lab',
+        )
 
 
-class ListSchoolWeeklySummarySerializer(SchoolWeeklyStatusSerializer):
+class SchoolWeeklySummaryUpdateCreateSerializer(serializers.ModelSerializer):
+    """
+    SchoolWeeklySummaryUpdateCreateSerializer
+        Serializer to create/Update School Weekly Record.
+    """
+
+    download_speed_benchmark = serializers.FloatField(required=False)
+    num_students = serializers.IntegerField(required=False)
+    num_teachers = serializers.IntegerField(required=False)
+    num_classroom = serializers.IntegerField(required=False)
+    num_latrines = serializers.IntegerField(required=False)
+    num_computers = serializers.IntegerField(required=False)
+    running_water = serializers.NullBooleanField(required=False)
+    electricity_availability = serializers.NullBooleanField(required=False)
+    computer_lab = serializers.NullBooleanField(required=False)
+
+    class Meta:
+        model = SchoolWeeklyStatus
+        fields = (
+            'id',
+            'year',
+            'week',
+            'date',
+            'connectivity_type',
+            'connectivity_latency',
+            'school',
+            'connectivity',
+            'connectivity_speed',
+            'download_speed_benchmark',
+            'coverage_availability',
+            'coverage_type',
+            'connectivity_upload_speed',
+            'num_students',
+            'num_teachers',
+            'num_classroom',
+            'num_latrines',
+            'num_computers',
+            'running_water',
+            'electricity_availability',
+            'computer_lab',
+        )
+
+    def update(self, instance, validated_data):
+        """
+        update
+            This method is used to update Data Layer
+        :param instance:
+        :param validated_data:
+        :return:
+        """
+        request_user = core_utilities.get_current_user(context=self.context)
+
+        school_master_status_data = {
+            'download_speed_benchmark': validated_data.pop('download_speed_benchmark', None),
+            'num_students' : validated_data.pop('num_students', None),
+            'num_teachers' : validated_data.pop('num_teachers', None),
+            'num_classrooms' : validated_data.pop('num_classroom', None),
+            'num_latrines' : validated_data.pop('num_latrines', None),
+            'num_computers' : validated_data.pop('num_computers', None),
+            'water_availability' : validated_data.pop('running_water', None),
+            'electricity_availability' : validated_data.pop('electricity_availability', None),
+            'computer_lab' : validated_data.pop('computer_lab', None),
+            'last_modified_by_id': request_user.id,
+        }
+
+        school_master_status_instance = instance.school.last_master_status
+        if school_master_status_instance:
+            SchoolMasterStatusSerializer(instance=school_master_status_instance).update(
+                school_master_status_instance, school_master_status_data)
+        else:
+            school_master_status_data['school_id'] = instance.school_id
+            school_master_status_data['created_by_id'] = request_user.id
+
+            school_master_status_instance = SchoolMasterStatus.objects.create(**school_master_status_data)
+            instance.school.last_master_status = school_master_status_instance
+            instance.school.save(update_fields=('last_master_status',))
+
+        return super().update(instance, validated_data)
+
+    def create(self, validated_data):
+        """
+        create
+            This method is used to create SchoolWeeklyStatus and SchoolMasterStatus
+        :param validated_data:
+        :return:
+        """
+        request_user = core_utilities.get_current_user(context=self.context)
+
+        school_master_status_data = {
+            'download_speed_benchmark': validated_data.pop('download_speed_benchmark', None),
+            'num_students': validated_data.pop('num_students', None),
+            'num_teachers': validated_data.pop('num_teachers', None),
+            'num_classrooms': validated_data.pop('num_classroom', None),
+            'num_latrines': validated_data.pop('num_latrines', None),
+            'num_computers': validated_data.pop('num_computers', None),
+            'water_availability': validated_data.pop('running_water', None),
+            'electricity_availability': validated_data.pop('electricity_availability', None),
+            'computer_lab': validated_data.pop('computer_lab', None),
+            'last_modified_by_id': request_user.id,
+        }
+
+        instance = super().create(validated_data)
+
+        school_master_status_instance = instance.school.last_master_status
+        if school_master_status_instance:
+            SchoolMasterStatusSerializer(instance=school_master_status_instance).update(
+                school_master_status_instance, school_master_status_data)
+        else:
+            school_master_status_data['school_id'] = instance.school_id
+            school_master_status_data['created_by_id'] = request_user.id
+
+            school_master_status_instance = SchoolMasterStatus.objects.create(**school_master_status_data)
+            instance.school.last_master_status = school_master_status_instance
+            instance.school.save(update_fields=('last_master_status',))
+
+        return instance
+
+
+class SchoolWeeklySummaryListSerializer(SchoolWeeklyStatusSerializer):
     school_name = serializers.CharField(source='school.name')
+    num_students = serializers.IntegerField(source='school.last_master_status.num_students')
+    num_teachers = serializers.IntegerField(source='school.last_master_status.num_teachers')
 
     class Meta(SchoolWeeklyStatus.Meta):
         model = SchoolWeeklyStatus
