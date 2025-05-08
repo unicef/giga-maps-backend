@@ -358,7 +358,7 @@ def get_filter_sql(request, filter_key, table_name):
                         sql_str = """{table_name}."{field_name}" IS NULL"""
                     else:
                         value_list.append("'" + str(val) + "'")
-                
+
                 if len(value_list) > 0:
                     filter_value = ','.join(value_list)
                     if sql_str:
@@ -381,7 +381,7 @@ def get_filter_sql(request, filter_key, table_name):
                         sql_str = """{table_name}."{field_name}" IS NULL"""
                     else:
                         value_list.append("'" + str(val) + "'")
-                
+
                 if len(value_list) > 0:
                     filter_value = ','.join(value_list)
                     if sql_str:
@@ -453,7 +453,10 @@ def get_filter_sql(request, filter_key, table_name):
                 sql_list.append('(' + none_sql_str + ' OR (' + range_sql_list[0] + ' AND ' + range_sql_list[1] + '))')
         elif field_filter.endswith('__in'):
             field_name = field_filter.replace('__in', '')
-            filter_value = ','.join(["'" + str(f).lower() + "'" for f in filter_value.split(',')])
+            if '|' in filter_value:
+                filter_value = ', '.join(["'" + str(f).lower() + "'" for f in filter_value.split('|')])
+            else:
+                filter_value = ','.join(["'" + str(f).lower() + "'" for f in filter_value.split(',')])
             sql_str = """LOWER({table_name}."{field_name}") IN ({value})"""
 
         if sql_str:
