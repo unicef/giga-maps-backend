@@ -20,7 +20,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'bps',
                 'is_parameter': True,
-                'alias': 'Download Speed',
+                'alias': 'Download Speed (connectivity_speed)',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
                 'supported_functions': [
@@ -66,7 +66,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'bps',
                 'is_parameter': True,
-                'alias': 'Upload Speed',
+                'alias': 'Upload Speed (connectivity_upload_speed)',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
                 'supported_functions': [
@@ -112,7 +112,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'ms',
                 'is_parameter': True,
-                'alias': 'Latency',
+                'alias': 'Latency (connectivity_latency)',
                 'base_benchmark': 1,
                 'display_unit': 'ms',
                 'supported_functions': [
@@ -169,7 +169,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'bps',
                 'is_parameter': True,
-                'alias': 'Download Speed',
+                'alias': 'Download Speed (connectivity_speed)',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
                 'supported_functions': [
@@ -217,7 +217,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'bps',
                 'is_parameter': True,
-                'alias': 'Upload Speed',
+                'alias': 'Upload Speed (connectivity_upload_speed)',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
                 'supported_functions': [
@@ -264,7 +264,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'ms',
                 'is_parameter': True,
-                'alias': 'Latency',
+                'alias': 'Latency (connectivity_latency)',
                 'base_benchmark': 1,
                 'display_unit': 'ms',
                 'supported_functions': [
@@ -311,7 +311,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'bps',
                 'is_parameter': True,
-                'alias': 'Download Speed Probe',
+                'alias': 'Download Speed Probe (connectivity_speed_probe)',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
                 'supported_functions': [
@@ -328,7 +328,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'bps',
                 'is_parameter': True,
-                'alias': 'Upload Speed Probe',
+                'alias': 'Upload Speed Probe (connectivity_upload_speed_probe)',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
                 'supported_functions': [
@@ -345,7 +345,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'ms',
                 'is_parameter': True,
-                'alias': 'Latency Probe',
+                'alias': 'Latency Probe (connectivity_latency_probe)',
                 'base_benchmark': 1,
                 'display_unit': 'ms',
                 'supported_functions': [
@@ -362,7 +362,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'bps',
                 'is_parameter': True,
-                'alias': 'Download Speed Mean',
+                'alias': 'Download Speed Mean (connectivity_speed_mean)',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
                 'supported_functions': [
@@ -379,7 +379,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'bps',
                 'is_parameter': True,
-                'alias': 'Upload Speed Mean',
+                'alias': 'Upload Speed Mean (connectivity_upload_speed_mean)',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
                 'supported_functions': [
@@ -396,7 +396,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'ms',
                 'is_parameter': True,
-                'alias': 'Roundtrip Time',
+                'alias': 'Roundtrip Time (roundtrip_time)',
                 'base_benchmark': 1,
                 'display_unit': 'ms',
                 'supported_functions': [
@@ -413,7 +413,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'ms',
                 'is_parameter': True,
-                'alias': 'Jitter Download',
+                'alias': 'Jitter Download (jitter_download)',
                 'base_benchmark': 1,
                 'display_unit': 'ms',
                 'supported_functions': [
@@ -430,7 +430,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'ms',
                 'is_parameter': True,
-                'alias': 'Jitter Upload',
+                'alias': 'Jitter Upload (jitter_upload)',
                 'base_benchmark': 1,
                 'display_unit': 'ms',
                 'supported_functions': [
@@ -447,7 +447,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': '',
                 'is_parameter': True,
-                'alias': 'RTT Packet Loss',
+                'alias': 'RTT Packet Loss (rtt_packet_loss_pct)',
                 'base_benchmark': 1,
                 'display_unit': '%',
                 'supported_functions': [

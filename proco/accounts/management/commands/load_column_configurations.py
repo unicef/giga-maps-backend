@@ -714,7 +714,7 @@ configuration_json = [
         'is_filter_applicable': True,
         'options': {
             'active_countries_filter':
-                """"connection_statistics_schoolweeklystatus"."building_id_govt" IS NOT NULL""",
+                """"building_id_govt" IS NOT NULL""",
             'applicable_filter_types': {
                 accounts_models.AdvanceFilter.TYPE_DROPDOWN: [
                     accounts_models.AdvanceFilter.FILTER_QUERY_PARAM_IEXACT,
