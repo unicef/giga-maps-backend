@@ -185,66 +185,11 @@ class SchoolWeeklyStatus(ConnectivityStatistics, TimeStampedModel, models.Model)
     year = models.PositiveSmallIntegerField(default=get_current_year)
     week = models.PositiveSmallIntegerField(default=get_current_week)
     date = models.DateField()
-    num_students = models.PositiveIntegerField(blank=True, default=None, null=True)
-    num_teachers = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
-    num_classroom = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
-    num_latrines = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
-    running_water = models.BooleanField(default=False)
-    electricity_availability = models.BooleanField(default=False)
-    computer_lab = models.BooleanField(default=False)
-    num_computers = models.PositiveIntegerField(blank=True, default=None, null=True)
+
     connectivity = models.NullBooleanField(default=None)
     connectivity_type = models.CharField(_('Type of internet connection'), max_length=64, default='unknown')
     coverage_availability = models.NullBooleanField(default=None)
     coverage_type = models.CharField(max_length=8, default=COVERAGE_TYPES.unknown, choices=COVERAGE_TYPES)
-
-    # New Fields added for School Master Data Source
-    download_speed_contracted = models.FloatField(blank=True, default=None, null=True)
-    num_computers_desired = models.PositiveIntegerField(blank=True, default=None, null=True)
-    electricity_type = models.CharField(max_length=255, null=True, blank=True)
-    num_adm_personnel = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
-
-    fiber_node_distance = models.FloatField(blank=True, default=None, null=True)
-    microwave_node_distance = models.FloatField(blank=True, default=None, null=True)
-
-    schools_within_1km = models.PositiveIntegerField(blank=True, default=None, null=True)
-    schools_within_2km = models.PositiveIntegerField(blank=True, default=None, null=True)
-    schools_within_3km = models.PositiveIntegerField(blank=True, default=None, null=True)
-
-    nearest_lte_distance = models.FloatField(blank=True, default=None, null=True)
-    nearest_umts_distance = models.FloatField(blank=True, default=None, null=True)
-    nearest_gsm_distance = models.FloatField(blank=True, default=None, null=True)
-    nearest_nr_distance = models.FloatField(blank=True, default=None, null=True)
-
-    pop_within_1km = models.PositiveIntegerField(blank=True, default=None, null=True)
-    pop_within_2km = models.PositiveIntegerField(blank=True, default=None, null=True)
-    pop_within_3km = models.PositiveIntegerField(blank=True, default=None, null=True)
-
-    school_data_source = models.CharField(blank=True, null=True, max_length=255)
-    school_data_collection_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
-    school_data_collection_modality = models.CharField(blank=True, null=True, max_length=255)
-    school_location_ingestion_timestamp = core_models.CustomDateTimeField(null=True, blank=True)
-    connectivity_govt_ingestion_timestamp = core_models.CustomDateTimeField(null=True, blank=True)
-    connectivity_govt_collection_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
-    disputed_region = models.BooleanField(default=False)
-
-    download_speed_benchmark = models.FloatField(blank=True, default=None, null=True)
-
-    num_students_girls = models.PositiveIntegerField(blank=True, default=None, null=True)
-    num_students_boys = models.PositiveIntegerField(blank=True, default=None, null=True)
-    num_students_other = models.PositiveIntegerField(blank=True, default=None, null=True)
-    num_teachers_female = models.PositiveIntegerField(blank=True, default=None, null=True)
-    num_teachers_male = models.PositiveIntegerField(blank=True, default=None, null=True)
-    num_tablets = models.PositiveIntegerField(blank=True, default=None, null=True)
-    num_robotic_equipment = models.PositiveIntegerField(blank=True, default=None, null=True)
-
-    computer_availability = models.NullBooleanField(default=None)
-    teachers_trained = models.NullBooleanField(default=None)
-    sustainable_business_model = models.NullBooleanField(default=None)
-    device_availability = models.NullBooleanField(default=None)
-
-    building_id_govt = models.CharField(blank=True, null=True, max_length=255)
-    num_schools_per_building = models.PositiveIntegerField(blank=True, default=None, null=True)
 
     objects = BaseManager()
 

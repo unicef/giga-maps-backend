@@ -70,7 +70,7 @@ pipenv run gunicorn config.wsgi:application -b 0.0.0.0:8000 -w 8 --timeout=300
 #   Step 2: Sync the QoS API data to QoSData table based on version. Only works for single country
 #       pipenv run python manage.py data_loss_recovery_for_qos --pull_data -country_code='MNG' -pull_start_version=11 -pull_end_version=20
 #   Step 3: Update the proco tables with new aggregation
-#       pipenv run python manage.py data_loss_recovery_for_qos --aggregate -country_code='MNG' -aggregate_start_version=11 -aggregate_end_version=20
+#       pipenv run python manage.py data_loss_recovery_for_qos --aggregate -country_code='KEN' -aggregate_start_version=22849 -aggregate_end_version=22866
 
 
 # pipenv run python manage.py create_api_key_with_write_access -user='pcdc_user_with_write_api_key66@nagarro.com' -api_code='DAILY_CHECK_APP' -reason='API Key to GET the PCDC measurement data, Post/Delete API Control over DailyCheckApp documentation' -valid_till='31-12-2099' --force_user -first_name='PCDC' -last_name='User' --inactive_email
@@ -113,3 +113,9 @@ pipenv run gunicorn config.wsgi:application -b 0.0.0.0:8000 -w 8 --timeout=300
 #
 # To sync the QoS missed data based on dates via scheduler:
 # pipenv run python manage.py data_loss_recovery_for_qos_dates --pull_data --aggregate -start_date='01-03-2025' -end_date='02-03-2025' -country_code='MNG' --schedule
+
+
+# pipenv run python manage.py populate_school_master_data_for_all_schools --populate_country_latest_school_master_data_version
+# pipenv run python manage.py populate_school_master_data_for_all_schools --populate_school_master_status_model_data -country_id=222
+# pipenv run python manage.py load_system_data_layers --update_data_sources
+# pipenv run python manage.py load_column_configurations --update_configurations

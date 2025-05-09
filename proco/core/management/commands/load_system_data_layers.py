@@ -20,7 +20,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'bps',
                 'is_parameter': True,
-                'alias': 'Download Speed',
+                'alias': 'Download Speed (connectivity_speed)',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
                 'supported_functions': [
@@ -66,7 +66,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'bps',
                 'is_parameter': True,
-                'alias': 'Upload Speed',
+                'alias': 'Upload Speed (connectivity_upload_speed)',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
                 'supported_functions': [
@@ -112,7 +112,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'ms',
                 'is_parameter': True,
-                'alias': 'Latency',
+                'alias': 'Latency (connectivity_latency)',
                 'base_benchmark': 1,
                 'display_unit': 'ms',
                 'supported_functions': [
@@ -169,7 +169,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'bps',
                 'is_parameter': True,
-                'alias': 'Download Speed',
+                'alias': 'Download Speed (connectivity_speed)',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
                 'supported_functions': [
@@ -217,7 +217,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'bps',
                 'is_parameter': True,
-                'alias': 'Upload Speed',
+                'alias': 'Upload Speed (connectivity_upload_speed)',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
                 'supported_functions': [
@@ -264,7 +264,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'ms',
                 'is_parameter': True,
-                'alias': 'Latency',
+                'alias': 'Latency (connectivity_latency)',
                 'base_benchmark': 1,
                 'display_unit': 'ms',
                 'supported_functions': [
@@ -311,7 +311,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'bps',
                 'is_parameter': True,
-                'alias': 'Download Speed Probe',
+                'alias': 'Download Speed Probe (connectivity_speed_probe)',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
                 'supported_functions': [
@@ -328,7 +328,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'bps',
                 'is_parameter': True,
-                'alias': 'Upload Speed Probe',
+                'alias': 'Upload Speed Probe (connectivity_upload_speed_probe)',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
                 'supported_functions': [
@@ -345,7 +345,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'ms',
                 'is_parameter': True,
-                'alias': 'Latency Probe',
+                'alias': 'Latency Probe (connectivity_latency_probe)',
                 'base_benchmark': 1,
                 'display_unit': 'ms',
                 'supported_functions': [
@@ -362,7 +362,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'bps',
                 'is_parameter': True,
-                'alias': 'Download Speed Mean',
+                'alias': 'Download Speed Mean (connectivity_speed_mean)',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
                 'supported_functions': [
@@ -379,7 +379,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'bps',
                 'is_parameter': True,
-                'alias': 'Upload Speed Mean',
+                'alias': 'Upload Speed Mean (connectivity_upload_speed_mean)',
                 'base_benchmark': 1000000,
                 'display_unit': 'Mbps',
                 'supported_functions': [
@@ -396,7 +396,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'ms',
                 'is_parameter': True,
-                'alias': 'Roundtrip Time',
+                'alias': 'Roundtrip Time (roundtrip_time)',
                 'base_benchmark': 1,
                 'display_unit': 'ms',
                 'supported_functions': [
@@ -413,7 +413,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'ms',
                 'is_parameter': True,
-                'alias': 'Jitter Download',
+                'alias': 'Jitter Download (jitter_download)',
                 'base_benchmark': 1,
                 'display_unit': 'ms',
                 'supported_functions': [
@@ -430,7 +430,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': 'ms',
                 'is_parameter': True,
-                'alias': 'Jitter Upload',
+                'alias': 'Jitter Upload (jitter_upload)',
                 'base_benchmark': 1,
                 'display_unit': 'ms',
                 'supported_functions': [
@@ -447,7 +447,7 @@ data_source_json = [
                 'type': 'int',
                 'unit': '',
                 'is_parameter': True,
-                'alias': 'RTT Packet Loss',
+                'alias': 'RTT Packet Loss (rtt_packet_loss_pct)',
                 'base_benchmark': 1,
                 'display_unit': '%',
                 'supported_functions': [
@@ -476,6 +476,7 @@ data_source_json = [
                 'alias': 'Coverage Type (coverage_type)',
                 'unit': '',
                 'display_unit': '',
+                'table_name': 'sws',
                 'count_labels': ['good', 'moderate'],
             },
             {
@@ -485,6 +486,7 @@ data_source_json = [
                 'alias': 'Connectivity Type (connectivity_type)',
                 'unit': '',
                 'display_unit': '',
+                'table_name': 'sws',
                 'count_labels': ['good', 'moderate'],
             },
             {
@@ -494,6 +496,7 @@ data_source_json = [
                 'alias': 'Fiber Node Distance (fiber_node_distance)',
                 'unit': 'km',
                 'display_unit': 'km',
+                'table_name': 'sms',
                 'count_labels': ['good', 'moderate', 'bad'],
             },
             {
@@ -503,6 +506,7 @@ data_source_json = [
                 'alias': 'Microwave Node Distance (microwave_node_distance)',
                 'unit': 'km',
                 'display_unit': 'km',
+                'table_name': 'sms',
                 'count_labels': ['good', 'moderate', 'bad'],
             },
             {
@@ -512,6 +516,7 @@ data_source_json = [
                 'alias': 'Nearest NR Distance (nearest_nr_distance)',
                 'unit': 'km',
                 'display_unit': 'km',
+                'table_name': 'sms',
                 'count_labels': ['good', 'moderate', 'bad'],
             },
             {
@@ -521,6 +526,7 @@ data_source_json = [
                 'alias': 'Nearest LTE Distance (nearest_lte_distance)',
                 'unit': 'km',
                 'display_unit': 'km',
+                'table_name': 'sms',
                 'count_labels': ['good', 'moderate', 'bad'],
             },
             {
@@ -530,6 +536,7 @@ data_source_json = [
                 'alias': 'Nearest UMTS Distance (nearest_umts_distance)',
                 'unit': 'km',
                 'display_unit': 'km',
+                'table_name': 'sms',
                 'count_labels': ['good', 'moderate', 'bad'],
             },
             {
@@ -539,6 +546,7 @@ data_source_json = [
                 'alias': 'Nearest GSM Distance (nearest_gsm_distance)',
                 'unit': 'km',
                 'display_unit': 'km',
+                'table_name': 'sms',
                 'count_labels': ['good', 'moderate', 'bad'],
             },
             {
@@ -548,6 +556,7 @@ data_source_json = [
                 'alias': 'Computer Availability (computer_availability)',
                 'unit': '',
                 'display_unit': '',
+                'table_name': 'sms',
                 'count_labels': ['good', 'moderate'],
             },
             {
@@ -557,6 +566,7 @@ data_source_json = [
                 'alias': 'Number of Computers (num_computers)',
                 'unit': '',
                 'display_unit': '',
+                'table_name': 'sms',
                 'count_labels': ['good', 'moderate', 'bad'],
             },
             {
@@ -566,6 +576,7 @@ data_source_json = [
                 'alias': 'Number of Girl Students (num_students_girls)',
                 'unit': '',
                 'display_unit': '',
+                'table_name': 'sms',
                 'count_labels': ['good', 'moderate', 'bad'],
             },
             {
@@ -575,6 +586,7 @@ data_source_json = [
                 'alias': 'Number of Boy Students (num_students_boys)',
                 'unit': '',
                 'display_unit': '',
+                'table_name': 'sms',
                 'count_labels': ['good', 'moderate', 'bad'],
             },
             {
@@ -584,6 +596,7 @@ data_source_json = [
                 'alias': 'Number of Other Students (num_students_other)',
                 'unit': '',
                 'display_unit': '',
+                'table_name': 'sms',
                 'count_labels': ['good', 'moderate', 'bad'],
             },
             {
@@ -593,6 +606,7 @@ data_source_json = [
                 'alias': 'Number of Female Teachers (num_teachers_female)',
                 'unit': '',
                 'display_unit': '',
+                'table_name': 'sms',
                 'count_labels': ['good', 'moderate', 'bad'],
             },
             {
@@ -602,6 +616,7 @@ data_source_json = [
                 'alias': 'Number of Male Teachers (num_teachers_male)',
                 'unit': '',
                 'display_unit': '',
+                'table_name': 'sms',
                 'count_labels': ['good', 'moderate', 'bad'],
             },
             {
@@ -611,6 +626,7 @@ data_source_json = [
                 'alias': 'Trained Teachers (teachers_trained)',
                 'unit': '',
                 'display_unit': '',
+                'table_name': 'sms',
                 'count_labels': ['good', 'moderate'],
             },
             {
@@ -620,6 +636,7 @@ data_source_json = [
                 'alias': 'Sustainable Business Model (sustainable_business_model)',
                 'unit': '',
                 'display_unit': '',
+                'table_name': 'sms',
                 'count_labels': ['good', 'moderate'],
             },
             {
@@ -629,6 +646,7 @@ data_source_json = [
                 'alias': 'Device Availability (device_availability)',
                 'unit': '',
                 'display_unit': '',
+                'table_name': 'sms',
                 'count_labels': ['good', 'moderate'],
             },
             {
@@ -638,6 +656,7 @@ data_source_json = [
                 'alias': 'Number of Tablets (num_tablets)',
                 'unit': '',
                 'display_unit': '',
+                'table_name': 'sms',
                 'count_labels': ['good', 'moderate', 'bad'],
             },
             {
@@ -647,6 +666,7 @@ data_source_json = [
                 'alias': 'Number of Robotic Equipment (num_robotic_equipment)',
                 'unit': '',
                 'display_unit': '',
+                'table_name': 'sms',
                 'count_labels': ['good', 'moderate', 'bad'],
             },
             {
@@ -656,6 +676,7 @@ data_source_json = [
                 'alias': 'Building Govt ID (building_id_govt)',
                 'unit': '',
                 'display_unit': '',
+                'table_name': 'sms',
                 'count_labels': ['good', 'moderate', 'bad'],
             },
             {
@@ -665,6 +686,7 @@ data_source_json = [
                 'alias': 'Number of Schools per Building (num_schools_per_building)',
                 'unit': '',
                 'display_unit': '',
+                'table_name': 'sms',
                 'count_labels': ['good', 'moderate', 'bad'],
             },
             {
