@@ -27,6 +27,7 @@ from proco.custom_auth.utils import get_user_emails_for_permissions
 from proco.data_sources import models as sources_models
 from proco.data_sources import utils as source_utilities
 from proco.data_sources.config import app_config as sources_config
+from proco.data_sources.models import QoSData
 from proco.locations.models import Country, CountryAdminMetadata
 from proco.schools.models import School
 from proco.taskapp import app
@@ -827,6 +828,46 @@ def update_live_data(*args, today=True):
                 ),
 
             ).delay()
+
+        background_task_utilities.task_on_complete(task_instance)
+    else:
+        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+
+
+@app.task(soft_time_limit=2 * 60 * 60, time_limit=2 * 60 * 60)
+def update_qos_data(*args, today=True):
+    """
+    Background task executed multiple once a day to get the QoS data to Giga DB
+    """
+    task_key = 'update_qos_data_status_{current_time}_{today}'.format(
+        current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'),
+        today=today,
+    )
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(task_id, task_key,
+                                                            'Sync QoS Realtime Data from Live source')
+
+    if task_instance:
+        logger.debug('Not found running job: {}'.format(task_key))
+        countries_ids = list(QoSData.objects.all().order_by('country_id').values_list(
+                'country_id', flat=True).distinct('country_id'))
+
+        if today:
+            aggr_date = core_utilities.get_current_datetime_object().date()
+        else:
+            aggr_date = core_utilities.get_current_datetime_object().date() - timedelta(days=1)
+
+        chain(
+            load_data_from_qos_apis.s(),
+            chord(
+                group([
+                    finalize_previous_day_data.s(country_id, aggr_date)
+                    for country_id in countries_ids
+                ]),
+                finalize_task.si(),
+            ),
+
+        ).delay()
 
         background_task_utilities.task_on_complete(task_instance)
     else:
