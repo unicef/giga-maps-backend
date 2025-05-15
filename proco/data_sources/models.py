@@ -12,7 +12,7 @@ from proco.locations.models import Country
 from proco.schools import models as school_models
 
 
-class SchoolMasterData(TimeStampedModel, models.Model):
+class SchoolMasterData(TimeStampedModel, core_models.DataSourceModelMixin):
     """
     SchoolMasterData
         This class define model used to store School Master Data.
@@ -182,8 +182,6 @@ class SchoolMasterData(TimeStampedModel, models.Model):
 
     history = HistoricalRecords(inherit=True)
 
-    objects = models.Manager()
-
     class Meta:
         ordering = ['created']
 
@@ -201,7 +199,7 @@ class SchoolMasterData(TimeStampedModel, models.Model):
         cache.set(cls.DATA_VERSION_CACHE_KEY.format(iso3_format), value)
 
 
-class DailyCheckAppMeasurementData(models.Model):
+class DailyCheckAppMeasurementData(core_models.DataSourceModelMixin):
     CACHE_KEY = 'last_dailycheckapp_measurement_at'
 
     created_at = models.DateTimeField(db_index=True)
@@ -216,8 +214,6 @@ class DailyCheckAppMeasurementData(models.Model):
     ip_address = models.TextField(blank=True, null=True)
     app_version = models.TextField(blank=True, null=True)
     source = models.TextField()
-
-    objects = models.Manager()
 
     class Meta:
         ordering = ('timestamp',)
@@ -238,7 +234,7 @@ class DailyCheckAppMeasurementData(models.Model):
         cache.set(cls.CACHE_KEY, value)
 
 
-class QoSData(models.Model):
+class QoSData(core_models.DataSourceModelMixin):
     DATA_VERSION_CACHE_KEY = 'qos_data_last_version_{0}'
 
     school = models.ForeignKey(
@@ -285,8 +281,6 @@ class QoSData(models.Model):
     agent_id = models.TextField(blank=True, null=True)
 
     version = models.PositiveIntegerField(blank=True, default=None, null=True)
-
-    objects = models.Manager()
 
     class Meta:
         ordering = ('timestamp',)

@@ -105,7 +105,6 @@ def load_qos_data_source_response_to_model(version_number, country):
                     )
                     logger.info('Total count of rows in the {0} version data: {1}'.format(
                         version_number, len(loaded_data_df)))
-                    pull_datetime = get_current_datetime_object()
 
                     loaded_data_df = loaded_data_df[loaded_data_df[DeltaSharingReader._change_type_col_name()].isin(
                         ['insert', 'update_postimage'])]
@@ -132,7 +131,6 @@ def load_qos_data_source_response_to_model(version_number, country):
 
                         loaded_data_df['version'] = version_number
                         loaded_data_df['country'] = country
-                        loaded_data_df['pulled_at'] = pull_datetime
 
                         for _, row in loaded_data_df.iterrows():
                             school = School.objects.filter(
@@ -314,49 +312,37 @@ def get_latest_api_version(country_code=None):
     return version_for_countries
 
 
-def check_missing_versions_from_table(country_code=None):
+def check_missing_dates_from_table(country, dates):
     qos_version_qry = QoSData.objects.all()
 
-    if country_code:
-        qos_version_qry = qos_version_qry.filter(country__iso3_format=country_code)
+    if country:
+        qos_version_qry = qos_version_qry.filter(country__iso3_format=country.iso3_format)
 
     qos_version_qry = qos_version_qry.values(
-        'country__iso3_format', 'version'
-    ).order_by('country__iso3_format', 'version').distinct('country__iso3_format', 'version')
+        'country__iso3_format', 'timestamp__date'
+    ).order_by('country__iso3_format', 'timestamp__date').distinct('country__iso3_format', 'timestamp__date')
 
-    db_versions_for_countries = {}
+    db_dates_for_countries = {}
     for qry_data in qos_version_qry:
         country_iso3_format = qry_data.get('country__iso3_format')
-        version_list = db_versions_for_countries.get(country_iso3_format, [])
-        version_list.append(qry_data.get('version'))
-        db_versions_for_countries[country_iso3_format] = version_list
+        date_list = db_dates_for_countries.get(country_iso3_format, [])
+        date_list.append(qry_data.get('timestamp__date'))
+        db_dates_for_countries[country_iso3_format] = date_list
 
-    api_latest_version_for_countries = get_latest_api_version(country_code=country_code)
 
-    for country_iso_code, versions_list in db_versions_for_countries.items():
-        start_version = versions_list[0] if len(versions_list) > 0 else 0
-        end_version = api_latest_version_for_countries.get(country_iso_code, 1)
+    for country_iso3_code, available_dates in db_dates_for_countries.items():
+        missing_dates = list(set(dates) - set(list(available_dates)))
 
-        must_version_list = sorted([x for x in range(start_version, end_version + 1)])
+        if len(missing_dates) > 0:
+            logger.info('Missing dates are between {0} - {1}: '.format(dates[0], dates[-1]))
 
-        missing_version_list = list(set(must_version_list) - set(versions_list))
-
-        logger.info('Missing versions details for country "{0}" are: \n\tStart version from DB: {1}'
-                    '\n\tEnd version from API: {2}'
-                    '\n\tMissing versions: {3}\n'.format(country_iso_code, start_version, end_version,
-                                                         missing_version_list))
+            for missing_date in sorted(missing_dates):
+                # print missing date in string format
+                logger.info(date_utilities.format_date(missing_date))
 
 
 class Command(BaseCommand):
     def add_arguments(self, parser):
-        # If this argument is passed then,
-        # Check the missing version for each country by
-        # taking the oldest version as start version and
-        # latest version from QoS API as end version which should be present in the DB table.
-        parser.add_argument(
-            '--check_missing_versions', action='store_true', dest='check_missing_versions', default=False,
-            help='If provided, missing version will be identified in data_sources_qosdata table.'
-        )
 
         parser.add_argument(
             '-country_code', dest='country_iso3_format', type=str,
@@ -365,75 +351,72 @@ class Command(BaseCommand):
         )
 
         parser.add_argument(
+            '-start_date', dest='start_date', type=str,
+            default=date_utilities.format_date(today_date - timedelta(days=30)),  # 30 days from today
+            help='Date from we need to check the missing data. Default is 30 days from Current date.'
+        )
+
+        parser.add_argument(
+            '-end_date', dest='end_date', type=str,
+            default=date_utilities.format_date(today_date),  # current date
+            help='Date till we need to check the missing data. Default is today date.'
+        )
+
+        parser.add_argument(
+            '--check_missing_dates', action='store_true', dest='check_missing_dates', default=False,
+            help='List down all the missing dates for qOs live data source.'
+        )
+
+        parser.add_argument(
             '--pull_data', action='store_true', dest='pull_data', default=False,
-            help='If provided, data will be fetched from QoS API with given start and end version.'
-        )
-
-        parser.add_argument(
-            '-pull_start_version', dest='pull_start_version', type=int,
-            help='Start version to fetch the data. It should be a valid lower than end version value in integer format.'
-        )
-
-        parser.add_argument(
-            '-pull_end_version', dest='pull_end_version', type=int,
-            help='End version to fetch the data. It should be a valid integer number higher than start version.'
+            help='Pull the QoS live data for specified date.'
         )
 
         parser.add_argument(
             '--aggregate', action='store_true', dest='aggregate_data', default=False,
-            help='If provided, aggregation on QOS data will be performed and all the related '
-                 'proco tables will be updated.'
-        )
-
-        parser.add_argument(
-            '-aggregate_start_version', dest='aggregate_start_version', type=int,
-            help='Start version to aggregate the data on. It should be a valid integer number lower than end version.'
-        )
-
-        parser.add_argument(
-            '-aggregate_end_version', dest='aggregate_end_version', type=int,
-            help='End version to aggregate the data on. It should be a valid integer number higher than start version.'
+            help='If provided, aggregation on QoS data will be performed and all the related tables will be updated.'
         )
 
     def handle(self, **options):
-        logger.info('Executing data loss recovery for QoS" ....\n')
+        logger.info('Executing data loss recovery for QoS for given dates" ....\n')
 
-        check_missing_versions = options.get('check_missing_versions')
         country_iso3_format = options.get('country_iso3_format')
-
         country = None
         if country_iso3_format:
             country = Country.objects.filter(iso3_format=country_iso3_format).first()
             logger.info('Country object: {0}'.format(country))
 
             if not country:
-                logger.error('Country with ISO3 format ({0}) not found in proco db. '
+                logger.error('Country with ISO3 format ({0}) not found in DB "locations_country". '
                              'Hence stopping the load.'.format(country_iso3_format))
                 exit(0)
 
-        if check_missing_versions:
+        check_missing_dates = options.get('check_missing_dates')
+        start_date = date_utilities.to_date(options.get('start_date'))
+        end_date = date_utilities.to_date(options.get('end_date'))
+
+        if start_date > end_date:
+            logger.error('Start date value can not be greater than end_date.')
+            exit(0)
+
+        date_list = sorted([(start_date + timedelta(days=x)).date() for x in range((end_date - start_date).days)] + [
+            end_date.date()])
+
+        if check_missing_dates:
             logger.info('\nChecking the missing versions.')
-            check_missing_versions_from_table(country_code=country_iso3_format)
+            check_missing_dates_from_table(country, date_list)
             logger.info('Checking the missing versions action completed successfully.\n')
 
         pull_data = options.get('pull_data')
         if pull_data:
-            if not country:
-                logger.error('Country code is mandatory to pull the data.'
-                             ' Please pass required parameters as: -country_code=<COUNTRY-ISO3-FORMAT>\n')
-                exit(0)
-
-            pull_start_version = options.get('pull_start_version')
-            pull_end_version = options.get('pull_end_version')
-
-            if pull_start_version and pull_end_version and pull_start_version <= pull_end_version:
+            if len(date_list) > 0:
                 logger.info('\nLoading the api data to "data_sources_qosdata" table ***\n')
-                for version_number in range(pull_start_version, pull_end_version + 1):
-                    load_qos_data_source_response_to_model(version_number, country)
+                for data_pull_date in date_list:
+                    load_qos_data_source_response_to_model(data_pull_date, country)
                 logger.info('\nData load completed successfully.\n')
             else:
                 logger.error('Please provide valid required parameters as:'
-                             ' -pull_start_version=<VERSION-NUMBER> -pull_end_version=<VERSION-NUMBER>\n')
+                             ' -start_date=<START_DATE> -end_date=<END_DATE>\n')
                 exit(0)
 
         try:
@@ -443,27 +426,8 @@ class Command(BaseCommand):
 
         aggregate_data = options.get('aggregate_data')
         if aggregate_data:
-            if not country:
-                logger.error('Country code is mandatory to aggregate the data.'
-                             ' Please pass required parameters as: -country_code=<COUNTRY-ISO3-FORMAT>')
-                exit(0)
-
-            aggregate_start_version = options.get('aggregate_start_version')
-            aggregate_end_version = options.get('aggregate_end_version')
-
-            if aggregate_start_version and aggregate_end_version and aggregate_start_version <= aggregate_end_version:
-                qos_queryset = QoSData.objects.all().filter(
-                    version__gte=aggregate_start_version,
-                    version__lte=aggregate_end_version,
-                    country=country,
-                )
-
-                date_list_from_versions = qos_queryset.order_by('timestamp__date').values_list(
-                    'timestamp__date', flat=True).distinct('timestamp__date')
-
-                logger.info('Date list from versions: {0}'.format(date_list_from_versions))
-
-                for pull_data_date in date_list_from_versions:
+            if len(date_list) > 0:
+                for pull_data_date in date_list:
                     logger.info(
                         '\nSyncing the "data_sources_qosdata" data to "connection_statistics_realtimeconnectivity" '
                         'for date: {0}'.format(pull_data_date))

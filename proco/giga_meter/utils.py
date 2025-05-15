@@ -27,10 +27,12 @@ def sync_school_master_data(
                      'Hence skipping the load for current table.'.format(table_name))
         raise ValueError(f"Invalid 'iso3_format': {table_name}")
 
-    country_latest_school_master_data_version = giga_meter_models.GigaMeter_SchoolMasterData.get_last_version(table_name)
-    logger.debug('Country latest school master data version present in DB: {0}'.format(country_latest_school_master_data_version))
+    country_latest_school_master_data_version = giga_meter_models.GigaMeter_SchoolMasterData.get_last_version(
+        table_name)
+    logger.debug('Country latest school master data version present in DB: {0}'.format(
+        country_latest_school_master_data_version))
 
-    # Create an url to access a shared table.
+    # Create a url to access a shared table.
     # A table path is the profile file path following with `#` and the fully qualified name of a table
     # (`<share-name>.<schema-name>.<table-name>`).
     table_url = profile_file + "#{share_name}.{schema_name}.{table_name}".format(
