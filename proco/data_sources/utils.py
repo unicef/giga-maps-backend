@@ -2,12 +2,14 @@ import json
 import logging
 import os
 from datetime import timedelta
+from typing import Optional
 
 import delta_sharing
 import numpy as np
 import pandas as pd
 import pytz
 import requests
+from delta_sharing import Share, Schema
 from delta_sharing.protocol import Schema, Share
 from delta_sharing.reader import DeltaSharingReader
 from django.conf import settings
@@ -36,7 +38,7 @@ ds_settings = settings.DATA_SOURCE_CONFIG
 
 class ProcoSharingClient(delta_sharing.SharingClient):
 
-    def get_share(self, share_name: str) -> Share:
+    def get_share(self, share_name: str) -> Optional[Share]:
         """
         Get share that can be accessed by you in a Delta Sharing Server.
 
@@ -46,8 +48,9 @@ class ProcoSharingClient(delta_sharing.SharingClient):
         for share in shares:
             if share.name == share_name:
                 return share
+        return None
 
-    def get_schema(self, share: Share, schema_name: str) -> Schema:
+    def get_schema(self, share: Share, schema_name: str) -> Optional[Schema]:
         """
         Get schema in a share that can be accessed by you in a Delta Sharing Server.
 
@@ -59,6 +62,7 @@ class ProcoSharingClient(delta_sharing.SharingClient):
         for schema in schemas:
             if schema.name == schema_name:
                 return schema
+        return None
 
 
 def normalize_school_name(school_name):
@@ -200,7 +204,7 @@ def sync_school_master_data(profile_file, share_name, schema_name, table_name, c
     table_last_data_version = sources_models.SchoolMasterData.get_last_version(table_name)
     logger.debug('Table last data version present in DB: {0}'.format(table_last_data_version))
 
-    # Create an url to access a shared table.
+    # Create a url to access a shared table.
     # A table path is the profile file path following with `#` and the fully qualified name of a table
     # (`<share-name>.<schema-name>.<table-name>`).
     table_url = profile_file + "#{share_name}.{schema_name}.{table_name}".format(
@@ -218,12 +222,6 @@ def sync_school_master_data(profile_file, share_name, schema_name, table_name, c
                     'Hence skipping the data update for current country ({0}).'.format(country))
         return
 
-    table_protocol = delta_sharing.get_table_protocol(table_url)
-    logger.debug('Table Protocol: {0}'.format(table_protocol))
-
-    table_meta_data = delta_sharing.get_table_metadata(table_url)
-    logger.debug('Table Metadata: {0}'.format(table_meta_data.__dict__))
-
     loaded_data_df = delta_sharing.load_table_changes_as_pandas(
         table_url,
         table_last_data_version,
@@ -232,6 +230,7 @@ def sync_school_master_data(profile_file, share_name, schema_name, table_name, c
         None,
     )
     logger.debug('Total count of rows in the data: {0}'.format(len(loaded_data_df)))
+    pull_datetime = core_utilities.get_current_datetime_object()
 
     if len(loaded_data_df) > 0:
         # Sort the values based on _commit_timestamp ASC
@@ -266,6 +265,7 @@ def sync_school_master_data(profile_file, share_name, schema_name, table_name, c
 
         loaded_data_df['version'] = table_current_version
         loaded_data_df['country'] = country
+        loaded_data_df['pulled_at'] = pull_datetime
 
         for _, row in loaded_data_df.iterrows():
             change_type = row[DeltaSharingReader._change_type_col_name()]
@@ -403,6 +403,7 @@ def load_daily_check_app_data_source_response_to_model(model, request_configs):
         logger.debug('Request header: {0}'.format(source_request_headers))
 
         response = requests.get(source_url, headers=source_request_headers)
+        pull_datetime = core_utilities.get_current_datetime_object()
 
         if response.status_code != status.HTTP_200_OK:
             logger.error('Invalid response received {0}'.format(response))
@@ -417,6 +418,7 @@ def load_daily_check_app_data_source_response_to_model(model, request_configs):
             for data in response_data:
                 if not data.get('created_at', None):
                     data['created_at'] = data.get('timestamp')
+                data['pulled_at'] = pull_datetime
                 insert_entries.append(model(**data))
 
         if len(insert_entries) >= 5000:
@@ -635,12 +637,6 @@ def load_qos_data_source_response_to_model(changes_for_countries):
                                     'Hence skipping the data update for current country ({0}).'.format(country))
                         continue
 
-                    table_protocol = delta_sharing.get_table_protocol(table_url)
-                    logger.debug('Table Protocol: {0}'.format(table_protocol))
-
-                    table_meta_data = delta_sharing.get_table_metadata(table_url)
-                    logger.debug('Table Metadata: {0}'.format(table_meta_data.__dict__))
-
                     if not table_last_data_version:
                         # In case if its 1st pull, then pull only last 10 version's data at max
                         # This is the case when we have restored the DB dump and running the task first time
@@ -657,8 +653,12 @@ def load_qos_data_source_response_to_model(changes_for_countries):
                         )
                         logger.debug(
                             'Total count of rows in the {0} version data: {1}'.format(version, len(loaded_data_df)))
-                        loaded_data_df = loaded_data_df[loaded_data_df[DeltaSharingReader._change_type_col_name()].isin(
-                            ['insert', 'update_postimage'])]
+                        pull_datetime = core_utilities.get_current_datetime_object()
+                        loaded_data_df = loaded_data_df[
+                            loaded_data_df[DeltaSharingReader._change_type_col_name()].isin(
+                                ['insert', 'update_postimage']
+                            )
+                        ]
 
                         logger.debug(
                             'Total count of rows after filtering only ["insert", "update_postimage"] in the "{0}" '
@@ -684,6 +684,7 @@ def load_qos_data_source_response_to_model(changes_for_countries):
 
                             loaded_data_df['version'] = version
                             loaded_data_df['country'] = country
+                            loaded_data_df['pulled_at'] = pull_datetime
 
                             for _, row in loaded_data_df.iterrows():
                                 school = School.objects.filter(
@@ -692,7 +693,7 @@ def load_qos_data_source_response_to_model(changes_for_countries):
 
                                 if not school:
                                     logger.warning(
-                                        'School with Giga ID ({0}) not found in PROCO DB. '
+                                        'School with Giga ID ({0}) not found in GigaMaps DB. '
                                         'Hence skipping the load for current school.'.format(row['school_id_giga']))
                                     continue
 
