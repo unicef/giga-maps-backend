@@ -25,7 +25,7 @@ def finalize_setup(sender, **kwargs):
     app.conf.beat_schedule.update({
         'proco.utils.tasks.update_all_cached_values': {
             'task': 'proco.utils.tasks.update_all_cached_values',
-            'schedule': crontab(hour=4, minute=0),
+            'schedule': crontab(hour=4, minute=45),
             'args': (),
             'kwargs': {'clean_cache': True},
         },
@@ -60,6 +60,12 @@ def finalize_setup(sender, **kwargs):
         'proco.data_sources.tasks.update_live_data_and_aggregate_yesterday_data': {
             'task': 'proco.data_sources.tasks.update_live_data',
             'schedule': crontab(hour=0, minute=30),
+            'args': (),
+            'kwargs': {'today': False},
+        },
+        'proco.data_sources.tasks.update_qos_data_and_aggregate_yesterday_data': {
+            'task': 'proco.data_sources.tasks.update_qos_data',
+            'schedule': crontab(hour=4, minute=0),
             'args': (),
             'kwargs': {'today': False},
         },
