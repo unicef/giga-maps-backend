@@ -357,7 +357,7 @@ def get_filter_sql(request, filter_key, table_name):
                     if val == 'none':
                         sql_str = """{table_name}."{field_name}" IS NULL"""
                     else:
-                        value_list.append("'" + str(val) + "'")
+                        value_list.append("'" + str(val).replace("'", "''") + "'")
 
                 if len(value_list) > 0:
                     filter_value = ','.join(value_list)
@@ -366,7 +366,7 @@ def get_filter_sql(request, filter_key, table_name):
                     else:
                         sql_str = """{table_name}."{field_name}" IN ({value})"""
             else:
-                filter_value = str(query_params[field_filter])
+                filter_value = str(query_params[field_filter]).replace("'", "''")
                 sql_str = """{table_name}."{field_name}" = '{value}'"""
         elif field_filter.endswith('__iexact'):
             field_name = field_filter.replace('__iexact', '')
@@ -380,7 +380,7 @@ def get_filter_sql(request, filter_key, table_name):
                     if val == 'none':
                         sql_str = """{table_name}."{field_name}" IS NULL"""
                     else:
-                        value_list.append("'" + str(val) + "'")
+                        value_list.append("'" + str(val).replace("'", "''") + "'")
 
                 if len(value_list) > 0:
                     filter_value = ','.join(value_list)
@@ -390,13 +390,15 @@ def get_filter_sql(request, filter_key, table_name):
                         sql_str = """LOWER({table_name}."{field_name}") IN ({value})"""
             else:
                 sql_str = """LOWER({table_name}."{field_name}") = '{value}'"""
+                filter_value = filter_value.replace("'", "''")
         elif field_filter.endswith('__contains'):
             field_name = field_filter.replace('__contains', '')
-            filter_value = str(query_params[field_filter])
+            filter_value = str(query_params[field_filter]).replace("'", "''")
             sql_str = """{table_name}."{field_name}"::text LIKE '{value}'"""
         elif field_filter.endswith('__icontains'):
             field_name = field_filter.replace('__icontains', '')
             sql_str = """LOWER({table_name}."{field_name}")::text LIKE '{value}'"""
+            filter_value = filter_value.replace("'", "''")
         elif field_filter.endswith('__on'):
             field_name = field_filter.replace('__on', '')
 
@@ -454,9 +456,13 @@ def get_filter_sql(request, filter_key, table_name):
         elif field_filter.endswith('__in'):
             field_name = field_filter.replace('__in', '')
             if '|' in filter_value:
-                filter_value = ', '.join(["'" + str(f).lower() + "'" for f in filter_value.split('|')])
+                # If there is single quote (') in value,
+                # then as per PSQL rule replace it with two time single quotes ('')
+                filter_value = ', '.join(["'" + str(f).lower().replace("'", "''") + "'" if "'" in str(
+                    f).lower() else "'" + str(f).lower() + "'" for f in filter_value.split('|')])
             else:
-                filter_value = ','.join(["'" + str(f).lower() + "'" for f in filter_value.split(',')])
+                filter_value = ','.join(["'" + str(f).lower().replace("'", "''") + "'" if "'" in str(
+                    f).lower() else "'" + str(f).lower() + "'" for f in filter_value.split(',')])
             sql_str = """LOWER({table_name}."{field_name}") IN ({value})"""
 
         if sql_str:
