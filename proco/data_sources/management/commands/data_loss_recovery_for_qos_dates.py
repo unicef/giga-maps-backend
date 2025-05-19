@@ -66,7 +66,7 @@ def load_qos_data_source_response_to_model(country, data_pull_date):
             table_name, date_utilities.format_date(data_pull_date)))
         return
 
-    # Create an url to access a shared table.
+    # Create a url to access a shared table.
     # A table path is the profile file path following with `#` and the fully qualified name of a table
     # (`<share-name>.<schema-name>.<table-name>`).
     table_url = profile_file + "#{share_name}.{schema_name}.{table_name}".format(
@@ -92,6 +92,7 @@ def load_qos_data_source_response_to_model(country, data_pull_date):
             date_utilities.format_date(data_pull_date),
             len(loaded_data_df))
         )
+        pull_datetime = get_current_datetime_object()
 
         if len(loaded_data_df) > 0:
             insert_entries = []
@@ -112,6 +113,7 @@ def load_qos_data_source_response_to_model(country, data_pull_date):
 
             loaded_data_df['version'] = None
             loaded_data_df['country'] = country
+            loaded_data_df['pulled_at'] = pull_datetime
 
             for _, row in loaded_data_df.iterrows():
                 school = School.objects.filter(country=country, giga_id_school=row['school_id_giga']).first()

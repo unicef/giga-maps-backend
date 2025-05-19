@@ -133,3 +133,18 @@ class BaseModel(BaseModelMixin, models.Model):
     class Meta:
         abstract = True
         ordering = ['last_modified_at']
+
+
+class DataSourceModelMixin(models.Model):
+    """
+    DataSourceModelMixin
+        This represents the common properties of the Data Source Models.
+    Inherits : `models.Model`
+    """
+
+    pulled_at = CustomDateTimeField(null=True, blank=True, verbose_name='Pulled at Date')
+
+    objects = models.Manager()
+
+    class Meta:
+        abstract = True
