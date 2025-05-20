@@ -95,6 +95,7 @@ class APIsListSerializer(FlexFieldsModelSerializer):
                 user=request_user,
                 status=accounts_models.APIKey.APPROVED,
                 valid_to__gte=core_utilities.get_current_datetime_object().date(),
+                has_write_access=False,
             ).exists()
         return False
 
@@ -137,19 +138,20 @@ class APIsListSerializer(FlexFieldsModelSerializer):
         return filters if isinstance(filters, dict) > 0 else {}
 
     def get_download_url(self, api_instance):
-        request_user = core_utilities.get_current_user(context=self.context)
+        if api_instance.download_url:
+            request_user = core_utilities.get_current_user(context=self.context)
 
-        if request_user and not request_user.is_anonymous:
-            valid_api_key = api_instance.api_keys.all().filter(
-                user=request_user,
-                status=accounts_models.APIKey.APPROVED,
-                valid_to__gte=core_utilities.get_current_datetime_object().date(),
-            ).first()
+            if request_user and not request_user.is_anonymous:
+                valid_api_key = api_instance.api_keys.all().filter(
+                    user=request_user,
+                    status=accounts_models.APIKey.APPROVED,
+                    valid_to__gte=core_utilities.get_current_datetime_object().date(),
+                    has_write_access=False,
+                ).first()
 
-            if valid_api_key:
-                filters = self.apply_api_key_filters(valid_api_key.filters)
-                return api_instance.download_url.format(**filters)
-
+                if valid_api_key:
+                    filters = self.apply_api_key_filters(valid_api_key.filters)
+                    return api_instance.download_url.format(**filters)
         return api_instance.download_url
 
     def get_report_title(self, api_instance):

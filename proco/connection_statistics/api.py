@@ -214,9 +214,7 @@ class SchoolConnectivityStatsListAPIView(ListAPIView):
     def get_country(self):
         if not hasattr(self, '_country'):
             self._country = get_object_or_404(
-                Country.objects.defer(
-                    'geometry', 'geometry_simplified',
-                ).select_related('last_weekly_status'),
+                Country.objects.defer('geometry').select_related('last_weekly_status'),
                 id=self.kwargs.get('country_id'),
             )
         return self._country
@@ -475,13 +473,14 @@ class ConnectivityAPIView(APIView):
         weekly_queryset = self.queryset.annotate(
             t=FilteredRelation(
                 'weekly_status',
-                condition=Q(weekly_status__week=week_number) & Q(weekly_status__year=year_number),
+                condition=Q(weekly_status__week=week_number)
+                          & Q(weekly_status__year=year_number)
+                          & Q(weekly_status__deleted__isnull=True),
             )
         ).filter(
             realtime_registration_status__rt_registered=True,
             realtime_registration_status__rt_registration_date__date__lte=end_date,
             realtime_registration_status__deleted__isnull=True,
-            t__deleted__isnull=True,
         ).annotate(
             dummy_group_by=Value(1)).values('dummy_group_by').annotate(
             good=Count(Case(When(t__connectivity_speed__gt=speed_benchmark, then='id')), distinct=True),
@@ -1283,18 +1282,19 @@ class TimePlayerViewSet(ListAPIView):
 
     def _format_result(self, qry_data):
         data = OrderedDict()
-        for resp_data in qry_data:
-            school_id = resp_data.get('school_id')
+        if qry_data:
+            for resp_data in qry_data:
+                school_id = resp_data.get('school_id')
 
-            school_data = data.get(school_id, {
-                'school_id': school_id,
-                'geopoint': resp_data.get('geopoint'),
-            })
-            school_data[int(resp_data.get('year'))] = {
-                'field_status': resp_data.get('field_status'),
-                'is_rt_connected': resp_data.get('is_rt_connected'),
-            }
-            data[school_id] = school_data
+                school_data = data.get(school_id, {
+                    'school_id': school_id,
+                    'geopoint': resp_data.get('geopoint'),
+                })
+                school_data[int(resp_data.get('year'))] = {
+                    'field_status': resp_data.get('field_status'),
+                    'is_rt_connected': resp_data.get('is_rt_connected'),
+                }
+                data[school_id] = school_data
         return list(data.values())
 
     def list(self, request, *args, **kwargs):

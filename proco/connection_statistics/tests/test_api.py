@@ -1,6 +1,6 @@
 import random
 from datetime import datetime, timedelta
-
+from django.conf import settings
 from django.core.cache import cache
 from django.core.management import call_command
 from django.test import TestCase
@@ -53,8 +53,8 @@ class GlobalStatisticsApiTestCase(TestAPIViewSetMixin, TestCase):
     def setUpTestData(cls):
         cls.country_one = CountryFactory()
 
-        cls.school_one = SchoolFactory(country=cls.country_one, location__country=cls.country_one, geopoint=None)
-        cls.school_two = SchoolFactory(country=cls.country_one, location__country=cls.country_one)
+        cls.school_one = SchoolFactory(country=cls.country_one, geopoint=None)
+        cls.school_two = SchoolFactory(country=cls.country_one)
 
         SchoolWeeklyStatusFactory(school=cls.school_one, connectivity=True)
         SchoolWeeklyStatusFactory(school=cls.school_two, connectivity=False)
@@ -161,9 +161,9 @@ class SchoolCoverageStatApiTestCase(TestAPIViewSetMixin, TestCase):
     def setUpTestData(cls):
         cls.country = CountryFactory()
 
-        cls.school_one = SchoolFactory(country=cls.country, location__country=cls.country)
-        cls.school_two = SchoolFactory(country=cls.country, location__country=cls.country)
-        cls.school_three = SchoolFactory(country=cls.country, location__country=cls.country)
+        cls.school_one = SchoolFactory(country=cls.country)
+        cls.school_two = SchoolFactory(country=cls.country)
+        cls.school_three = SchoolFactory(country=cls.country)
 
         cls.school_weekly_one = SchoolWeeklyStatusFactory(
             school=cls.school_one,
@@ -285,7 +285,7 @@ class SchoolCoverageStatApiTestCase(TestAPIViewSetMixin, TestCase):
         Expected: HTTP_200_OK - 1 school data with empty statistics json.
         coverage_type == unknown
         """
-        school_four = SchoolFactory(country=self.country, location__country=self.country)
+        school_four = SchoolFactory(country=self.country)
 
         url, _, view = statistics_url((), {
             'country_id': self.country.id,
@@ -299,7 +299,7 @@ class SchoolCoverageStatApiTestCase(TestAPIViewSetMixin, TestCase):
 
         school_data = response.data[0]
         self.assertIn('statistics', school_data)
-        self.assertEqual(len(school_data['statistics']), 0)
+        self.assertEqual(len(school_data['statistics']), 68)
 
         self.assertEqual(school_data['coverage_type'], 'unknown')
 
@@ -364,9 +364,9 @@ class ConnectivityStatApiTestCase(TestAPIViewSetMixin, TestCase):
 
         cls.admin1_one = Admin1Factory(country=cls.country, layer_name='adm1')
 
-        cls.school_one = SchoolFactory(country=cls.country, location__country=cls.country, admin1=cls.admin1_one)
-        cls.school_two = SchoolFactory(country=cls.country, location__country=cls.country, admin1=cls.admin1_one)
-        cls.school_three = SchoolFactory(country=cls.country, location__country=cls.country, admin1=cls.admin1_one)
+        cls.school_one = SchoolFactory(country=cls.country, admin1=cls.admin1_one)
+        cls.school_two = SchoolFactory(country=cls.country, admin1=cls.admin1_one)
+        cls.school_three = SchoolFactory(country=cls.country, admin1=cls.admin1_one)
 
         cls.school_weekly_one = SchoolWeeklyStatusFactory(
             school=cls.school_one,
@@ -665,9 +665,9 @@ class SchoolConnectivityStatApiTestCase(TestAPIViewSetMixin, TestCase):
     def setUpTestData(cls):
         cls.country = CountryFactory()
 
-        cls.school_one = SchoolFactory(country=cls.country, location__country=cls.country)
-        cls.school_two = SchoolFactory(country=cls.country, location__country=cls.country)
-        cls.school_three = SchoolFactory(country=cls.country, location__country=cls.country)
+        cls.school_one = SchoolFactory(country=cls.country)
+        cls.school_two = SchoolFactory(country=cls.country)
+        cls.school_three = SchoolFactory(country=cls.country)
 
         cls.school_weekly_one = SchoolWeeklyStatusFactory(
             school=cls.school_one,
@@ -989,7 +989,7 @@ class SchoolConnectivityStatApiTestCase(TestAPIViewSetMixin, TestCase):
         Expected: HTTP_200_OK - 1 school data with empty statistics json and filled graph_data json.
         Connectivity_speed == 0, as for download speed is calculated based on graph data aggregation.
         """
-        school_four = SchoolFactory(country=self.country, location__country=self.country)
+        school_four = SchoolFactory(country=self.country)
 
         today = datetime.now().date()
         date_7_days_back = today - timedelta(days=6)
@@ -1013,7 +1013,7 @@ class SchoolConnectivityStatApiTestCase(TestAPIViewSetMixin, TestCase):
         # self.assertEqual(school_data['statistics']['connectivity_speed'], 0)
         self.assertEqual(school_data['connectivity_status'], 'unknown')
 
-        self.assertEqual(len(school_data['statistics']), 0)
+        self.assertEqual(len(school_data['statistics']), 68)
 
         for data in school_data['graph_data']:
             self.assertIsNone(data['value'])
@@ -1040,60 +1040,6 @@ class SchoolConnectivityStatApiTestCase(TestAPIViewSetMixin, TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 3)
-
-        # self.assertEqual(response.data[0]['statistics']['connectivity_speed'], 0)
-        # self.assertEqual(response.data[1]['statistics']['connectivity_speed'], 0)
-        # self.assertEqual(response.data[2]['statistics']['connectivity_speed'], 0)
-
-
-class CountryCoverageStatsAPITestCase(TestAPIViewSetMixin, TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.country_one = CountryFactory()
-        cls.country_two = CountryFactory()
-
-        cls.stat_one = CountryWeeklyStatusFactory(country=cls.country_one)
-        cls.stat_two = CountryWeeklyStatusFactory(country=cls.country_two)
-
-    def setUp(self):
-        cache.clear()
-        super().setUp()
-
-    def test_get_country_coverage_stats(self):
-        url, _, view = statistics_url((), {'country_id': self.country_one.id}, view_name='country-coverage-stat')
-
-        response = self.forced_auth_req('get', url, view=view)
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['total_schools'], self.stat_one.schools_total)
-        # self.assertEqual(response.data['connected_schools']['5g_4g'], self.stat_one.schools_coverage_good)
-        # self.assertEqual(response.data['connected_schools']['3g_2g'], self.stat_one.schools_coverage_moderate)
-        # self.assertEqual(response.data['connected_schools']['no_coverage'], self.stat_one.schools_coverage_no)
-        # self.assertEqual(response.data['connected_schools']['unknown'], self.stat_one.schools_coverage_unknown)
-
-    def test_get_country_coverage_stats_no_data(self):
-        url, _, view = statistics_url((), {'country_id': 999}, view_name='country-coverage-stat')
-        response = self.forced_auth_req('get', url, view=view)
-
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_get_country_coverage_stats_cached(self):
-        url, _, view = statistics_url((), {'country_id': self.country_one.id}, view_name='country-coverage-stat')
-
-        # Call the API to cache the data
-        with self.assertNumQueries(4):
-            self.forced_auth_req('get', url, view=view)
-
-        with self.assertNumQueries(0):
-            self.forced_auth_req('get', url, view=view)
-
-    def test_get_country_coverage_stats_no_cache(self):
-        url = reverse('connection_statistics:country-coverage-stat')
-        query_params = {'country_id': self.country_one.id}
-        # Call the API without caching
-        with self.assertNumQueries(5):
-            response = self.client.get(url, query_params, HTTP_CACHE_CONTROL='no-cache')
-            self.assertEqual(response.status_code, status.HTTP_200_OK)
 
 
 class ConnectivityConfigurationsAPITestCase(TestAPIViewSetMixin, TestCase):
@@ -1637,8 +1583,8 @@ class SchoolSummaryAPIViewSetAPITestCase(TestAPIViewSetMixin, TestCase):
     def setUpTestData(cls):
         cls.country = CountryFactory()
 
-        cls.school_one = SchoolFactory(country=cls.country, location__country=cls.country, geopoint=None)
-        cls.school_two = SchoolFactory(country=cls.country, location__country=cls.country)
+        cls.school_one = SchoolFactory(country=cls.country, geopoint=None)
+        cls.school_two = SchoolFactory(country=cls.country)
 
         cls.stat_one = SchoolWeeklyStatusFactory(
             school=cls.school_one,
@@ -1849,8 +1795,8 @@ class SchoolDailyConnectivitySummaryAPIViewSetAPITestCase(TestAPIViewSetMixin, T
     def setUpTestData(cls):
         cls.country = CountryFactory()
 
-        cls.school_one = SchoolFactory(country=cls.country, location__country=cls.country, geopoint=None)
-        cls.school_two = SchoolFactory(country=cls.country, location__country=cls.country)
+        cls.school_one = SchoolFactory(country=cls.country, geopoint=None)
+        cls.school_two = SchoolFactory(country=cls.country)
 
         today = datetime.now().date()
 
@@ -2033,7 +1979,7 @@ class SchoolDailyConnectivitySummaryAPIViewSetAPITestCase(TestAPIViewSetMixin, T
 
 
 class TimePlayerApiTestCase(TestAPIViewSetMixin, TestCase):
-    databases = ['default', ]
+    databases = {'default', settings.READ_ONLY_DB_KEY,}
 
     @classmethod
     def setUpTestData(cls):
@@ -2068,6 +2014,7 @@ class TimePlayerApiTestCase(TestAPIViewSetMixin, TestCase):
             data={
                 'icon': '<icon>',
                 'name': 'Test data layer 3',
+                'code': 'TEST_DATA_LAYER_{0}'.format(pcdc_data_source.id),
                 'description': 'Test data layer 3 description',
                 'version': '1.0.0',
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,

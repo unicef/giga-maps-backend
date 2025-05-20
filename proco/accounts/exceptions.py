@@ -74,7 +74,7 @@ class CountryRequiredForPrivateAPIKeyError(BaseInvalidValidationError):
 
     This class overrides both 'message' and 'code' variables.
     """
-    message = _("'active_countries_list' field is required for Private API Key.'")
+    message = _("'active_countries_list' field is required for Private API Key.")
     description = _('Provide valid country list for Private API Key')
     code = 'invalid_private_api_key_countries'
 

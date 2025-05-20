@@ -607,7 +607,7 @@ class AppStaticConfigurationsApiTestCase(TestAPIViewSetMixin, TestCase):
 
 
 class TimePlayerApiTestCase(TestAPIViewSetMixin, TestCase):
-    databases = ['default', ]
+    databases = {'default', settings.READ_ONLY_DB_KEY,}
 
     @classmethod
     def setUpTestData(cls):
@@ -642,6 +642,7 @@ class TimePlayerApiTestCase(TestAPIViewSetMixin, TestCase):
             data={
                 'icon': '<icon>',
                 'name': 'Test data layer 3',
+                'code': 'TEST_DATA_LAYER_{0}'.format(pcdc_data_source.id),
                 'description': 'Test data layer 3 description',
                 'version': '1.0.0',
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
@@ -988,6 +989,7 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
             data={
                 'icon': '<icon>',
                 'name': 'Test data layer',
+                'code': 'TEST_DATA_LAYER_{0}'.format(pcdc_data_source.id),
                 'description': 'Test data layer description',
                 'version': '1.0.0',
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
@@ -1037,6 +1039,7 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
             data={
                 'icon': '<icon>',
                 'name': 'Test data layer 2',
+                'code': 'TEST_DATA_LAYER_{0}'.format(pcdc_data_source.id),
                 'description': 'Test data layer 2 description',
                 'version': '1.0.0',
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
@@ -1104,6 +1107,7 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
             data={
                 'icon': '<icon>',
                 'name': 'Test data layer 2',
+                'code': 'TEST_DATA_LAYER_{0}'.format(pcdc_data_source.id),
                 'description': 'Test data layer 2 description',
                 'version': '1.0.0',
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
@@ -1168,6 +1172,7 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
             data={
                 'icon': '<icon>',
                 'name': 'Test data layer 3',
+                'code': 'TEST_DATA_LAYER_{0}'.format(pcdc_data_source.id),
                 'description': 'Test data layer 3 description',
                 'version': '1.0.0',
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
@@ -1249,6 +1254,7 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
             data={
                 'icon': '<icon>',
                 'name': 'Test data layer',
+                'code': 'TEST_DATA_LAYER_{0}'.format(pcdc_data_source.id),
                 'description': 'Test data layer description',
                 'version': '1.0.0',
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
@@ -1313,6 +1319,7 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
             data={
                 'icon': '<icon>',
                 'name': 'Test data layer',
+                'code': 'TEST_DATA_LAYER_{0}'.format(qos_data_source.id),
                 'description': 'Test data layer description',
                 'version': '1.0.0',
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
@@ -1421,7 +1428,7 @@ class LogActionApiTestCase(TestAPIViewSetMixin, TestCase):
 
 
 class DataLayerMapApiTestCase(TestAPIViewSetMixin, TestCase):
-    databases = ['default', ]
+    databases = {'default', settings.READ_ONLY_DB_KEY,}
 
     @classmethod
     def setUpTestData(cls):
@@ -1709,7 +1716,7 @@ class DataLayerMapApiTestCase(TestAPIViewSetMixin, TestCase):
 
 
 class DataLayerInfoApiTestCase(TestAPIViewSetMixin, TestCase):
-    databases = ['default', ]
+    databases = {'default', settings.READ_ONLY_DB_KEY,}
 
     @classmethod
     def setUpTestData(cls):
@@ -2002,5 +2009,76 @@ class InvalidateCacheApiTestCase(TestAPIViewSetMixin, TestCase):
         url, view, view_info = accounts_url((), {'hard': 'false'}, view_name='admin-invalidate-cache')
 
         response = self.forced_auth_req('get', url, user=self.admin_user, view=view, view_info=view_info)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_hard_cache_clean_for_all_pattern_for_admin(self):
+        url, view, view_info = accounts_url((), {'hard': 'true'},
+                                            view_name='admin-invalidate-cache-based-on-patterns')
+
+        response = self.forced_auth_req(
+            'delete',
+            url,
+            user=self.admin_user,
+            view=view,
+            view_info=view_info,
+            data={
+                'key': 'all'
+            }
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_soft_cache_clean_for_all_pattern_admin(self):
+        url, view, view_info = accounts_url((), {'hard': 'false'},
+                                            view_name='admin-invalidate-cache-based-on-patterns')
+
+        response = self.forced_auth_req(
+            'delete',
+            url,
+            user=self.admin_user,
+            view=view,
+            view_info=view_info,
+            data={
+                'key': 'all'
+            }
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_hard_cache_clean_for_country_for_admin(self):
+        url, view, view_info = accounts_url((), {'hard': 'true'},
+                                            view_name='admin-invalidate-cache-based-on-patterns')
+
+        response = self.forced_auth_req(
+            'delete',
+            url,
+            user=self.admin_user,
+            view=view,
+            view_info=view_info,
+            data={
+                'key': 'country',
+                'id': 12345,
+                'code': 'C_CODE'
+            }
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_hard_cache_clean_for_layer_for_admin(self):
+        url, view, view_info = accounts_url((), {'hard': 'true'},
+                                            view_name='admin-invalidate-cache-based-on-patterns')
+
+        response = self.forced_auth_req(
+            'delete',
+            url,
+            user=self.admin_user,
+            view=view,
+            view_info=view_info,
+            data={
+                'key': 'layer',
+                'id': 12345,
+            }
+        )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)

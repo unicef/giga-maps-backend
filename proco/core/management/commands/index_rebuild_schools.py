@@ -92,8 +92,7 @@ def collect_data(country_id, school_id):
     queryset = SchoolIndex.Meta.model.objects.all()
 
     qs = queryset.prefetch_related(
-        Prefetch('country',
-                 Country.objects.defer('geometry', 'geometry_simplified')),
+        Prefetch('country', Country.objects.defer('geometry')),
     ).annotate(
         school_id=F('id'),
         country_name=F('country__name'),
