@@ -679,7 +679,6 @@ class DownloadSchoolsViewSet(BaseModelViewSet, core_mixins.DownloadAPIDataToCSVM
 
     filter_backends = (
         DjangoFilterBackend,
-        # NullsAlwaysLastOrderingFilter,
     )
 
     ordering_field_names = ['name_lower']
@@ -717,12 +716,20 @@ class AdminViewSchoolAPIViewSet(BaseModelViewSet):
     )
 
     filter_backends = (
-        SearchFilter, DjangoFilterBackend,
+        DjangoFilterBackend,
+        SearchFilter,
     )
 
     ordering_field_names = ['country', 'name_lower']
     apply_query_pagination = True
-    search_fields = ('=school_type', '=environment', 'name', 'country__name', '=giga_id_school', '=external_id')
+    search_fields = (
+        '=school_type',
+        '=environment',
+        'name_lower',
+        'country__name',
+        '=giga_id_school',
+        '=external_id',
+    )
 
     filterset_fields = {
         'country_id': ['exact', 'in'],
@@ -829,7 +836,9 @@ class ImportCSVViewSet(BaseModelViewSet):
     serializer_class = ImportCSVSerializer
 
     search_fields = ('=country__id', 'status',)
-    filter_backends = (DjangoFilterBackend,)
+    filter_backends = (
+        DjangoFilterBackend,
+    )
 
     filterset_fields = {
         'id': ['exact', 'in'],

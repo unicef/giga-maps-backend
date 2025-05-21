@@ -30,7 +30,7 @@ class SoftCacheManager(object):
 
     def invalidate_many(self, keys, hard=False):
         for key in keys:
-            self.invalidate(key, hard=False)
+            self.invalidate(key, hard=hard)
 
     def invalidate(self, key='*', hard=False):
         if hard:
