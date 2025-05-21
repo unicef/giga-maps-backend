@@ -207,12 +207,6 @@ def sync_school_master_data(profile_file, share_name, schema_name, table_name, c
                     'Hence skipping the data update for current country ({0}).'.format(country))
         return
 
-    table_protocol = delta_sharing.get_table_protocol(table_url)
-    logger.debug('Table Protocol: {0}'.format(table_protocol))
-
-    table_meta_data = delta_sharing.get_table_metadata(table_url)
-    logger.debug('Table Metadata: {0}'.format(table_meta_data.__dict__))
-
     loaded_data_df = delta_sharing.load_table_changes_as_pandas(
         table_url,
         table_last_data_version,
@@ -623,12 +617,6 @@ def load_qos_data_source_response_to_model(changes_for_countries):
                         logger.info('Both QoS data version in DB and Table version from API, are same. '
                                     'Hence skipping the data update for current country ({0}).'.format(country))
                         continue
-
-                    table_protocol = delta_sharing.get_table_protocol(table_url)
-                    logger.debug('Table Protocol: {0}'.format(table_protocol))
-
-                    table_meta_data = delta_sharing.get_table_metadata(table_url)
-                    logger.debug('Table Metadata: {0}'.format(table_meta_data.__dict__))
 
                     if not table_last_data_version:
                         # In case if its 1st pull, then pull only last 10 version's data at max

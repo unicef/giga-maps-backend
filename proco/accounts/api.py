@@ -380,6 +380,63 @@ class InvalidateCache(APIView):
         return Response(data={'message': message})
 
 
+class InvalidateCacheByPattern(APIView):
+    permission_classes = (
+        core_permissions.IsUserAuthenticated,
+        core_permissions.CanCleanCache,
+    )
+
+    def delete(self, request, *args, **kwargs):
+        hard_delete = request.query_params.get('hard', settings.INVALIDATE_CACHE_HARD).lower() == 'true'
+        payload = request.data
+        if payload:
+            cache_key_name = payload.get('key', 'all')
+        else:
+            cache_key_name = 'all'
+
+        if cache_key_name == 'all':
+            if hard_delete:
+                cache_manager.invalidate(hard=True)
+                message = 'Cache cleared. Map is updated in real time.'
+            else:
+                cache_manager.invalidate()
+                message = 'Cache invalidation started. Maps will be updated in a few minutes.'
+
+            update_all_cached_values.delay()
+        else:
+            keys = []
+
+            if cache_key_name == 'country':
+                country_id = payload.get('id', None)
+                country_code = payload.get('code', None)
+                keys = [
+                    "*COUNTRIES_LIST_",
+                    "*PUBLISHED_LAYERS_LIST_*",
+                    "*GLOBAL_COUNTRY_SEARCH_MAPPING_",
+                    "*country_id_\['{0}'\]*".format(country_id),
+                    "*country_id_{0}*".format(country_id),
+                    "*COUNTRY_INFO_pk_{0}".format(country_code),
+                ]
+            elif cache_key_name == 'layer':
+                layer_id = payload.get('id', None)
+                keys = [
+                    "*PUBLISHED_LAYERS_LIST_*",
+                    "*DATA_LAYER_INFO_{0}*".format(layer_id),
+                    "*DATA_LAYER_MAP_{0}*".format(layer_id),
+                    "*layer_id_\['{0}'\]*".format(layer_id),
+                    "*layer_id_{0}*".format(layer_id),
+                ]
+
+            if hard_delete:
+                cache_manager.invalidate_many(keys=keys, hard=True)
+                message = 'Cache cleared. Map is updated in real time.'
+            else:
+                cache_manager.invalidate_many(keys=keys)
+                message = 'Cache invalidation started. Maps will be updated in a few minutes.'
+
+        return Response(data={'message': message})
+
+
 class AppStaticConfigurationsViewSet(APIView):
     base_auth_permissions = (
         permissions.AllowAny,
@@ -1004,11 +1061,11 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     "schools_school"."id" = t."school_id"
                     AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
                     AND t."live_data_source" IN ({live_source_types})
+                    AND t."deleted" IS NULL
                 )
             WHERE (
                 "schools_school"."deleted" IS NULL
                 AND "connection_statistics_schoolrealtimeregistration"."deleted" IS NULL
-                AND t."deleted" IS NULL
                 {country_condition}
                 {admin1_condition}
                 {school_condition}
@@ -1130,8 +1187,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             {case_conditions}
         FROM "schools_school" schools_school
         INNER JOIN public.locations_country c ON c."id" = schools_school."country_id"
-            AND c."deleted" IS NULL
-            AND schools_school."deleted" IS NULL
         INNER JOIN "connection_statistics_schoolweeklystatus" sws ON schools_school."last_weekly_status_id" = sws."id"
         LEFT JOIN public.locations_countryadminmetadata AS adm1_metadata
             ON adm1_metadata."id" = schools_school.admin1_id
@@ -1153,15 +1208,16 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     "schools_school"."id" = t."school_id"
                     AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
                     AND t."live_data_source" IN ({live_source_types})
+                    AND t."deleted" IS NULL
                 )
-            WHERE (
-                "schools_school"."id" IN ({ids})
-                AND "schools_school"."deleted" IS NULL
-                AND t."deleted" IS NULL)
+            WHERE ("schools_school"."id" IN ({ids})
+                AND "schools_school"."deleted" IS NULL)
             GROUP BY "schools_school"."id"
             ORDER BY "schools_school"."id" ASC
         ) AS sds ON sds.school_id = schools_school.id
         WHERE "schools_school"."id" IN ({ids})
+            AND c."deleted" IS NULL
+            AND schools_school."deleted" IS NULL
         GROUP BY schools_school."id", srr."rt_registered", srr."rt_registration_date",
             adm1_metadata."name", adm1_metadata."description_ui_label",
             adm2_metadata."name", adm2_metadata."description_ui_label",
@@ -1500,7 +1556,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             END as connectivity_status
         FROM "schools_school"
         INNER JOIN locations_country c ON c.id = schools_school.country_id
-            AND c."deleted" IS NULL
         INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
         LEFT JOIN locations_countryadminmetadata AS adm1_metadata
             ON adm1_metadata."id" = schools_school.admin1_id
@@ -1511,6 +1566,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             AND adm2_metadata."layer_name" = 'adm2'
             AND adm2_metadata."deleted" IS NULL
         WHERE "schools_school"."id" IN ({ids})
+            AND c."deleted" IS NULL
         """
 
         kwargs = copy.deepcopy(self.kwargs)
@@ -1832,52 +1888,42 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 SELECT DISTINCT ST_AsMVTGeom(ST_Transform("schools_school".geopoint, 3857), bounds.b2d) AS geom,
                     {random_select_list}
                     "schools_school".id,
-                    CASE WHEN sds.rt_connected = True THEN True ELSE False END AS is_rt_connected,
+                    True AS is_rt_connected,
                     sds.{col_name} AS field_avg,
                     {case_conditions}
-                    CASE WHEN "schools_school".connectivity_status IN ('good', 'moderate') THEN 'connected'
-                        WHEN "schools_school".connectivity_status = 'no' THEN 'not_connected'
-                        ELSE 'unknown'
-                    END as connectivity_status
+                    'connected' AS connectivity_status
                 FROM schools_school
                 INNER JOIN bounds ON ST_Intersects("schools_school".geopoint, ST_Transform(bounds.geom, 4326))
-                {school_weekly_join}
-                LEFT JOIN (
+                INNER JOIN (
                     SELECT "schools_school"."id" AS school_id,
                         "schools_school"."last_weekly_status_id",
-                        AVG(t."{col_name}") AS "{col_name}",
-                        TRUE AS rt_connected
+                        AVG(t."{col_name}") AS "{col_name}"
                     FROM "schools_school"
-                    INNER JOIN "connection_statistics_schoolrealtimeregistration"
-                        ON ("schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id")
+                    INNER JOIN connection_statistics_schoolrealtimeregistration rt_status ON
+                        rt_status."school_id" = "schools_school".id
                     {school_weekly_join}
-                    LEFT OUTER JOIN "connection_statistics_schooldailystatus" t
-                        ON (
-                            "schools_school"."id" = t."school_id"
-                            AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
-                            AND t."live_data_source" IN ({live_source_types})
-                        )
+                    LEFT OUTER JOIN "connection_statistics_schooldailystatus" t ON (
+                        "schools_school"."id" = t."school_id"
+                        AND t."deleted" IS NULL
+                        AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
+                        AND t."live_data_source" IN ({live_source_types})
+                    )
                     WHERE (
                         "schools_school"."deleted" IS NULL
-                        AND "connection_statistics_schoolrealtimeregistration"."deleted" IS NULL
-                        AND t."deleted" IS NULL
+                        AND rt_status."deleted" IS NULL
                         {country_condition}
                         {admin1_condition}
                         {school_condition}
                         {school_weekly_condition}
-                        AND "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
-                        AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date"::date
-                        <= '{end_date}')
+                        AND rt_status."rt_registered" = True
+                        AND rt_status."rt_registration_date"::date <= '{end_date}'
+                    )
                     GROUP BY "schools_school"."id"
                 ) AS sds ON sds.school_id = "schools_school".id
                 {school_weekly_outer_join}
                 WHERE "schools_school"."deleted" IS NULL
-                    {country_outer_condition}
-                    {admin1_outer_condition}
-                    {school_outer_condition}
-                    {school_weekly_condition}
-                {random_order}
-                {limit_condition}
+                    {random_order}
+                    {limit_condition}
             )
             SELECT ST_AsMVT(DISTINCT mvtgeom.*) FROM mvtgeom;
         """
@@ -1887,10 +1933,6 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         kwargs['country_condition'] = ''
         kwargs['admin1_condition'] = ''
         kwargs['school_condition'] = ''
-
-        kwargs['country_outer_condition'] = ''
-        kwargs['admin1_outer_condition'] = ''
-        kwargs['school_outer_condition'] = ''
 
         kwargs['school_weekly_join'] = ''
         kwargs['school_weekly_condition'] = ''
@@ -1921,12 +1963,12 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
             kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status,'
             kwargs['school_weekly_outer_join'] = """
-            LEFT OUTER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
+            INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
             """
         else:
             kwargs['case_conditions'] = """
                 CASE WHEN sds.{col_name} >  {benchmark_value} THEN 'good'
-                    WHEN sds.{col_name} < {benchmark_value} and sds.{col_name} >= {base_benchmark} THEN 'moderate'
+                    WHEN sds.{col_name} < {benchmark_value} AND sds.{col_name} >= {base_benchmark} THEN 'moderate'
                     WHEN sds.{col_name} < {base_benchmark}  THEN 'bad'
                     ELSE 'unknown'
                 END AS field_status,
@@ -1935,7 +1977,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             if kwargs['is_reverse'] is True:
                 kwargs['case_conditions'] = """
                 CASE WHEN sds.{col_name} < {benchmark_value}  THEN 'good'
-                    WHEN sds.{col_name} >= {benchmark_value} and sds.{col_name} <= {base_benchmark} THEN 'moderate'
+                    WHEN sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark} THEN 'moderate'
                     WHEN sds.{col_name} > {base_benchmark} THEN 'bad'
                     ELSE 'unknown'
                 END AS field_status,
@@ -1944,10 +1986,6 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         if len(kwargs.get('school_ids', [])) > 0:
             add_random_condition = False
             kwargs['school_condition'] = 'AND "schools_school"."id" IN ({0})'.format(
-                ','.join([str(school_id) for school_id in kwargs['school_ids']])
-            )
-
-            kwargs['school_outer_condition'] = 'AND "schools_school"."id" IN ({0})'.format(
                 ','.join([str(school_id) for school_id in kwargs['school_ids']])
             )
         elif len(kwargs.get('admin1_ids', [])) > 0:
@@ -1960,9 +1998,6 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             kwargs['admin1_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
                 ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
             )
-            kwargs['admin1_outer_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
-                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
-            )
         elif len(kwargs.get('country_ids', [])) > 0:
             if settings.COUNTRY_MAP_API_SAMPLING_LIMIT:
                 kwargs['MAP_API_SAMPLING_LIMIT'] = settings.COUNTRY_MAP_API_SAMPLING_LIMIT
@@ -1973,13 +2008,9 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
-            kwargs['country_outer_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
-                ','.join([str(country_id) for country_id in kwargs['country_ids']])
-            )
 
         if len(kwargs['school_filters']) > 0:
             kwargs['school_condition'] += ' AND ' + kwargs['school_filters']
-            kwargs['school_outer_condition'] += ' AND ' + kwargs['school_filters']
 
         if len(kwargs['school_static_filters']) > 0:
             kwargs['school_weekly_join'] = """
@@ -2021,10 +2052,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 {random_select_list}
                 schools_school.id,
                 {table_name}."{col_name}" AS field_value,
-                CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
-                    WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
-                    ELSE 'unknown'
-                END as connectivity_status,
+                'connected' AS connectivity_status,
                 {label_case_statements}
             FROM schools_school
             INNER JOIN bounds ON ST_Intersects(schools_school.geopoint, ST_Transform(bounds.geom, 4326))
@@ -2287,36 +2315,34 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
                 {env}::box2d AS b2d
             ),
             mvtgeom AS (
-                SELECT DISTINCT ST_AsMVTGeom(ST_Transform(t1.geopoint, 3857), bounds.b2d) AS geom,
-                   t1.school_id,
-                   t1.year,
+                SELECT DISTINCT ST_AsMVTGeom(ST_Transform(sds.geopoint, 3857), bounds.b2d) AS geom,
+                   sds.school_id,
+                   sds.year,
                    CASE
                        WHEN rt_status.rt_registered = True
-                            AND EXTRACT(YEAR FROM CAST(rt_status.rt_registration_date AS DATE)) <= t1.year THEN True
+                            AND EXTRACT(YEAR FROM CAST(rt_status.rt_registration_date AS DATE)) <= sds.year THEN True
                        ELSE False
-                   END as is_rt_connected,
-                   t1.field_status
+                   END AS is_rt_connected,
+                   {case_conditions}
                 FROM bounds
                 INNER JOIN (
                     SELECT schools_school.id AS school_id,
                         schools_school.geopoint,
-                        EXTRACT(YEAR FROM CAST(sds.date AS DATE)) AS year,
-                        {case_conditions}
+                        EXTRACT(YEAR FROM CAST(t.date AS DATE)) AS year,
+                        schools_school."last_weekly_status_id",
+                        'AVG(t."{col_name}")' AS "{col_name}"
                     FROM "schools_school"
-                    INNER JOIN "connection_statistics_schooldailystatus" sds ON (
-                        schools_school."id" = sds."school_id"
-                        AND EXTRACT(YEAR FROM CAST(sds.date AS DATE)) >= {start_year}
-                        AND sds."live_data_source" IN ({live_source_types}))
-                    INNER JOIN "connection_statistics_schoolweeklystatus" sws ON schools_school."last_weekly_status_id" = sws."id"
+                    INNER JOIN "connection_statistics_schooldailystatus" t ON schools_school."id" = t."school_id"
                     WHERE schools_school."deleted" IS NULL
-                        AND sds."deleted" IS NULL
+                        AND t."deleted" IS NULL
                         AND schools_school."country_id" = {country_id}
-                    GROUP BY schools_school."id", EXTRACT(YEAR FROM CAST(sds.date AS DATE)), field_status
-                    ORDER BY schools_school.id ASC, year ASC, field_status
-                ) AS t1 ON ST_Intersects(t1.geopoint, ST_Transform(bounds.geom, 4326))
-            LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = t1.school_id
+                        AND EXTRACT(YEAR FROM CAST(t.date AS DATE)) >= {start_year}
+                        AND t."live_data_source" IN ({live_source_types})
+                    GROUP BY schools_school."id", EXTRACT(YEAR FROM CAST(t.date AS DATE))
+                ) AS sds ON ST_Intersects(sds.geopoint, ST_Transform(bounds.geom, 4326))
+            INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
+            LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = sds.school_id
             WHERE rt_status."deleted" IS NULL
-            ORDER BY t1.school_id ASC, t1.year ASC
         )
         SELECT ST_AsMVT(DISTINCT mvtgeom.*) FROM mvtgeom;
         """
@@ -2344,7 +2370,8 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
         else:
             kwargs['case_conditions'] = """
                         CASE WHEN sds.{col_name} >  {benchmark_value} THEN 'good'
-                            WHEN sds.{col_name} < {benchmark_value} and sds.{col_name} >= {base_benchmark} THEN 'moderate'
+                            WHEN sds.{col_name} < {benchmark_value} AND sds.{col_name} >= {base_benchmark} THEN
+                            'moderate'
                             WHEN sds.{col_name} < {base_benchmark}  THEN 'bad'
                             ELSE 'unknown'
                         END AS field_status
@@ -2353,7 +2380,8 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
             if kwargs['is_reverse'] is True:
                 kwargs['case_conditions'] = """
                         CASE WHEN sds.{col_name} < {benchmark_value}  THEN 'good'
-                            WHEN sds.{col_name} >= {benchmark_value} and sds.{col_name} <= {base_benchmark} THEN 'moderate'
+                            WHEN sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark} THEN
+                            'moderate'
                             WHEN sds.{col_name} > {base_benchmark} THEN 'bad'
                             ELSE 'unknown'
                         END AS field_status

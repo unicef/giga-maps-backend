@@ -22,6 +22,7 @@ from proco.connection_statistics.utils import (
     update_country_weekly_status,
 )
 from proco.core import utils as core_utilities
+from proco.core.config import app_config as core_configs
 from proco.custom_auth import models as auth_models
 from proco.custom_auth.utils import get_user_emails_for_permissions
 from proco.data_sources import models as sources_models
@@ -191,7 +192,6 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
     }
 
     coverage_type_choices = dict(statistics_models.SchoolWeeklyStatus.COVERAGE_TYPES).keys()
-    true_choices = ['true', 'yes', '1']
 
     if country_ids and len(country_ids) > 0:
         task_key = 'handle_published_school_master_data_row_status_{current_time}_country_ids_{ids}'.format(
@@ -312,18 +312,21 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                     school_weekly.num_teachers = row.num_teachers
                     school_weekly.num_classroom = row.num_classrooms
                     school_weekly.num_latrines = row.num_latrines
-                    school_weekly.running_water = False if core_utilities.is_blank_string(
-                        row.water_availability) else str(row.water_availability).lower() in true_choices
-                    school_weekly.electricity_availability = False if core_utilities.is_blank_string(
-                        row.electricity_availability) else str(row.electricity_availability).lower() in true_choices
-                    school_weekly.computer_lab = False if core_utilities.is_blank_string(
-                        row.computer_lab) else str(row.computer_lab).lower() in true_choices
+                    school_weekly.running_water = False \
+                        if core_utilities.is_blank_string(row.water_availability) \
+                        else str(row.water_availability).lower() in core_configs.true_choices
+                    school_weekly.electricity_availability = False \
+                        if core_utilities.is_blank_string(row.electricity_availability) \
+                        else str(row.electricity_availability).lower() in core_configs.true_choices
+                    school_weekly.computer_lab = False \
+                        if core_utilities.is_blank_string(row.computer_lab) \
+                        else str(row.computer_lab).lower() in core_configs.true_choices
                     school_weekly.num_computers = row.num_computers
 
                     if core_utilities.is_blank_string(row.connectivity_govt):
                         school_weekly.connectivity = None
                     else:
-                        school_weekly.connectivity = str(row.connectivity_govt).lower() in true_choices
+                        school_weekly.connectivity = str(row.connectivity_govt).lower() in core_configs.true_choices
 
                     school_weekly.connectivity_type = row.connectivity_type_govt or 'unknown'
 
@@ -331,7 +334,7 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                         school_weekly.coverage_availability = None
                     else:
                         school_weekly.coverage_availability = str(
-                            row.cellular_coverage_availability).lower() in true_choices
+                            row.cellular_coverage_availability).lower() in core_configs.true_choices
 
                     coverage_type = statistics_models.SchoolWeeklyStatus.COVERAGE_UNKNOWN
                     if not core_utilities.is_blank_string(row.cellular_coverage_type):
@@ -371,7 +374,7 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                     school_weekly.connectivity_govt_ingestion_timestamp = row.connectivity_govt_ingestion_timestamp
                     school_weekly.connectivity_govt_collection_year = row.connectivity_govt_collection_year
                     school_weekly.disputed_region = False if core_utilities.is_blank_string(
-                        row.disputed_region) else str(row.disputed_region).lower() in true_choices
+                        row.disputed_region) else str(row.disputed_region).lower() in core_configs.true_choices
 
                     download_speed_benchmark = row.download_speed_benchmark
                     if download_speed_benchmark:
@@ -386,14 +389,18 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                     school_weekly.num_tablets = row.num_tablets
                     school_weekly.num_robotic_equipment = row.num_robotic_equipment
 
-                    school_weekly.computer_availability = None if core_utilities.is_blank_string(
-                        row.computer_availability) else str(row.computer_availability).lower() in true_choices
-                    school_weekly.teachers_trained = None if core_utilities.is_blank_string(
-                        row.teachers_trained) else str(row.teachers_trained).lower() in true_choices
-                    school_weekly.sustainable_business_model = None if core_utilities.is_blank_string(
-                        row.sustainable_business_model) else str(row.sustainable_business_model).lower() in true_choices
-                    school_weekly.device_availability = None if core_utilities.is_blank_string(
-                        row.device_availability) else str(row.device_availability).lower() in true_choices
+                    school_weekly.computer_availability = None \
+                        if core_utilities.is_blank_string(row.computer_availability) \
+                        else str(row.computer_availability).lower() in core_configs.true_choices
+                    school_weekly.teachers_trained = None \
+                        if core_utilities.is_blank_string(row.teachers_trained) \
+                        else str(row.teachers_trained).lower() in core_configs.true_choices
+                    school_weekly.sustainable_business_model = None \
+                        if core_utilities.is_blank_string(row.sustainable_business_model) \
+                        else str(row.sustainable_business_model).lower() in core_configs.true_choices
+                    school_weekly.device_availability = None \
+                        if core_utilities.is_blank_string(row.device_availability) \
+                        else str(row.device_availability).lower() in core_configs.true_choices
 
                     school_weekly.building_id_govt = row.building_id_govt
                     school_weekly.num_schools_per_building = row.num_schools_per_building
@@ -402,7 +409,7 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
 
                     rt_registered = None
                     if not core_utilities.is_blank_string(row.connectivity_RT):
-                        rt_registered = str(row.connectivity_RT).lower() in true_choices
+                        rt_registered = str(row.connectivity_RT).lower() in core_configs.true_choices
 
                     if rt_registered is not None and row.connectivity_RT_ingestion_timestamp is not None:
                         school_rt_qs = statistics_models.SchoolRealTimeRegistration.objects.filter(school=school)
@@ -964,6 +971,48 @@ def clean_historic_data():
 
         call_command('data_source_additional_steps', *cmd_args)
         task_instance.info('Completed school master historical record cleanup.')
+
+        background_task_utilities.task_on_complete(task_instance)
+    else:
+        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+
+
+@app.task(soft_time_limit=2 * 60 * 60, time_limit=2 * 60 * 60)
+def scheduler_for_data_loss_recovery_for_qos_dates(
+    country_iso3_format,
+    start_date,
+    end_date,
+    check_missing_dates,
+    pull_data,
+    aggregate_data
+):
+    current_datetime = core_utilities.get_current_datetime_object()
+    task_key = 'scheduler_for_data_loss_recovery_for_qos_dates_{current_time}'.format(
+        current_time=format_date(current_datetime, frmt='%d%m%Y_%H%M%S'),
+    )
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(task_id, task_key, 'Data loss recovery for QoS dates')
+
+    if task_instance:
+        logger.debug('Not found running job for qos data loss utility handler: {}'.format(task_key))
+        cmd_args = []
+        if country_iso3_format:
+            cmd_args.append('-country_code={}'.format(country_iso3_format))
+
+        if start_date:
+            cmd_args.append('-start_date={}'.format(start_date))
+        if end_date:
+            cmd_args.append('-end_date={}'.format(end_date))
+
+        if check_missing_dates is True:
+            cmd_args.append('--check_missing_dates')
+        if pull_data is True:
+            cmd_args.append('--pull_data')
+        if aggregate_data is True:
+            cmd_args.append('--aggregate')
+
+        call_command('data_loss_recovery_for_qos_dates', *cmd_args)
+        task_instance.info('Completed QoS data loss recovery utility handler.')
 
         background_task_utilities.task_on_complete(task_instance)
     else:

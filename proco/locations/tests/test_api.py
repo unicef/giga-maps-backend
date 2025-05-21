@@ -36,8 +36,8 @@ class CountryApiTestCase(TestAPIViewSetMixin, TestCase):
 
         cls.admin1_one = Admin1Factory(country=cls.country_one)
 
-        SchoolFactory(country=cls.country_one, location__country=cls.country_one, admin1=cls.admin1_one)
-        SchoolFactory(country=cls.country_one, location__country=cls.country_one, admin1=cls.admin1_one)
+        SchoolFactory(country=cls.country_one, admin1=cls.admin1_one)
+        SchoolFactory(country=cls.country_one, admin1=cls.admin1_one)
 
         CountryWeeklyStatusFactory(country=cls.country_one)
 
@@ -121,8 +121,8 @@ class CountryBoundaryApiTestCase(TestAPIViewSetMixin, TestCase):
 
         cls.admin1_one = Admin1Factory(country=cls.country_one)
 
-        SchoolFactory(country=cls.country_one, location__country=cls.country_one, admin1=cls.admin1_one)
-        SchoolFactory(country=cls.country_one, location__country=cls.country_one, admin1=cls.admin1_one)
+        SchoolFactory(country=cls.country_one, admin1=cls.admin1_one)
+        SchoolFactory(country=cls.country_one, admin1=cls.admin1_one)
 
     def setUp(self):
         cache.clear()
@@ -132,7 +132,6 @@ class CountryBoundaryApiTestCase(TestAPIViewSetMixin, TestCase):
         with self.assertNumQueries(3):
             response = self.forced_auth_req('get', reverse(self.base_view))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        # self.assertIn('geometry_simplified', response.data[0])
 
     def test_country_list_cached(self):
         with self.assertNumQueries(3):
@@ -161,12 +160,12 @@ class CountryDataViewSetTestCase(TestAPIViewSetMixin, TestCase):
 
         cls.admin1_one = Admin1Factory(country=cls.country_one)
 
-        cls.school_one = SchoolFactory(country=cls.country_one, location__country=cls.country_one,
+        cls.school_one = SchoolFactory(country=cls.country_one,
                                        admin1=cls.admin1_one)
-        cls.school_two = SchoolFactory(country=cls.country_one, location__country=cls.country_one,
+        cls.school_two = SchoolFactory(country=cls.country_one,
                                        admin1=cls.admin1_one)
 
-        cls.school_three = SchoolFactory(country=cls.country_two, location__country=cls.country_two, admin1=None)
+        cls.school_three = SchoolFactory(country=cls.country_two, admin1=None)
 
         cls.user = test_utilities.setup_admin_user_by_role()
 
@@ -339,10 +338,9 @@ class CountryDataViewSetTestCase(TestAPIViewSetMixin, TestCase):
 
         response_data = response.data
         # 2 records as we created manually in setup and only 2 countries has schools
-        self.assertEqual(len(response_data), 2)
+        self.assertEqual(len(response_data), 3)
 
         with self.assertNumQueries(0):
             response = self.forced_auth_req('get', url, user=self.user, view=view)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-

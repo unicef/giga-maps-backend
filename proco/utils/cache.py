@@ -28,9 +28,9 @@ class SoftCacheManager(object):
             value['invalidated'] = True
             cache.set(key, value, None)
 
-    def invalidate_many(self, keys):
+    def invalidate_many(self, keys, hard=False):
         for key in keys:
-            self.invalidate(key)
+            self.invalidate(key, hard=False)
 
     def invalidate(self, key='*', hard=False):
         if hard:

@@ -42,7 +42,7 @@ def changed_fields(instance, validated_data, changed_data=None):
     if not changed_data:
         changed_data = []
 
-    model_instance = ['country', 'school', 'last_weekly_status', 'location']
+    model_instance = ['country', 'school', 'last_weekly_status']
     try:
         for field, value in validated_data.items():
             if not isinstance(value, dict):

@@ -26,7 +26,7 @@ flake8-pep3101 = "==2.1.0"
 flake8-mutable = "==1.2.0"
 coverage = "==7.3.0"
 django-anymail = "==7.2"
-delta-sharing = "==1.0.3"
+delta-sharing = "==1.0.5"
 
 [packages]
 django-environ = "*"
