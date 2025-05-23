@@ -39,6 +39,20 @@ class ConnectivityStatistics(models.Model):
     jitter_upload = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
     rtt_packet_loss_pct = models.FloatField(help_text=_('percentage'), blank=True, null=True, default=None)
 
+    speed_download_max = models.PositiveIntegerField(help_text=_('bps'), blank=True, null=True, default=None)
+    speed_upload_max = models.PositiveIntegerField(help_text=_('bps'), blank=True, null=True, default=None)
+    pe_ingress = models.PositiveIntegerField(help_text=_('bps'), blank=True, null=True, default=None)
+    pe_egress = models.PositiveIntegerField(help_text=_('bps'), blank=True, null=True, default=None)
+    inbound_traffic_sum = models.PositiveIntegerField(help_text=_('byte'), blank=True, null=True, default=None)
+    outbound_traffic_sum = models.PositiveIntegerField(help_text=_('byte'), blank=True, null=True, default=None)
+    latency_min = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
+    latency_mean = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
+    latency_max = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
+    signal_mean = models.FloatField(help_text=_('dBM'), blank=True, null=True, default=None)
+    signal_max = models.FloatField(help_text=_('dBM'), blank=True, null=True, default=None)
+    is_connected_all = models.PositiveIntegerField(blank=True, default=None, null=True)
+    is_connected_true = models.PositiveIntegerField(blank=True, default=None, null=True)
+
     live_data_source = models.CharField(
         max_length=50,
         choices=statistics_configs.LIVE_DATA_SOURCE_CHOICES,

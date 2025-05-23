@@ -280,6 +280,20 @@ class QoSData(core_models.DataSourceModelMixin):
     report_id = models.TextField(blank=True, null=True)
     agent_id = models.TextField(blank=True, null=True)
 
+    speed_download_max = models.FloatField(blank=True, null=True)
+    speed_upload_max = models.FloatField(blank=True, null=True)
+    pe_ingress = models.FloatField(blank=True, null=True)
+    pe_egress = models.FloatField(blank=True, null=True)
+    inbound_traffic_sum = models.FloatField(blank=True, null=True)
+    outbound_traffic_sum = models.FloatField(blank=True, null=True)
+    latency_min = models.FloatField(blank=True, null=True)
+    latency_mean = models.FloatField(blank=True, null=True)
+    latency_max = models.FloatField(blank=True, null=True)
+    signal_mean = models.FloatField(blank=True, null=True)
+    signal_max = models.FloatField(blank=True, null=True)
+    is_connected_all = models.PositiveIntegerField(blank=True, default=None, null=True)
+    is_connected_true = models.PositiveIntegerField(blank=True, default=None, null=True)
+
     version = models.PositiveIntegerField(blank=True, default=None, null=True)
 
     class Meta:

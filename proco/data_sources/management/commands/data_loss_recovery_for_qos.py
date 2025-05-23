@@ -204,6 +204,19 @@ def sync_qos_realtime_data(date, country):
         latency_probe_avg=Avg('latency_probe'),
         speed_download_mean_avg=Avg('speed_download_mean'),
         speed_upload_mean_avg=Avg('speed_upload_mean'),
+        speed_download_max_avg=Avg('speed_download_max'),
+        speed_upload_max_avg=Avg('speed_upload_max'),
+        pe_ingress_avg=Avg('pe_ingress'),
+        pe_egress_avg=Avg('pe_egress'),
+        inbound_traffic_sum_avg=Avg('inbound_traffic_sum'),
+        outbound_traffic_sum_avg=Avg('outbound_traffic_sum'),
+        latency_min_avg=Avg('latency_min'),
+        latency_mean_avg=Avg('latency_mean'),
+        latency_max_avg=Avg('latency_max'),
+        signal_mean_avg=Avg('signal_mean'),
+        signal_max_avg=Avg('signal_max'),
+        is_connected_all_avg=Avg('is_connected_all'),
+        is_connected_true_avg=Avg('is_connected_true'),
     ).order_by('school')
 
     if not qos_measurements.exists():
@@ -213,52 +226,55 @@ def sync_qos_realtime_data(date, country):
     logger.info('Migrating the records from "QoSData" to "RealTimeConnectivity" with date: {0} '.format(date))
 
     realtime = []
+    # convert Mbps to bps
+    fields_for_mb_conversion = [
+        'download_avg',
+        'upload_avg',
+        'speed_download_probe_avg',
+        'speed_upload_probe_avg',
+        'speed_download_mean_avg',
+        'speed_upload_mean_avg',
+        'speed_download_max_avg',
+        'speed_upload_max_avg',
+        'pe_ingress_avg',
+        'pe_egress_avg',
+        'inbound_traffic_sum_avg',
+        'outbound_traffic_sum_avg',
+    ]
 
     for qos_measurement in qos_measurements:
-        connectivity_speed = qos_measurement.get('download_avg')
-        if connectivity_speed:
-            # convert Mbps to bps
-            connectivity_speed = connectivity_speed * 1000 * 1000
 
-        connectivity_upload_speed = qos_measurement.get('upload_avg')
-        if connectivity_upload_speed:
-            # convert Mbps to bps
-            connectivity_upload_speed = connectivity_upload_speed * 1000 * 1000
-
-        connectivity_speed_probe = qos_measurement.get('speed_download_probe_avg')
-        if connectivity_speed_probe:
-            # convert Mbps to bps
-            connectivity_speed_probe = connectivity_speed_probe * 1000 * 1000
-
-        connectivity_upload_speed_probe = qos_measurement.get('speed_upload_probe_avg')
-        if connectivity_upload_speed_probe:
-            # convert Mbps to bps
-            connectivity_upload_speed_probe = connectivity_upload_speed_probe * 1000 * 1000
-
-        connectivity_speed_mean = qos_measurement.get('speed_download_mean_avg')
-        if connectivity_speed_mean:
-            # convert Mbps to bps
-            connectivity_speed_mean = connectivity_speed_mean * 1000 * 1000
-
-        connectivity_upload_speed_mean = qos_measurement.get('speed_upload_mean_avg')
-        if connectivity_upload_speed_mean:
-            # convert Mbps to bps
-            connectivity_upload_speed_mean = connectivity_upload_speed_mean * 1000 * 1000
+        for field_name in fields_for_mb_conversion:
+            if qos_measurement.get(field_name):
+                qos_measurement[field_name] = qos_measurement[field_name] * 1000 * 1000
 
         realtime.append(RealTimeConnectivity(
             created=date,
-            connectivity_speed=connectivity_speed,
-            connectivity_upload_speed=connectivity_upload_speed,
+            connectivity_speed=qos_measurement.get('download_avg'),
+            connectivity_upload_speed=qos_measurement.get('upload_avg'),
             connectivity_latency=qos_measurement.get('latency_avg'),
             roundtrip_time=qos_measurement.get('roundtrip_time_avg'),
             jitter_download=qos_measurement.get('jitter_download_avg'),
             jitter_upload=qos_measurement.get('jitter_upload_avg'),
             rtt_packet_loss_pct=qos_measurement.get('rtt_packet_loss_pct_avg'),
-            connectivity_speed_probe=connectivity_speed_probe,
-            connectivity_upload_speed_probe=connectivity_upload_speed_probe,
+            connectivity_speed_probe=qos_measurement.get('speed_download_probe_avg'),
+            connectivity_upload_speed_probe=qos_measurement.get('speed_upload_probe_avg'),
             connectivity_latency_probe=qos_measurement.get('latency_probe_avg'),
-            connectivity_speed_mean=connectivity_speed_mean,
-            connectivity_upload_speed_mean=connectivity_upload_speed_mean,
+            connectivity_speed_mean=qos_measurement.get('speed_download_mean_avg'),
+            connectivity_upload_speed_mean=qos_measurement.get('speed_upload_mean_avg'),
+            speed_download_max=qos_measurement.get('speed_download_max_avg'),
+            speed_upload_max=qos_measurement.get('speed_upload_max_avg'),
+            pe_ingress=qos_measurement.get('pe_ingress_avg'),
+            pe_egress=qos_measurement.get('pe_egress_avg'),
+            inbound_traffic_sum=qos_measurement.get('inbound_traffic_sum_avg'),
+            outbound_traffic_sum=qos_measurement.get('outbound_traffic_sum_avg'),
+            latency_min=qos_measurement.get('latency_min_avg'),
+            latency_mean=qos_measurement.get('latency_mean_avg'),
+            latency_max=qos_measurement.get('latency_max_avg'),
+            signal_mean=qos_measurement.get('signal_mean_avg'),
+            signal_max=qos_measurement.get('signal_max_avg'),
+            is_connected_all=qos_measurement.get('is_connected_all_avg'),
+            is_connected_true=qos_measurement.get('is_connected_true_avg'),
             school_id=qos_measurement.get('school'),
             live_data_source=statistics_configs.QOS_SOURCE,
         ))
