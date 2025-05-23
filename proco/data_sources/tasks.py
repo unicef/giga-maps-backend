@@ -301,6 +301,20 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                             school_weekly.connectivity_latency_probe = None
                             school_weekly.connectivity_speed_mean = None
                             school_weekly.connectivity_upload_speed_mean = None
+
+                            school_weekly.speed_download_max = None
+                            school_weekly.speed_upload_max = None
+                            school_weekly.pe_ingress = None
+                            school_weekly.pe_egress = None
+                            school_weekly.inbound_traffic_sum = None
+                            school_weekly.outbound_traffic_sum = None
+                            school_weekly.latency_min = None
+                            school_weekly.latency_mean = None
+                            school_weekly.latency_max = None
+                            school_weekly.signal_mean = None
+                            school_weekly.signal_max = None
+                            school_weekly.is_connected_all = None
+                            school_weekly.is_connected_true = None
                         else:
                             school_weekly = statistics_models.SchoolWeeklyStatus.objects.create(
                                 school=school,
