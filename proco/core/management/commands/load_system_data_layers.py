@@ -458,7 +458,630 @@ data_source_json = [
                         'sql': 'AVG({col_name})'
                     }
                 ]
-            }
+            },
+            {
+                'name': 'speed_download_max',
+                'type': 'int',
+                'unit': 'bps',
+                'is_parameter': True,
+                'alias': 'Speed Download Max',
+                'base_benchmark': 1000000,
+                'display_unit': 'Mbps',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})',
+                        'eval': ''
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
+                    }
+                ]
+            },
+            {
+                'name': 'speed_upload_max',
+                'type': 'int',
+                'unit': 'bps',
+                'is_parameter': True,
+                'alias': 'Speed Upload Max',
+                'base_benchmark': 1000000,
+                'display_unit': 'Mbps',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})',
+                        'eval': ''
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
+                    }
+                ]
+            },
+            {
+                'name': 'pe_ingress',
+                'type': 'int',
+                'unit': 'bps',
+                'is_parameter': True,
+                'alias': 'PE Ingress',
+                'base_benchmark': 1000000,
+                'display_unit': 'Mbps',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})',
+                        'eval': ''
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
+                    }
+                ]
+            },
+            {
+                'name': 'pe_egress',
+                'type': 'int',
+                'unit': 'bps',
+                'is_parameter': True,
+                'alias': 'PE Egress',
+                'base_benchmark': 1000000,
+                'display_unit': 'Mbps',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})',
+                        'eval': ''
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
+                    }
+                ]
+            },
+            {
+                'name': 'inbound_traffic_sum',
+                'type': 'int',
+                'unit': 'bps',
+                'is_parameter': True,
+                'alias': 'Inbound Traffic Sum',
+                'base_benchmark': 1000000,
+                'display_unit': 'MB',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})',
+                        'eval': ''
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
+                    }
+                ]
+            },
+            {
+                'name': 'outbound_traffic_sum',
+                'type': 'int',
+                'unit': 'bps',
+                'is_parameter': True,
+                'alias': 'Outbound Traffic Sum',
+                'base_benchmark': 1000000,
+                'display_unit': 'MB',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})',
+                        'eval': ''
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
+                    }
+                ]
+            },
+            {
+                'name': 'latency_min',
+                'type': 'int',
+                'unit': 'ms',
+                'is_parameter': True,
+                'alias': 'Latency Min',
+                'base_benchmark': 1,
+                'display_unit': 'ms',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})'
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
+                    }
+                ]
+            },
+            {
+                'name': 'latency_mean',
+                'type': 'int',
+                'unit': 'ms',
+                'is_parameter': True,
+                'alias': 'Latency Mean',
+                'base_benchmark': 1,
+                'display_unit': 'ms',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})'
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
+                    }
+                ]
+            },
+            {
+                'name': 'latency_max',
+                'type': 'int',
+                'unit': 'ms',
+                'is_parameter': True,
+                'alias': 'Latency Max',
+                'base_benchmark': 1,
+                'display_unit': 'ms',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})'
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
+                    }
+                ]
+            },
+            ######################################
+            {
+                'name': 'signal_mean',
+                'type': 'int',
+                'unit': 'dbm',
+                'is_parameter': True,
+                'alias': 'Signal Mean',
+                'base_benchmark': 1000000,
+                'display_unit': 'dBM',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})',
+                        'eval': ''
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
+                    }
+                ]
+            },
+            {
+                'name': 'signal_max',
+                'type': 'int',
+                'unit': 'dbm',
+                'is_parameter': True,
+                'alias': 'Signal Max',
+                'base_benchmark': 1000000,
+                'display_unit': 'dBM',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})',
+                        'eval': ''
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
+                    }
+                ]
+            },
+            {
+                'name': 'is_connected_all',
+                'type': 'int',
+                'unit': None,
+                'is_parameter': True,
+                'alias': 'Is Connected All',
+                'base_benchmark': 1000000,
+                'display_unit': None,
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})',
+                        'eval': ''
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
+                    }
+                ]
+            },
+            {
+                'name': 'is_connected_true',
+                'type': 'int',
+                'unit': None,
+                'is_parameter': True,
+                'alias': 'Is Connected True',
+                'base_benchmark': 1000000,
+                'display_unit': None,
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})',
+                        'eval': ''
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
+                    }
+                ]
+            },
+
         ],
         'status': 'PUBLISHED'
     },

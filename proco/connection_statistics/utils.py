@@ -49,6 +49,19 @@ def aggregate_real_time_data_to_school_daily_status(country, date):
             connectivity_speed_mean_avg=Avg('connectivity_speed_mean'),
             connectivity_upload_speed_mean_avg=Avg('connectivity_upload_speed_mean'),
             connectivity_upload_speed_avg=Avg('connectivity_upload_speed'),
+            speed_download_max_avg=Avg('speed_download_max'),
+            speed_upload_max_avg=Avg('speed_upload_max'),
+            pe_ingress_avg=Avg('pe_ingress'),
+            pe_egress_avg=Avg('pe_egress'),
+            inbound_traffic_sum_avg=Avg('inbound_traffic_sum'),
+            outbound_traffic_sum_avg=Avg('outbound_traffic_sum'),
+            latency_min_avg=Avg('latency_min'),
+            latency_mean_avg=Avg('latency_mean'),
+            latency_max_avg=Avg('latency_max'),
+            signal_mean_avg=Avg('signal_mean'),
+            signal_max_avg=Avg('signal_max'),
+            is_connected_all_avg=Avg('is_connected_all'),
+            is_connected_true_avg=Avg('is_connected_true'),
         ).order_by()
 
         for source_agg in aggregate_by_source:
@@ -69,6 +82,19 @@ def aggregate_real_time_data_to_school_daily_status(country, date):
                     'connectivity_speed_mean': source_agg['connectivity_speed_mean_avg'],
                     'connectivity_upload_speed_mean': source_agg['connectivity_upload_speed_mean_avg'],
                     'connectivity_upload_speed': source_agg['connectivity_upload_speed_avg'],
+                    'speed_download_max': source_agg['speed_download_max_avg'],
+                    'speed_upload_max': source_agg['speed_upload_max_avg'],
+                    'pe_ingress': source_agg['pe_ingress_avg'],
+                    'pe_egress': source_agg['pe_egress_avg'],
+                    'inbound_traffic_sum': source_agg['inbound_traffic_sum_avg'],
+                    'outbound_traffic_sum': source_agg['outbound_traffic_sum_avg'],
+                    'latency_min': source_agg['latency_min_avg'],
+                    'latency_mean': source_agg['latency_mean_avg'],
+                    'latency_max': source_agg['latency_max_avg'],
+                    'signal_mean': source_agg['signal_mean_avg'],
+                    'signal_max': source_agg['signal_max_avg'],
+                    'is_connected_all': source_agg['is_connected_all_avg'],
+                    'is_connected_true': source_agg['is_connected_true_avg'],
                     'deleted': None,
                 },
             )
@@ -90,6 +116,19 @@ def aggregate_school_daily_to_country_daily(country, date) -> bool:
         connectivity_speed_mean_avg=Avg('connectivity_speed_mean'),
         connectivity_upload_speed_mean_avg=Avg('connectivity_upload_speed_mean'),
         connectivity_upload_speed_avg=Avg('connectivity_upload_speed'),
+        speed_download_max_avg=Avg('speed_download_max'),
+        speed_upload_max_avg=Avg('speed_upload_max'),
+        pe_ingress_avg=Avg('pe_ingress'),
+        pe_egress_avg=Avg('pe_egress'),
+        inbound_traffic_sum_avg=Avg('inbound_traffic_sum'),
+        outbound_traffic_sum_avg=Avg('outbound_traffic_sum'),
+        latency_min_avg=Avg('latency_min'),
+        latency_mean_avg=Avg('latency_mean'),
+        latency_max_avg=Avg('latency_max'),
+        signal_mean_avg=Avg('signal_mean'),
+        signal_max_avg=Avg('signal_max'),
+        is_connected_all_avg=Avg('is_connected_all'),
+        is_connected_true_avg=Avg('is_connected_true'),
     ).order_by()
 
     # Adding this check because soft deletion is in place now from 2024
@@ -116,6 +155,19 @@ def aggregate_school_daily_to_country_daily(country, date) -> bool:
                 'connectivity_speed_mean': source_agg['connectivity_speed_mean_avg'],
                 'connectivity_upload_speed_mean': source_agg['connectivity_upload_speed_mean_avg'],
                 'connectivity_upload_speed': source_agg['connectivity_upload_speed_avg'],
+                'speed_download_max': source_agg['speed_download_max_avg'],
+                'speed_upload_max': source_agg['speed_upload_max_avg'],
+                'pe_ingress': source_agg['pe_ingress_avg'],
+                'pe_egress': source_agg['pe_egress_avg'],
+                'inbound_traffic_sum': source_agg['inbound_traffic_sum_avg'],
+                'outbound_traffic_sum': source_agg['outbound_traffic_sum_avg'],
+                'latency_min': source_agg['latency_min_avg'],
+                'latency_mean': source_agg['latency_mean_avg'],
+                'latency_max': source_agg['latency_max_avg'],
+                'signal_mean': source_agg['signal_mean_avg'],
+                'signal_max': source_agg['signal_max_avg'],
+                'is_connected_all': source_agg['is_connected_all_avg'],
+                'is_connected_true': source_agg['is_connected_true_avg'],
                 'deleted': None,
             },
         )
@@ -167,6 +219,10 @@ def aggregate_school_daily_status_to_school_weekly_status(country, date) -> bool
             Avg('roundtrip_time'), Avg('jitter_download'), Avg('jitter_upload'), Avg('rtt_packet_loss_pct'),
             Avg('connectivity_speed_probe'), Avg('connectivity_upload_speed_probe'), Avg('connectivity_latency_probe'),
             Avg('connectivity_speed_mean'), Avg('connectivity_upload_speed_mean'),
+            Avg('speed_download_max'), Avg('speed_upload_max'), Avg('pe_ingress'), Avg('pe_egress'),
+            Avg('inbound_traffic_sum'), Avg('outbound_traffic_sum'),
+            Avg('latency_min'), Avg('latency_mean'), Avg('latency_max'), Avg('signal_mean'), Avg('signal_max'),
+            Avg('is_connected_all'), Avg('is_connected_true'),
         )
 
         school_weekly.modified = get_current_datetime_object()
@@ -183,6 +239,20 @@ def aggregate_school_daily_status_to_school_weekly_status(country, date) -> bool
         school_weekly.connectivity_speed_mean = aggregate['connectivity_speed_mean__avg']
         school_weekly.connectivity_upload_speed_mean = aggregate['connectivity_upload_speed_mean__avg']
         school_weekly.connectivity_upload_speed = aggregate['connectivity_upload_speed__avg']
+
+        school_weekly.speed_download_max = aggregate['speed_download_max__avg']
+        school_weekly.speed_upload_max = aggregate['speed_upload_max__avg']
+        school_weekly.pe_ingress = aggregate['pe_ingress__avg']
+        school_weekly.pe_egress = aggregate['pe_egress__avg']
+        school_weekly.inbound_traffic_sum = aggregate['inbound_traffic_sum__avg']
+        school_weekly.outbound_traffic_sum = aggregate['outbound_traffic_sum__avg']
+        school_weekly.latency_min = aggregate['latency_min__avg']
+        school_weekly.latency_mean = aggregate['latency_mean__avg']
+        school_weekly.latency_max = aggregate['latency_max__avg']
+        school_weekly.signal_mean = aggregate['signal_mean__avg']
+        school_weekly.signal_max = aggregate['signal_max__avg']
+        school_weekly.is_connected_all = aggregate['is_connected_all__avg']
+        school_weekly.is_connected_true = aggregate['is_connected_true__avg']
 
         if created:
             prev_weekly = SchoolWeeklyStatus.objects.all().filter(
@@ -393,10 +463,22 @@ def update_country_weekly_status(country: Country, date):
                                             filter=Q(connectivity_upload_speed_probe__gt=0)),
         connectivity_latency_probe=Avg('connectivity_latency_probe',
                                        filter=Q(connectivity_latency_probe__gt=0)),
-        connectivity_speed_mean=Avg('connectivity_speed_mean',
-                                    filter=Q(connectivity_speed_mean__gt=0)),
+        connectivity_speed_mean=Avg('connectivity_speed_mean', filter=Q(connectivity_speed_mean__gt=0)),
         connectivity_upload_speed_mean=Avg('connectivity_upload_speed_mean',
                                            filter=Q(connectivity_upload_speed_mean__gt=0)),
+        speed_download_max=Avg('speed_download_max', filter=Q(speed_download_max__gt=0)),
+        speed_upload_max=Avg('speed_upload_max', filter=Q(speed_upload_max__gt=0)),
+        pe_ingress=Avg('pe_ingress', filter=Q(pe_ingress__gt=0)),
+        pe_egress=Avg('pe_egress', filter=Q(pe_egress__gt=0)),
+        inbound_traffic_sum=Avg('inbound_traffic_sum', filter=Q(inbound_traffic_sum__gt=0)),
+        outbound_traffic_sum=Avg('outbound_traffic_sum', filter=Q(outbound_traffic_sum__gt=0)),
+        latency_min=Avg('latency_min', filter=Q(latency_min__gt=0)),
+        latency_mean=Avg('latency_mean', filter=Q(latency_mean__gt=0)),
+        latency_max=Avg('latency_max', filter=Q(latency_max__gt=0)),
+        signal_mean=Avg('signal_mean', filter=Q(signal_mean__gt=0)),
+        signal_max=Avg('signal_max', filter=Q(signal_max__gt=0)),
+        is_connected_all=Avg('is_connected_all', filter=Q(is_connected_all__gt=0)),
+        is_connected_true=Avg('is_connected_true', filter=Q(is_connected_true__gt=0)),
     )
 
     country_status.connectivity_speed = schools_stats['connectivity_speed']
@@ -411,6 +493,20 @@ def update_country_weekly_status(country: Country, date):
     country_status.connectivity_speed_mean = schools_stats['connectivity_speed_mean']
     country_status.connectivity_upload_speed_mean = schools_stats['connectivity_upload_speed_mean']
     country_status.connectivity_upload_speed = schools_stats['connectivity_upload_speed']
+
+    country_status.speed_download_max = schools_stats['speed_download_max']
+    country_status.speed_upload_max = schools_stats['speed_upload_max']
+    country_status.pe_ingress = schools_stats['pe_ingress']
+    country_status.pe_egress = schools_stats['pe_egress']
+    country_status.inbound_traffic_sum = schools_stats['inbound_traffic_sum']
+    country_status.outbound_traffic_sum = schools_stats['outbound_traffic_sum']
+    country_status.latency_min = schools_stats['latency_min']
+    country_status.latency_mean = schools_stats['latency_mean']
+    country_status.latency_max = schools_stats['latency_max']
+    country_status.signal_mean = schools_stats['signal_mean']
+    country_status.signal_max = schools_stats['signal_max']
+    country_status.is_connected_all = schools_stats['is_connected_all']
+    country_status.is_connected_true = schools_stats['is_connected_true']
 
     # move country status as far as we can
     if country_status.integration_status == CountryWeeklyStatus.COUNTRY_CREATED and country_status.schools_total:
