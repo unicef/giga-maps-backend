@@ -48,6 +48,8 @@ class Country(GeometryMixin, TimeStampedModel):
 
     benchmark_metadata = JSONField(null=True, default=dict)
 
+    country_disclaimer = models.CharField(max_length=500, null=True, blank=True)
+
     last_weekly_status = models.ForeignKey(
         'connection_statistics.CountryWeeklyStatus',
         null=True,
