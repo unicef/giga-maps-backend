@@ -34,10 +34,13 @@ RUN apt-get update && apt-get install -y \
     postgresql postgresql-contrib libpq-dev gcc 
     #systemctl start postgresql.service
 
-USER postgres
-RUN psql -c "ALTER USER postgres WITH PASSWORD 'root';"
+RUN service postgresql start && \
+    su - postgres -c "psql -c \"ALTER USER postgres WITH PASSWORD 'root';\""
+
+#USER postgres
+#RUN psql -c "ALTER USER postgres WITH PASSWORD 'root';"
     
-USER root
+#USER root
 RUN wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add - \
     echo "deb http://apt.postgresql.org/pub/repos/apt/ `lsb_release -cs`-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list \
     curl -fsSL https://packages.redis.io/gpg | sudo gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg \
