@@ -32,9 +32,13 @@ RUN pip install --upgrade \
 
 RUN apt-get update && apt-get install -y \
     postgresql postgresql-contrib libpq-dev gcc \
-    systemctl start postgresql.service \
-    sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'root';" \
-    wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add - \
+    systemctl start postgresql.service
+
+USER postgres
+RUN sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'root';"
+    
+USER root
+RUN wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add - \
     echo "deb http://apt.postgresql.org/pub/repos/apt/ `lsb_release -cs`-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list \
     curl -fsSL https://packages.redis.io/gpg | sudo gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg \
     echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/redis.list \
