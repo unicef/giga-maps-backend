@@ -51,7 +51,9 @@ steps:
       sudo apt-get install redis
       sudo apt install binutils libproj-dev gdal-bin
       sudo pip install pipenv
+      echo "-------------------------------------Starting Package Installation---------------------------------------"
       pipenv install --ignore-pipfile --dev
+      echo "-------------------------------------Ending Package Installation-----------------------------------------"
       ./scripts/runtests.sh
   continueOnError: true
 
