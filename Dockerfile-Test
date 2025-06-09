@@ -35,7 +35,7 @@ RUN apt-get update && apt-get install -y \
     #systemctl start postgresql.service
 
 USER postgres
-RUN sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'root';"
+RUN psql -c "ALTER USER postgres WITH PASSWORD 'root';"
     
 USER root
 RUN wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add - \
