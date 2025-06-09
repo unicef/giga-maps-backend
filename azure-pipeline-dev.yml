@@ -36,7 +36,7 @@ steps:
 
 - task: Bash@3
   displayName: Unit Tests
-  condition: eq(variables['Build.SourceBranch'], 'refs/heads/develop')
+  # condition: eq(variables['Build.SourceBranch'], 'refs/heads/develop')
   inputs:
     targetType: 'inline'
     script: |
