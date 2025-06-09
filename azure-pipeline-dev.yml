@@ -52,7 +52,12 @@ steps:
       sudo apt install binutils libproj-dev gdal-bin
       sudo add-apt-repository ppa:deadsnakes/ppa
       sudo apt update
+      echo "-------------------------------------Pyhthon Activities Start---------------------------------------"
       sudo apt install python3.8 python3.8-dev python3.8-distutils python3.8-venv
+      sudo python3.8 --version
+      sudo ln -sf /usr/bin/python3.8 /usr/bin/python
+      sudo python --version
+      echo "-------------------------------------Pyhthon Activities End---------------------------------------"
       sudo pip install pipenv
       echo "-------------------------------------Starting Package Installation---------------------------------------"
       sudo pipenv install --pre --ignore-pipfile --dev
