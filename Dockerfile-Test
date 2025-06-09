@@ -63,8 +63,11 @@ WORKDIR /code/
 
  # todo: try to figure out how we can test using dev packages and exclude them from prod build at the same time...
 RUN pipenv install --ignore-pipfile --dev
-RUN ./scripts/runtests.sh
 
 ADD . /code/
+
+RUN ./scripts/runtests.sh
+
+
 
 
