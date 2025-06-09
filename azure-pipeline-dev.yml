@@ -52,7 +52,7 @@ steps:
       sudo apt install binutils libproj-dev gdal-bin
       sudo pip install pipenv
       echo "-------------------------------------Starting Package Installation---------------------------------------"
-      pipenv install --pre --ignore-pipfile --dev
+      sudo pipenv install --pre --ignore-pipfile --dev
       echo "-------------------------------------Ending Package Installation-----------------------------------------"
       ./scripts/runtests.sh
   continueOnError: true
