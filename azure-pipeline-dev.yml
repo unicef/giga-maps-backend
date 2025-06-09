@@ -60,7 +60,7 @@ steps:
       echo "-------------------------------------Pyhthon Activities End---------------------------------------"
       sudo pip install pipenv
       echo "-------------------------------------Starting Package Installation---------------------------------------"
-      sudo pipenv install --pre --ignore-pipfile --dev
+      pipenv install --ignore-pipfile --dev
       echo "-------------------------------------Ending Package Installation-----------------------------------------"
       ./scripts/runtests.sh
   continueOnError: true
