@@ -31,8 +31,8 @@ RUN pip install --upgrade \
     pipenv
 
 RUN apt-get update && apt-get install -y \
-    postgresql postgresql-contrib libpq-dev gcc \
-    systemctl start postgresql.service
+    postgresql postgresql-contrib libpq-dev gcc 
+    #systemctl start postgresql.service
 
 USER postgres
 RUN sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'root';"
