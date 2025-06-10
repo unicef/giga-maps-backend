@@ -41,10 +41,6 @@ steps:
     command: 'build'
     Dockerfile: './Dockerfile-Test'
     tags: 'unit-test'
-    arguments:
-      --build-arg=AD_B2C_BASE_URL=''
-      --build-arg=AD_B2C_CLIENT_ID=''
-      --build-arg=AD_B2C_DOMAIN=''
     addPipelineData: false
     addBaseImageData: false
 
