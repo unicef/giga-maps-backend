@@ -119,7 +119,8 @@ RUN pipenv install --ignore-pipfile --dev
 
 ADD . /code/
 
-RUN ./scripts/runtests.sh
+RUN service postgresql start && \
+    ./scripts/runtests.sh
 
 
 
