@@ -40,57 +40,9 @@ steps:
     command: 'build'
     Dockerfile: './Dockerfile-Test'
     tags: 'unit-test'
-    arguments: 
-      --build-arg AD_B2C_BASE_URL=
-      --build-arg AD_B2C_CLIENT_ID=
-      --build-arg AD_B2C_DOMAIN=
-      --build-arg AD_B2C_EDIT_PROFILE_POLICY=B2C_1_ProfileEditingPolicy
-      --build-arg AD_B2C_FORGOT_PASSWORD_POLICY=B2C_1_PasswordResetPolicy
-      --build-arg AD_B2C_SIGNUP_SIGNIN_POLICY=B2C_1_UNICEF_SOCIAL_signup_signin
-      --build-arg AD_B2C_TENANT_ID=
-      --build-arg CELERY_BROKER_URL=redis://localhost:6379/0
-      --build-arg CELERY_RESULT_BACKEND_URL=redis://localhost:6379/0
-      --build-arg COUNTRY_INDEX_NAME=giga-countries
-      --build-arg DAILY_CHECK_APP_API_CODE=DAILY_CHECK_APP
-      --build-arg DAILY_CHECK_APP_BASE_URL=https://uni-ooi-giga-daily-check-service-api-dev.azurewebsites.net/api/v1
-      --build-arg DATA_LAYER_DASHBOARD_URL=http://localhost:9500/admin/giga-layer
-      --build-arg DATABASE_URL=postgis://postgres:root@localhost/postgres
-      --build-arg DEFAULT_FROM_EMAIL=giga@mail.unicef.org
-      --build-arg DJANGO_SECRET_KEY=
-      --build-arg DJANGO_SETTINGS_MODULE=config.settings.dev_test
-      --build-arg DOCKER_REPOSITORY=project-connect-backend-v2
-      --build-arg DOCKER_SERVICE_CONNECTION=UNICEF_DATA_CONNECT_WEB_ACR
-      --build-arg GIGA_METER_DATABASE_URL=postgis://postgres:root@localhost/postgres1
-      --build-arg GIGA_METER_ENABLE_AUTO_SYNC=true; allowOverride=True
-      --build-arg MAILJET_API_KEY=
-      --build-arg MAILJET_API_URL=https://api.mailjet.com/v3
-      --build-arg MAILJET_SECRET_KEY=
-      --build-arg PROJECT_FULL_NAME=gigamaps-test
-      --build-arg PROJECT_SHORT_NAME=gigamaps-test
-      --build-arg QOS_BEARER_TOKEN=
-      --build-arg QOS_ENDPOINT=
-      --build-arg QOS_EXPIRATION_TIME=
-      --build-arg QOS_SCHEMA_NAME=qos
-      --build-arg QOS_SHARE_CREDENTIALS_VERSION=1
-      --build-arg QOS_SHARE_NAME=gold
-      --build-arg READ_ONLY_DATABASE_URL=postgis://postgres:root@localhost/postgres
-      --build-arg REDIS_URL_DEV=isSecret=True
-      --build-arg SCHOOL_INDEX_NAME=giga-schools-test
-      --build-arg SCHOOL_MASTER_BEARER_TOKEN=
-      --build-arg SCHOOL_MASTER_DASHBOARD_URL=http://localhost:9500/admin/data-source
-      --build-arg SCHOOL_MASTER_ENDPOINT=
-      --build-arg SCHOOL_MASTER_EXPIRATION_TIME=
-      --build-arg SCHOOL_MASTER_REVIEW_GRACE_PERIOD_IN_HRS=48
-      --build-arg SCHOOL_MASTER_SCHEMA_NAME=school-master
-      --build-arg SCHOOL_MASTER_SHARE_CREDENTIALS_VERSION=1
-      --build-arg SCHOOL_MASTER_SHARE_NAME=gold
-      --build-arg SEARCH_API_KEY=SEARCH_API_KEY
-      --build-arg SEARCH_ENDPOINT=SEARCH_ENDPOINT
-      --build-arg SONAR_HOST=isSecret=True
-      --build-arg SONAR_TOKEN=isSecret=True
-      --build-arg SSH_PASSWD=isSecret=True
-      --build-arg SUPPORT_EMAIL_ID=giga@mail.unicef.org
-      --build-arg SUPPORT_PHONE_NUMBER=1234567890
+    arguments: '--build-arg AD_B2C_BASE_URL= --build-arg AD_B2C_CLIENT_ID= --build-arg AD_B2C_DOMAIN= --build-arg AD_B2C_EDIT_PROFILE_POLICY=B2C_1_ProfileEditingPolicy --build-arg AD_B2C_FORGOT_PASSWORD_POLICY=B2C_1_PasswordResetPolicy --build-arg AD_B2C_SIGNUP_SIGNIN_POLICY=B2C_1_UNICEF_SOCIAL_signup_signin --build-arg AD_B2C_TENANT_ID= --build-arg CELERY_BROKER_URL=redis://localhost:6379/0 --build-arg CELERY_RESULT_BACKEND_URL=redis://localhost:6379/0 --build-arg COUNTRY_INDEX_NAME=giga-countries --build-arg DAILY_CHECK_APP_API_CODE=DAILY_CHECK_APP --build-arg DAILY_CHECK_APP_BASE_URL=https://uni-ooi-giga-daily-check-service-api-dev.azurewebsites.net/api/v1 --build-arg DATA_LAYER_DASHBOARD_URL=http://localhost:9500/admin/giga-layer --build-arg DATABASE_URL=postgis://postgres:root@localhost/postgres --build-arg DEFAULT_FROM_EMAIL=giga@mail.unicef.org --build-arg DJANGO_SECRET_KEY= --build-arg DJANGO_SETTINGS_MODULE=config.settings.dev_test --build-arg DOCKER_REPOSITORY=project-connect-backend-v2 --build-arg DOCKER_SERVICE_CONNECTION=UNICEF_DATA_CONNECT_WEB_ACR --build-arg GIGA_METER_DATABASE_URL=postgis://postgres:root@localhost/postgres1 --build-arg GIGA_METER_ENABLE_AUTO_SYNC=true; allowOverride=True --build-arg MAILJET_API_KEY= --build-arg MAILJET_API_URL=https://api.mailjet.com/v3 --build-arg MAILJET_SECRET_KEY= --build-arg PROJECT_FULL_NAME=gigamaps-test --build-arg PROJECT_SHORT_NAME=gigamaps-test --build-arg QOS_BEARER_TOKEN= --build-arg QOS_ENDPOINT= --build-arg QOS_EXPIRATION_TIME= --build-arg QOS_SCHEMA_NAME=qos --build-arg QOS_SHARE_CREDENTIALS_VERSION=1 --build-arg QOS_SHARE_NAME=gold --build-arg READ_ONLY_DATABASE_URL=postgis://postgres:root@localhost/postgres --build-arg REDIS_URL_DEV=isSecret=True --build-arg SCHOOL_INDEX_NAME=giga-schools-test --build-arg SCHOOL_MASTER_BEARER_TOKEN= --build-arg SCHOOL_MASTER_DASHBOARD_URL=http://localhost:9500/admin/data-source --build-arg SCHOOL_MASTER_ENDPOINT= --build-arg SCHOOL_MASTER_EXPIRATION_TIME= --build-arg SCHOOL_MASTER_REVIEW_GRACE_PERIOD_IN_HRS=48 --build-arg SCHOOL_MASTER_SCHEMA_NAME=school-master --build-arg SCHOOL_MASTER_SHARE_CREDENTIALS_VERSION=1 --build-arg SCHOOL_MASTER_SHARE_NAME=gold --build-arg SEARCH_API_KEY=SEARCH_API_KEY --build-arg SEARCH_ENDPOINT=SEARCH_ENDPOINT --build-arg SONAR_HOST=isSecret=True --build-arg SONAR_TOKEN=isSecret=True --build-arg SSH_PASSWD=isSecret=True --build-arg SUPPORT_EMAIL_ID=giga@mail.unicef.org --build-arg SUPPORT_PHONE_NUMBER=1234567890'
+    addPipelineData: false
+    addBaseImageData: false
 
 - task: Docker@2
   displayName: Dev - Build and Push image
