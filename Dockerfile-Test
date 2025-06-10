@@ -46,7 +46,7 @@ RUN wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-k
     curl -fsSL https://packages.redis.io/gpg | gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg \
     echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/redis.list \
     apt update \
-    apt install postgis postgresql-14-postgis-3 \
+    apt install postgis postgresql-11-postgis-3 \
     apt-get install redis \
     apt install binutils libproj-dev gdal-bin
 
