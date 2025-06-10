@@ -110,7 +110,12 @@ ENV SONAR_HOST='isSecret=True'
 ENV SONAR_TOKEN='isSecret=True'
 ENV SSH_PASSWD='isSecret=True'
 ENV SUPPORT_EMAIL_ID='giga@mail.unicef.org'
-ENV SUPPORT_PHONE_NUMBER='1234567890'        
+ENV SUPPORT_PHONE_NUMBER='1234567890'
+
+RUN ss -tlpn | grep ":5432" \
+    lsof -i :5432 \
+    nc -zv localhost 5432 
+    #su - postgres -c "psql -h localhost -p 5432 -U postgres" \
 
  # todo: try to figure out how we can test using dev packages and exclude them from prod build at the same time...
 RUN pipenv install --ignore-pipfile --dev
