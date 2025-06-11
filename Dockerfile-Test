@@ -133,10 +133,10 @@ RUN export SONAR_SCANNER_VERSION=5.0.1.3006 && \
     unzip -o $HOME/.sonar/sonar-scanner.zip -d $HOME/.sonar/ && \
     export PATH=$SONAR_SCANNER_HOME/bin:$PATH && \
     export SONAR_SCANNER_OPTS="-server" && \
-    export SONAR_TOKEN=$(SONAR_TOKEN) && \
+    #export SONAR_TOKEN=$SONAR_TOKEN && \
     sonar-scanner \
     -Dsonar.projectKey=$BUILD_DEFINITION_NAME \
     -Dsonar.sources=proco \
-    -Dsonar.host.url=$(SONAR_HOST) \
+    -Dsonar.host.url=$SONAR_HOST \
     -Dsonar.python.coverage.reportPaths=coverage.xml \
     -Dsonar.exclusions=**/migrations/**,**/proco_data_migrations/**,**/tests/**,**/proco/**/admin.py,**/dailycheckapp_contact/**,**/realtime_dailycheckapp/**,**/realtime_unicef/**,**/management/commands/**
