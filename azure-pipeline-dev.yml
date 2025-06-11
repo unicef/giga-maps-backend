@@ -37,6 +37,7 @@ steps:
 
 - task: Docker@2
   displayName: Unit Tests and Sonar Scan
+  # condition: eq(variables['Build.SourceBranch'], 'refs/heads/develop')
   inputs:
     containerRegistry: '$(dockerRegistryServiceConnection)'
     repository: '$(imageRepositoryDev)'
@@ -49,68 +50,6 @@ steps:
       --build-arg=BUILD_DEFINITION_NAME=$(BUILD_DEFINITION_NAME)
     addPipelineData: false
     addBaseImageData: false
-
-- task: Docker@2
-  displayName: Dev - Build and Push image
-  inputs:
-    command: buildAndPush
-    repository: $(imageRepositoryDev)
-    dockerfile: $(dockerfilePath)
-    containerRegistry: $(dockerRegistryServiceConnection)
-    tags: |
-      $(tag)
-
-- task: Bash@3
-  displayName: Unit Tests
-  # condition: eq(variables['Build.SourceBranch'], 'refs/heads/develop')
-  inputs:
-    targetType: 'inline'
-    script: |
-      sudo systemctl start postgresql.service
-      sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'root';"
-      wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
-      echo "deb http://apt.postgresql.org/pub/repos/apt/ `lsb_release -cs`-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
-      curl -fsSL https://packages.redis.io/gpg | sudo gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg
-      echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/redis.list
-      sudo apt update
-      sudo apt install postgis postgresql-14-postgis-3
-      sudo apt-get install redis
-      sudo apt install binutils libproj-dev gdal-bin
-      sudo add-apt-repository ppa:deadsnakes/ppa
-      sudo apt update
-      echo "-------------------------------------Pyhthon Activities Start---------------------------------------"
-      sudo apt install python3.8 python3.8-dev python3.8-distutils python3.8-venv
-      sudo python3.8 --version
-      sudo ln -sf /usr/bin/python3.8 /usr/bin/python
-      sudo python --version
-      echo "-------------------------------------Pyhthon Activities End---------------------------------------"
-      sudo pip install pipenv
-      echo "-------------------------------------Starting Package Installation---------------------------------------"
-      pipenv install --ignore-pipfile --dev
-      echo "-------------------------------------Ending Package Installation-----------------------------------------"
-      ./scripts/runtests.sh
-  continueOnError: true
-
-# Sonar Scan
-- task: Bash@3
-  displayName: Sonar Scan
-  condition: eq(variables['Build.SourceBranch'], 'refs/heads/develop')
-  inputs:
-    targetType: 'inline'
-    script: |
-      export SONAR_SCANNER_VERSION=5.0.1.3006
-      export SONAR_SCANNER_HOME=$HOME/.sonar/sonar-scanner-$SONAR_SCANNER_VERSION-linux
-      curl --create-dirs -sSLo $HOME/.sonar/sonar-scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-$SONAR_SCANNER_VERSION-linux.zip
-      unzip -o $HOME/.sonar/sonar-scanner.zip -d $HOME/.sonar/
-      export PATH=$SONAR_SCANNER_HOME/bin:$PATH
-      export SONAR_SCANNER_OPTS="-server"
-      export SONAR_TOKEN=$(SONAR_TOKEN)
-      sonar-scanner \
-        -Dsonar.projectKey=${{ lower(variables['Build.DefinitionName']) }} \
-        -Dsonar.sources=proco \
-        -Dsonar.host.url=$(SONAR_HOST) \
-        -Dsonar.python.coverage.reportPaths=coverage.xml \
-        -Dsonar.exclusions=**/migrations/**,**/proco_data_migrations/**,**/tests/**,**/proco/**/admin.py,**/dailycheckapp_contact/**,**/realtime_dailycheckapp/**,**/realtime_unicef/**,**/management/commands/**
 
 # Docker build and push
 - task: Docker@2
