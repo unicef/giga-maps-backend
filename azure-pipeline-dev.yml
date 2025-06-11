@@ -25,6 +25,7 @@ variables:
   imageRepositoryProd: 'prod/$(app)'
   tag: '$(Build.BuildId)'
   pythonVersion: '3.8'
+  BUILD_DEFINITION_NAME: $[lower(variables['Build.DefinitionName'])]
 
 steps:
 # Use a specific Python version
@@ -35,12 +36,17 @@ steps:
      addToPath: true
 
 - task: Docker@2
+  displayName: Unit Tests and Sonar Scan
   inputs:
     containerRegistry: '$(dockerRegistryServiceConnection)'
     repository: '$(imageRepositoryDev)'
     command: 'build'
     Dockerfile: './Dockerfile-Test'
     tags: 'unit-test'
+    arguments:
+      --build-arg=SONAR_HOST=$(SONAR_HOST)
+      --build-arg=SONAR_TOKEN=$(SONAR_TOKEN)
+      --build-arg=BUILD_DEFINITION_NAME=$(BUILD_DEFINITION_NAME)
     addPipelineData: false
     addBaseImageData: false
 
