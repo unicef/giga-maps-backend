@@ -1,0 +1,142 @@
+FROM python:3.8-buster
+
+# Install dependencies
+RUN apt-get update
+RUN apt-get install -y --no-install-recommends \
+    build-essential \
+    libcurl4-openssl-dev \
+    libjpeg-dev \
+    vim \
+    ntp \
+    libpq-dev
+RUN apt-get install -y --no-install-recommends \
+    git-core
+RUN apt-get install -y --no-install-recommends \
+    postgresql-client \
+    libpq-dev \
+    python-psycopg2
+RUN apt-get install -y --no-install-recommends \
+    python-gdal \
+    gdal-bin \
+    libgdal-dev \
+    libgdal20 \
+    libxml2-dev \
+    libxslt-dev \
+    xmlsec1 \
+    lsb-release
+
+RUN pip install --upgrade \
+    setuptools \
+    pip \
+    wheel \
+    pipenv
+
+RUN apt-get update && apt-get install -y \
+    postgresql postgresql-contrib libpq-dev gcc 
+    #systemctl start postgresql.service
+
+RUN service postgresql start && \
+    su - postgres -c "psql -c \"ALTER USER postgres WITH PASSWORD 'root';\""
+
+#USER postgres
+#RUN psql -c "ALTER USER postgres WITH PASSWORD 'root';"
+    
+#USER root
+RUN wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add - && \
+    echo "deb http://apt-archive.postgresql.org/pub/repos/apt/ `lsb_release -cs`-pgdg main" | tee /etc/apt/sources.list.d/pgdg.list && \
+    curl -fsSL https://packages.redis.io/gpg | gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/redis.list && \
+    apt update && \
+    apt install -y postgis postgresql-11-postgis-3 redis binutils libproj-dev gdal-bin
+
+# python app
+ENV PYTHONUNBUFFERED 1
+ENV PYTHONPATH /code
+
+RUN mkdir /code
+
+ADD Pipfile /code/Pipfile
+ADD Pipfile.lock /code/Pipfile.lock
+
+WORKDIR /code/
+
+ENV AD_B2C_BASE_URL=''
+ENV AD_B2C_CLIENT_ID=''
+ENV AD_B2C_DOMAIN=''
+ENV AD_B2C_EDIT_PROFILE_POLICY='B2C_1_ProfileEditingPolicy'
+ENV AD_B2C_FORGOT_PASSWORD_POLICY='B2C_1_PasswordResetPolicy'
+ENV AD_B2C_SIGNUP_SIGNIN_POLICY='B2C_1_UNICEF_SOCIAL_signup_signin'
+ENV AD_B2C_TENANT_ID=''
+ENV CELERY_BROKER_URL='redis://localhost:6379/0'
+ENV CELERY_RESULT_BACKEND_URL='redis://localhost:6379/0'
+ENV COUNTRY_INDEX_NAME='giga-countries'
+ENV DAILY_CHECK_APP_API_CODE='DAILY_CHECK_APP'
+ENV DAILY_CHECK_APP_BASE_URL='https://uni-ooi-giga-daily-check-service-api-dev.azurewebsites.net/api/v1'
+ENV DATA_LAYER_DASHBOARD_URL='http://localhost:9500/admin/giga-layer'
+ENV DATABASE_URL='postgis://postgres:root@localhost/postgres'
+ENV DEFAULT_FROM_EMAIL='giga@mail.unicef.org'
+ENV DJANGO_SECRET_KEY=''
+ENV DJANGO_SETTINGS_MODULE='config.settings.dev_test'
+ENV DOCKER_REPOSITORY='project-connect-backend-v2'
+ENV DOCKER_SERVICE_CONNECTION='UNICEF_DATA_CONNECT_WEB_ACR'
+ENV GIGA_METER_DATABASE_URL='postgis://postgres:root@localhost/postgres'
+ENV GIGA_METER_ENABLE_AUTO_SYNC='true; allowOverride=True'
+ENV MAILJET_API_KEY=''
+ENV MAILJET_API_URL='https://api.mailjet.com/v3'
+ENV MAILJET_SECRET_KEY=''
+ENV PROJECT_FULL_NAME='gigamaps-test'
+ENV PROJECT_SHORT_NAME='gigamaps-test'
+ENV QOS_BEARER_TOKEN=''
+ENV QOS_ENDPOINT=''
+ENV QOS_EXPIRATION_TIME=''
+ENV QOS_SCHEMA_NAME='qos'
+ENV QOS_SHARE_CREDENTIALS_VERSION='1'
+ENV QOS_SHARE_NAME='gold'
+ENV READ_ONLY_DATABASE_URL='postgis://postgres:root@localhost/postgres'
+ENV REDIS_URL_DEV='isSecret=True'
+ENV SCHOOL_INDEX_NAME='giga-schools-test'
+ENV SCHOOL_MASTER_BEARER_TOKEN=''
+ENV SCHOOL_MASTER_DASHBOARD_URL='http://localhost:9500/admin/data-source'
+ENV SCHOOL_MASTER_ENDPOINT=''
+ENV SCHOOL_MASTER_EXPIRATION_TIME=''
+ENV SCHOOL_MASTER_REVIEW_GRACE_PERIOD_IN_HRS='48'
+ENV SCHOOL_MASTER_SCHEMA_NAME='school-master'
+ENV SCHOOL_MASTER_SHARE_CREDENTIALS_VERSION='1'
+ENV SCHOOL_MASTER_SHARE_NAME='gold'
+ENV SEARCH_API_KEY='SEARCH_API_KEY'
+ENV SEARCH_ENDPOINT='SEARCH_ENDPOINT'
+ENV SONAR_HOST='isSecret=True'
+ENV SONAR_TOKEN='isSecret=True'
+ENV SSH_PASSWD='isSecret=True'
+ENV SUPPORT_EMAIL_ID='giga@mail.unicef.org'
+ENV SUPPORT_PHONE_NUMBER='1234567890'
+
+ARG SONAR_TOKEN
+ENV SONAR_TOKEN=$SONAR_TOKEN
+ARG SONAR_HOST
+ENV SONAR_HOST=$SONAR_HOST
+ARG BUILD_DEFINITION_NAME
+ENV BUILD_DEFINITION_NAME=$BUILD_DEFINITION_NAME
+
+ # todo: try to figure out how we can test using dev packages and exclude them from prod build at the same time...
+RUN pipenv install --ignore-pipfile --dev
+
+ADD . /code/
+
+RUN service postgresql start && \
+    service redis-server start && \
+    ./scripts/runtests.sh
+
+RUN export SONAR_SCANNER_VERSION=5.0.1.3006 && \
+    export SONAR_SCANNER_HOME=$HOME/.sonar/sonar-scanner-$SONAR_SCANNER_VERSION-linux && \
+    curl --create-dirs -sSLo $HOME/.sonar/sonar-scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-$SONAR_SCANNER_VERSION-linux.zip && \
+    unzip -o $HOME/.sonar/sonar-scanner.zip -d $HOME/.sonar/ && \
+    export PATH=$SONAR_SCANNER_HOME/bin:$PATH && \
+    export SONAR_SCANNER_OPTS="-server" && \
+    #export SONAR_TOKEN=$SONAR_TOKEN && \
+    sonar-scanner \
+    -Dsonar.projectKey=$BUILD_DEFINITION_NAME \
+    -Dsonar.sources=proco \
+    -Dsonar.host.url=$SONAR_HOST \
+    -Dsonar.python.coverage.reportPaths=coverage.xml \
+    -Dsonar.exclusions=**/migrations/**,**/proco_data_migrations/**,**/tests/**,**/proco/**/admin.py,**/dailycheckapp_contact/**,**/realtime_dailycheckapp/**,**/realtime_unicef/**,**/management/commands/**
