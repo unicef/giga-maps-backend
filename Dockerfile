@@ -47,7 +47,7 @@ ENV PYTHONPATH /code
 RUN mkdir /code
 
 ADD Pipfile /code/Pipfile
-ADD Pipfile.lock /code/Pipfile.lock
+# ADD Pipfile.lock /code/Pipfile.lock
 
 WORKDIR /code/
 
