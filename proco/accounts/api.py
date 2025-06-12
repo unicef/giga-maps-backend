@@ -2330,7 +2330,7 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
                         schools_school.geopoint,
                         EXTRACT(YEAR FROM CAST(t.date AS DATE)) AS year,
                         schools_school."last_weekly_status_id",
-                        'AVG(t."{col_name}")' AS "{col_name}"
+                        AVG(t."{col_name}") AS "{col_name}"
                     FROM "schools_school"
                     INNER JOIN "connection_statistics_schooldailystatus" t ON schools_school."id" = t."school_id"
                     WHERE schools_school."deleted" IS NULL
