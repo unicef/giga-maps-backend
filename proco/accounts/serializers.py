@@ -595,7 +595,7 @@ class UpdateAPIKeysSerializer(serializers.ModelSerializer):
             elif validated_data.get('status', None) == accounts_models.APIKey.DECLINED:
                 email_content = {
                     'subject': account_config.private_api_key_rejected_email_subject_format % (
-                        core_utilities.get_project_title(), instance.api.name,
+                        core_utilities.get_project_title(),
                     ),
                     'user_name': instance.user.first_name + ' ' + instance.user.last_name,
                     'template': account_config.api_key_rejection_email_template,
