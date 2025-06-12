@@ -138,5 +138,6 @@ RUN export SONAR_SCANNER_VERSION=5.0.1.3006 && \
     -Dsonar.projectKey=$BUILD_DEFINITION_NAME \
     -Dsonar.sources=proco \
     -Dsonar.host.url=$SONAR_HOST \
+    -Dsonar.python.version=3.8 \
     -Dsonar.python.coverage.reportPaths=coverage.xml \
     -Dsonar.exclusions=**/migrations/**,**/proco_data_migrations/**,**/tests/**,**/proco/**/admin.py,**/dailycheckapp_contact/**,**/realtime_dailycheckapp/**,**/realtime_unicef/**,**/management/commands/**
