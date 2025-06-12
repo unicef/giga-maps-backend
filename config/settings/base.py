@@ -498,6 +498,7 @@ READ_ONLY_DATABASE_ALLOWED_REQUESTS = [
     'global-stat',
     'get-time-player-data',
     # 'tiles-connectivity-view',
+    # 'tiles-school-connectivity-status-view',
     'get-latest-week-and-month',
     'list-published-advance-filters',
     'list-published-data-layers',
@@ -519,3 +520,5 @@ AI_TRANSLATION_SUPPORTED_TARGETS = env.list('AI_TRANSLATION_SUPPORTED_TARGETS', 
 AI_TRANSLATION_CACHE_KEY_LIMIT = env('AI_TRANSLATION_CACHE_KEY_LIMIT', default=2000)
 
 GIGA_METER_ENABLE_AUTO_SYNC = env.bool('GIGA_METER_ENABLE_AUTO_SYNC', default=True)
+
+UNDER_TEST = (len(sys.argv) > 1 and sys.argv[1] == 'test')

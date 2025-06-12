@@ -7,6 +7,7 @@ from django.contrib import messages
 from django.core.exceptions import PermissionDenied
 from django.core.management import call_command
 from django.db import connections
+from django.db.models import Prefetch
 from django.db.models.functions.text import Lower
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
@@ -43,7 +44,7 @@ from proco.schools.serializers import (
 )
 from proco.schools.tasks import process_loaded_file
 from proco.utils import dates as date_utilities
-from proco.utils.cache import cache_manager
+from proco.utils.cache import cache_manager, custom_cache_control
 from proco.utils.error_message import id_missing_error_mess, delete_succ_mess, \
     error_mess
 from proco.utils.log import action_log, changed_fields
@@ -85,9 +86,9 @@ class SchoolsViewSet(
     def get_country(self):
         if not hasattr(self, '_country'):
             self._country = get_object_or_404(
-                Country.objects.defer(
-                    'geometry', 'geometry_simplified',
-                ).select_related('last_weekly_status').annotate(code_lower=Lower('code')),
+                Country.objects.defer('geometry').select_related('last_weekly_status').annotate(
+                    code_lower=Lower('code'),
+                ),
                 code_lower=self.kwargs.get('country_code').lower(),
             )
         return self._country
@@ -121,7 +122,7 @@ class RandomSchoolsListAPIView(CachedListMixin, ListAPIView):
     pagination_class = None
 
     def get_serializer(self, *args, **kwargs):
-        countries_statuses = Country.objects.all().defer('geometry', 'geometry_simplified').select_related(
+        countries_statuses = Country.objects.all().defer('geometry').select_related(
             'last_weekly_status',
         ).values_list(
             'id', 'last_weekly_status__integration_status',
@@ -421,21 +422,21 @@ class ConnectivityTileGenerator(BaseTileGenerator):
                     WHEN c.connectivity_speed <= {benchmark} and c.connectivity_speed >= 1000000 THEN 'moderate'
                     WHEN c.connectivity_speed < 1000000  THEN 'bad'
                     ELSE 'unknown'
-                END as connectivity,
+                END AS connectivity,
                 CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
                     WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
                     ELSE 'unknown'
-                END as connectivity_status,
+                END AS connectivity_status,
                 CASE WHEN rt_status.rt_registered = True {rt_date_condition} THEN True
                     ELSE False
-                END as is_rt_connected
+                END AS is_rt_connected
                 FROM schools_school
                 INNER JOIN bounds ON ST_Intersects(schools_school.geopoint, ST_Transform(bounds.geom, {srid}))
                 {school_weekly_join}
                 LEFT JOIN connection_statistics_schoolweeklystatus c {weekly_lookup_condition}
                     AND c."deleted" IS NULL
-                LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = schools_school.id
-                    AND rt_status."deleted" IS NULL
+                LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status
+                    ON rt_status.school_id = schools_school.id AND rt_status."deleted" IS NULL
                 WHERE schools_school."deleted" IS NULL
                     {country_condition}
                     {admin1_condition}
@@ -458,15 +459,21 @@ class ConnectivityTileGenerator(BaseTileGenerator):
                                                               'connection_statistics_schoolweeklystatus')
         if len(school_static_filters) > 0:
             tbl['school_weekly_join'] = """
-                    LEFT OUTER JOIN connection_statistics_schoolweeklystatus
-                        ON schools_school."last_weekly_status_id" = connection_statistics_schoolweeklystatus."id"
-                    """
+            LEFT OUTER JOIN connection_statistics_schoolweeklystatus
+                ON schools_school."last_weekly_status_id" = connection_statistics_schoolweeklystatus."id"
+            """
             tbl['school_weekly_condition'] = 'AND ' + school_static_filters
 
         return sql_tmpl.format(**tbl)
 
 
-@method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
+@method_decorator([
+    custom_cache_control(
+        public=True,
+        max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE,
+        cache_status_codes=[rest_status.HTTP_200_OK,],
+    )
+], name='dispatch')
 class ConnectivityTileRequestHandler(APIView):
     CACHE_KEY = 'cache'
     CACHE_KEY_PREFIX = 'CONNECTIVITY_TILES_MAP'
@@ -513,6 +520,153 @@ class ConnectivityTileRequestHandler(APIView):
         return response
 
 
+class SchoolStatusConnectivityTileGenerator(BaseTileGenerator):
+    def __init__(self, table_config):
+        super().__init__()
+        self.table_config = table_config
+
+    def update_kwargs(self, request, table_configs):
+        query_params = request.query_params.dict()
+        query_param_keys = query_params.keys()
+
+        if 'country_id' in query_param_keys:
+            table_configs['country_ids'] = [query_params['country_id'], ]
+        elif 'country_id__in' in query_param_keys:
+            table_configs['country_ids'] = [c_id.strip() for c_id in query_params['country_id__in'].split(',')]
+
+        if 'admin1_id' in query_param_keys:
+            table_configs['admin1_ids'] = [query_params['admin1_id']]
+        elif 'admin1_id__in' in query_param_keys:
+            table_configs['admin1_ids'] = [a_id.strip() for a_id in query_params['admin1_id__in'].split(',')]
+
+        if 'school_id' in query_param_keys:
+            table_configs['school_ids'] = [str(query_params['school_id']).strip()]
+        elif 'school_id__in' in query_param_keys:
+            table_configs['school_ids'] = [s_id.strip() for s_id in query_params['school_id__in'].split(',')]
+
+        table_configs['school_filters'] = core_utilities.get_filter_sql(
+            request, 'schools', 'schools_school')
+        table_configs['school_static_filters'] = core_utilities.get_filter_sql(
+            request, 'school_static', 'connection_statistics_schoolweeklystatus')
+
+    def envelope_to_sql(self, env, request):
+        tbl = self.table_config.copy()
+        tbl['env'] = self.envelope_to_bounds_sql(env)
+
+        tbl['limit_condition'] = ''
+        tbl['country_condition'] = ''
+        tbl['admin1_condition'] = ''
+        tbl['school_condition'] = ''
+        tbl['random_order'] = ''
+
+        self.update_kwargs(request, tbl)
+
+        """sql with join and connectivity_speed"""
+        sql_tmpl = """
+            WITH bounds AS (
+                SELECT {env} AS geom,
+                {env}::box2d AS b2d
+            ),
+            mvtgeom AS (
+                SELECT ST_AsMVTGeom(ST_Transform(schools_school.geopoint, 3857), bounds.b2d) AS geom,
+                schools_school.id,
+                CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                    WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
+                    ELSE 'unknown'
+                END AS connectivity_status
+                FROM schools_school
+                INNER JOIN bounds ON ST_Intersects(schools_school.geopoint, ST_Transform(bounds.geom, {srid}))
+                {school_weekly_join}
+                WHERE schools_school."deleted" IS NULL
+                    {country_condition}
+                    {admin1_condition}
+                    {school_condition}
+                    {school_weekly_condition}
+                    {random_order}
+                    {limit_condition}
+            )
+            SELECT ST_AsMVT(DISTINCT mvtgeom.*) FROM mvtgeom;
+        """
+
+        tbl['school_weekly_join'] = ''
+        tbl['school_weekly_condition'] = ''
+
+        add_random_condition = True
+
+        if len(tbl.get('school_ids', [])) > 0:
+            add_random_condition = False
+            tbl['school_condition'] = 'AND schools_school."id" IN ({0})'.format(
+                ','.join([str(school_id) for school_id in tbl['school_ids']])
+            )
+        elif len(tbl.get('admin1_ids', [])) > 0:
+            if settings.ADMIN_MAP_API_SAMPLING_LIMIT:
+                tbl['MAP_API_SAMPLING_LIMIT'] = settings.ADMIN_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
+                add_random_condition = False
+
+            tbl['admin1_condition'] = 'AND schools_school."admin1_id" IN ({0})'.format(
+                ','.join([str(admin1_id) for admin1_id in tbl['admin1_ids']])
+            )
+        elif len(tbl.get('country_ids', [])) > 0:
+            if settings.COUNTRY_MAP_API_SAMPLING_LIMIT:
+                tbl['MAP_API_SAMPLING_LIMIT'] = settings.COUNTRY_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
+                add_random_condition = False
+
+            tbl['country_condition'] = 'AND schools_school."country_id" IN ({0})'.format(
+                ','.join([str(country_id) for country_id in tbl['country_ids']])
+            )
+
+        if len(tbl['school_filters']) > 0:
+            tbl['school_condition'] += ' AND ' + tbl['school_filters']
+
+        if len(tbl['school_static_filters']) > 0:
+            tbl['school_weekly_join'] = """
+            INNER JOIN "connection_statistics_schoolweeklystatus"
+                ON schools_school."last_weekly_status_id" = connection_statistics_schoolweeklystatus."id"
+            """
+            tbl['school_weekly_condition'] = ' AND ' + tbl['school_static_filters']
+
+        if add_random_condition:
+            if 'limit' in request.query_params:
+                limit = request.query_params['limit']
+                tbl['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+            elif tbl.get('MAP_API_SAMPLING_LIMIT'):
+                limit = tbl['MAP_API_SAMPLING_LIMIT']
+                tbl['random_order'] = 'ORDER BY random()'
+            else:
+                limit = '50000'
+                tbl['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+
+            tbl['limit_condition'] = 'LIMIT ' + str(limit)
+
+        return sql_tmpl.format(**tbl)
+
+@method_decorator([
+    custom_cache_control(
+        public=True,
+        max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE,
+        cache_status_codes=[rest_status.HTTP_200_OK,],
+    )
+], name='dispatch')
+class SchoolConnectivityStatusTileRequestHandler(ConnectivityTileRequestHandler):
+    CACHE_KEY = 'cache'
+    CACHE_KEY_PREFIX = 'SCHOOL_STATUS_CONNECTIVITY_TILES_MAP'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        table_config = {
+            'table': 'schools_school',
+            'srid': '4326',
+            'geomColumn': 'geopoint',
+            'attrColumns': 'id',
+        }
+        self.tile_generator = SchoolStatusConnectivityTileGenerator(table_config)
+
+
 class DownloadSchoolsViewSet(BaseModelViewSet, core_mixins.DownloadAPIDataToCSVMixin):
     model = School
     queryset = School.objects.all().select_related('last_weekly_status')
@@ -525,10 +679,9 @@ class DownloadSchoolsViewSet(BaseModelViewSet, core_mixins.DownloadAPIDataToCSVM
 
     filter_backends = (
         DjangoFilterBackend,
-        # NullsAlwaysLastOrderingFilter,
     )
 
-    ordering_field_names = ['name']
+    ordering_field_names = ['name_lower']
     apply_query_pagination = True
 
     filterset_fields = {
@@ -563,17 +716,24 @@ class AdminViewSchoolAPIViewSet(BaseModelViewSet):
     )
 
     filter_backends = (
-        SearchFilter, DjangoFilterBackend,
+        DjangoFilterBackend,
+        SearchFilter,
     )
 
-    ordering_field_names = ['country', 'name']
+    ordering_field_names = ['country', 'name_lower']
     apply_query_pagination = True
-    search_fields = ('=school_type', '=environment', 'name', 'country__name', '=giga_id_school', '=external_id')
+    search_fields = (
+        '=school_type',
+        '=environment',
+        'name_lower',
+        'country__name',
+        '=giga_id_school',
+        '=external_id',
+    )
 
     filterset_fields = {
         'country_id': ['exact', 'in'],
         'name': ['exact', 'in'],
-        'location__name': ['exact', 'in'],
     }
 
     def get_serializer_class(self):
@@ -597,7 +757,9 @@ class AdminViewSchoolAPIViewSet(BaseModelViewSet):
         :return queryset:
         """
         qs = super().get_queryset()
-        return qs.prefetch_related('country').defer('location')
+        return qs.prefetch_related(
+            Prefetch('country', Country.objects.defer('geometry')),
+        )
 
     def create(self, request, *args, **kwargs):
         try:
@@ -674,7 +836,9 @@ class ImportCSVViewSet(BaseModelViewSet):
     serializer_class = ImportCSVSerializer
 
     search_fields = ('=country__id', 'status',)
-    filter_backends = (DjangoFilterBackend,)
+    filter_backends = (
+        DjangoFilterBackend,
+    )
 
     filterset_fields = {
         'id': ['exact', 'in'],

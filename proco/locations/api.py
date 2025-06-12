@@ -89,7 +89,7 @@ class CountryViewSet(
 
     def get_queryset(self):
         qs = super().get_queryset()
-        return qs.defer('geometry', 'geometry_simplified')
+        return qs.defer('geometry')
 
     def filter_queryset(self, queryset):
         """
@@ -172,14 +172,9 @@ class CountryDataViewSet(BaseModelViewSet):
         Return active records
         :return queryset:
         """
+        queryset = self.model.objects.all().defer('geometry')
         if ids:
-            queryset = self.model.objects.filter(id__in=ids).defer(
-                'geometry', 'geometry_simplified',
-            )
-        else:
-            queryset = self.model.objects.all().defer(
-                'geometry', 'geometry_simplified',
-            )
+            queryset = queryset.filter(id__in=ids)
         return self.apply_queryset_filters(queryset)
 
     def create(self, request, *args, **kwargs):

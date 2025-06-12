@@ -19,7 +19,7 @@ class TestCountryWeeklyStatusModel(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.country = CountryFactory()
-        cls.school = SchoolFactory(country=cls.country, location__country=cls.country)
+        cls.school = SchoolFactory(country=cls.country)
 
         cls.country_weekly = CountryWeeklyStatusFactory(
             country=cls.country, integration_status=CountryWeeklyStatus.REALTIME_MAPPED, year=datetime.now().year + 1,
@@ -46,7 +46,7 @@ class TestSchoolWeeklyStatusModel(TestCase):
     def setUpTestData(cls):
         cls.country = CountryFactory()
 
-        cls.school = SchoolFactory(country=cls.country, location__country=cls.country)
+        cls.school = SchoolFactory(country=cls.country)
 
         cls.school_weekly = SchoolWeeklyStatusFactory(
             school=cls.school,
@@ -79,7 +79,7 @@ class TestCountryDailyStatusModel(TestCase):
     def setUpTestData(cls):
         cls.country = CountryFactory()
 
-        cls.school = SchoolFactory(country=cls.country, location__country=cls.country)
+        cls.school = SchoolFactory(country=cls.country)
 
         cls.country_daily = CountryDailyStatusFactory(country=cls.country)
 
@@ -97,7 +97,7 @@ class TestSchoolDailyStatusModel(TestCase):
     def setUpTestData(cls):
         cls.country = CountryFactory()
 
-        cls.school = SchoolFactory(country=cls.country, location__country=cls.country)
+        cls.school = SchoolFactory(country=cls.country)
 
         cls.school_daily = SchoolDailyStatusFactory(school=cls.school,
                                                     date=datetime.now().date() - timedelta(days=1),
@@ -117,7 +117,7 @@ class TestRealTimeConnectivityModel(TestCase):
     def setUpTestData(cls):
         cls.country = CountryFactory()
 
-        cls.school = SchoolFactory(country=cls.country, location__country=cls.country)
+        cls.school = SchoolFactory(country=cls.country)
 
         cls.school_real_time_connectivity = RealTimeConnectivityFactory(school=cls.school, connectivity_speed=4000000)
 

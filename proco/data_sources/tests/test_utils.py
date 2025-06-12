@@ -1,13 +1,8 @@
-import os
-
 import pandas as pd
-from django.conf import settings
 from django.test import TestCase
 
-from proco.core.utils import get_current_datetime_object
 from proco.data_sources import utils as sources_utilities
 from proco.schools.tests.factories import SchoolFactory
-from proco.utils.dates import format_date
 from proco.utils.tests import TestAPIViewSetMixin
 
 
@@ -43,6 +38,7 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
             'latitude': 1234567,
             'longitude': 1234567,
             'education_level': 'Education Level',
+            'connectivity_RT': None,
         }, school))
 
         self.assertTrue(sources_utilities.has_changes_for_review({
@@ -53,6 +49,7 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
             'latitude': 1234567,
             'longitude': 1234567,
             'education_level': 'Education Level',
+            'connectivity_RT': None,
         }, school))
 
         self.assertTrue(sources_utilities.has_changes_for_review({
@@ -63,6 +60,7 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
             'latitude': 1234567,
             'longitude': 1234567,
             'education_level': 'Education Level',
+            'connectivity_RT': None,
         }, school))
 
         self.assertTrue(sources_utilities.has_changes_for_review({
@@ -73,6 +71,7 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
             'latitude': 1234567,
             'longitude': 1234567,
             'education_level': 'Education Level',
+            'connectivity_RT': None,
         }, school))
 
         self.assertTrue(sources_utilities.has_changes_for_review({
@@ -83,6 +82,7 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
             'latitude': school.geopoint.y,
             'longitude': 1234567,
             'education_level': 'Education Level',
+            'connectivity_RT': None,
         }, school))
 
         self.assertTrue(sources_utilities.has_changes_for_review({
@@ -93,6 +93,7 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
             'latitude': school.geopoint.y,
             'longitude': school.geopoint.x,
             'education_level': 'Education Level',
+            'connectivity_RT': None,
         }, school))
 
         self.assertFalse(sources_utilities.has_changes_for_review({
@@ -103,6 +104,7 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
             'latitude': school.geopoint.y,
             'longitude': school.geopoint.x,
             'education_level': school.education_level,
+            'connectivity_RT': None,
         }, school))
 
         self.assertTrue(sources_utilities.has_changes_for_review({
@@ -113,6 +115,7 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
             'latitude': school.geopoint.y,
             'longitude': school.geopoint.x,
             'education_level': school.education_level,
+            'connectivity_RT': None,
         }, school))
 
         self.assertTrue(sources_utilities.has_changes_for_review({
@@ -123,6 +126,7 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
             'latitude': school.geopoint.y,
             'longitude': school.geopoint.x,
             'education_level': school.education_level,
+            'connectivity_RT': None,
         }, None))
 
     def test_parse_row(self):

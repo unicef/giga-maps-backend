@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.core.cache import cache
 from django.test import TestCase
 from django.urls import resolve, reverse
@@ -24,6 +25,7 @@ def schools_url(url_params, query_param, view_name='schools-list'):
 
 class SchoolsApiTestCase(TestAPIViewSetMixin, TestCase):
     base_view = 'schools:schools'
+    databases = {'default', settings.READ_ONLY_DB_KEY, }
 
     @classmethod
     def setUpTestData(cls):
@@ -31,9 +33,9 @@ class SchoolsApiTestCase(TestAPIViewSetMixin, TestCase):
 
         cls.admin1_one = Admin1Factory(country=cls.country)
 
-        cls.school_one = SchoolFactory(country=cls.country, location__country=cls.country, admin1=cls.admin1_one)
-        cls.school_two = SchoolFactory(country=cls.country, location__country=cls.country, admin1=cls.admin1_one)
-        cls.school_three = SchoolFactory(country=cls.country, location__country=cls.country, admin1=cls.admin1_one)
+        cls.school_one = SchoolFactory(country=cls.country, admin1=cls.admin1_one)
+        cls.school_two = SchoolFactory(country=cls.country, admin1=cls.admin1_one)
+        cls.school_three = SchoolFactory(country=cls.country, admin1=cls.admin1_one)
 
         cls.school_weekly_one = SchoolWeeklyStatusFactory(
             school=cls.school_one,
