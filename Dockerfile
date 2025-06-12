@@ -52,7 +52,7 @@ ADD Pipfile /code/Pipfile
 WORKDIR /code/
 
  # todo: try to figure out how we can test using dev packages and exclude them from prod build at the same time...
-RUN pipenv install --ignore-pipfile --dev
+RUN pipenv install --dev
 
 ADD . /code/
 # cleanup env files if any

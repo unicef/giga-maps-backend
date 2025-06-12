@@ -119,7 +119,7 @@ ARG BUILD_DEFINITION_NAME
 ENV BUILD_DEFINITION_NAME=$BUILD_DEFINITION_NAME
 
  # todo: try to figure out how we can test using dev packages and exclude them from prod build at the same time...
-RUN pipenv install --ignore-pipfile --dev
+RUN pipenv install --dev
 
 ADD . /code/
 
