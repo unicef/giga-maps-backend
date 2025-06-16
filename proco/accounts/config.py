@@ -13,7 +13,8 @@ class AppConfig(object):
     @property
     def public_api_key_generation_email_subject_format(self):
         """format for the email subject when an API Key is generated for a Public API."""
-        return '%s - API Key generated for "%s" API'
+        # '%s - API Key generated for "%s" API'
+        return '%s - %s API Key Generated'
 
     @property
     def public_api_key_generation_email_message_format(self):
@@ -52,7 +53,8 @@ class AppConfig(object):
     @property
     def private_api_key_rejected_email_subject_format(self):
         """format for the email subject when an API Key is rejected for a Private API."""
-        return '%s - API Key rejected for "%s" API'
+        # '%s - API Key rejected for "%s" API'
+        return '%s - Giga Maps API key request'
 
     @property
     def private_api_key_rejected_email_message_format(self):
@@ -104,6 +106,16 @@ class AppConfig(object):
     def standard_email_template_name(self):
         """template for standard emails"""
         return 'email/standard_email.html'
+
+    @property
+    def api_key_generation_email_template(self):
+        """template for API Key Generation emails"""
+        return 'email/apis/api_key_generation_email.html'
+
+    @property
+    def api_key_rejection_email_template(self):
+        """template for API Key Rejection emails"""
+        return 'email/apis/api_key_rejection_email.html'
 
     @property
     def data_layer_creation_email_subject_format(self):
