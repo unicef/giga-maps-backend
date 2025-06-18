@@ -402,11 +402,11 @@ class CreateAPIKeysSerializer(serializers.ModelSerializer):
             # Once API Key is created, send the status email to the user
             if request_user is not None and instance.status == accounts_models.APIKey.APPROVED:
                 email_content = {
-                    'subject': account_config.public_api_key_generation_email_subject_format % (
+                    'subject': account_config.api_key_generation_email_subject_format % (
                         core_utilities.get_project_title(), str(instance.api.name).title(),
                     ),
                     'user_name': request_user.first_name + ' ' + request_user.last_name,
-                    'template': account_config.api_key_generation_email_template,
+                    'template': account_config.api_key_generated_email_template,
                     'api_name': str(instance.api.name).title(),
                 }
                 account_utilities.send_email_over_mailjet_service([request_user], **email_content)
@@ -583,41 +583,39 @@ class UpdateAPIKeysSerializer(serializers.ModelSerializer):
             instance = super().update(instance, validated_data)
 
         if instance.user is not None:
-            email_subject = None
-            email_message = None
+            email_content = {
+                'api_name': str(instance.api.name).title(),
+                'user_name': instance.user.first_name + ' ' + instance.user.last_name,
+            }
 
             # Once API Key is APPROVED/REJECTED, send the status email to the user
             if validated_data.get('status', None) == accounts_models.APIKey.APPROVED:
-                email_subject = account_config.private_api_key_approved_email_subject_format % (
-                    core_utilities.get_project_title(), str(instance.api.name).title(),
-                )
-                email_message = account_config.private_api_key_approved_email_message_format
+                email_content['subject'] = account_config.api_key_generation_email_subject_format % (
+                        core_utilities.get_project_title(), email_content['api_name'],
+                    )
+                email_content['template'] = account_config.api_key_generated_email_template
+
             elif validated_data.get('status', None) == accounts_models.APIKey.DECLINED:
-                email_content = {
-                    'subject': account_config.private_api_key_rejected_email_subject_format % (
-                        core_utilities.get_project_title(),
-                    ),
-                    'user_name': instance.user.first_name + ' ' + instance.user.last_name,
-                    'template': account_config.api_key_rejection_email_template,
-                    'api_name': str(instance.api.name).title(),
-                }
-                account_utilities.send_email_over_mailjet_service([instance.user], **email_content)
+                email_content['subject'] = account_config.private_api_key_rejected_email_subject_format % (
+                    core_utilities.get_project_title(),
+                )
+                email_content['template'] = account_config.api_key_rejected_email_template
 
             # Once API Key extension is APPROVED/REJECTED, send the status email to the user
             elif validated_data.get('extension_status', None) == accounts_models.APIKey.APPROVED:
-                email_subject = account_config.api_key_extension_approved_email_subject_format % (
-                    core_utilities.get_project_title(), str(instance.api.name).title(),
+                email_content['subject'] = account_config.api_key_extension_approved_email_subject_format % (
+                    core_utilities.get_project_title(), email_content['api_name'],
                 )
-                email_message = account_config.api_key_extension_approved_email_message_format
-            elif validated_data.get('extension_status', None) == accounts_models.APIKey.DECLINED:
-                email_subject = account_config.api_key_extension_rejected_email_subject_format % (
-                    core_utilities.get_project_title(), str(instance.api.name).title(),
-                )
-                email_message = account_config.api_key_extension_rejected_email_message_format
+                email_content['template'] = account_config.api_key_extension_approved_email_template
 
-            if not core_utilities.is_blank_string(email_subject):
-                email_content = {'subject': email_subject, 'message': email_message}
-                account_utilities.send_standard_email(instance.user, email_content)
+            elif validated_data.get('extension_status', None) == accounts_models.APIKey.DECLINED:
+                email_content['subject'] = account_config.api_key_extension_rejected_email_subject_format % (
+                    core_utilities.get_project_title(), email_content['api_name'],
+                )
+                email_content['template'] = account_config.api_key_extension_rejected_email_template
+
+            if 'subject' in email_content:
+                account_utilities.send_email_over_mailjet_service([instance.user], **email_content)
 
         return instance
 
