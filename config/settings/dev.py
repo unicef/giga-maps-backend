@@ -29,10 +29,8 @@ DATABASES = {
 
 # Email settings
 # --------------------------------------------------------------------------
-
-# DEFAULT_FROM_EMAIL = 'noreply@example.com'
-# SERVER_EMAIL = DEFAULT_FROM_EMAIL
-# EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+SERVER_EMAIL_SIGNATURE = env('SERVER_EMAIL_SIGNATURE', default='proco'.capitalize())
+DEFAULT_FROM_EMAIL = SERVER_EMAIL = SERVER_EMAIL_SIGNATURE + ' <{0}>'.format(env('SERVER_EMAIL'))
 
 if CELERY_ENABLED:
     MAILING_USE_CELERY = False

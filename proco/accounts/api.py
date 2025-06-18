@@ -186,12 +186,16 @@ class APIKeysViewSet(BaseModelViewSet):
 
         # Once API Key is deleted by Admin, send the status email to the user
         if api_key_user is not None and request_user.id != api_key_user.id:
-            email_subject = account_config.api_key_deletion_email_subject_format % (
-                core_utilities.get_project_title(), instance.api.name,
-            )
-            email_message = account_config.api_key_deletion_email_message_format
-            email_content = {'subject': email_subject, 'message': email_message}
-            account_utilities.send_standard_email(api_key_user, email_content)
+            email_content = {
+                'subject': account_config.api_key_deletion_email_subject_format % (
+                    core_utilities.get_project_title(), str(instance.api.name).title(),
+                ),
+                'api_name': str(instance.api.name).title(),
+                'user_name': instance.user.first_name + ' ' + instance.user.last_name,
+                'template': account_config.api_key_deleted_email_template,
+            }
+
+            account_utilities.send_email_over_mailjet_service([api_key_user], **email_content)
         return status
 
 

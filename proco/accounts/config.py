@@ -11,16 +11,35 @@ class AppConfig(object):
         return r'[a-zA-Z0-9-\' _()#]*$'
 
     @property
-    def public_api_key_generation_email_subject_format(self):
+    def api_key_deleted_email_template(self):
+        """HTML template for API Key deletion emails"""
+        return 'email/apis/api_key_deleted_email.html'
+
+    @property
+    def api_key_extension_approved_email_template(self):
+        """HTML template for API Key Extension Approval emails"""
+        return 'email/apis/api_key_extension_approved_email.html'
+
+    @property
+    def api_key_extension_rejected_email_template(self):
+        """HTML template for API Key Extension Rejection emails"""
+        return 'email/apis/api_key_extension_rejected_email.html'
+
+    @property
+    def api_key_generated_email_template(self):
+        """HTML template for API Key Generation emails"""
+        return 'email/apis/api_key_generated_email.html'
+
+    @property
+    def api_key_rejected_email_template(self):
+        """HTML template for API Key Rejection emails"""
+        return 'email/apis/api_key_rejected_email.html'
+
+    @property
+    def api_key_generation_email_subject_format(self):
         """format for the email subject when an API Key is generated for a Public API."""
         # '%s - API Key generated for "%s" API'
         return '%s - %s API Key Generated'
-
-    @property
-    def public_api_key_generation_email_message_format(self):
-        """format for the email message when an API Key is generated for a Public API."""
-        return ('API key generated successfully for the requested public API. '
-                'Please check your dashboard for the API key.')
 
     @property
     def private_api_key_generation_email_subject_format(self):
@@ -40,28 +59,9 @@ class AppConfig(object):
         """
 
     @property
-    def private_api_key_approved_email_subject_format(self):
-        """format for the email subject when an API Key is approved for a Private API."""
-        return '%s - API Key approved for "%s" API'
-
-    @property
-    def private_api_key_approved_email_message_format(self):
-        """format for the email message when an API Key is approved for a Private API."""
-        return ('API key request for the private API has been approved by Admin. '
-                'Please check your dashboard for the approved API key.')
-
-    @property
     def private_api_key_rejected_email_subject_format(self):
         """format for the email subject when an API Key is rejected for a Private API."""
-        # '%s - API Key rejected for "%s" API'
         return '%s - Giga Maps API key request'
-
-    @property
-    def private_api_key_rejected_email_message_format(self):
-        """format for the email message when an API Key is rejected for a Private API."""
-        return ('API key request for the private API has been rejected by Admin. Status has been updated in dashboard.'
-                '\n\nWe kindly request that you reach out to our support team to obtain more details '
-                'regarding the rejection.')
 
     @property
     def private_api_key_extension_request_email_subject_format(self):
@@ -82,40 +82,17 @@ class AppConfig(object):
     @property
     def api_key_extension_approved_email_subject_format(self):
         """format for the email subject when an API Key extension is approved for a Public/Private API."""
-        return '%s - API Key extension approved for "%s" API'
-
-    @property
-    def api_key_extension_approved_email_message_format(self):
-        """format for the email message when an API Key extension is approved for a Public/Private API."""
-        return ('API key extension request has been approved by Admin. API key end date has been updated '
-                'in your dashboard.')
+        return '%s - API Key extension approved for %s API'
 
     @property
     def api_key_extension_rejected_email_subject_format(self):
         """format for the email subject when an API Key extension is rejected for a Public/Private API."""
-        return '%s - API Key extension rejected for "%s" API'
-
-    @property
-    def api_key_extension_rejected_email_message_format(self):
-        """format for the email message when an API Key extension is rejected for a Public/Private API."""
-        return ('API key extension request has been rejected by Admin.\n\n'
-                'We kindly request that you reach out to our support team to obtain more details '
-                'regarding the rejection.')
+        return '%s - API Key extension rejected for %s API'
 
     @property
     def standard_email_template_name(self):
         """template for standard emails"""
         return 'email/standard_email.html'
-
-    @property
-    def api_key_generation_email_template(self):
-        """template for API Key Generation emails"""
-        return 'email/apis/api_key_generation_email.html'
-
-    @property
-    def api_key_rejection_email_template(self):
-        """template for API Key Rejection emails"""
-        return 'email/apis/api_key_rejection_email.html'
 
     @property
     def data_layer_creation_email_subject_format(self):
@@ -152,13 +129,7 @@ class AppConfig(object):
     @property
     def api_key_deletion_email_subject_format(self):
         """format for the email subject when an API Key is deleted by admin for an API."""
-        return '%s - API Key is deleted for "%s" API'
-
-    @property
-    def api_key_deletion_email_message_format(self):
-        """format for the email message when an API Key is deleted for an API."""
-        return ('The admin has deleted the API Key due to security reasons.'
-                ' Please raise the key again if required.')
+        return '%s - API key for %s API has been deleted'
 
 
 app_config = AppConfig()

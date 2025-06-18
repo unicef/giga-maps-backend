@@ -1,0 +1,16 @@
+Dear {{user_name}},<br/>
+<p>Your API key for the {{api_name}} API has been deleted. If you believe this was in error, or you would like to
+  request a new key, please visit the Giga Maps API dashboard,
+  or contact us at <a href="mailto:{{support_email}}">{{support_email}}</a>.</p>
+Regards,<br/>
+The Giga Maps Team<br/>
+<br/>
+{% if giga_logo_url %}
+  <img src="{{giga_logo_url}}" width="300">
+{% endif %}
+<br/>
+<p><a href="{{website_url}}">Website</a> | <a href="{{linkedin_url}}">LinkedIn</a> | <a href="{{x_url}}">X</a> |
+  <a href="{{instagram_url}}">Instagram</a> | <a href="{{youtube_url}}">YouTube</a> |
+  <a href="{{newsletter_url}}">Newsletter</a></p>
+<br/>
+<p style="font-size:10px;">*This is an automated message. Replies to this email will not be monitored.</p>
