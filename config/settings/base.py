@@ -522,3 +522,18 @@ AI_TRANSLATION_CACHE_KEY_LIMIT = env('AI_TRANSLATION_CACHE_KEY_LIMIT', default=2
 GIGA_METER_ENABLE_AUTO_SYNC = env.bool('GIGA_METER_ENABLE_AUTO_SYNC', default=True)
 
 UNDER_TEST = (len(sys.argv) > 1 and sys.argv[1] == 'test')
+
+GIGA_LOGO_URL = env(
+    'GIGA_LOGO_URL',
+    default='https://saunigigaweb.blob.core.windows.net/giga-maps-backend-dev-public/images/e2cb2d5c-785b-4950-a8fe'
+            '-29c5a2ef4242.png',
+)
+GIGA_WEBSITE_URL = env('GIGA_WEBSITE_URL', default='http://giga.global/')
+GIGA_LINKEDIN_URL = env('GIGA_LINKEDIN_URL', default='https://www.linkedin.com/showcase/gigaglobal')
+GIGA_X_URL = env('GIGA_X_URL', default='https://x.com/Gigaglobal')
+GIGA_INSTAGRAM_URL = env('GIGA_INSTAGRAM_URL', default='https://www.instagram.com/giga_global/')
+GIGA_YOUTUBE_URL = env('GIGA_YOUTUBE_URL', default='https://www.youtube.com/@GigaGlobal')
+GIGA_NEWS_LETTER_URL = env(
+    'GIGA_NEWS_LETTER_URL',
+    default='https://gigaconnect.us1.list-manage.com/subscribe?u=ad5a5d41f9573f4114f531faa&id=64ba229224',
+)

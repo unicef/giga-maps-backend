@@ -48,7 +48,7 @@ def send_standard_email(user, data):
 
 
 def send_email_over_mailjet_service(recipient_list, cc=None, bcc=None, fail_silently=False,
-                                    template=config.standard_email_template_name, user_name='User', **kwargs):
+                                    template=config.standard_email_template_name, **kwargs):
     if (
         core_utilities.is_blank_string(settings.ANYMAIL.get('MAILJET_API_KEY')) or
         core_utilities.is_blank_string(settings.ANYMAIL.get('MAILJET_SECRET_KEY'))
@@ -58,11 +58,19 @@ def send_email_over_mailjet_service(recipient_list, cc=None, bcc=None, fail_sile
 
     kwargs.update({
         'project_title': core_utilities.get_project_title(),
-        'user_name': user_name,
+        'dashboard_url': settings.API_KEY_ADMIN_DASHBOARD_URL,
         'support_number': settings.SUPPORT_PHONE_NUMBER,
         'support_email': core_utilities.get_support_email(),
         'footer_copyright': core_utilities.get_footer_copyright(),
+        'giga_logo_url': settings.GIGA_LOGO_URL,
+        'website_url': settings.GIGA_WEBSITE_URL,
+        'linkedin_url': settings.GIGA_LINKEDIN_URL,
+        'x_url': settings.GIGA_X_URL,
+        'instagram_url': settings.GIGA_INSTAGRAM_URL,
+        'youtube_url': settings.GIGA_YOUTUBE_URL,
+        'newsletter_url': settings.GIGA_NEWS_LETTER_URL,
     })
+
     email_body = get_template(template).render(kwargs)
 
     mail = AnymailMessage(
