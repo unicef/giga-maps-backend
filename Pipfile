@@ -42,7 +42,7 @@ gunicorn = "*"
 futures = "==3.1.1"
 # BlobPermissions not available in 12 release (https://github.com/Azure/azure-sdk-for-python/blob/22be12d5fa3604acde0695705993347787497a2e/sdk/storage/azure-storage-blob/CHANGELOG.md#1200b4-2019-10-08)
 azure-storage-blob = "<12.0.0"
-django-storages = {version = "*", extras = ["azure"]}
+django-storages = "==1.11.1"
 django-compressor = "*"
 boto3 = "*"
 Django = ">=2.2,<3"
