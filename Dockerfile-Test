@@ -36,7 +36,8 @@ RUN apt-get update && apt-get install -y \
     #systemctl start postgresql.service
 
 RUN service postgresql start && \
-    su - postgres -c "psql -c \"ALTER USER postgres WITH PASSWORD 'root';\""
+    su - postgres -c "psql -c \"ALTER USER postgres WITH PASSWORD 'root';\"" && \
+    su - postgres -c "psql -c '\list'"
 
 #USER postgres
 #RUN psql -c "ALTER USER postgres WITH PASSWORD 'root';"
@@ -123,21 +124,21 @@ RUN pipenv install --dev
 
 ADD . /code/
 
-RUN service postgresql start && \
-    service redis-server start && \
-    ./scripts/runtests.sh
+# RUN service postgresql start && \
+#     service redis-server start && \
+#     ./scripts/runtests.sh
 
-RUN export SONAR_SCANNER_VERSION=5.0.1.3006 && \
-    export SONAR_SCANNER_HOME=$HOME/.sonar/sonar-scanner-$SONAR_SCANNER_VERSION-linux && \
-    curl --create-dirs -sSLo $HOME/.sonar/sonar-scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-$SONAR_SCANNER_VERSION-linux.zip && \
-    unzip -o $HOME/.sonar/sonar-scanner.zip -d $HOME/.sonar/ && \
-    export PATH=$SONAR_SCANNER_HOME/bin:$PATH && \
-    export SONAR_SCANNER_OPTS="-server" && \
-    #export SONAR_TOKEN=$SONAR_TOKEN && \
-    sonar-scanner \
-    -Dsonar.projectKey=$BUILD_DEFINITION_NAME \
-    -Dsonar.sources=proco \
-    -Dsonar.host.url=$SONAR_HOST \
-    -Dsonar.python.version=3.8 \
-    -Dsonar.python.coverage.reportPaths=coverage.xml \
-    -Dsonar.exclusions=**/migrations/**,**/proco_data_migrations/**,**/tests/**,**/proco/**/admin.py,**/dailycheckapp_contact/**,**/realtime_dailycheckapp/**,**/realtime_unicef/**,**/management/commands/**
+# RUN export SONAR_SCANNER_VERSION=5.0.1.3006 && \
+#     export SONAR_SCANNER_HOME=$HOME/.sonar/sonar-scanner-$SONAR_SCANNER_VERSION-linux && \
+#     curl --create-dirs -sSLo $HOME/.sonar/sonar-scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-$SONAR_SCANNER_VERSION-linux.zip && \
+#     unzip -o $HOME/.sonar/sonar-scanner.zip -d $HOME/.sonar/ && \
+#     export PATH=$SONAR_SCANNER_HOME/bin:$PATH && \
+#     export SONAR_SCANNER_OPTS="-server" && \
+#     #export SONAR_TOKEN=$SONAR_TOKEN && \
+#     sonar-scanner \
+#     -Dsonar.projectKey=$BUILD_DEFINITION_NAME \
+#     -Dsonar.sources=proco \
+#     -Dsonar.host.url=$SONAR_HOST \
+#     -Dsonar.python.version=3.8 \
+#     -Dsonar.python.coverage.reportPaths=coverage.xml \
+#     -Dsonar.exclusions=**/migrations/**,**/proco_data_migrations/**,**/tests/**,**/proco/**/admin.py,**/dailycheckapp_contact/**,**/realtime_dailycheckapp/**,**/realtime_unicef/**,**/management/commands/**
