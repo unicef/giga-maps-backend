@@ -76,13 +76,13 @@ ENV COUNTRY_INDEX_NAME='giga-countries'
 ENV DAILY_CHECK_APP_API_CODE='DAILY_CHECK_APP'
 ENV DAILY_CHECK_APP_BASE_URL='https://uni-ooi-giga-daily-check-service-api-dev.azurewebsites.net/api/v1'
 ENV DATA_LAYER_DASHBOARD_URL='http://localhost:9500/admin/giga-layer'
-ENV DATABASE_URL="postgis://postgres:root@localhost/${BUILD_ID}"
+ENV DATABASE_URL="postgis://postgres:root@localhost/postgres_${BUILD_ID}"
 ENV DEFAULT_FROM_EMAIL='giga@mail.unicef.org'
 ENV DJANGO_SECRET_KEY=''
 ENV DJANGO_SETTINGS_MODULE='config.settings.dev_test'
 ENV DOCKER_REPOSITORY='project-connect-backend-v2'
 ENV DOCKER_SERVICE_CONNECTION='UNICEF_DATA_CONNECT_WEB_ACR'
-ENV GIGA_METER_DATABASE_URL="postgis://postgres:root@localhost/${BUILD_ID}"
+ENV GIGA_METER_DATABASE_URL="postgis://postgres:root@localhost/postgres_${BUILD_ID}"
 ENV GIGA_METER_ENABLE_AUTO_SYNC='true; allowOverride=True'
 ENV MAILJET_API_KEY=''
 ENV MAILJET_API_URL='https://api.mailjet.com/v3'
@@ -95,7 +95,7 @@ ENV QOS_EXPIRATION_TIME=''
 ENV QOS_SCHEMA_NAME='qos'
 ENV QOS_SHARE_CREDENTIALS_VERSION='1'
 ENV QOS_SHARE_NAME='gold'
-ENV READ_ONLY_DATABASE_URL="postgis://postgres:root@localhost/${BUILD_ID}"
+ENV READ_ONLY_DATABASE_URL="postgis://postgres:root@localhost/postgres_${BUILD_ID}"
 ENV REDIS_URL_DEV='isSecret=True'
 ENV SCHOOL_INDEX_NAME='giga-schools-test'
 ENV SCHOOL_MASTER_BEARER_TOKEN=''
@@ -128,7 +128,7 @@ ADD . /code/
 
 RUN service postgresql start && \
     service redis-server start && \
-    su - postgres -c "psql -c 'CREATE DATABASE ${BUILD_ID}'" && \
+    su - postgres -c "psql -c 'CREATE DATABASE postgres_${BUILD_ID}'" && \
     ./scripts/runtests.sh
 
 # RUN export SONAR_SCANNER_VERSION=5.0.1.3006 && \
