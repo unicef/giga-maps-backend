@@ -128,6 +128,7 @@ ADD . /code/
 
 RUN service postgresql start && \
     service redis-server start && \
+    su - postgres -c "psql -c 'CREATE DATABASE postgres-${BUILD_ID}'" && \
     ./scripts/runtests.sh
 
 # RUN export SONAR_SCANNER_VERSION=5.0.1.3006 && \
