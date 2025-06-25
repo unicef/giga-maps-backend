@@ -48,6 +48,7 @@ steps:
       --build-arg=SONAR_HOST=$(SONAR_HOST)
       --build-arg=SONAR_TOKEN=$(SONAR_TOKEN)
       --build-arg=BUILD_DEFINITION_NAME=$(BUILD_DEFINITION_NAME)
+      --build-arg=BUILD_ID=$(tag)
     addPipelineData: false
     addBaseImageData: false
 
