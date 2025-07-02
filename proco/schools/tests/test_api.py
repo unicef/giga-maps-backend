@@ -25,7 +25,7 @@ def schools_url(url_params, query_param, view_name='schools-list'):
 
 class SchoolsApiTestCase(TestAPIViewSetMixin, TestCase):
     base_view = 'schools:schools'
-    databases = {'default', settings.READ_ONLY_DB_KEY,}
+    databases = {'default', settings.READ_ONLY_DB_KEY, }
 
     @classmethod
     def setUpTestData(cls):

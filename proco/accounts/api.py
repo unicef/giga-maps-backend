@@ -247,12 +247,16 @@ class APIKeysViewSet(BaseModelViewSet):
 
         # Once API Key is deleted by Admin, send the status email to the user
         if api_key_user is not None and request_user.id != api_key_user.id:
-            email_subject = account_config.api_key_deletion_email_subject_format % (
-                core_utilities.get_project_title(), instance.api.name,
-            )
-            email_message = account_config.api_key_deletion_email_message_format
-            email_content = {'subject': email_subject, 'message': email_message}
-            account_utilities.send_standard_email(api_key_user, email_content)
+            email_content = {
+                'subject': account_config.api_key_deletion_email_subject_format % (
+                    core_utilities.get_project_title(), str(instance.api.name).title(),
+                ),
+                'api_name': str(instance.api.name).title(),
+                'user_name': instance.user.first_name + ' ' + instance.user.last_name,
+                'template': account_config.api_key_deleted_email_template,
+            }
+
+            account_utilities.send_email_over_mailjet_service([api_key_user], **email_content)
         return status
 
 
@@ -2102,10 +2106,6 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         kwargs['admin1_condition'] = ''
         kwargs['school_condition'] = ''
 
-        # kwargs['country_outer_condition'] = ''
-        # kwargs['admin1_outer_condition'] = ''
-        # kwargs['school_outer_condition'] = ''
-
         kwargs['school_weekly_join'] = ''
         kwargs['school_weekly_condition'] = ''
         kwargs['school_weekly_outer_join'] = ''
@@ -2160,10 +2160,6 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             kwargs['school_condition'] = 'AND "schools_school"."id" IN ({0})'.format(
                 ','.join([str(school_id) for school_id in kwargs['school_ids']])
             )
-
-            # kwargs['school_outer_condition'] = 'AND "schools_school"."id" IN ({0})'.format(
-            #     ','.join([str(school_id) for school_id in kwargs['school_ids']])
-            # )
         elif len(kwargs.get('admin1_ids', [])) > 0:
             if settings.ADMIN_MAP_API_SAMPLING_LIMIT is not None:
                 kwargs['MAP_API_SAMPLING_LIMIT'] = settings.ADMIN_MAP_API_SAMPLING_LIMIT
@@ -2174,9 +2170,6 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             kwargs['admin1_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
                 ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
             )
-            # kwargs['admin1_outer_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
-            #     ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
-            # )
         elif len(kwargs.get('country_ids', [])) > 0:
             if settings.COUNTRY_MAP_API_SAMPLING_LIMIT:
                 kwargs['MAP_API_SAMPLING_LIMIT'] = settings.COUNTRY_MAP_API_SAMPLING_LIMIT
@@ -2187,13 +2180,9 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
-            # kwargs['country_outer_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
-            #     ','.join([str(country_id) for country_id in kwargs['country_ids']])
-            # )
 
         if len(kwargs['school_filters']) > 0:
             kwargs['school_condition'] += ' AND ' + kwargs['school_filters']
-            # kwargs['school_outer_condition'] += ' AND ' + kwargs['school_filters']
 
         if len(kwargs['school_static_filters']) > 0:
             kwargs['school_weekly_join'] = """
@@ -2557,7 +2546,8 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
         else:
             kwargs['case_conditions'] = """
                         CASE WHEN sds.{col_name} >  {benchmark_value} THEN 'good'
-                            WHEN sds.{col_name} < {benchmark_value} AND sds.{col_name} >= {base_benchmark} THEN 'moderate'
+                            WHEN sds.{col_name} < {benchmark_value} AND sds.{col_name} >= {base_benchmark} THEN
+                            'moderate'
                             WHEN sds.{col_name} < {base_benchmark}  THEN 'bad'
                             ELSE 'unknown'
                         END AS field_status
@@ -2566,7 +2556,8 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
             if kwargs['is_reverse'] is True:
                 kwargs['case_conditions'] = """
                         CASE WHEN sds.{col_name} < {benchmark_value}  THEN 'good'
-                            WHEN sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark} THEN 'moderate'
+                            WHEN sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark} THEN
+                            'moderate'
                             WHEN sds.{col_name} > {base_benchmark} THEN 'bad'
                             ELSE 'unknown'
                         END AS field_status

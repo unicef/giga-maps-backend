@@ -1,6 +1,5 @@
 import numpy as np
 from django.contrib.gis.db.models import MultiPolygonField
-from django.contrib.gis.geos import GEOSGeometry, MultiPolygon, Polygon
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import ugettext as _

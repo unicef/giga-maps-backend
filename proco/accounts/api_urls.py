@@ -42,7 +42,8 @@ urlpatterns = [
     }), name='list-send-notifications'),
 
     path('invalidate-cache/', api.InvalidateCache.as_view(), name='admin-invalidate-cache'),
-    path('invalidate-cache-patterns/', api.InvalidateCacheByPattern.as_view(), name='admin-invalidate-cache-based-on-patterns'),
+    path('invalidate-cache-patterns/', api.InvalidateCacheByPattern.as_view(),
+         name='admin-invalidate-cache-based-on-patterns'),
 
     path('app_configs/', api.AppStaticConfigurationsViewSet.as_view(), name='get-app-static-configurations'),
     path('data_sources/', api.DataSourceViewSet.as_view({

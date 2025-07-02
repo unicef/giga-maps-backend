@@ -251,9 +251,9 @@ def giga_meter_handle_published_school_master_data_row(*args, country_ids=None, 
                             'teachers_trained': None
                             if core_utilities.is_blank_string(row.teachers_trained)
                             else str(row.teachers_trained).lower() in core_configs.true_choices,
-                            'sustainable_business_model': None
-                            if core_utilities.is_blank_string(row.sustainable_business_model)
-                            else str(row.sustainable_business_model).lower() in core_configs.true_choices,
+                            'sustainable_business_model': None if core_utilities.is_blank_string(
+                                row.sustainable_business_model) else str(
+                                row.sustainable_business_model).lower() in core_configs.true_choices,
                             'device_availability': None
                             if core_utilities.is_blank_string(row.device_availability)
                             else str(row.device_availability).lower() in core_configs.true_choices,

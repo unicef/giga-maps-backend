@@ -344,4 +344,3 @@ class CountryDataViewSetTestCase(TestAPIViewSetMixin, TestCase):
             response = self.forced_auth_req('get', url, user=self.user, view=view)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-

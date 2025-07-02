@@ -837,7 +837,8 @@ class CountrySummaryAPIViewSet(BaseModelViewSet):
     )
 
     filter_backends = (
-        NullsAlwaysLastOrderingFilter, SearchFilter, DjangoFilterBackend
+        DjangoFilterBackend,
+        SearchFilter,
     )
 
     ordering_field_names = ['-year', '-week', 'country__name']
@@ -938,7 +939,8 @@ class CountryDailyConnectivitySummaryAPIViewSet(BaseModelViewSet):
     )
 
     filter_backends = (
-        NullsAlwaysLastOrderingFilter, SearchFilter, DjangoFilterBackend,
+        DjangoFilterBackend,
+        SearchFilter,
     )
 
     ordering_field_names = ['-date', 'country__name', ]
@@ -1037,14 +1039,19 @@ class SchoolSummaryAPIViewSet(BaseModelViewSet):
     )
 
     filter_backends = (
-        NullsAlwaysLastOrderingFilter, SearchFilter, DjangoFilterBackend
+        DjangoFilterBackend,
+        SearchFilter,
     )
 
-    ordering_field_names = ['-year', '-week', 'school__name']
+    ordering_field_names = ['-year', '-week', 'school__name_lower', ]
     apply_query_pagination = True
     search_fields = (
-        '=school__id', 'school__name', '=school__giga_id_school', '=school__external_id',
-        'year', 'week',
+        '=school__id',
+        'school__name_lower',
+        '=school__giga_id_school',
+        '=school__external_id',
+        'year',
+        'week',
     )
     filterset_fields = {
         'school_id': ['exact', 'in'],
@@ -1144,14 +1151,18 @@ class SchoolDailyConnectivitySummaryAPIViewSet(BaseModelViewSet):
     )
 
     filter_backends = (
-        NullsAlwaysLastOrderingFilter, SearchFilter, DjangoFilterBackend
+        DjangoFilterBackend,
+        SearchFilter,
     )
 
-    ordering_field_names = ['-date', 'school__name', ]
+    ordering_field_names = ['-date', 'school__name_lower', ]
     apply_query_pagination = True
 
     search_fields = (
-        '=school__id', 'school__name', '=school__giga_id_school', '=school__external_id',
+        '=school__id',
+        'school__name_lower',
+        '=school__giga_id_school',
+        '=school__external_id',
     )
     filterset_fields = {
         'school_id': ['exact', 'in'],
