@@ -23,6 +23,8 @@ variables:
   imageRepositoryProd: 'prod/$(app)'
   tag: '$(Build.BuildId)'
   pythonVersion: '3.8'
+  SONAR_HOST: $(SONAR_HOST)
+  SONAR_TOKEN: $(SONAR_TOKEN)
 
 stages:
 - stage: build_test
