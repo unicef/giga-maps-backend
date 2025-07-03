@@ -23,8 +23,8 @@ variables:
   imageRepositoryProd: 'prod/$(app)'
   tag: '$(Build.BuildId)'
   pythonVersion: '3.8'
-  SONAR_HOST: $(SONAR_HOST)
-  SONAR_TOKEN: $(SONAR_TOKEN)
+  SONAR_HOST_V: $(SONAR_HOST)
+  SONAR_TOKEN_V: $(SONAR_TOKEN)
 
 stages:
 - stage: build_test
@@ -40,6 +40,6 @@ stages:
         targetType: 'inline'
         script: |
           printenv
-          echo "$SONAR_HOST"
-          echo "$SONAR_TOKEN"
+          echo "$SONAR_HOST_V"
+          echo "$SONAR_TOKEN_V"
       continueOnError: true
