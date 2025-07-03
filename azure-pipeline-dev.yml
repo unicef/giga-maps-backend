@@ -37,6 +37,7 @@ stages:
       inputs:
         targetType: 'inline'
         script: |
+          printenv
           echo "$SONAR_HOST"
           echo "$SONAR_TOKEN"
       continueOnError: true
