@@ -1,8 +1,8 @@
 # encoding: utf-8
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import time
 import logging
+import time
 
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
@@ -10,7 +10,7 @@ from azure.search.documents.indexes import SearchIndexClient
 from azure.search.documents.indexes.models import CorsOptions, SearchIndex
 from django.conf import settings
 from django.core.management.base import BaseCommand
-from django.db.models import Prefetch, F
+from django.db.models import Prefetch, F, Case, IntegerField, Value, When, FilteredRelation, Q
 
 from proco.core.utils import is_blank_string
 from proco.locations.models import Country
@@ -30,7 +30,7 @@ def delete_index():
 
     try:
         result = admin_client.delete_index(SchoolIndex.Meta.index_name)
-        logger.info('Index: ', SchoolIndex.Meta.index_name, 'Deleted')
+        logger.info('Index "{0}" deleted successfully'.format(SchoolIndex.Meta.index_name))
         logger.info(result)
     except Exception as ex:
         logger.error(ex)
@@ -51,7 +51,7 @@ def create_index():
     cors_options = CorsOptions(allowed_origins=['*'], max_age_in_seconds=24 * 60 * 60)
     scoring_profiles = []
 
-    logger.info('Index name: ', SchoolIndex.Meta.index_name)
+    logger.info('Index name: {0}'.format(SchoolIndex.Meta.index_name))
 
     index = SearchIndex(
         name=SchoolIndex.Meta.index_name,
@@ -62,7 +62,7 @@ def create_index():
 
     try:
         result = admin_client.create_index(index)
-        logger.info('Index: ', result.name, 'created')
+        logger.info('Index "{0}" created successfully'.format(result.name))
     except Exception as ex:
         logger.error(ex)
 
@@ -94,11 +94,18 @@ def collect_data(country_id, school_id):
     qs = queryset.prefetch_related(
         Prefetch('country', Country.objects.defer('geometry')),
     ).annotate(
+        srr=FilteredRelation(
+            'realtime_registration_status',
+            condition=Q(realtime_registration_status__rt_registered=True)
+                      & Q(realtime_registration_status__deleted__isnull=True),
+        )
+    ).annotate(
         school_id=F('id'),
         country_name=F('country__name'),
         country_code=F('country__code'),
         admin1_name=F('admin1__name'),
         admin2_name=F('admin2__name'),
+        row_score=Case(When(srr__id__isnull=True, then=Value(0)), default=1, output_field=IntegerField())
     ).values(*qry_fields).order_by(*SchoolIndex.Meta.ordering).distinct(*qry_fields)
 
     if country_id:
