@@ -68,6 +68,8 @@ class SchoolIndex(object):
         facetable=True,
     )
 
+    row_score = SimpleField(name='row_score', type=SearchFieldDataType.Int32, sortable=True)
+
     class Meta:
         index_name = settings.AZURE_CONFIG.get('COGNITIVE_SEARCH', {}).get('SCHOOL_INDEX_NAME', 'giga-schools')
         model = School
@@ -83,4 +85,4 @@ class SchoolIndex(object):
             'admin1_id', 'admin2_id',
             'admin1_name', 'admin2_name', 'id',
         )
-        ordering = ('country_name', 'admin1_name', 'admin2_name', 'name',)
+        ordering = ('-row_score', 'country_name', 'admin1_name', 'admin2_name', 'name',)

@@ -553,9 +553,7 @@ class BaseSearchMixin:
 
     @property
     def get_skip(self):
-        page_no = core_utilities.convert_to_int(self.params.get('page', ['1'])[-1], default=1)
-        if page_no > 0:
-            page_no = page_no - 1
+        page_no = core_utilities.convert_to_int(self.params.get('page', ['0'])[-1], default=0)
         return page_no * self.get_top
 
     @property
