@@ -1,6 +1,12 @@
 FROM python:3.8-buster
 
 # Install dependencies
+RUN sed -i \
+      -e 's|http://deb.debian.org/debian|http://archive.debian.org/debian|g' \
+      -e '/deb.debian.org\/debian-security/d' \
+      /etc/apt/sources.list
+RUN echo 'Acquire::Check-Valid-Until "false";' \
+      > /etc/apt/apt.conf.d/99no-check-valid-until
 RUN apt-get update
 RUN apt-get install -y --no-install-recommends \
     build-essential \
