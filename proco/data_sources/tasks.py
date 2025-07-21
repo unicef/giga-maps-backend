@@ -15,6 +15,7 @@ from requests.exceptions import HTTPError
 from proco.accounts import utils as account_utilities
 from proco.background import utils as background_task_utilities
 from proco.connection_statistics import models as statistics_models
+from proco.connection_statistics.config import app_config as statistics_configs
 from proco.connection_statistics.utils import (
     aggregate_real_time_data_to_school_daily_status,
     aggregate_school_daily_status_to_school_weekly_status,
@@ -877,6 +878,13 @@ def update_qos_data(*args, today=True):
             aggr_date = core_utilities.get_current_datetime_object().date()
         else:
             aggr_date = core_utilities.get_current_datetime_object().date() - timedelta(days=1)
+
+        # INFO: Hard delete all the records of QoS source from RealtimeConnectivity table to fix Kenya issue
+        # where newer version has old timestamp data
+        statistics_models.RealTimeConnectivity.objects.all().filter(
+            created__date=aggr_date,
+            live_data_source=statistics_configs.QOS_SOURCE,
+        ).delete()
 
         chain(
             load_data_from_qos_apis.s(),
