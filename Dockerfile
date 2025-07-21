@@ -31,7 +31,7 @@ RUN pip install --upgrade \
     pipenv
 
 # ssh
-ENV SSH_PASSWD "root:Docker!"
+ENV SSH_PASSWD="root:Docker!"
 RUN apt-get update \
         && apt-get install -y --no-install-recommends dialog \
         && apt-get update \
@@ -41,8 +41,8 @@ RUN apt-get update \
 COPY sshd_config /etc/ssh/
 
 # python app
-ENV PYTHONUNBUFFERED 1
-ENV PYTHONPATH /code
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/code
 
 RUN mkdir /code
 
