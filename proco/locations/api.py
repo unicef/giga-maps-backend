@@ -330,7 +330,7 @@ class CountrySearchStatListAPIView(CachedListMixin, ListAPIView):
     LIST_CACHE_KEY_PREFIX = 'GLOBAL_COUNTRY_SEARCH_MAPPING'
 
     def get_queryset(self):
-        queryset = self.model.objects.all()
+        queryset = self.model.objects.all().filter(schools__deleted__isnull=True)
 
         qs = queryset.values(
             'id', 'name', 'code', 'last_weekly_status__integration_status',
@@ -484,6 +484,16 @@ class BaseSearchMixin:
                         filters.append('{0} eq {1}'.format(field_name, param_value))
                     else:
                         filters.append("{0} eq '{1}'".format(field_name, param_value))
+
+                elif filter_name == 'notexact':
+                    if param_value == 'null':
+                        filters.append('{0} ne {1}'.format(field_name, param_value))
+                    elif field_type in (SearchFieldDataType.Int32, SearchFieldDataType.Int64,
+                                        SearchFieldDataType.Double):
+                        filters.append('{0} ne {1}'.format(field_name, param_value))
+                    else:
+                        filters.append("{0} ne '{1}'".format(field_name, param_value))
+
                 elif filter_name == 'in':
                     in_filters = []
                     for val in param_value.split(','):
@@ -630,12 +640,12 @@ class AggregateSearchViewSet(BaseSearchMixin, ListAPIView):
     )
 
     filterset_fields = {
-        'id': ['exact', 'in'],
-        'country_id': ['exact', 'in'],
-        'admin1_id': ['exact', 'in'],
-        'admin2_id': ['exact', 'in'],
-        'admin1_name': ['exact', 'in'],
-        'admin2_name': ['exact', 'in'],
+        'id': ['exact', 'in', 'notexact'],
+        'country_id': ['exact', 'in', 'notexact'],
+        'admin1_id': ['exact', 'in', 'notexact'],
+        'admin2_id': ['exact', 'in', 'notexact'],
+        'admin1_name': ['exact', 'in', 'notexact'],
+        'admin2_name': ['exact', 'in', 'notexact'],
     }
 
     filter_field_type = {
