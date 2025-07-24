@@ -712,6 +712,7 @@ def sync_qos_realtime_data(country_id):
     last_entry_date = RealTimeConnectivity.objects.filter(
         live_data_source=statistics_configs.QOS_SOURCE,
         school__country_id=country_id,
+        school__deleted__isnull=True,
     ).order_by('-created').values_list('created', flat=True).first()
 
     if not last_entry_date:

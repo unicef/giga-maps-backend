@@ -1,6 +1,12 @@
 FROM python:3.8-buster
 
 # Install dependencies
+RUN sed -i \
+      -e 's|http://deb.debian.org/debian|http://archive.debian.org/debian|g' \
+      -e '/deb.debian.org\/debian-security/d' \
+      /etc/apt/sources.list
+RUN echo 'Acquire::Check-Valid-Until "false";' \
+      > /etc/apt/apt.conf.d/99no-check-valid-until
 RUN apt-get update
 RUN apt-get install -y --no-install-recommends \
     build-essential \
@@ -31,7 +37,7 @@ RUN pip install --upgrade \
     pipenv
 
 # ssh
-ENV SSH_PASSWD "root:Docker!"
+ENV SSH_PASSWD="root:Docker!"
 RUN apt-get update \
         && apt-get install -y --no-install-recommends dialog \
         && apt-get update \
@@ -41,18 +47,18 @@ RUN apt-get update \
 COPY sshd_config /etc/ssh/
 
 # python app
-ENV PYTHONUNBUFFERED 1
-ENV PYTHONPATH /code
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/code
 
 RUN mkdir /code
 
 ADD Pipfile /code/Pipfile
-ADD Pipfile.lock /code/Pipfile.lock
+# ADD Pipfile.lock /code/Pipfile.lock
 
 WORKDIR /code/
 
  # todo: try to figure out how we can test using dev packages and exclude them from prod build at the same time...
-RUN pipenv install --ignore-pipfile --dev
+RUN pipenv install --dev
 
 ADD . /code/
 # cleanup env files if any
