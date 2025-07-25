@@ -61,7 +61,7 @@ class AppConfig(object):
     @property
     def private_api_key_rejected_email_subject_format(self):
         """format for the email subject when an API Key is rejected for a Private API."""
-        return '%s - Giga Maps API key request'
+        return '%s - Giga Maps API Key Request for %s Not Approved'
 
     @property
     def private_api_key_extension_request_email_subject_format(self):
