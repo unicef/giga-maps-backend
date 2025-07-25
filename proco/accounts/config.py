@@ -39,7 +39,7 @@ class AppConfig(object):
     def api_key_generation_email_subject_format(self):
         """format for the email subject when an API Key is generated for a Public API."""
         # '%s - API Key generated for "%s" API'
-        return '%s - %s API Key Generated'
+        return '%s - Your Giga Maps API Key for %s is Now Available'
 
     @property
     def private_api_key_generation_email_subject_format(self):
