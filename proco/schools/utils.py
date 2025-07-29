@@ -65,7 +65,8 @@ def get_connectivity_status_by_master_api(school_instance):
 
     if school_row:
         status = 'unknown'
-        if core_utilities.is_blank_string(school_row.connectivity_govt):
+        if (core_utilities.is_blank_string(school_row.connectivity_govt) or
+            str(school_row.connectivity_govt).lower() == 'unknown'):
             connectivity_govt = None
         elif str(school_row.connectivity_govt).lower() in core_configs.true_choices:
             connectivity_govt = 'yes'

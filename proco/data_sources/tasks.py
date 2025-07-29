@@ -323,7 +323,8 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                         else str(row.computer_lab).lower() in core_configs.true_choices
                     school_weekly.num_computers = row.num_computers
 
-                    if core_utilities.is_blank_string(row.connectivity_govt):
+                    if (core_utilities.is_blank_string(row.connectivity_govt) or
+                        str(row.connectivity_govt).lower()  == 'unknown'):
                         school_weekly.connectivity = None
                     else:
                         school_weekly.connectivity = str(row.connectivity_govt).lower() in core_configs.true_choices
