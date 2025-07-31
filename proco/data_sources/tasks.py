@@ -687,7 +687,7 @@ def load_data_from_daily_check_app_api(*args):
 
 
 @app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)
-def load_data_from_qos_apis(*args):
+def load_data_from_qos_apis(*args, redo_aggregations=False, aggr_date=None):
     logger.info('Loading the QoS data to DB.')
     changes_for_countries = {}
 
@@ -698,6 +698,17 @@ def load_data_from_qos_apis(*args):
     ).values_list('id', flat=True).order_by('id').distinct('id'))
 
     for country_id in countries_ids:
+        if redo_aggregations:
+            # INFO: Hard delete all the records of QoS source from RealtimeConnectivity table to fix Kenya issue
+            # where newer version has old timestamp data
+            statistics_models.RealTimeConnectivity.objects.all().filter(
+                created__date=aggr_date,
+                live_data_source=statistics_configs.QOS_SOURCE,
+                school__country_id=country_id,
+            ).delete()
+            logger.info('Deleted records from "RealTimeConnectivity" data table for Date "{0}"'
+                        ' and Live Data Source "QOS".'.format(aggr_date))
+
         source_utilities.sync_qos_realtime_data(country_id)
     logger.info('Loaded the QoS data to DB successfully.')
 
@@ -870,7 +881,7 @@ def update_qos_data(*args, today=True):
                                                             'Sync QoS Realtime Data from Live source')
 
     if task_instance:
-        logger.debug('Not found running job: {}'.format(task_key))
+        task_instance.info('Not found running job: {0}'.format(task_key))
         countries_ids = list(QoSData.objects.all().order_by('country_id').values_list(
                 'country_id', flat=True).distinct('country_id'))
 
@@ -879,15 +890,11 @@ def update_qos_data(*args, today=True):
         else:
             aggr_date = core_utilities.get_current_datetime_object().date() - timedelta(days=1)
 
-        # INFO: Hard delete all the records of QoS source from RealtimeConnectivity table to fix Kenya issue
-        # where newer version has old timestamp data
-        statistics_models.RealTimeConnectivity.objects.all().filter(
-            created__date=aggr_date,
-            live_data_source=statistics_configs.QOS_SOURCE,
-        ).delete()
+        load_data_from_qos_apis(redo_aggregations=True, aggr_date=aggr_date)
+        task_instance.info('Loaded the data from QoS source and aggregated to "RealTimeConnectivity" data table.')
 
+        task_instance.info('Finalizing the data for country ids in parallel: {0}.'.format(countries_ids))
         chain(
-            load_data_from_qos_apis.s(),
             chord(
                 group([
                     finalize_previous_day_data.s(country_id, aggr_date)
@@ -895,8 +902,8 @@ def update_qos_data(*args, today=True):
                 ]),
                 finalize_task.si(),
             ),
-
         ).delay()
+        task_instance.info('Finalized the data successfully for country ids: {0}.'.format(countries_ids))
 
         background_task_utilities.task_on_complete(task_instance)
     else:

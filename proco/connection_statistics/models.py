@@ -43,8 +43,8 @@ class ConnectivityStatistics(models.Model):
     speed_upload_max = models.PositiveIntegerField(help_text=_('bps'), blank=True, null=True, default=None)
     pe_ingress = models.PositiveIntegerField(help_text=_('bps'), blank=True, null=True, default=None)
     pe_egress = models.PositiveIntegerField(help_text=_('bps'), blank=True, null=True, default=None)
-    inbound_traffic_sum = models.PositiveIntegerField(help_text=_('byte'), blank=True, null=True, default=None)
-    outbound_traffic_sum = models.PositiveIntegerField(help_text=_('byte'), blank=True, null=True, default=None)
+    inbound_traffic_sum = models.BigIntegerField(help_text=_('byte'), blank=True, null=True, default=None)
+    outbound_traffic_sum = models.BigIntegerField(help_text=_('byte'), blank=True, null=True, default=None)
     latency_min = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
     latency_mean = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
     latency_max = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
@@ -384,7 +384,7 @@ class RealTimeConnectivity(ConnectivityStatistics, TimeStampedModel, models.Mode
         ordering = ('id',)
 
     def __str__(self):
-        return f'{self.created} {self.school.name} Speed - {self.connectivity_speed}'
+        return f'{self.created} {self.school.id} {self.school.name}'
 
     def delete(self, *args, **kwargs):
         force = kwargs.pop('force', False)

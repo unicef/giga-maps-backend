@@ -649,6 +649,12 @@ class Command(BaseCommand):
             help='If provided, recalculate the School table "education_level_govt_lower" field.'
         )
 
+        parser.add_argument(
+            '--data_loss_recovery_for_qos_for_yesterday', action='store_true',
+            dest='data_loss_recovery_for_qos_for_yesterday', default=False,
+            help='If provided, run the task manually to sync and aggregate previous day data.'
+        )
+
     def handle(self, **options):
         logger.info('Executing data cleanup utility.\n')
         logger.info('Options: {}\n\n'.format(options))
@@ -784,5 +790,9 @@ class Command(BaseCommand):
         if options.get('populate_school_education_level_govt_lower'):
             logger.info('Re-calculating the School table lower case field: education_level_govt_lower')
             populate_school_education_level_govt_lower(country_id, start_school_id, end_school_id)
+
+        if options.get('data_loss_recovery_for_qos_for_yesterday'):
+            logger.info('Running "update_qos_data(today=False)" task.')
+            sources_tasks.update_qos_data(today=False)
 
         logger.info('Completed data cleanup utility successfully.\n')

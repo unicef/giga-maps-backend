@@ -189,7 +189,10 @@ class SchoolMasterData(TimeStampedModel, core_models.DataSourceModelMixin):
     def get_last_version(cls, iso3_format):
         last_data_version = cache.get(cls.DATA_VERSION_CACHE_KEY.format(iso3_format))
         if not last_data_version:
-            latest_records = cls.objects.filter(country__iso3_format=iso3_format).order_by('-created').first()
+            latest_records = cls.objects.filter(
+                country__iso3_format=iso3_format,
+                version__isnull=False,
+            ).order_by('-created').first()
             if latest_records:
                 last_data_version = latest_records.version
         return last_data_version
@@ -304,7 +307,10 @@ class QoSData(core_models.DataSourceModelMixin):
     def get_last_version(cls, iso3_format):
         last_data_version = cache.get(cls.DATA_VERSION_CACHE_KEY.format(iso3_format))
         if not last_data_version:
-            latest_records = cls.objects.filter(country__iso3_format=iso3_format).order_by('-version').first()
+            latest_records = cls.objects.filter(
+                country__iso3_format=iso3_format,
+                version__isnull=False,
+            ).order_by('-version').first()
             if latest_records:
                 last_data_version = latest_records.version
         return last_data_version
