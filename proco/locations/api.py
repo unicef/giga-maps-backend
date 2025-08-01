@@ -512,13 +512,13 @@ class BaseSearchMixin:
         if not isinstance(val, str):
             return val
         wh = '\t\n\r\v\f'
-        punctuation = r"""!"#$%&'()*+,./:;<=>?@[\]^`{|}~_""" + wh
+        punctuation = r"""!"#$%&'()*+/:;<=>?@[\]^`{|}~_""" + wh
         return re.sub(r'[' + re.escape(punctuation) + ']', '', val)
 
     @property
     def get_search_text(self):
-        search_text = self.params.get('q', ['*'])[-1]
-        search_text = self.normalize_search_text(search_text)
+        search_text_orig = self.params.get('q', ['*'])[-1]
+        search_text = self.normalize_search_text(search_text_orig)
         search_text = core_utilities.sanitize_str(search_text)
         # Remove multiple spaces with single space
         search_text = ' '.join([
@@ -532,7 +532,9 @@ class BaseSearchMixin:
         elif ' ' in search_text:
             search_text = search_text.replace(' ', ' AND ')
 
-        return search_text
+        search_text_orig = search_text_orig if search_text_orig.startswith('"') else '"' + search_text_orig + '"'
+
+        return '(' + search_text_orig.replace('*', '') + ') OR (' + search_text + ')'
 
     @property
     def get_search_fields(self):
