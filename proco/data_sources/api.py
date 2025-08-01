@@ -71,7 +71,7 @@ class QoSLoaderViewSet(APIView):
             'country_id')
 
         for country_id in countries_ids:
-            sources_tasks.finalize_previous_day_data(None, country_id, date)
+            sources_tasks.finalize_previous_day_data(country_id=country_id, date=date)
 
         return Response(data={'success': True})
 

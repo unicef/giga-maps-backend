@@ -61,7 +61,7 @@ class AggregateConnectivityDataTestCase(TestCase):
             live_data_source='DAILY_CHECK_APP_MLAB'
         )
 
-        finalize_previous_day_data(None, self.country.id, yesterday.date())
+        finalize_previous_day_data(country_id=self.country.id, date=yesterday.date())
         yesterday_status.refresh_from_db()
 
         self.assertEqual(yesterday_status.connectivity_speed, 3000000)

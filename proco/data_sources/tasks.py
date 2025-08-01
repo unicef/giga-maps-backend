@@ -799,7 +799,7 @@ def update_static_data(*args, country_iso3_format=None):
 
 
 @app.task(soft_time_limit=60 * 60, time_limit=60 * 60)
-def finalize_previous_day_data(_prev_result, country_id, date, *args):
+def finalize_previous_day_data(*args, country_id=144, date=core_utilities.get_current_datetime_object().date()):
     country = Country.objects.get(id=country_id)
 
     aggregate_real_time_data_to_school_daily_status(country, date)
@@ -840,7 +840,7 @@ def update_live_data(*args, today=True):
                 load_data_from_qos_apis.s(),
                 chord(
                     group([
-                        finalize_previous_day_data.s(country_id, today_date)
+                        finalize_previous_day_data.s(country_id=country_id, date=today_date)
                         for country_id in countries_ids
                     ]),
                     finalize_task.si(),
@@ -854,7 +854,7 @@ def update_live_data(*args, today=True):
                 load_data_from_qos_apis.s(),
                 chord(
                     group([
-                        finalize_previous_day_data.s(country_id, yesterday_date)
+                        finalize_previous_day_data.s(country_id=country_id, date=yesterday_date)
                         for country_id in countries_ids
                     ]),
                     finalize_task.si(),
@@ -897,7 +897,7 @@ def update_qos_data(*args, today=True):
         chain(
             chord(
                 group([
-                    finalize_previous_day_data.s(country_id, aggr_date)
+                    finalize_previous_day_data.s(None, country_id=country_id, date=aggr_date)
                     for country_id in countries_ids
                 ]),
                 finalize_task.si(),
