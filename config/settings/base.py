@@ -252,6 +252,9 @@ if CELERY_ENABLED:
 
 # Django mailing configuration
 # --------------------------------------------------------------------------
+ENABLED_API_KEY_EMAILS = env.bool('ENABLED_API_KEY_EMAILS', default=True)
+ENABLED_DATA_LAYER_EMAILS = env.bool('ENABLED_DATA_LAYER_EMAILS', default=True)
+ENABLED_DATA_SOURCES_EMAILS = env.bool('ENABLED_DATA_SOURCES_EMAILS', default=True)
 
 if CELERY_ENABLED:
     TEMPLATED_EMAIL_BACKEND = 'proco.mailing.backends.AsyncTemplateBackend'

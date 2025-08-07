@@ -541,7 +541,11 @@ class CreateAPIKeysSerializer(serializers.ModelSerializer):
                 api_key_country_relationships.save()
 
             # Once API Key is created, send the status email to the user
-            if request_user is not None and instance.status == accounts_models.APIKey.APPROVED:
+            if (
+                settings.ENABLED_API_KEY_EMAILS and
+                request_user is not None and
+                instance.status == accounts_models.APIKey.APPROVED
+            ):
                 email_content = {
                     'subject': account_config.api_key_generation_email_subject_format % (
                         core_utilities.get_project_title(), str(instance.api.name).title(),
@@ -552,7 +556,7 @@ class CreateAPIKeysSerializer(serializers.ModelSerializer):
                 }
                 account_utilities.send_email_over_mailjet_service([request_user], **email_content)
 
-            elif instance.status == accounts_models.APIKey.INITIATED:
+            elif settings.ENABLED_API_KEY_EMAILS and instance.status == accounts_models.APIKey.INITIATED:
                 countries = []
                 if len(active_countries_list) == locations_models.Country.objects.all().count():
                     countries.append('All countries')
@@ -723,7 +727,7 @@ class UpdateAPIKeysSerializer(serializers.ModelSerializer):
 
             instance = super().update(instance, validated_data)
 
-        if instance.user is not None:
+        if settings.ENABLED_API_KEY_EMAILS and instance.user is not None:
             email_content = {
                 'api_name': str(instance.api.name).title(),
                 'user_name': instance.user.first_name + ' ' + instance.user.last_name,
@@ -863,7 +867,7 @@ class UpdateAPIKeysForExtensionSerializer(serializers.ModelSerializer):
 
         instance = super().update(instance, validated_data)
 
-        if instance.extension_status == accounts_models.APIKey.INITIATED:
+        if settings.ENABLED_API_KEY_EMAILS and instance.extension_status == accounts_models.APIKey.INITIATED:
             email_subject = account_config.private_api_key_extension_request_email_subject_format % (
                 core_utilities.get_project_title(), str(instance.api.name).title(),
             )
@@ -943,7 +947,7 @@ class UpdateAPIKeysForAPICategoriesSerializer(serializers.ModelSerializer):
             api_key_category_relationships.save()
 
         # Once API Key - Category relationship is created, send the status email to the user
-        if request_user is not None:
+        if settings.ENABLED_API_KEY_EMAILS and request_user is not None:
             email_subject = account_config.api_key_api_category_on_update_email_subject_format % (
                 core_utilities.get_project_title(), instance.api.name,
             )
@@ -1695,7 +1699,7 @@ class CreateDataLayersSerializer(BaseDataLayerCRUDSerializer):
         # Once Data Layer is created, send the status email to the PUBLISHERS
         publishers = get_user_emails_for_permissions([auth_models.RolePermission.CAN_PUBLISH_DATA_LAYER])
 
-        if request_user is not None and len(publishers) > 0:
+        if settings.ENABLED_DATA_LAYER_EMAILS and request_user is not None and len(publishers) > 0:
             email_subject = account_config.data_layer_creation_email_subject_format % (
                 core_utilities.get_project_title(), data_layer_instance.name,
             )
@@ -1704,7 +1708,7 @@ class CreateDataLayersSerializer(BaseDataLayerCRUDSerializer):
             account_utilities.send_email_over_mailjet_service(publishers, cc=[request_user.email, ],
                                                               **email_content)
 
-            return data_layer_instance
+        return data_layer_instance
 
 
 class UpdateDataLayerSerializer(BaseDataLayerCRUDSerializer):
@@ -1833,7 +1837,12 @@ class UpdateDataLayerSerializer(BaseDataLayerCRUDSerializer):
 
             publishers = get_user_emails_for_permissions([auth_models.RolePermission.CAN_PUBLISH_DATA_LAYER])
 
-            if request_user is not None and len(publishers) > 0 and request_user.email not in publishers:
+            if (
+                settings.ENABLED_DATA_LAYER_EMAILS and
+                request_user is not None and
+                len(publishers) > 0 and
+                request_user.email not in publishers
+            ):
                 if validated_data.get('status', None) == accounts_models.DataLayer.LAYER_STATUS_READY_TO_PUBLISH:
                     email_subject = account_config.data_layer_update_ready_to_publish_email_subject_format % (
                         core_utilities.get_project_title(), data_layer_instance.name,
