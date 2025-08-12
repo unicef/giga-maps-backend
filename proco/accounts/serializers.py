@@ -259,6 +259,7 @@ class APICategoriesCRUDSerializer(FlexFieldsModelSerializer):
             'is_default',
             'created_by',
             'last_modified_by',
+            'last_modified_at',
         )
 
         expandable_fields = {
@@ -294,6 +295,25 @@ class APICategoriesCRUDSerializer(FlexFieldsModelSerializer):
                 raise accounts_exceptions.InvalidDefaultAPICategoryError()
 
         return is_default
+
+    def create(self, validated_data):
+        request_user = core_utilities.get_current_user(context=self.context)
+        # set created_by and last_modified_by value
+        if request_user is not None:
+            validated_data['created_by'] = validated_data.get('created_by') or request_user
+            validated_data['last_modified_by'] = validated_data.get('last_modified_by') or request_user
+
+        instance = super().create(validated_data)
+        return instance
+
+    def update(self, instance, validated_data):
+        request_user = core_utilities.get_current_user(context=self.context)
+        if request_user is not None:
+            validated_data['last_modified_by'] = validated_data.get('last_modified_by') or request_user
+            validated_data['last_modified_at'] = core_utilities.get_current_datetime_object()
+
+        instance = super().update(instance, validated_data)
+        return instance
 
 
 class APIKeysListSerializer(FlexFieldsModelSerializer):
