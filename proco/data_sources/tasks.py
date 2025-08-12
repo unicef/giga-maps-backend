@@ -558,7 +558,7 @@ def email_reminder_to_editor_and_publisher_for_review_waiting_records():
         task_id, task_key, 'Send reminder email to Editor and Publisher to review the school master rows')
 
     if task_instance:
-        logger.debug('Not found running job for reminder email task: {}'.format(task_key))
+        task_instance.debug('Not found running job for reminder email task: {}'.format(task_key))
 
         ds_settings = settings.DATA_SOURCE_CONFIG.get('SCHOOL_MASTER')
         review_grace_period = core_utilities.convert_to_int(ds_settings['REVIEW_GRACE_PERIOD_IN_HRS'], default='48')
@@ -568,7 +568,10 @@ def email_reminder_to_editor_and_publisher_for_review_waiting_records():
         task_instance.info('Sending email reminder to Editor/Publisher if records are waiting for '
                            'more than {0} hrs'.format(review_grace_period))
 
-        if (
+        if not settings.ENABLED_DATA_SOURCES_EMAILS:
+            logger.error('School Master data source email notification is disabled.')
+            task_instance.info('ERROR: School Master data source email notification is disabled.')
+        elif (
             core_utilities.is_blank_string(settings.ANYMAIL.get('MAILJET_API_KEY')) or
             core_utilities.is_blank_string(settings.ANYMAIL.get('MAILJET_SECRET_KEY'))
         ):
