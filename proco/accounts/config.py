@@ -39,7 +39,7 @@ class AppConfig(object):
     def api_key_generation_email_subject_format(self):
         """format for the email subject when an API Key is generated for a Public API."""
         # '%s - API Key generated for "%s" API'
-        return '%s - %s API Key Generated'
+        return '%s - Your Giga Maps API Key for %s is Now Available'
 
     @property
     def private_api_key_generation_email_subject_format(self):
@@ -61,7 +61,7 @@ class AppConfig(object):
     @property
     def private_api_key_rejected_email_subject_format(self):
         """format for the email subject when an API Key is rejected for a Private API."""
-        return '%s - Giga Maps API key request'
+        return '%s - Giga Maps API Key Request for %s Not Approved'
 
     @property
     def private_api_key_extension_request_email_subject_format(self):
@@ -82,12 +82,12 @@ class AppConfig(object):
     @property
     def api_key_extension_approved_email_subject_format(self):
         """format for the email subject when an API Key extension is approved for a Public/Private API."""
-        return '%s - API Key extension approved for %s API'
+        return '%s - Your Giga Maps API Key Extension for %s Has Been Approved'
 
     @property
     def api_key_extension_rejected_email_subject_format(self):
         """format for the email subject when an API Key extension is rejected for a Public/Private API."""
-        return '%s - API Key extension rejected for %s API'
+        return '%s - Your Giga Maps API Key Extension for %s Was Not Approved'
 
     @property
     def api_key_api_category_on_update_email_subject_format(self):
