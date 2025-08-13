@@ -30,7 +30,7 @@ from proco.utils import dates as date_utilities
 
 def aggregate_real_time_data_to_school_daily_status(country, date):
     schools = RealTimeConnectivity.objects.all().filter(
-        created__date=date, school__country=country,
+        created__date=date, school__country=country, school__deleted__isnull=True,
     ).order_by('school').values_list('school', flat=True).order_by('school_id').distinct('school_id')
 
     for school in schools:

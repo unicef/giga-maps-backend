@@ -52,10 +52,10 @@ def load_data(input_file):
             row_data['default_filters'] = json.loads(default_filters)
 
             instance, created = API.objects.update_or_create(
-                code=row_data['code'],
-                category=row_data['category'],
+                code=row_data['code'] or str(row_data['name'] + '_' + row_data['category']).upper(),
                 defaults={
                     'name': row_data['name'],
+                    'category': row_data['category'],
                     'description': row_data['description'],
                     'documentation_url': row_data['documentation_url'],
                     'download_url': row_data['download_url'],

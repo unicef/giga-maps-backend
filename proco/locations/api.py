@@ -330,7 +330,37 @@ class CountrySearchStatListAPIView(CachedListMixin, ListAPIView):
     LIST_CACHE_KEY_PREFIX = 'GLOBAL_COUNTRY_SEARCH_MAPPING'
 
     def get_queryset(self):
-        queryset = self.model.objects.all()
+        queryset = self.model.objects.all().filter(schools__deleted__isnull=True)
+
+        qs = queryset.values(
+            'id', 'name', 'code', 'last_weekly_status__integration_status',
+            'schools__admin1__id', 'schools__admin1__name', 'schools__admin1__description', 'schools__admin1__description_ui_label',
+            'schools__admin1__giga_id_admin',
+            'schools__admin2__id', 'schools__admin2__name', 'schools__admin2__description', 'schools__admin2__description_ui_label',
+            'schools__admin2__giga_id_admin',
+        ).annotate(
+            school_count=Count('schools__id'),
+        ).order_by('name', 'schools__admin1__name', 'schools__admin2__name')
+
+        qs = qs.annotate(
+            custom_order=Case(
+                When(last_weekly_status__integration_status=3, school_count__gt=0, then=Value(1)),
+                When(last_weekly_status__integration_status=2, school_count__gt=0, then=Value(2)),
+                When(last_weekly_status__integration_status=1, school_count__gt=0, then=Value(3)),
+                When(last_weekly_status__integration_status=0, school_count__gt=0, then=Value(4)),
+                When(last_weekly_status__integration_status=5, school_count__gt=0, then=Value(5)),
+                When(last_weekly_status__integration_status=4, school_count__gt=0, then=Value(6)),
+                default=Value(7),
+                output_field=IntegerField(),
+            ),
+        ).order_by('custom_order', 'name', 'schools__admin1__name', 'schools__admin2__name')
+
+        return qs
+
+    def get_queryset_to_list_countries_with_no_schools(self):
+        queryset = self.model.objects.all().exclude(
+            id__in=list(School.objects.all().values_list('country_id', flat=True).order_by('country_id').distinct('country_id')),
+        )
 
         qs = queryset.values(
             'id', 'name', 'code', 'last_weekly_status__integration_status',
@@ -416,7 +446,9 @@ class CountrySearchStatListAPIView(CachedListMixin, ListAPIView):
         cache_key = self.get_list_cache_key()
 
         queryset = self.get_queryset()
-        queryset_data = list(queryset)
+        qs_for_remaining_countries = self.get_queryset_to_list_countries_with_no_schools()
+
+        queryset_data = list(queryset) + list(qs_for_remaining_countries)
         data = self._format_result(queryset_data)
 
         request_path = remove_query_param(request.get_full_path(), self.CACHE_KEY)
@@ -484,6 +516,16 @@ class BaseSearchMixin:
                         filters.append('{0} eq {1}'.format(field_name, param_value))
                     else:
                         filters.append("{0} eq '{1}'".format(field_name, param_value))
+
+                elif filter_name == 'notexact':
+                    if param_value == 'null':
+                        filters.append('{0} ne {1}'.format(field_name, param_value))
+                    elif field_type in (SearchFieldDataType.Int32, SearchFieldDataType.Int64,
+                                        SearchFieldDataType.Double):
+                        filters.append('{0} ne {1}'.format(field_name, param_value))
+                    else:
+                        filters.append("{0} ne '{1}'".format(field_name, param_value))
+
                 elif filter_name == 'in':
                     in_filters = []
                     for val in param_value.split(','):
@@ -630,12 +672,12 @@ class AggregateSearchViewSet(BaseSearchMixin, ListAPIView):
     )
 
     filterset_fields = {
-        'id': ['exact', 'in'],
-        'country_id': ['exact', 'in'],
-        'admin1_id': ['exact', 'in'],
-        'admin2_id': ['exact', 'in'],
-        'admin1_name': ['exact', 'in'],
-        'admin2_name': ['exact', 'in'],
+        'id': ['exact', 'in', 'notexact'],
+        'country_id': ['exact', 'in', 'notexact'],
+        'admin1_id': ['exact', 'in', 'notexact'],
+        'admin2_id': ['exact', 'in', 'notexact'],
+        'admin1_name': ['exact', 'in', 'notexact'],
+        'admin2_name': ['exact', 'in', 'notexact'],
     }
 
     filter_field_type = {
