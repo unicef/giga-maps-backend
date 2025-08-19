@@ -521,15 +521,18 @@ class BaseSearchMixin:
         search_text = self.normalize_search_text(search_text_orig)
         search_text = core_utilities.sanitize_str(search_text)
         # Remove multiple spaces with single space
-        search_text = ' '.join([
-            search_word
-            if search_word.endswith('*') else search_word + '*'
-            for search_word in search_text.split()
-        ])
 
-        if '-' in search_text:
-            search_text = '"' + search_text + '"'
-        elif ' ' in search_text:
+        words = []
+        for search_word in search_text.split():
+            if not search_word.endswith('*'):
+                search_word += '*'
+            if '-' in search_word or ',' in search_word:
+                search_word = '"' + search_word + '"'
+
+            words.append(search_word)
+
+        search_text = ' '.join(words)
+        if ' ' in search_text:
             search_text = search_text.replace(' ', ' AND ')
 
         search_text_orig = search_text_orig if search_text_orig.startswith('"') else '"' + search_text_orig + '"'
