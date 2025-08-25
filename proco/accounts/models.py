@@ -744,3 +744,35 @@ class AdvanceFilterCountryRelationship(core_models.BaseModelMixin):
                              condition=Q(deleted=None),
                              name='unique_without_deleted_for_advance_filters_country'),
         ]
+
+
+class AppConfiguration(core_models.BaseModelMixin):
+
+    """
+    AppConfiguration
+
+        Defines a data model for the Application Configurations. It contains application constants
+        with their values and description.
+    """
+
+    name = models.CharField(max_length=100, db_index=True)
+    value_type = models.CharField(null=True, max_length=20, db_index=True)
+    description = models.CharField(max_length=255)
+
+    value = models.CharField(max_length=255)
+
+    min_value = models.CharField(max_length=100, null=True)
+    max_value = models.CharField(max_length=100, null=True)
+
+    can_edit = models.BooleanField(default=False)
+    can_view = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['last_modified_at']
+        constraints = [
+            UniqueConstraint(fields=['name', 'value_type', 'deleted'],
+                             name='unique_with_deleted_for_app_configurations'),
+            UniqueConstraint(fields=['name', 'value_type'],
+                             condition=Q(deleted=None),
+                             name='unique_without_deleted_for_app_configurations'),
+        ]

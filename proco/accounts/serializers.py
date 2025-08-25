@@ -1,4 +1,5 @@
 import copy
+import decimal
 import re
 from datetime import timedelta
 from math import floor, ceil
@@ -30,6 +31,7 @@ from proco.custom_auth.utils import get_user_emails_for_permissions
 from proco.locations import models as locations_models
 from proco.schools.models import School
 from proco.utils import dates as date_utilities
+from proco.utils.cache import cache_manager
 
 
 class ExpandAPISerializer(FlexFieldsModelSerializer):
@@ -2581,3 +2583,155 @@ class ColumnConfigurationChoicesSerializer(FlexFieldsModelSerializer):
                 })
 
         return choices
+
+
+
+class AppConfigSerializer(FlexFieldsModelSerializer):
+    """
+    AppConfigSerializer
+
+        This serializer App configs is used to perform CRUD actions.
+    """
+
+    class Meta:
+        model = accounts_models.AppConfiguration
+        read_only_fields = (
+            'id',
+            'name',
+            'min_value',
+            'max_value',
+            'can_edit',
+            'can_view',
+            'description',
+            'value_type',
+            'created_by',
+            'last_modified_by',
+        )
+        fields = read_only_fields + (
+            'value',
+        )
+
+        expandable_fields = {
+            'last_modified_by': (ExpandUserSerializer, {'source': 'last_modified_by'}),
+            'created_by': (ExpandUserSerializer, {'source': 'created_by'}),
+        }
+
+    def validate_name(self, name):
+        if re.match(r'[A-Za-z0-9-\' _]*$', name):
+            return name
+        raise accounts_exceptions.InvalidAppConfigValueError(
+            message_kwargs={'field': 'name'},
+        )
+
+
+    def check_uniqueness(self, name, value_type):
+        # If its new App Configuration, then combination of name and type should be unique. Else raise error
+        if accounts_models.AppConfiguration.objects.filter(name__iexact=name, value_type__iexact=value_type).exists():
+            raise accounts_exceptions.DuplicateAppConfigurationError(
+                message_kwargs={'name': name, 'value_type': value_type})
+        return True
+
+    def check_value_format(self, instance, data):
+        value_type = instance.value_type
+
+        try:
+            if value_type == 'str':
+                str(data)
+            elif value_type == 'int':
+                int(data)
+            elif value_type == 'bool':
+                bool(data)
+            elif value_type == 'float':
+                float(data)
+            elif value_type == 'decimal':
+                decimal.Decimal(data)
+        except (ValueError, TypeError) as e:
+            raise accounts_exceptions.InvalidAppConfigValueError(
+                message_kwargs={'field': self.instance.description},
+            )
+
+    def validate_value(self, data):
+        if self.instance:
+            # check if record is updatable or not.
+            if not self.instance.can_edit:
+                raise accounts_exceptions.AppConfigUpdateError(can_edit=self.instance.can_edit)
+
+            if self.instance.value_type in ('int', 'float', 'decimal'):
+
+                try:
+                    max_value = float(self.instance.max_value)
+                except(ValueError, TypeError) as e:
+                    max_value = 0
+
+                try:
+                    min_value = float(self.instance.min_value)
+                except(ValueError, TypeError) as e:
+                    min_value = 0
+
+                try:
+                    value = float(data)
+                except (ValueError, TypeError) as e:
+                    raise accounts_exceptions.InvalidAppConfigValueError(
+                        message_kwargs={'field': self.validated_data.get('description')},
+                    )
+
+                # if self.instance.value_type and
+                # check if value lies within defined range.
+                if min_value <= value <= max_value:
+                    return data
+
+                raise accounts_exceptions.InvalidAppConfigValueError(
+                    message_kwargs={'field': self.instance.description},
+                )
+
+            # check that the provided value has valid format or not
+            self.check_value_format(self.instance, data)
+
+        cache_manager.invalidate(key=account_config.cache_key_for_app_config, hard=True)
+        cache_manager.invalidate(key=account_config.cache_key_for_map_view_app_config, hard=True)
+        return data
+
+
+class CreateAppConfigSerializer(AppConfigSerializer):
+    """
+    CreateAppConfigSerializer
+
+        This serializer App configs is used to perform CRUD actions.
+    """
+
+    class Meta:
+        model = accounts_models.AppConfiguration
+        read_only_fields = (
+            'id',
+        )
+        fields = read_only_fields + (
+            'name',
+            'min_value',
+            'max_value',
+            'can_edit',
+            'can_view',
+            'description',
+            'value_type',
+            'value',
+            'created_by',
+            'last_modified_by',
+        )
+
+
+    def create(self, validated_data):
+        """
+        create
+            This method is used to create Advance Filter
+        :param validated_data:
+        :return:
+        """
+
+        self.check_uniqueness(validated_data.get('name'), validated_data.get('value_type'))
+
+        request_user = core_utilities.get_current_user(context=self.context)
+        if request_user is not None:
+            validated_data['created_by'] = validated_data.get('created_by') or request_user
+            validated_data['last_modified_by'] = validated_data.get('last_modified_by') or request_user
+
+        return super().create(validated_data)
+

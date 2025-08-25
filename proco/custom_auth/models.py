@@ -346,6 +346,18 @@ class RolePermission(core_models.BaseModelMixin):
         (CAN_DELETE_NOTIFICATION, 'Can Delete Notification'),
     )
 
+    CAN_VIEW_APP_CONFIG = 'can_view_app_config'
+    CAN_ADD_APP_CONFIG = 'can_add_app_config'
+    CAN_UPDATE_APP_CONFIG = 'can_update_app_config'
+    CAN_DELETE_APP_CONFIG = 'can_delete_app_config'
+
+    APP_CONFIG_MANAGEMENT_PERMISSION_CHOICES = (
+        (CAN_VIEW_APP_CONFIG, 'Can View App Configurations'),
+        (CAN_ADD_APP_CONFIG, 'Can Add App Configurations'),
+        (CAN_UPDATE_APP_CONFIG, 'Can Update App Configurations'),
+        (CAN_DELETE_APP_CONFIG, 'Can Delete App Configurations'),
+    )
+
     PERMISSION_CHOICES = (
         USER_MANAGEMENT_PERMISSION_CHOICES
         + DATA_LAYER_MANAGEMENT_PERMISSION_CHOICES
@@ -360,6 +372,7 @@ class RolePermission(core_models.BaseModelMixin):
         + CONTACT_MESSAGE_MANAGEMENT_PERMISSION_CHOICES
         + RECENT_ACTIONS_MANAGEMENT_PERMISSION_CHOICES
         + NOTIFICATION_PERMISSION_CHOICES
+        + APP_CONFIG_MANAGEMENT_PERMISSION_CHOICES
     )
 
     role = models.ForeignKey(Role, related_name='permissions', on_delete=models.DO_NOTHING)

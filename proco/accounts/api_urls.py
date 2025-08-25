@@ -110,3 +110,19 @@ urlpatterns = [
         'get': 'list',
     }), name='list-all-published-advance-filters'),
 ]
+
+app_config_urls = [
+    path('cms/app_configs/mapview/', api.MapViewAppConfigViewSet.as_view({
+        'get': 'list',
+    }), name='list-app-configs-accessible-to-map-view'),
+    path('cms/app_configs/', api.AppConfigViewSet.as_view({
+        'get': 'list',
+        'post': 'create',
+    }), name='list-or-create-app-configs'),
+    path('cms/app_configs/<int:pk>/', api.AppConfigViewSet.as_view({
+        'put': 'partial_update',
+        'delete': 'destroy',
+    }), name='update-or-delete-app-config'),
+]
+
+urlpatterns.extend(app_config_urls)

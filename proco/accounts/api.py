@@ -3051,3 +3051,65 @@ class AllPublishedAdvanceFiltersViewSet(BaseModelViewSet):
     def update_serializer_context(self, context):
         context['country_id'] = self.kwargs.get('country_id')
         return context
+
+
+class AppConfigViewSet(CachedListMixin, BaseModelViewSet):
+    """
+    AppConfigViewSet
+        This `ModelViewSet` is used to specify the API actions which can be performed on the
+        `AppConfiguration` objects.
+    Inherits
+        `BaseModelViewSet`
+    """
+
+    LIST_CACHE_KEY_PREFIX = account_config.cache_key_for_app_config
+
+    model = accounts_models.AppConfiguration
+    """ Serializer to be used by API actions """
+    serializer_class = serializers.AppConfigSerializer
+
+    action_serializers = {
+        'create': serializers.CreateAppConfigSerializer,
+        'partial_update': serializers.AppConfigSerializer,
+    }
+
+    permission_classes = (
+        core_permissions.IsUserAuthenticated,
+        core_permissions.CanViewAppConfig,
+        core_permissions.CanAddAppConfig,
+        core_permissions.CanUpdateAppConfig,
+        core_permissions.CanDeleteAppConfig,
+    )
+
+    filter_backends = (
+        DjangoFilterBackend,
+        NullsAlwaysLastOrderingFilter,
+        SearchFilter,
+    )
+
+    ordering_field_names = ['name']
+    apply_query_pagination = True
+    search_fields = ('name', 'description', 'value_type')
+
+    filterset_fields = {
+        'id': ['exact', 'in'],
+        'name': ['iexact', 'in', 'exact'],
+        'value_type': ['iexact', 'in', 'exact'],
+    }
+
+    permit_list_expands = ['created_by', 'last_modified_by',]
+
+    def apply_queryset_filters(self, queryset):
+        if self.action.lower() == 'list':
+            queryset = queryset.filter(can_view=True)
+        return queryset
+
+
+class MapViewAppConfigViewSet(AppConfigViewSet):
+    LIST_CACHE_KEY_PREFIX = account_config.cache_key_for_map_view_app_config
+
+    base_auth_permissions = (
+        permissions.AllowAny,
+    )
+    permission_classes = ()
+
