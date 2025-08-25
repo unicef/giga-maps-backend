@@ -143,5 +143,13 @@ class AppConfig(object):
         """format for the email subject when an API Key is deleted by admin for an API."""
         return '%s - API key for %s API has been deleted'
 
+    @property
+    def cache_key_for_app_config(self):
+        return 'APP_CONFIGURATIONS_DICT'
+
+    @property
+    def cache_key_for_map_view_app_config(self):
+        return 'MAP_VIEW_APP_CONFIGURATIONS_DICT'
+
 
 app_config = AppConfig()

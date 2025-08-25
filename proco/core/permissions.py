@@ -477,3 +477,23 @@ class CanDoCRUDonAPICategories(ProcoBasePermission):
             return True
 
         return self.check_permission(request, view)
+
+
+class CanViewAppConfig(ProcoBasePermission):
+    method = 'GET'
+    permission_name = RolePermission.CAN_VIEW_APP_CONFIG
+
+
+class CanAddAppConfig(ProcoBasePermission):
+    method = 'POST'
+    permission_name = RolePermission.CAN_ADD_APP_CONFIG
+
+
+class CanUpdateAppConfig(ProcoBasePermission):
+    method = 'PUT'
+    permission_name = RolePermission.CAN_UPDATE_APP_CONFIG
+
+
+class CanDeleteAppConfig(ProcoBasePermission):
+    method = 'DELETE'
+    permission_name = RolePermission.CAN_DELETE_APP_CONFIG

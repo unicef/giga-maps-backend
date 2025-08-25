@@ -349,3 +349,35 @@ class InvalidAPICategoryAssignedError(BaseInvalidValidationError):
     message = _('Invalid API Category updated to current API Key.')
     description = _('Provide valid API Category ids')
     code = 'invalid_api_category_ids'
+
+
+class InvalidAppConfigValueError(BaseInvalidValidationError):
+    """An exception class that extends BaseInvalidValidationError. This exception should
+     be raised when value for the given app configuration doesn't lie between min_value
+     and max_value.
+
+     This class overrides both 'message' and 'code' variables.
+    """
+    field_name = 'value'
+    code = 'invalid_app_config_value'
+    message = _('{field} has invalid value')
+    description = _('App config value is invalid.')
+
+
+class AppConfigUpdateError(BaseInvalidValidationError):
+    """An exception class that extends BaseInvalidValidationError. This exception should
+     be raised when user trying to update an app configuration which is non-updatable.
+
+     This class overrides both 'message' and 'code' variables.
+    """
+    message = _('Cannot update given app configuration.')
+    resolution = _(
+        'This App configuration cannot be updated. Retry with another app configuration.'
+    )
+    description = _('This App configuration cannot be updated.')
+    code = 'app_configuration_update_not_allowed'
+
+
+class DuplicateAppConfigurationError(BaseInvalidValidationError):
+    message = _("App Configuration with name '{name}' and value type '{value_type}' already exists.")
+    code = 'duplicate_app_configuration'
