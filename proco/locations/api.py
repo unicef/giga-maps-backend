@@ -517,6 +517,8 @@ class BaseSearchMixin:
 
     @property
     def get_search_text(self):
+        if 'q' not in self.params:
+            return None
         search_text_orig = self.params.get('q', ['*'])[-1]
         search_text = self.normalize_search_text(search_text_orig)
         search_text = core_utilities.sanitize_str(search_text)
@@ -542,9 +544,7 @@ class BaseSearchMixin:
     @property
     def get_search_fields(self):
         search_fields = self.params.get('search_fields')
-        if not search_fields:
-            search_fields = self.index_class.Meta.searchable_fields
-        else:
+        if search_fields:
             search_fields = [core_utilities.sanitize_str(field_name) for field_name in search_fields[-1].split(',')]
         return search_fields
 
