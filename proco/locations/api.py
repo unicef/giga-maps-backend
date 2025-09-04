@@ -371,22 +371,7 @@ class CountrySearchStatListAPIView(CachedListMixin, ListAPIView):
             'schools__admin2__id', 'schools__admin2__name', 'schools__admin2__description',
             'schools__admin2__description_ui_label',
             'schools__admin2__giga_id_admin',
-        ).annotate(
-            school_count=Count('schools__id'),
         ).order_by('name', 'schools__admin1__name', 'schools__admin2__name')
-
-        qs = qs.annotate(
-            custom_order=Case(
-                When(last_weekly_status__integration_status=3, school_count__gt=0, then=Value(1)),
-                When(last_weekly_status__integration_status=2, school_count__gt=0, then=Value(2)),
-                When(last_weekly_status__integration_status=1, school_count__gt=0, then=Value(3)),
-                When(last_weekly_status__integration_status=0, school_count__gt=0, then=Value(4)),
-                When(last_weekly_status__integration_status=5, school_count__gt=0, then=Value(5)),
-                When(last_weekly_status__integration_status=4, school_count__gt=0, then=Value(6)),
-                default=Value(7),
-                output_field=IntegerField(),
-            ),
-        ).order_by('custom_order', 'name', 'schools__admin1__name', 'schools__admin2__name')
 
         return qs
 
