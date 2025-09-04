@@ -93,6 +93,8 @@ def load_qos_data_source_response_to_model(country, data_pull_date):
             len(loaded_data_df))
         )
 
+        pull_datetime = get_current_datetime_object()
+
         if len(loaded_data_df) > 0:
             insert_entries = []
             unregistered_school_giga_ids = []
@@ -112,6 +114,7 @@ def load_qos_data_source_response_to_model(country, data_pull_date):
 
             loaded_data_df['version'] = None
             loaded_data_df['country'] = country
+            loaded_data_df['pulled_at'] = pull_datetime
 
             for _, row in loaded_data_df.iterrows():
                 school = School.objects.filter(country=country, giga_id_school=row['school_id_giga']).first()
