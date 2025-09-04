@@ -169,3 +169,13 @@ class InvalidAPIKeyError(BaseInvalidValidationError):
 
     message = _('Invalid API Key provided')
     code = 'invalid_api_key_provided'
+
+
+class InvalidModelNameFormatError(BaseInvalidValidationError):
+    """An exception class that extends BaseInvalidValidationError. This exceptions should
+     be raised when the invalid model name format is found
+    """
+    message = _("Invalid value of entity name.")
+    code = 'invalid_model_name_format'
+    resolution = _('Check and provide valid entity name.')
+    description = _('Model name is in invalid format.')

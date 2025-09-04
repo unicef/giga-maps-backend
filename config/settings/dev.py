@@ -1,7 +1,6 @@
-from django.core.exceptions import ImproperlyConfigured
+from kombu import Exchange, Queue  # NOQA
 
 from config.settings.base import *  # noqa: F403
-from kombu import Exchange, Queue  # NOQA
 
 DEBUG = True
 TEMPLATES[0]['OPTIONS']['debug'] = DEBUG
