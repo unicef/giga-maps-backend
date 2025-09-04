@@ -359,31 +359,19 @@ class CountrySearchStatListAPIView(CachedListMixin, ListAPIView):
 
     def get_queryset_to_list_countries_with_no_schools(self):
         queryset = self.model.objects.all().exclude(
-            id__in=list(School.objects.all().values_list('country_id', flat=True).order_by('country_id').distinct('country_id')),
+            id__in=list(School.objects.all().values_list('country_id', flat=True).order_by('country_id').distinct(
+                'country_id')),
         )
 
         qs = queryset.values(
             'id', 'name', 'code', 'last_weekly_status__integration_status',
-            'schools__admin1__id', 'schools__admin1__name', 'schools__admin1__description', 'schools__admin1__description_ui_label',
+            'schools__admin1__id', 'schools__admin1__name', 'schools__admin1__description',
+            'schools__admin1__description_ui_label',
             'schools__admin1__giga_id_admin',
-            'schools__admin2__id', 'schools__admin2__name', 'schools__admin2__description', 'schools__admin2__description_ui_label',
+            'schools__admin2__id', 'schools__admin2__name', 'schools__admin2__description',
+            'schools__admin2__description_ui_label',
             'schools__admin2__giga_id_admin',
-        ).annotate(
-            school_count=Count('schools__id'),
         ).order_by('name', 'schools__admin1__name', 'schools__admin2__name')
-
-        qs = qs.annotate(
-            custom_order=Case(
-                When(last_weekly_status__integration_status=3, school_count__gt=0, then=Value(1)),
-                When(last_weekly_status__integration_status=2, school_count__gt=0, then=Value(2)),
-                When(last_weekly_status__integration_status=1, school_count__gt=0, then=Value(3)),
-                When(last_weekly_status__integration_status=0, school_count__gt=0, then=Value(4)),
-                When(last_weekly_status__integration_status=5, school_count__gt=0, then=Value(5)),
-                When(last_weekly_status__integration_status=4, school_count__gt=0, then=Value(6)),
-                default=Value(7),
-                output_field=IntegerField(),
-            ),
-        ).order_by('custom_order', 'name', 'schools__admin1__name', 'schools__admin2__name')
 
         return qs
 
@@ -516,7 +504,6 @@ class BaseSearchMixin:
                         filters.append('{0} eq {1}'.format(field_name, param_value))
                     else:
                         filters.append("{0} eq '{1}'".format(field_name, param_value))
-
                 elif filter_name == 'notexact':
                     if param_value == 'null':
                         filters.append('{0} ne {1}'.format(field_name, param_value))
@@ -525,7 +512,6 @@ class BaseSearchMixin:
                         filters.append('{0} ne {1}'.format(field_name, param_value))
                     else:
                         filters.append("{0} ne '{1}'".format(field_name, param_value))
-
                 elif filter_name == 'in':
                     in_filters = []
                     for val in param_value.split(','):
@@ -546,34 +532,39 @@ class BaseSearchMixin:
         if not isinstance(val, str):
             return val
         wh = '\t\n\r\v\f'
-        punctuation = r"""!"#$%&'()*+,./:;<=>?@[\]^`{|}~_""" + wh
+        punctuation = r"""!"#$%&'()*+/:;<=>?@[\]^`{|}~_""" + wh
         return re.sub(r'[' + re.escape(punctuation) + ']', '', val)
 
     @property
     def get_search_text(self):
-        search_text = self.params.get('q', ['*'])[-1]
-        search_text = self.normalize_search_text(search_text)
+        if 'q' not in self.params:
+            return None
+        search_text_orig = self.params.get('q', ['*'])[-1]
+        search_text = self.normalize_search_text(search_text_orig)
         search_text = core_utilities.sanitize_str(search_text)
         # Remove multiple spaces with single space
-        search_text = ' '.join([
-            search_word
-            if search_word.endswith('*') else search_word + '*'
-            for search_word in search_text.split()
-        ])
 
-        if '-' in search_text:
-            search_text = '"' + search_text + '"'
-        elif ' ' in search_text:
+        words = []
+        for search_word in search_text.split():
+            if not search_word.endswith('*'):
+                search_word += '*'
+            if '-' in search_word or ',' in search_word:
+                search_word = '"' + search_word + '"'
+
+            words.append(search_word)
+
+        search_text = ' '.join(words)
+        if ' ' in search_text:
             search_text = search_text.replace(' ', ' AND ')
 
-        return search_text
+        search_text_orig = search_text_orig if search_text_orig.startswith('"') else '"' + search_text_orig + '"'
+
+        return '(' + search_text_orig.replace('*', '') + ') OR (' + search_text + ')'
 
     @property
     def get_search_fields(self):
         search_fields = self.params.get('search_fields')
-        if not search_fields:
-            search_fields = self.index_class.Meta.searchable_fields
-        else:
+        if search_fields:
             search_fields = [core_utilities.sanitize_str(field_name) for field_name in search_fields[-1].split(',')]
         return search_fields
 
@@ -595,9 +586,7 @@ class BaseSearchMixin:
 
     @property
     def get_skip(self):
-        page_no = core_utilities.convert_to_int(self.params.get('page', ['1'])[-1], default=1)
-        if page_no > 0:
-            page_no = page_no - 1
+        page_no = core_utilities.convert_to_int(self.params.get('page', ['0'])[-1], default=0)
         return page_no * self.get_top
 
     @property

@@ -541,7 +541,11 @@ class CreateAPIKeysSerializer(serializers.ModelSerializer):
                 api_key_country_relationships.save()
 
             # Once API Key is created, send the status email to the user
-            if request_user is not None and instance.status == accounts_models.APIKey.APPROVED:
+            if (
+                settings.ENABLED_API_KEY_EMAILS and
+                request_user is not None and
+                instance.status == accounts_models.APIKey.APPROVED
+            ):
                 email_content = {
                     'subject': account_config.api_key_generation_email_subject_format % (
                         core_utilities.get_project_title(), str(instance.api.name).title(),
@@ -552,7 +556,7 @@ class CreateAPIKeysSerializer(serializers.ModelSerializer):
                 }
                 account_utilities.send_email_over_mailjet_service([request_user], **email_content)
 
-            elif instance.status == accounts_models.APIKey.INITIATED:
+            elif settings.ENABLED_API_KEY_EMAILS and instance.status == accounts_models.APIKey.INITIATED:
                 countries = []
                 if len(active_countries_list) == locations_models.Country.objects.all().count():
                     countries.append('All countries')
@@ -723,7 +727,7 @@ class UpdateAPIKeysSerializer(serializers.ModelSerializer):
 
             instance = super().update(instance, validated_data)
 
-        if instance.user is not None:
+        if settings.ENABLED_API_KEY_EMAILS and instance.user is not None:
             email_content = {
                 'api_name': str(instance.api.name).title(),
                 'user_name': instance.user.first_name + ' ' + instance.user.last_name,
@@ -863,7 +867,7 @@ class UpdateAPIKeysForExtensionSerializer(serializers.ModelSerializer):
 
         instance = super().update(instance, validated_data)
 
-        if instance.extension_status == accounts_models.APIKey.INITIATED:
+        if settings.ENABLED_API_KEY_EMAILS and instance.extension_status == accounts_models.APIKey.INITIATED:
             email_subject = account_config.private_api_key_extension_request_email_subject_format % (
                 core_utilities.get_project_title(), str(instance.api.name).title(),
             )
@@ -943,7 +947,7 @@ class UpdateAPIKeysForAPICategoriesSerializer(serializers.ModelSerializer):
             api_key_category_relationships.save()
 
         # Once API Key - Category relationship is created, send the status email to the user
-        if request_user is not None:
+        if settings.ENABLED_API_KEY_EMAILS and request_user is not None:
             email_subject = account_config.api_key_api_category_on_update_email_subject_format % (
                 core_utilities.get_project_title(), instance.api.name,
             )
@@ -1679,7 +1683,7 @@ class CreateDataLayersSerializer(BaseDataLayerCRUDSerializer):
         # Once Data Layer is created, send the status email to the PUBLISHERS
         publishers = get_user_emails_for_permissions([auth_models.RolePermission.CAN_PUBLISH_DATA_LAYER])
 
-        if request_user is not None and len(publishers) > 0:
+        if settings.ENABLED_DATA_LAYER_EMAILS and request_user is not None and len(publishers) > 0:
             email_subject = account_config.data_layer_creation_email_subject_format % (
                 core_utilities.get_project_title(), data_layer_instance.name,
             )
@@ -1688,7 +1692,7 @@ class CreateDataLayersSerializer(BaseDataLayerCRUDSerializer):
             account_utilities.send_email_over_mailjet_service(publishers, cc=[request_user.email, ],
                                                               **email_content)
 
-            return data_layer_instance
+        return data_layer_instance
 
 
 class UpdateDataLayerSerializer(BaseDataLayerCRUDSerializer):
@@ -1813,7 +1817,12 @@ class UpdateDataLayerSerializer(BaseDataLayerCRUDSerializer):
 
             publishers = get_user_emails_for_permissions([auth_models.RolePermission.CAN_PUBLISH_DATA_LAYER])
 
-            if request_user is not None and len(publishers) > 0 and request_user.email not in publishers:
+            if (
+                settings.ENABLED_DATA_LAYER_EMAILS and
+                request_user is not None and
+                len(publishers) > 0 and
+                request_user.email not in publishers
+            ):
                 if validated_data.get('status', None) == accounts_models.DataLayer.LAYER_STATUS_READY_TO_PUBLISH:
                     email_subject = account_config.data_layer_update_ready_to_publish_email_subject_format % (
                         core_utilities.get_project_title(), data_layer_instance.name,
@@ -2469,3 +2478,65 @@ class PublishAdvanceFilterSerializer(serializers.ModelSerializer):
         call_command('populate_active_filters_for_countries', *args)
 
         return instance
+
+
+class ColumnConfigurationChoicesSerializer(FlexFieldsModelSerializer):
+    values = serializers.SerializerMethodField()
+
+    class Meta:
+        model = accounts_models.ColumnConfiguration
+        read_only_fields = fields = (
+            'name',
+            'label',
+            'type',
+            'description',
+            'values',
+        )
+
+    def get_values(self, instance):
+        choices = []
+
+        parameter_field = instance.name
+        field_type = instance.type
+        parameter_table = instance.table_alias
+
+        join_condition = ''
+        filter_condition = ''
+
+        select_qry = """
+        SELECT DISTINCT {col} AS {col_name}
+        FROM schools_school AS schools
+        {join_condition}
+        WHERE schools.deleted IS NULL
+            {filter_condition}
+        ORDER BY {col_name} ASC NULLS LAST
+        """
+
+        if parameter_table == 'school_static':
+            join_condition = ('INNER JOIN connection_statistics_schoolweeklystatus AS school_static '
+                              'ON schools.last_weekly_status_id = school_static.id')
+            filter_condition = 'AND school_static.deleted IS NULL'
+
+        sql_qry = select_qry.format(
+            col_name=parameter_field,
+            col=f"LOWER(NULLIF({parameter_table + '.' + parameter_field}, ''))"
+            if field_type == 'str' else parameter_table + '.' + parameter_field,
+            join_condition=join_condition,
+            filter_condition=filter_condition)
+
+        data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__)
+        for value in data:
+            field_value = value[parameter_field]
+            if core_utilities.is_blank_string(field_value):
+                choices.append({
+                    'label': 'Unknown',
+                    'value': 'none'
+                })
+            else:
+                choices.append({
+                    'label': field_value.title()
+                    if field_type == accounts_models.ColumnConfiguration.TYPE_STR else field_value,
+                    'value': field_value
+                })
+
+        return choices

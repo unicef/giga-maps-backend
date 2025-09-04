@@ -455,7 +455,14 @@ def get_filter_sql(request, filter_key, table_name):
                 sql_list.append('(' + none_sql_str + ' OR (' + range_sql_list[0] + ' AND ' + range_sql_list[1] + '))')
         elif field_filter.endswith('__in'):
             field_name = field_filter.replace('__in', '')
-            filter_value = ','.join(["'" + str(f).lower().replace("'", "''") + "'" for f in filter_value.split(',')])
+            if '|' in filter_value:
+                # If there is single quote (') in value,
+                # then as per PSQL rule replace it with two time single quotes ('')
+                filter_value = ', '.join(["'" + str(f).lower().replace("'", "''") + "'" if "'" in str(
+                    f).lower() else "'" + str(f).lower() + "'" for f in filter_value.split('|')])
+            else:
+                filter_value = ','.join(["'" + str(f).lower().replace("'", "''") + "'" if "'" in str(
+                    f).lower() else "'" + str(f).lower() + "'" for f in filter_value.split(',')])
             sql_str = """LOWER({table_name}."{field_name}") IN ({value})"""
 
         if sql_str:

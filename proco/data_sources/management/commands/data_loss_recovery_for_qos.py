@@ -106,6 +106,8 @@ def load_qos_data_source_response_to_model(version_number, country):
                     logger.info('Total count of rows in the {0} version data: {1}'.format(
                         version_number, len(loaded_data_df)))
 
+                    pull_datetime = get_current_datetime_object()
+
                     loaded_data_df = loaded_data_df[loaded_data_df[DeltaSharingReader._change_type_col_name()].isin(
                         ['insert', 'update_postimage'])]
                     logger.info('Total count of rows after filtering only ["insert", "update_postimage"] in the "{0}" '
@@ -131,6 +133,7 @@ def load_qos_data_source_response_to_model(version_number, country):
 
                         loaded_data_df['version'] = version_number
                         loaded_data_df['country'] = country
+                        loaded_data_df['pulled_at'] = pull_datetime
 
                         for _, row in loaded_data_df.iterrows():
                             school = School.objects.filter(
