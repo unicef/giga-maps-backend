@@ -57,6 +57,10 @@ class SoftCacheManager(object):
             'expired_at': (timezone.now().timestamp() + soft_timeout) if soft_timeout else None,
         }, None)
 
+    def get_or_set_cache(self, key, default):
+        if key and default:
+            return cache.get_or_set(key, default)
+
 
 cache_manager = SoftCacheManager()
 

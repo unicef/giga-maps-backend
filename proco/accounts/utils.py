@@ -10,6 +10,7 @@ from rest_framework.response import Response
 
 from proco.accounts.config import app_config as config
 from proco.core import utils as core_utilities
+from proco.utils.cache import cache_manager
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -167,3 +168,44 @@ class BaseTileGenerator:
             response["Access-Control-Allow-Origin"] = "*"
             return response
         return pbf
+
+
+# CMS calls
+CONFIGURATIONS = "giga_maps_app_configurations"
+CONF_NOT_FOUND = "App configuration {0} not found."
+from proco.accounts.models import AppConfiguration
+
+def get_config(value_type, name):
+    """
+    get_config
+        Helper method to retrieve value of given application constant.
+        :param name: name of the application constant
+        :type value_type: String
+        :type name: String
+        :returns: value stored in database for the given app configuration
+    """
+    app_configurations = cache_manager.get_or_set_cache(
+        CONFIGURATIONS,
+        lambda: get_configurations(),
+    )
+
+    key = value_type + '_' + name
+
+    assert key in app_configurations, CONF_NOT_FOUND.format(name)
+    return app_configurations.get(key)
+
+
+def get_configurations():
+    """
+    get_configurations
+        Helper method to retrieve all app configurations from database.
+        :returns app_configurations: Dictionary of all app configurations
+    """
+
+    app_configurations = {
+        configuration.value_type + '_' + configuration.name: configuration.value
+        for configuration in AppConfiguration.objects.all().order_by().using(
+            settings.READ_ONLY_DB_KEY,
+        )
+    }
+    return app_configurations

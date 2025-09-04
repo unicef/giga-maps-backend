@@ -79,6 +79,7 @@ LOCAL_APPS = [
     'proco.proco_data_migrations',
     'proco.data_sources',
     'proco.giga_meter',
+    'proco.entities',
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -352,6 +353,7 @@ ADMIN_REORDER = (
     'accounts',
     'data_sources',
     'giga_meter',
+    'entities',
 )
 
 RANDOM_SCHOOLS_DEFAULT_AMOUNT = env('RANDOM_SCHOOLS_DEFAULT_AMOUNT', default=20000)
