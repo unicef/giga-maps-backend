@@ -409,10 +409,13 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                     school_weekly.save()
 
                     rt_registered = None
-                    if not core_utilities.is_blank_string(row.connectivity_RT):
+                    if (
+                        not core_utilities.is_blank_string(row.connectivity_RT) and
+                        row.connectivity_RT_ingestion_timestamp is not None
+                    ):
                         rt_registered = str(row.connectivity_RT).lower() in core_configs.true_choices
 
-                    if rt_registered is not None and row.connectivity_RT_ingestion_timestamp is not None:
+                    if rt_registered is not None:
                         school_rt_qs = statistics_models.SchoolRealTimeRegistration.objects.filter(school=school)
                         if school_rt_qs.exists():
                             school_rt_instance = school_rt_qs.order_by('-created').first()
