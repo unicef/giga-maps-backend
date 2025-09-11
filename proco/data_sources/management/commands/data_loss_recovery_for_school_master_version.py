@@ -8,6 +8,7 @@ from django.core.management.base import BaseCommand
 from django.db.utils import DataError
 from requests.exceptions import HTTPError
 
+from proco.background.models import BackgroundTask
 from proco.core.utils import get_current_datetime_object
 from proco.data_sources import tasks as sources_tasks
 from proco.data_sources import utils as sources_utilities
@@ -15,15 +16,12 @@ from proco.data_sources.models import SchoolMasterData
 from proco.locations.models import Country
 from proco.schools.models import School
 from proco.utils import dates as date_utilities
-from proco.background.models import BackgroundTask
-
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
 ds_settings = settings.DATA_SOURCE_CONFIG.get('SCHOOL_MASTER')
 share_name = ds_settings['SHARE_NAME']
 schema_name = ds_settings['SCHEMA_NAME']
-dashboard_url = ds_settings['DASHBOARD_URL']
 country_codes_for_exclusion = ds_settings['COUNTRY_EXCLUSION_LIST']
 
 profile_json = {
@@ -225,11 +223,15 @@ def clean_school_master_version_data(country, pull_version):
         country=country,
         version=pull_version,
     ).delete()
+    logger.info(
+        f'Deleted all data_sources_schoolmasterdata table entries for country "{country}" with version "{pull_version}"')
 
     SchoolMasterData.history.model.objects.filter(
         country=country,
         version=pull_version,
     ).delete()
+    logger.info(
+        f'Deleted all data_sources_historicalschoolmasterdata table entries for country "{country}" with version "{pull_version}"')
 
 
 class Command(BaseCommand):
@@ -255,6 +257,11 @@ class Command(BaseCommand):
             help='Start version to fetch the data. It should be a valid version value in integer format.'
         )
 
+        parser.add_argument(
+            '--schedule', action='store_true', dest='schedule_tasks', default=False,
+            help='If provided, it will schedule the task on Celery.'
+        )
+
     def handle(self, **options):
         logger.info('Executing data loss recovery for SchoolMasterData for given/latest version" ....\n')
 
@@ -265,6 +272,17 @@ class Command(BaseCommand):
         if not country:
             logger.error('Country with ISO3 format ({0}) not found in giga-maps db. '
                          'Hence stopping the load.'.format(country_iso3_format))
+            exit(0)
+
+        schedule_tasks = options.get('schedule_tasks')
+
+        if schedule_tasks:
+            sources_tasks.scheduler_for_data_loss_recovery_for_school_master_version.delay(
+                country_iso3_format,
+                options.get('pull_data'),
+                options.get('pull_version')
+            )
+            logger.info('Completed scheduling the data loss recovery for school master successfully.\n')
             exit(0)
 
         check_latest_version = options.get('check_latest_version')
@@ -296,7 +314,7 @@ class Command(BaseCommand):
             logger.info(f'SchoolMaster data version updated in cache.\n')
 
             BackgroundTask.objects.filter(name='cleanup_school_master_rows_status_{current_time}'.format(
-                    current_time=date_utilities.format_date(get_current_datetime_object(), frmt='%d%m%Y_%H'))
+                current_time=date_utilities.format_date(get_current_datetime_object(), frmt='%d%m%Y_%H'))
             ).update(deleted=get_current_datetime_object())
             sources_tasks.cleanup_school_master_rows()
             logger.info(f'SchoolMaster data clean up completed successfully.\n')
