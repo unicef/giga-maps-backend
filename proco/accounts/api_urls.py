@@ -8,7 +8,6 @@ urlpatterns = [
     path('apis/', api.APIsListAPIView.as_view({
         'get': 'list',
     }), name='list-apis'),
-
     path('api_categories/', api.APICategoriesViewSet.as_view({
         'get': 'list',
         'post': 'create',
@@ -17,7 +16,6 @@ urlpatterns = [
         'put': 'partial_update',
         'delete': 'destroy',
     }), name='update-and-delete-api-category'),
-
     path('api_keys/', api.APIKeysViewSet.as_view({
         'get': 'list',
         'post': 'create',
@@ -102,6 +100,9 @@ urlpatterns = [
     path('adv_filters/<int:pk>/publish/', api.AdvanceFiltersPublishViewSet.as_view({
         'put': 'partial_update',
     }), name='publish-advance-filter'),
+    path('column_configurations/<int:pk>/choices/', api.ColumnConfigurationChoicesViewSet.as_view({
+        'get': 'retrieve',
+    }), name='retrieve-advance-filter-live-choices'),
     path('adv_filters/<str:status>/<int:country_id>/', api.PublishedAdvanceFiltersViewSet.as_view({
         'get': 'list',
     }), name='list-published-advance-filters'),

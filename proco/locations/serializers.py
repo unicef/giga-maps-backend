@@ -90,6 +90,7 @@ class BaseCountrySerializer(FlexFieldsModelSerializer):
             'date_schools_mapped',
             'admin_metadata',
             'benchmark_metadata',
+            'country_disclaimer',
         )
         read_only_fields = fields
 

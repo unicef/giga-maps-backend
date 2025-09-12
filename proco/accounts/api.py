@@ -246,7 +246,7 @@ class APIKeysViewSet(BaseModelViewSet):
         api_key_user = instance.user
 
         # Once API Key is deleted by Admin, send the status email to the user
-        if api_key_user is not None and request_user.id != api_key_user.id:
+        if settings.ENABLED_API_KEY_EMAILS and api_key_user is not None and request_user.id != api_key_user.id:
             email_content = {
                 'subject': account_config.api_key_deletion_email_subject_format % (
                     core_utilities.get_project_title(), str(instance.api.name).title(),
@@ -2740,3 +2740,20 @@ class PublishedAdvanceFiltersViewSet(CachedListMixin, BaseModelViewSet):
     def update_serializer_context(self, context):
         context['country_id'] = self.kwargs.get('country_id')
         return context
+
+
+class ColumnConfigurationChoicesViewSet(BaseModelViewSet):
+    """
+    ColumnConfigurationChoicesViewSet
+    Cache Attr:
+        Auto Cache: Not required
+        Call Cache: Yes
+    """
+
+    model = accounts_models.ColumnConfiguration
+    serializer_class = serializers.ColumnConfigurationChoicesSerializer
+
+    base_auth_permissions = (
+        core_permissions.IsUserAuthenticated,
+        core_permissions.CanPublishAdvanceFilter,
+    )
