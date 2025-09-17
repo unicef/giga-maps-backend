@@ -86,6 +86,7 @@ class APICategory(core_models.BaseModel):
                              name='unique_without_deleted_for_api_category'),
         ]
 
+
 class APIKey(core_models.BaseModel):
     """
     APIKey

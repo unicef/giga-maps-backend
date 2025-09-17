@@ -123,7 +123,7 @@ class APICategoriesViewSet(BaseModelViewSet):
 class APIKeysViewSet(BaseModelViewSet):
     """
     APIKeysViewSet
-        This class is used to list all API keys.
+        This class is used to update the API key valid_to date value.
         Inherits: BaseModelViewSet
     """
     model = accounts_models.APIKey

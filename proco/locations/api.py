@@ -357,6 +357,24 @@ class CountrySearchStatListAPIView(CachedListMixin, ListAPIView):
 
         return qs
 
+    def get_queryset_to_list_countries_with_no_schools(self):
+        queryset = self.model.objects.all().exclude(
+            id__in=list(School.objects.all().values_list('country_id', flat=True).order_by('country_id').distinct(
+                'country_id')),
+        )
+
+        qs = queryset.values(
+            'id', 'name', 'code', 'last_weekly_status__integration_status',
+            'schools__admin1__id', 'schools__admin1__name', 'schools__admin1__description',
+            'schools__admin1__description_ui_label',
+            'schools__admin1__giga_id_admin',
+            'schools__admin2__id', 'schools__admin2__name', 'schools__admin2__description',
+            'schools__admin2__description_ui_label',
+            'schools__admin2__giga_id_admin',
+        ).order_by('name', 'schools__admin1__name', 'schools__admin2__name')
+
+        return qs
+
     def _format_result(self, qry_data):
         data = OrderedDict()
         for resp_data in qry_data:
@@ -416,7 +434,9 @@ class CountrySearchStatListAPIView(CachedListMixin, ListAPIView):
         cache_key = self.get_list_cache_key()
 
         queryset = self.get_queryset()
-        queryset_data = list(queryset)
+        qs_for_remaining_countries = self.get_queryset_to_list_countries_with_no_schools()
+
+        queryset_data = list(queryset) + list(qs_for_remaining_countries)
         data = self._format_result(queryset_data)
 
         request_path = remove_query_param(request.get_full_path(), self.CACHE_KEY)
@@ -519,7 +539,6 @@ class BaseSearchMixin:
     def get_search_text(self):
         if 'q' not in self.params:
             return None
-
         search_text_orig = self.params.get('q', ['*'])[-1]
         search_text = self.normalize_search_text(search_text_orig)
         search_text = core_utilities.sanitize_str(search_text)
