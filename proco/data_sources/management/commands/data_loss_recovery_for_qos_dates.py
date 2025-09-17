@@ -94,6 +94,8 @@ def load_qos_data_source_response_to_model(country, data_pull_date):
         )
         pull_datetime = get_current_datetime_object()
 
+        pull_datetime = get_current_datetime_object()
+
         if len(loaded_data_df) > 0:
             insert_entries = []
             unregistered_school_giga_ids = []

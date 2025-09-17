@@ -759,6 +759,270 @@ class APIKeyAPICategoryApiTestCase(TestAPIViewSetMixin, TestCase):
 
         self.assertEqual(put_response.status_code, status.HTTP_200_OK)
 
+
+class APIKeyAPICategoryApiTestCase(TestAPIViewSetMixin, TestCase):
+    databases = ['default', ]
+
+    @classmethod
+    def setUpTestData(cls):
+        api_file = os.path.join(
+            settings.BASE_DIR,
+            'proco/core/resources/all_apis.tsv'
+        )
+        args = ['--api-file', api_file]
+        call_command('load_api_data', *args)
+
+        cls.admin_user = test_utilities.setup_admin_user_by_role()
+        cls.read_only_user = test_utilities.setup_read_only_user_by_role()
+
+        cls.country = CountryFactory()
+
+    def setUp(self):
+        cache.clear()
+        super().setUp()
+
+    def test_list_api_categories_all_for_admin_user(self):
+        url, _, view = accounts_url((), {}, view_name='list-or-create-api-categories')
+
+        response = self.forced_auth_req('get', url, user=self.admin_user, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response_data = response.data
+
+        self.assertEqual(type(response_data), dict)
+        self.assertEqual(response_data['count'], 0)
+        self.assertEqual(len(response_data['results']), 0)
+
+    def test_list_api_categories_for_read_only_user(self):
+        url, _, view = accounts_url((), {}, view_name='list-or-create-api-categories')
+
+        response = self.forced_auth_req('get', url, user=self.read_only_user, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+    def test_list_api_categories_all_for_non_logged_in_user(self):
+        url, _, view = accounts_url((), {}, view_name='list-or-create-api-categories')
+
+        response = self.forced_auth_req('get', url, user=None, view=view)
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_create_api_categories_for_admin_for_pcdc(self):
+        url, _, view = accounts_url((), {}, view_name='list-or-create-api-categories')
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.admin_user,
+            view=view,
+            data={
+                "api": accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
+                "code": "GOVT",
+                "name": "Govt",
+                "is_default": True,
+                "description": "To access the Govt endpoints"
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_update_api_categories_for_admin_for_pcdc(self):
+        url, _, view = accounts_url((), {}, view_name='list-or-create-api-categories')
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.admin_user,
+            view=view,
+            data={
+                "api": accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
+                "code": "GOVT",
+                "name": "Govt",
+                "is_default": True,
+                "description": "To access the Govt endpoints"
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        response_data = response.data
+
+        category_id = response_data['id']
+
+        url, _, view = accounts_url((category_id,), {},
+                                    view_name='update-and-delete-api-category')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                "description": "To access the Govt endpoints"
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+    def test_create_api_categories_for_read_only_user_for_pcdc(self):
+        url, _, view = accounts_url((), {}, view_name='list-or-create-api-categories')
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.read_only_user,
+            view=view,
+            data={
+                "api": accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
+                "code": "GOVT",
+                "name": "Govt",
+                "is_default": True,
+                "description": "To access the Govt endpoints"
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_delete_api_category_by_admin(self):
+        url, _, view = accounts_url((), {}, view_name='list-or-create-api-categories')
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.admin_user,
+            view=view,
+            data={
+                "api": accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
+                "code": "GOVT",
+                "name": "Govt",
+                "is_default": True,
+                "description": "To access the Govt endpoints"
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        response_data = response.data
+
+        api_category_id = response_data['id']
+
+        url, _, view = accounts_url((api_category_id,), {},
+                                    view_name='update-and-delete-api-category')
+
+        delete_response = self.forced_auth_req(
+            'delete',
+            url,
+            user=self.admin_user,
+        )
+
+        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_delete_api_category_by_read_only_user(self):
+        url, _, view = accounts_url((), {}, view_name='list-or-create-api-categories')
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.admin_user,
+            view=view,
+            data={
+                "api": accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
+                "code": "GOVT",
+                "name": "Govt",
+                "is_default": True,
+                "description": "To access the Govt endpoints"
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        response_data = response.data
+
+        api_category_id = response_data['id']
+
+        url, _, view = accounts_url((api_category_id,), {},
+                                    view_name='update-and-delete-api-category')
+
+        delete_response = self.forced_auth_req(
+            'delete',
+            url,
+            user=self.read_only_user,
+        )
+
+        self.assertEqual(delete_response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_assign_api_key_category_for_pcdc_api(self):
+        url, _, view = accounts_url((), {}, view_name='list-or-create-api-categories')
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.admin_user,
+            view=view,
+            data={
+                "api": accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
+                "code": "GOVT",
+                "name": "Govt",
+                "is_default": True,
+                "description": "To access the Govt endpoints"
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        response_data = response.data
+
+        api_category_id = response_data['id']
+
+        url, _, view = accounts_url((), {})
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.read_only_user,
+            view=view,
+            data={
+                'api': accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
+                'active_countries_list': [self.country.id, ]
+            }
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        response_data = response.data
+
+        api_key_id = response_data['id']
+
+        url, _, view = accounts_url((api_key_id,), {},
+                                    view_name='update-and-delete-api-key')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.APIKey.APPROVED,
+                'valid_to': core_utilities.get_current_datetime_object().date() + timedelta(days=30),
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, _, view = accounts_url((api_key_id,), {},
+                                    view_name='api-key-api-categories-crud')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                "active_api_categories_list": [api_category_id,],
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
 class NotificationsApiTestCase(TestAPIViewSetMixin, TestCase):
     databases = ['default', ]
 
@@ -1286,8 +1550,6 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
                 }
             }
         )
-
-        print(response.__dict__)
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 

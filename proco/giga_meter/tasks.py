@@ -204,7 +204,8 @@ def giga_meter_handle_published_school_master_data_row(*args, country_ids=None, 
                             else str(row.computer_lab).lower() in core_configs.true_choices,
                             'num_computers' : row.num_computers,
                             'connectivity_govt': None
-                            if core_utilities.is_blank_string(row.connectivity_govt)
+                            if (core_utilities.is_blank_string(row.connectivity_govt) or
+                               str(row.connectivity_govt).lower() == 'unknown')
                             else str(row.connectivity_govt).lower() in core_configs.true_choices,
                             'connectivity_type_govt': row.connectivity_type_govt,
                             'connectivity_type':  row.connectivity_type,

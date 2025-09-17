@@ -107,6 +107,8 @@ def load_qos_data_source_response_to_model(version_number, country):
                         version_number, len(loaded_data_df)))
                     pull_datetime = get_current_datetime_object()
 
+                    pull_datetime = get_current_datetime_object()
+
                     loaded_data_df = loaded_data_df[loaded_data_df[DeltaSharingReader._change_type_col_name()].isin(
                         ['insert', 'update_postimage'])]
                     logger.info('Total count of rows after filtering only ["insert", "update_postimage"] in the "{0}" '

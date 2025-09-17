@@ -86,6 +86,7 @@ class APICategory(core_models.BaseModel):
                              name='unique_without_deleted_for_api_category'),
         ]
 
+
 class APIKey(core_models.BaseModel):
     """
     APIKey
@@ -438,7 +439,6 @@ class DataLayerDataSourceRelationship(core_models.BaseModelMixin):
 
     # API Parameter:
     data_source_column = JSONField(null=True, default=dict)
-    data_source_column_function = JSONField(null=True, default=dict)
 
     class Meta:
         ordering = ['last_modified_at']

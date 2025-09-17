@@ -165,7 +165,10 @@ def has_changes_for_review(row, school):
         old_connectivity_rt = school_rt_instance.rt_registered if school_rt_instance else None
 
         new_connectivity_rt = None
-        if not core_utilities.is_blank_string(row['connectivity_RT']):
+        if (
+            not pd.isnull(row['connectivity_RT']) and
+            not pd.isnull(row['connectivity_RT_ingestion_timestamp'])
+        ):
             new_connectivity_rt = str(row['connectivity_RT']).lower() in core_configs.true_choices
 
         if old_connectivity_rt != new_connectivity_rt:
