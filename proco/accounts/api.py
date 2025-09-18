@@ -1778,6 +1778,62 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
         return query.format(**kwargs)
 
+    def get_school_ids_at_same_location(self, request, school_id, country_id):
+        """Get school_ids at same location"""
+        response = {"count": 0, "school_ids": []}
+
+        count_query = """
+        SELECT
+            count(s.id)
+        FROM
+            schools_school s
+        WHERE
+            s.deleted IS NULL
+            AND s.id != {school_id}
+            AND s.geopoint = (SELECT geopoint FROM schools_school WHERE id = {school_id} AND deleted IS NULL)
+        """.format(school_id=school_id)
+
+        schools_count = db_utilities.sql_to_response(count_query, label=self.__class__.__name__, db_var=settings.READ_ONLY_DB_KEY)
+        total_count = schools_count[0].get('count', 0) if schools_count else 0
+        if total_count == 0:
+            return response
+
+        try:
+            limit = int(request.query_params.get("limit_same_location_schools", 300))
+            limit = limit if limit > 0 else 300
+        except ValueError:
+            limit = 300
+        try:
+            offset = int(request.query_params.get("offset_same_location_schools", 0))
+            offset = max(offset, 0)
+        except ValueError:
+            offset = 0
+
+        query = """
+        SELECT
+            s.id
+        FROM
+            schools_school s
+        LEFT JOIN
+            connection_statistics_schoolrealtimeregistration srr
+            ON s.id = srr.school_id AND srr.deleted IS NULL
+        WHERE
+            s.deleted IS NULL
+            AND s.id != {school_id}
+            AND s.country_id = {country_id}
+            AND s.geopoint = (SELECT geopoint FROM schools_school WHERE id = {school_id} AND deleted IS NULL)
+        ORDER BY
+            COALESCE(srr.rt_registered, false) DESC
+        LIMIT {limit} OFFSET {offset}
+        """.format(school_id=school_id, country_id=country_id, limit=limit, offset=offset)
+        school_ids = []
+        sql_response = db_utilities.sql_to_response(query, label=self.__class__.__name__, db_var=settings.READ_ONLY_DB_KEY)
+        if sql_response:
+            school_ids = [r.get('id') for r in sql_response]
+            response['count'] = total_count
+            response['school_ids'] = school_ids
+        return response
+
     def get(self, request, *args, **kwargs):
         use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
         request_path = remove_query_param(request.get_full_path(), 'cache')
@@ -1905,6 +1961,10 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                                 'convert_unit': self.kwargs.get('convert_unit'),
                                 'display_unit': display_unit,
                             }
+                            if request.query_params.get('include_same_location_schools') == 'true':
+                                info_panel_school['schools_at_same_location'] = self.get_school_ids_at_same_location(
+                                    request, info_panel_school.get('id'), info_panel_school.get('country_id')
+                                )
 
                     response = info_panel_school_list
                 else:
@@ -2006,6 +2066,10 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                             info_panel_school['geopoint'] = json.loads(info_panel_school['geopoint'])
                             info_panel_school['statistics'] = list(filter(
                                 lambda s: s['school_id'] == info_panel_school['id'], statistics))[-1]
+                            if request.query_params.get('include_same_location_schools') == 'true':
+                                info_panel_school['schools_at_same_location'] = self.get_school_ids_at_same_location(
+                                    request, info_panel_school.get('id'), info_panel_school.get('country_id')
+                                )
 
                     response = info_panel_school_list
                 else:
