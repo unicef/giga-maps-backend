@@ -106,4 +106,7 @@ urlpatterns = [
     path('adv_filters/<str:status>/<int:country_id>/', api.PublishedAdvanceFiltersViewSet.as_view({
         'get': 'list',
     }), name='list-published-advance-filters'),
+    path('adv_filters/<int:country_id>/all', api.AllPublishedAdvanceFiltersViewSet.as_view({
+        'get': 'list',
+    }), name='list-all-published-advance-filters'),
 ]

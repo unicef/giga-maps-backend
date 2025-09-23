@@ -6,6 +6,7 @@ from math import floor, ceil
 from django.apps import apps
 from django.conf import settings
 from django.contrib.admin.models import LogEntry
+from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.validators import validate_email
 from django.db import connection
@@ -2035,6 +2036,7 @@ class DataLayerCountryRelationshipSerializer(serializers.ModelSerializer):
 
 
 class AdvanceFilterCountryRelationshipSerializer(serializers.ModelSerializer):
+    default_filter_values = serializers.JSONField()
     class Meta:
         model = accounts_models.AdvanceFilterCountryRelationship
 
@@ -2047,6 +2049,8 @@ class AdvanceFilterCountryRelationshipSerializer(serializers.ModelSerializer):
         fields = read_only_fields + (
             'advance_filter',
             'country',
+            'is_default',
+            'default_filter_values',
         )
 
         extra_kwargs = {
@@ -2063,6 +2067,15 @@ class AdvanceFilterCountryRelationshipSerializer(serializers.ModelSerializer):
 
         instance = super().create(validated_data)
         return instance
+
+    def validate(self, attrs):
+        """Validate default_filter_values on Country Edit"""
+        try:
+            instance = accounts_models.AdvanceFilterCountryRelationship(**attrs)
+            instance.clean()
+        except ValidationError as e:
+            raise serializers.ValidationError({'default_filter_values': e.messages})
+        return attrs
 
 
 class ColumnConfigurationListSerializer(FlexFieldsModelSerializer):
@@ -2112,6 +2125,7 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
     class Meta:
         model = accounts_models.AdvanceFilter
         read_only_fields = fields = (
+            'id',
             'name',
             'type',
             'description',
