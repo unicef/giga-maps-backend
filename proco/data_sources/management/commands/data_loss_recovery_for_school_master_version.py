@@ -32,8 +32,8 @@ profile_json = {
 }
 profile_file = os.path.join(
     settings.BASE_DIR,
-    'school_master_profile_{dt}.share'.format(
-        dt=date_utilities.format_date(get_current_datetime_object())
+    'school_master_profile-{dt}.share'.format(
+        dt=date_utilities.format_date(get_current_datetime_object(), frmt='%d%m%Y_%H%M%S')
     )
 )
 open(profile_file, 'w').write(json.dumps(profile_json))
@@ -319,11 +319,13 @@ class Command(BaseCommand):
             sources_tasks.cleanup_school_master_rows()
             logger.info(f'SchoolMaster data clean up completed successfully.\n')
 
-            sources_tasks.handle_published_school_master_data_row(country_ids=[country.id, ])
-            logger.info(f'SchoolMaster data publishing completed successfully.\n')
+            sources_tasks.handle_published_school_master_data_row.delay(country_ids=[country.id, ])
+            logger.info(f'Handle School Master published rows for country {country} task scheduled successfully.'
+                        f'It will be picked by worker in next available slot.\n')
 
-            sources_tasks.handle_deleted_school_master_data_row(country_ids=[country.id, ])
-            logger.info(f'SchoolMaster data publish for deleted schools completed successfully.\n')
+            sources_tasks.handle_deleted_school_master_data_row.delay(country_ids=[country.id, ])
+            logger.info(f'Handle School Master deleted rows for country {country} task scheduled successfully.'
+                        f'It will be picked by worker in next available slot.\n')
 
         try:
             os.remove(profile_file)
