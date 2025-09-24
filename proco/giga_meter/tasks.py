@@ -6,6 +6,7 @@ import uuid
 from celery import chain
 from celery import current_task
 from django.conf import settings
+from django.core.management import call_command
 from django.db.models import Count
 from django.db.utils import DataError
 from requests.exceptions import HTTPError
@@ -354,10 +355,15 @@ def giga_meter_update_static_data(*args, country_iso3_format=None, force_tasks=F
     if force_tasks:
         timestamp_str = format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H%M%S')
 
-    task_key = 'giga_meter_update_static_data_status_{current_time}'.format(current_time=timestamp_str)
+    if country_iso3_format:
+        task_key = f'giga_meter_update_static_data_status_{timestamp_str}_country_code_{country_iso3_format}'
+        task_description = f'Giga Meter - Sync Static Data from School Master sources for a country {country_iso3_format}'
+    else:
+        task_key = f'giga_meter_update_static_data_status_{timestamp_str}'
+        task_description = 'Giga Meter - Sync Static Data from School Master sources'
+
     task_id = current_task.request.id or str(uuid.uuid4())
-    task_instance = background_task_utilities.task_on_start(
-        task_id, task_key, 'Giga Meter - Sync Static Data from School Master sources', check_previous=True)
+    task_instance = background_task_utilities.task_on_start(task_id, task_key, task_description, check_previous=True)
 
     if task_instance:
         logger.debug('Not found running job for static data pull handler: {}'.format(task_key))
@@ -410,3 +416,28 @@ def handle_giga_meter_school_master_data_sync(*args):
     else:
         logger.warning('Giga Meter - School Master data synch disabled from config. '
                      'To enable it, please update "GIGA_METER_ENABLE_AUTO_SYNC" configuration.')
+
+
+@app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)
+def scheduler_for_populate_school_geopoint_field(country_iso3_format):
+    current_datetime = core_utilities.get_current_datetime_object()
+    task_key = 'scheduler_for_populate_school_geopoint_field_for_{code}_country_at_{current_time}'.format(
+        current_time=format_date(current_datetime, frmt='%d%m%Y_%H'),
+        code=country_iso3_format if country_iso3_format else 'all',
+    )
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(task_id, task_key, 'Populate school geopoint field')
+
+    if task_instance:
+        logger.debug('Not found running job for Populate school geopoint field utility handler: {0}'.format(task_key))
+        cmd_args = []
+
+        if country_iso3_format:
+            cmd_args.append('-country_iso3_format={0}'.format(country_iso3_format))
+
+        call_command('populate_school_geopoint_field', *cmd_args)
+        task_instance.info('Completed Populate school geopoint field utility handler.')
+
+        background_task_utilities.task_on_complete(task_instance)
+    else:
+        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
