@@ -6,6 +6,7 @@ import uuid
 from celery import chain
 from celery import current_task
 from django.conf import settings
+from django.contrib.gis.geos import Point
 from django.core.management import call_command
 from django.db.models import Count
 from django.db.utils import DataError
@@ -156,7 +157,7 @@ def giga_meter_handle_published_school_master_data_row(*args, country_ids=None, 
                             'name': row.school_name,
                             'country_code': row.country.code,
                             # 'timezone': row.timezone,
-                            # 'geopoint': Point(x=row.longitude, y=row.latitude),
+                            'geopoint': Point(x=row.longitude, y=row.latitude),
                             # 'gps_confidence': row.gps_confidence,
                             # 'altitude' : row.altitude,
                             # 'address': row.address,
