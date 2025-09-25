@@ -16,6 +16,7 @@ from proco.core import utils as core_utilities
 from proco.taskapp import app
 from proco.utils.dates import format_date
 
+
 logger = logging.getLogger('gigamaps.' + __name__)
 
 
@@ -168,6 +169,9 @@ def populate_school_registration_data():
         Frequency: Once in a day
         Limit: 1 hour
     """
+    from proco.schools.models import School
+    from proco.schools import utils as school_utilities
+
     logger.info('Setting RT status, RT Date for schools which start live data from sources.')
 
     task_key = 'populate_school_registration_data_status_{current_time}'.format(
@@ -178,7 +182,7 @@ def populate_school_registration_data():
         task_id, task_key, 'Populate the RT table data for new schools')
 
     if task_instance:
-        logger.debug('Not found running job: {}'.format(task_key))
+        task_instance.info(f'Not found running job with name: {task_key}')
         sql = """
         SELECT DISTINCT sds.school_id
         FROM public.connection_statistics_schooldailystatus AS sds
@@ -190,10 +194,17 @@ def populate_school_registration_data():
         """
 
         school_ids_missing_in_rt_table = db_utilities.sql_to_response(sql, label='SchoolRealtimeRegistration')
+        task_instance.info('Total number of newly registered schools for live data in last 6 hours: {0}'.format(
+            len(school_ids_missing_in_rt_table))
+        )
 
         for missing_school_id in school_ids_missing_in_rt_table:
             cmd_args = ['--reset', '-school_id={0}'.format(missing_school_id['school_id'])]
             call_command('populate_school_registration_data', *cmd_args)
+
+            school = School.objects.get(id=missing_school_id)
+            school.connectivity_status = school_utilities.get_connectivity_status_by_master_api(school)
+            school.save(update_fields=['connectivity_status'])
 
         background_task_utilities.task_on_complete(task_instance)
     else:
