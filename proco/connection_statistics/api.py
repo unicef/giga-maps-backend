@@ -794,15 +794,32 @@ class ConnectivityConfigurationsViewSet(APIView):
             today_date = core_utilities.get_current_datetime_object().date()
             monday_date = today_date - timedelta(days=today_date.weekday())
 
-            latest_daily_entry = self.queryset.filter(
-                date__lt=monday_date,
+            last_week_start = monday_date - timedelta(days=7)
+            last_week_end = monday_date - timedelta(days=1)
+
+            last_week_entry = self.queryset.filter(
+                date__range=(last_week_start, last_week_end),
                 school__deleted__isnull=True,
             ).values_list('date', flat=True).order_by('-date').first()
 
-            if latest_daily_entry:
-                monday_on_entry_date = latest_daily_entry - timedelta(days=latest_daily_entry.weekday())
+            if last_week_entry:
+                # TECH-7453: 1. If last week's data is present use it as default.
+                monday_on_entry_date = last_week_entry - timedelta(days=last_week_entry.weekday())
                 sunday_on_entry_date = monday_on_entry_date + timedelta(days=6)
+            else:
+                # TECH-7453: 2. If last week data is not present then fallback to the latest available week including the current week as well.
+                latest_daily_entry = self.queryset.filter(
+                    school__deleted__isnull=True,
+                ).values_list('date', flat=True).order_by('-date').first()
 
+                if latest_daily_entry:
+                    monday_on_entry_date = latest_daily_entry - timedelta(days=latest_daily_entry.weekday())
+                    sunday_on_entry_date = monday_on_entry_date + timedelta(days=6)
+                else:
+                    monday_on_entry_date = None
+                    sunday_on_entry_date = None
+
+            if monday_on_entry_date:
                 static_data = {
                     'week': {
                         'start_date': date_utilities.format_date(monday_on_entry_date),
