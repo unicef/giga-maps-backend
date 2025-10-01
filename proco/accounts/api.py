@@ -1815,8 +1815,9 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         FROM
             schools_school s
         LEFT JOIN
-            connection_statistics_schoolrealtimeregistration srr
-            ON s.id = srr.school_id AND srr.deleted IS NULL
+            connection_statistics_schoolrealtimeregistration srr ON s.id = srr.school_id
+            AND srr.deleted IS NULL
+            AND srr.rt_registration_date <= '{end_date}'
         WHERE
             s.deleted IS NULL
             AND s.id != {school_id}
@@ -1832,13 +1833,18 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             s.name_lower ASC
         LIMIT {limit}
         OFFSET {offset}
-        """.format(school_id=school_id, country_id=country_id, limit=limit, offset=offset)
-        school_ids = []
+        """.format(
+            school_id=school_id,
+            country_id=country_id,
+            limit=limit,
+            offset=offset,
+            end_date=self.kwargs.get('end_date', core_utilities.get_current_datetime_object().date())
+        )
+
         sql_response = db_utilities.sql_to_response(query, label=self.__class__.__name__, db_var=settings.READ_ONLY_DB_KEY)
         if sql_response:
-            school_ids = [r.get('id') for r in sql_response]
             response['count'] = total_count
-            response['school_ids'] = school_ids
+            response['school_ids'] = [r.get('id') for r in sql_response]
         return response
 
     def get(self, request, *args, **kwargs):
