@@ -21,8 +21,8 @@ def sql_to_response(sql, label='', db_var='default'):
         try:
             cur.execute(sql)
             if not cur:
-                return
+                return None
             return dictfetchall(cur)
         except Exception as ex:
             logger.error('Exception on query execution - {0}'.format(str(ex)))
-    return
+    return None
