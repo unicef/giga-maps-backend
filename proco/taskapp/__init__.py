@@ -71,7 +71,7 @@ def finalize_setup(sender, **kwargs):
         },
         'proco.utils.tasks.populate_school_registration_data': {
             'task': 'proco.utils.tasks.populate_school_registration_data',
-            'schedule': crontab(hour=2, minute=40),
+            'schedule': crontab(hour='2,8,14,20', minute=50),
             'args': (),
         },
         'proco.data_sources.tasks.handle_published_school_master_data_row': {
