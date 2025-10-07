@@ -4,8 +4,96 @@ from azure.search.documents.indexes.models import (
     SearchableField
 )
 from django.conf import settings
-
 from proco.schools.models import School
+from proco.entities.models import Entity
+
+
+class EntityIndex(object):
+    entity_id = SimpleField(name='entity_id', type=SearchFieldDataType.String, key=True)
+    entity_name = SimpleField(
+        name='entity_name',
+        type=SearchFieldDataType.String,
+        filterable=True,
+        sortable=True,
+    )
+
+    id = SimpleField(name='id', type=SearchFieldDataType.Int64, filterable=True)
+
+    name = SearchableField(
+        name='name',
+        type=SearchFieldDataType.String,
+        filterable=True,
+        facetable=True,
+        sortable=True,
+    )
+    giga_id = SearchableField(
+        name='giga_id',
+        type=SearchFieldDataType.String,
+        filterable=True,
+        facetable=True,
+        sortable=True,
+    )
+    external_id = SearchableField(
+        name='external_id',
+        type=SearchFieldDataType.String,
+        filterable=True,
+        facetable=True,
+        sortable=True,
+    )
+
+    admin1_id = SimpleField(name='admin1_id', type=SearchFieldDataType.Int64, filterable=True)
+    admin1_name = SearchableField(
+        name='admin1_name',
+        type=SearchFieldDataType.String,
+        filterable=True,
+        facetable=True,
+        sortable=True,
+    )
+
+    admin2_id = SimpleField(name='admin2_id', type=SearchFieldDataType.Int64, filterable=True)
+    admin2_name = SearchableField(
+        name='admin2_name',
+        type=SearchFieldDataType.String,
+        filterable=True,
+        facetable=True,
+        sortable=True,
+    )
+
+    country_id = SimpleField(name='country_id', type=SearchFieldDataType.Int64, filterable=True)
+    country_name = SearchableField(
+        name='country_name',
+        type=SearchFieldDataType.String,
+        filterable=True,
+        facetable=True,
+        sortable=True,
+    )
+    country_code = SearchableField(
+        name='country_code',
+        type=SearchFieldDataType.String,
+        filterable=True,
+        facetable=True,
+    )
+
+    row_score = SimpleField(name='row_score', type=SearchFieldDataType.Int32, sortable=True)
+
+    class Meta:
+        index_name = settings.AZURE_CONFIG.get('COGNITIVE_SEARCH', {}).get('ENTITIES_INDEX_NAME')
+        model = Entity
+
+        searchable_fields = (
+            'country_id', 'country_name', 'country_code',
+            'admin1_id', 'admin1_name',
+            'admin2_id', 'admin2_name',
+            'name', 'external_id', 'giga_id',
+        )
+        filterable_fields = (
+            'country_id', 'country_name', 'country_code',
+            'admin1_id', 'admin2_id',
+            'admin1_name', 'admin2_name', 'id',
+            'entity_name',
+        )
+        ordering = ('entity_name', '-row_score', 'country_name', 'admin1_name', 'admin2_name', 'name',)
+
 
 
 class SchoolIndex(object):

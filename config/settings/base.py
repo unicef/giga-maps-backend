@@ -415,6 +415,7 @@ if ENABLE_AZURE_COGNITIVE_SEARCH:
         'SEARCH_API_KEY': env('SEARCH_API_KEY', default=None),
         'COUNTRY_INDEX_NAME': env('COUNTRY_INDEX_NAME', default='giga_countries'),
         'SCHOOL_INDEX_NAME': env('SCHOOL_INDEX_NAME', default='giga_schools'),
+        'ENTITIES_INDEX_NAME': env('ENTITIES_INDEX_NAME', default='giga_entities'),
     }
 
 DATA_SOURCE_CONFIG = {
