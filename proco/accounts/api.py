@@ -1778,7 +1778,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
         return query.format(**kwargs)
 
-    def get_school_ids_at_same_location(self, request, school_id, country_id):
+    def get_school_ids_at_same_location(self, request, school_id, country_id, include_current_school):
         """Get school_ids at same location"""
         response = {"count": 0, "school_ids": []}
 
@@ -1820,7 +1820,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             AND srr.rt_registration_date <= '{end_date}'
         WHERE
             s.deleted IS NULL
-            AND s.id != {school_id}
+            {school_id_check}
             AND s.country_id = {country_id}
             AND s.geopoint = (SELECT geopoint FROM schools_school WHERE id = {school_id})
         ORDER BY
@@ -1838,12 +1838,13 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             country_id=country_id,
             limit=limit,
             offset=offset,
-            end_date=self.kwargs.get('end_date', core_utilities.get_current_datetime_object().date())
+            end_date=self.kwargs.get('end_date', core_utilities.get_current_datetime_object().date()),
+            school_id_check='' if include_current_school else f'AND s.id != {school_id}'
         )
 
         sql_response = db_utilities.sql_to_response(query, label=self.__class__.__name__, db_var=settings.READ_ONLY_DB_KEY)
         if sql_response:
-            response['count'] = total_count
+            response['count'] = total_count + 1 if include_current_school else total_count
             response['school_ids'] = [r.get('id') for r in sql_response]
         return response
 
@@ -1913,6 +1914,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     unit_agg_str = '{val} * 1000 * 1000'
 
             self.kwargs['round_unit_value'] = unit_agg_str
+            check_duplicate_schools = request.query_params.get('include_same_location_schools') == 'true'
+            include_current_school = request.query_params.get('include_current_school') == 'true'
 
             if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
 
@@ -1981,11 +1984,13 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                                 'convert_unit': self.kwargs.get('convert_unit'),
                                 'display_unit': display_unit,
                             }
-                            if request.query_params.get('include_same_location_schools') == 'true':
+
+                            if check_duplicate_schools:
                                 info_panel_school['schools_at_same_location'] = self.get_school_ids_at_same_location(
                                     request,
                                     info_panel_school.get('id'),
                                     info_panel_school.get('country_id'),
+                                    include_current_school,
                                 )
 
                     response = sorted_info_panel_school_list
@@ -2095,9 +2100,13 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                             info_panel_school['geopoint'] = json.loads(info_panel_school['geopoint'])
                             info_panel_school['statistics'] = list(filter(
                                 lambda s: s['school_id'] == info_panel_school['id'], statistics))[-1]
-                            if request.query_params.get('include_same_location_schools') == 'true':
+
+                            if check_duplicate_schools:
                                 info_panel_school['schools_at_same_location'] = self.get_school_ids_at_same_location(
-                                    request, info_panel_school.get('id'), info_panel_school.get('country_id')
+                                    request,
+                                    info_panel_school.get('id'),
+                                    info_panel_school.get('country_id'),
+                                    include_current_school,
                                 )
 
                     response = sorted_info_panel_school_list
