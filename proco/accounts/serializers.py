@@ -2193,13 +2193,19 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
                 country_range_json['max_place_holder'] = 'Max ({})'.format(country_range_json['max_value'])
             else:
                 internal_type = parameter_field_props.get_internal_type()
-                min_value, max_value = connection.ops.integer_field_range(internal_type)
-                country_range_json = {
-                    'min_place_holder': 'Min',
-                    'max_place_holder': 'Max',
-                    'min_value': min_value,
-                    'max_value': max_value
-                }
+                if internal_type in connection.ops.integer_field_ranges.keys():
+                    min_value, max_value = connection.ops.integer_field_range(internal_type)
+                    country_range_json = {
+                        'min_place_holder': 'Min',
+                        'max_place_holder': 'Max',
+                        'min_value': min_value,
+                        'max_value': max_value
+                    }
+                else:
+                    country_range_json = {
+                        'min_place_holder': 'Min',
+                        'max_place_holder': 'Max',
+                    }
 
             options['active_range'] = country_range_json
 

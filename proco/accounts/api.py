@@ -525,6 +525,9 @@ class InvalidateCacheByPattern(APIView):
                 country_id = payload.get('id', None)
                 country_code = payload.get('code', None)
                 keys = [
+                    "*GLOBAL_STATS_",
+                    "*CONNECTIVITY_STATS_*",
+                    "*CONNECTIVITY_TILES_MAP*benchmark*global*indicator*download*limit*",
                     "*COUNTRIES_LIST_",
                     "*PUBLISHED_LAYERS_LIST_*",
                     "*GLOBAL_COUNTRY_SEARCH_MAPPING_",
