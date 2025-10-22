@@ -9,7 +9,7 @@ import proco.core.models
 class Migration(migrations.Migration):
     dependencies = [
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
-        ('accounts', '0021_added_unique_constraint_on_api_model'),
+        ('accounts', '0022_auto_20250821_0946'),
     ]
 
     operations = [
