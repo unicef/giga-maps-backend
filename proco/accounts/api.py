@@ -525,6 +525,9 @@ class InvalidateCacheByPattern(APIView):
                 country_id = payload.get('id', None)
                 country_code = payload.get('code', None)
                 keys = [
+                    "*GLOBAL_STATS_",
+                    "*CONNECTIVITY_STATS_*",
+                    "*CONNECTIVITY_TILES_MAP*benchmark*global*indicator*download*limit*",
                     "*COUNTRIES_LIST_",
                     "*PUBLISHED_LAYERS_LIST_*",
                     "*GLOBAL_COUNTRY_SEARCH_MAPPING_",
@@ -2801,6 +2804,79 @@ class AdvanceFiltersViewSet(BaseModelViewSet):
 
         return super().apply_queryset_filters(queryset)
 
+    def perform_update(self, serializer):
+        """Handle filter updates and invalidate related default filter values if options are changed or filter type changed"""
+        instance = serializer.instance
+        old_options = copy.deepcopy(instance.options) or {}
+        old_type = instance.type
+
+        updated_instance = serializer.save()
+        new_options = updated_instance.options or {}
+
+        if old_type != updated_instance.type: # filter type changed invalidate the default filter without choices check
+            message="filter_type changed from {o} to {n}".format(o=old_type, n=updated_instance.type)
+            self._invalidate_default_values(updated_instance, {}, bypass_default_value_check=True, message=message)
+            return updated_instance
+
+        if (
+            updated_instance.type in [
+                accounts_models.AdvanceFilter.TYPE_DROPDOWN, accounts_models.AdvanceFilter.TYPE_DROPDOWN_MULTISELECT
+            ]
+        ):
+            old_live = bool(old_options.get("live_choices"))
+            new_live = bool(new_options.get("live_choices"))
+            if old_live != new_live:
+                # if choice type changed from static to live or live to static then invalidate without choices check
+                old_type = "Live Choices" if old_live else "Static Choices"
+                new_type = "Live Choices" if new_live else "Static Choices"
+                message = "choice type changed from {o} to {n}".format(o=old_type, n=new_type)
+                self._invalidate_default_values(updated_instance, {}, bypass_default_value_check=True, message=message)
+                return updated_instance
+            self._invalidate_incompatible_default_values(updated_instance, old_options, new_options)
+        return updated_instance
+
+    def _invalidate_incompatible_default_values(self, filter_instance, old_options, new_options):
+        """ Invalidate default filter values that are no longer in sync with the updated filter options """
+        try:
+            old_choices = {c.get("value") for c in old_options.get("choices", []) if isinstance(c, dict) and "value" in c}
+            new_choices = {c.get("value") for c in new_options.get("choices", []) if isinstance(c, dict) and "value" in c}
+
+            if old_choices != new_choices:
+                self._invalidate_default_values(filter_instance, new_choices)
+
+        except Exception as e:
+            logger.error(f"Error invalidating default values for filter {filter_instance.code}: {str(e)}")
+
+    def _invalidate_default_values(self, filter_instance, new_choices, bypass_default_value_check=False, message="filter options changes"):
+        """Remove default filter values when its options or filter type change."""
+        relationships = accounts_models.AdvanceFilterCountryRelationship.objects.filter(
+            advance_filter=filter_instance,
+            is_default=True,
+            deleted__isnull=True
+        )
+        for relationship in relationships:
+            if bypass_default_value_check or self._has_invalid_default_values(relationship, new_choices):
+                invalid_values = relationship.default_filter_values
+                relationship.default_filter_values = {}
+                relationship.is_default = False
+                relationship.save(update_fields=["default_filter_values", "is_default"])
+                logger.warning(
+                    f"Cleared default filter values {invalid_values} for filter '{filter_instance.code}' "
+                    f"for country '{relationship.country.name}' due to {message}."
+                )
+
+    def _has_invalid_default_values(self, relationship, valid_choices):
+        """ Check if relationship has default values that are no longer valid """
+        if not relationship.default_filter_values:
+            return True
+
+        for _, value in relationship.default_filter_values.items():
+            values = value if isinstance(value, list) else [value]
+            if any(v not in valid_choices for v in values):
+                return True
+
+        return False
+
     def perform_destroy(self, instance):
         """
         Delete the filter from Admin portal listing only if its in Draft or Disabled mode.
@@ -2916,6 +2992,38 @@ class ColumnConfigurationChoicesViewSet(BaseModelViewSet):
         core_permissions.IsUserAuthenticated,
         core_permissions.CanPublishAdvanceFilter,
     )
+
+
+class AllPublishedAdvanceFiltersViewSet(BaseModelViewSet):
+    """
+    AllPublishedAdvanceFiltersViewSet
+    - returns list of all Published filters with their live_choices as options.
+    - required to created default filter logic: TECH-7454
+    """
+    model = accounts_models.AdvanceFilter
+    serializer_class = serializers.PublishedAdvanceFiltersListSerializer
+    permit_list_expands = ['column_configuration']
+
+    apply_query_pagination = True
+
+    permission_classes = (
+        core_permissions.IsUserAuthenticated,
+    )
+
+    def apply_queryset_filters(self, queryset):
+        """
+        Override if applying more complex filters to queryset.
+        """
+        queryset = queryset.filter(
+            status=accounts_models.AdvanceFilter.FILTER_STATUS_PUBLISHED,
+            active_countries__deleted__isnull=True,
+        ).distinct()
+
+        return super().apply_queryset_filters(queryset)
+
+    def update_serializer_context(self, context):
+        context['country_id'] = self.kwargs.get('country_id')
+        return context
 
 
 class AppConfigViewSet(CachedListMixin, BaseModelViewSet):
