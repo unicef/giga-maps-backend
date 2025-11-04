@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from datetime import timedelta
-from typing import Optional
+from typing import Optional, Any
 
 import delta_sharing
 import numpy as np
@@ -100,41 +100,65 @@ def normalize_qos_data_frame(df):
     return df
 
 
-def has_changes_for_review(row, school):
+def _values_equal(a: Any, b: Any) -> bool:
+    """
+    Null-safe equality check.
+    Treats NaN, NaT, and None as equal if both sides are missing.
+    """
+    if (pd.isna(a) and pd.isna(b)) or (a is None and b is None):
+        return True
+    return a == b
+
+
+def _normalize_str(value: Any) -> Optional[str]:
+    """Normalize strings: blank => None, else trimmed lowercase string."""
+    if core_utilities.is_blank_string(value):
+        return None
+    if pd.isna(value) or value is None:
+        return None
+    return str(value).strip().lower()
+
+
+def has_changes_for_review(row, school) -> bool:
+    """
+    Compare a DataFrame row with an existing School model instance.
+    Returns True if any meaningful change is detected; False otherwise.
+
+    This preserves the original control flow and column accesses, but uses
+    null-safe comparisons so NaN/NaT/None do not cause false positives.
+    """
     if school:
-        if row['school_name'].lower() != school.name.lower():
+        if not _values_equal(str(row['school_name']).lower() if not pd.isna(row['school_name']) else None,
+                             _normalize_str(school.name)):
             return True
 
-        old_external_id = None \
-            if core_utilities.is_blank_string(school.external_id) else str(school.external_id).lower()
-        new_external_id = None \
-            if core_utilities.is_blank_string(row['school_id_govt']) else str(row['school_id_govt']).lower()
-
-        if old_external_id != new_external_id:
+        old_external_id = None if core_utilities.is_blank_string(school.external_id) else str(
+            school.external_id).lower()
+        new_external_id = None if core_utilities.is_blank_string(row['school_id_govt']) else str(
+            row['school_id_govt']).lower()
+        if not _values_equal(old_external_id, new_external_id):
             return True
 
         old_admin1_id = None
         if school.admin1:
             old_admin1_id = str(school.admin1.giga_id_admin).lower()
-        new_admin1_id = None \
-            if core_utilities.is_blank_string(row['admin1_id_giga']) else str(row['admin1_id_giga']).lower()
-
-        if old_admin1_id != new_admin1_id:
+        new_admin1_id = None if core_utilities.is_blank_string(row['admin1_id_giga']) else str(
+            row['admin1_id_giga']).lower()
+        if not _values_equal(old_admin1_id, new_admin1_id):
             return True
 
         old_admin2_id = None
         if school.admin2:
             old_admin2_id = str(school.admin2.giga_id_admin).lower()
-        new_admin2_id = None \
-            if core_utilities.is_blank_string(row['admin2_id_giga']) else str(row['admin2_id_giga']).lower()
-
-        if old_admin2_id != new_admin2_id:
+        new_admin2_id = None if core_utilities.is_blank_string(row['admin2_id_giga']) else str(
+            row['admin2_id_giga']).lower()
+        if not _values_equal(old_admin2_id, new_admin2_id):
             return True
 
         old_lat = school.geopoint.y
         new_lat = row['latitude']
         if (
-            old_lat != new_lat and
+            not _values_equal(old_lat, new_lat) and
             (
                 str(old_lat).split('.')[0] != str(new_lat).split('.')[0] or
                 str(old_lat).split('.')[1][:5] != str(new_lat).split('.')[1][:5]
@@ -145,7 +169,7 @@ def has_changes_for_review(row, school):
         old_long = school.geopoint.x
         new_long = row['longitude']
         if (
-            old_long != new_long and
+            not _values_equal(old_long, new_long) and
             (
                 str(old_long).split('.')[0] != str(new_long).split('.')[0] or
                 str(old_long).split('.')[1][:5] != str(new_long).split('.')[1][:5]
@@ -153,12 +177,11 @@ def has_changes_for_review(row, school):
         ):
             return True
 
-        old_education_level = None \
-            if core_utilities.is_blank_string(school.education_level) else str(school.education_level).lower()
-        new_education_level = None \
-            if core_utilities.is_blank_string(row['education_level']) else str(row['education_level']).lower()
-
-        if old_education_level != new_education_level:
+        old_education_level = None if core_utilities.is_blank_string(school.education_level) else str(
+            school.education_level).lower()
+        new_education_level = None if core_utilities.is_blank_string(row['education_level']) else str(
+            row['education_level']).lower()
+        if not _values_equal(old_education_level, new_education_level):
             return True
 
         school_rt_instance = SchoolRealTimeRegistration.objects.filter(school=school).order_by('-created').first()
@@ -171,9 +194,11 @@ def has_changes_for_review(row, school):
         ):
             new_connectivity_rt = str(row['connectivity_RT']).lower() in core_configs.true_choices
 
-        if old_connectivity_rt != new_connectivity_rt:
+        if not _values_equal(old_connectivity_rt, new_connectivity_rt):
             return True
+
         return False
+
     return True
 
 
@@ -291,6 +316,7 @@ def sync_school_master_data(profile_file, share_name, schema_name, table_name, c
                 if school:
                     row['school_id'] = school.id
                     review_required = has_changes_for_review(row, school)
+                    print(review_required)
                     if not review_required:
                         row['status'] = sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED
                         row['published_at'] = core_utilities.get_current_datetime_object()
