@@ -109,16 +109,6 @@ def _values_equal(a: Any, b: Any) -> bool:
         return True
     return a == b
 
-
-def _normalize_str(value: Any) -> Optional[str]:
-    """Normalize strings: blank => None, else trimmed lowercase string."""
-    if core_utilities.is_blank_string(value):
-        return None
-    if pd.isna(value) or value is None:
-        return None
-    return str(value).strip().lower()
-
-
 def has_changes_for_review(row, school) -> bool:
     """
     Compare a DataFrame row with an existing School model instance.
@@ -128,30 +118,29 @@ def has_changes_for_review(row, school) -> bool:
     null-safe comparisons so NaN/NaT/None do not cause false positives.
     """
     if school:
-        if not _values_equal(str(row['school_name']).lower() if not pd.isna(row['school_name']) else None,
-                             _normalize_str(school.name)):
+        if not _values_equal(row['school_name'].lower(), school.name.lower()):
             return True
 
-        old_external_id = None if core_utilities.is_blank_string(school.external_id) else str(
-            school.external_id).lower()
-        new_external_id = None if core_utilities.is_blank_string(row['school_id_govt']) else str(
-            row['school_id_govt']).lower()
+        old_external_id = None \
+            if core_utilities.is_blank_string(school.external_id) else str(school.external_id).lower()
+        new_external_id = None \
+            if core_utilities.is_blank_string(row['school_id_govt']) else str(row['school_id_govt']).lower()
         if not _values_equal(old_external_id, new_external_id):
             return True
 
         old_admin1_id = None
         if school.admin1:
             old_admin1_id = str(school.admin1.giga_id_admin).lower()
-        new_admin1_id = None if core_utilities.is_blank_string(row['admin1_id_giga']) else str(
-            row['admin1_id_giga']).lower()
+        new_admin1_id = None \
+            if core_utilities.is_blank_string(row['admin1_id_giga']) else str(row['admin1_id_giga']).lower()
         if not _values_equal(old_admin1_id, new_admin1_id):
             return True
 
         old_admin2_id = None
         if school.admin2:
             old_admin2_id = str(school.admin2.giga_id_admin).lower()
-        new_admin2_id = None if core_utilities.is_blank_string(row['admin2_id_giga']) else str(
-            row['admin2_id_giga']).lower()
+        new_admin2_id = None \
+            if core_utilities.is_blank_string(row['admin2_id_giga']) else str(row['admin2_id_giga']).lower()
         if not _values_equal(old_admin2_id, new_admin2_id):
             return True
 
@@ -177,10 +166,10 @@ def has_changes_for_review(row, school) -> bool:
         ):
             return True
 
-        old_education_level = None if core_utilities.is_blank_string(school.education_level) else str(
-            school.education_level).lower()
-        new_education_level = None if core_utilities.is_blank_string(row['education_level']) else str(
-            row['education_level']).lower()
+        old_education_level = None \
+            if core_utilities.is_blank_string(school.education_level) else str(school.education_level).lower()
+        new_education_level = None \
+            if core_utilities.is_blank_string(row['education_level']) else str(row['education_level']).lower()
         if not _values_equal(old_education_level, new_education_level):
             return True
 
@@ -196,9 +185,7 @@ def has_changes_for_review(row, school) -> bool:
 
         if not _values_equal(old_connectivity_rt, new_connectivity_rt):
             return True
-
         return False
-
     return True
 
 
@@ -316,7 +303,6 @@ def sync_school_master_data(profile_file, share_name, schema_name, table_name, c
                 if school:
                     row['school_id'] = school.id
                     review_required = has_changes_for_review(row, school)
-                    print(review_required)
                     if not review_required:
                         row['status'] = sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED
                         row['published_at'] = core_utilities.get_current_datetime_object()
