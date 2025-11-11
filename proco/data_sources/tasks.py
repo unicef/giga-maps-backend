@@ -730,21 +730,21 @@ def cleanup_school_master_rows():
     if task_instance:
         logger.debug('Not found running job for school master cleanup task: {}'.format(task_key))
         # Delete all the old records where more than 1 record are in DRAFT/UPDATED_IN_DRAFT or
-        # ROW_STATUS_DRAFT_LOCKED/ROW_STATUS_UPDATED_IN_DRAFT_LOCKED/ROW_STATUS_DELETED_PUBLISHED for same School GIGA ID
+        # ROW_STATUS_DRAFT_LOCKED/ROW_STATUS_UPDATED_IN_DRAFT_LOCKED/ROW_STATUS_DELETED for same School GIGA ID
         rows_with_more_than_1_record_in_draft = sources_models.SchoolMasterData.objects.filter(
             status__in=[
                 sources_models.SchoolMasterData.ROW_STATUS_DRAFT,
                 sources_models.SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT,
                 sources_models.SchoolMasterData.ROW_STATUS_DRAFT_LOCKED,
                 sources_models.SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT_LOCKED,
-                sources_models.SchoolMasterData.ROW_STATUS_DELETED_PUBLISHED
+                sources_models.SchoolMasterData.ROW_STATUS_DELETED,
             ]
         ).values('school_id_giga', 'country_id').annotate(
             total_records=Count('school_id_giga', distinct=False),
         ).order_by('-total_records', 'school_id_giga', 'country_id').filter(total_records__gt=1)
 
         logger.debug('Queryset to get all the old records to delete where more than 1 record are in DRAFT/'
-                     'UPDATED_IN_DRAFT/ROW_STATUS_DRAFT_LOCKED/ROW_STATUS_UPDATED_IN_DRAFT_LOCKED/ROW_STATUS_DELETED_PUBLISHED '
+                     'UPDATED_IN_DRAFT/ROW_STATUS_DRAFT_LOCKED/ROW_STATUS_UPDATED_IN_DRAFT_LOCKED/ROW_STATUS_DELETED '
                      'for same School GIGA ID: {0}'.format(rows_with_more_than_1_record_in_draft.query))
 
         for row in rows_with_more_than_1_record_in_draft:
@@ -754,26 +754,48 @@ def cleanup_school_master_rows():
             ).order_by('-created')[1:]:
                 row_to_delete.delete()
         task_instance.info('Deleted rows where more than 1 record are in DRAFT/'
-                           'UPDATED_IN_DRAFT/ROW_STATUS_DRAFT_LOCKED/ROW_STATUS_UPDATED_IN_DRAFT_LOCKED/ROW_STATUS_DELETED_PUBLISHED '
+                           'UPDATED_IN_DRAFT/ROW_STATUS_DRAFT_LOCKED/ROW_STATUS_UPDATED_IN_DRAFT_LOCKED/ROW_STATUS_DELETED '
                            'for same School GIGA ID')
 
-        # Delete all the old records where more than 1 record are in is_read=True for same School GIGA ID
+        # At least keep 1 PUBLISHED row for each school in the school master table
+        rows_with_more_than_1_record_in_published = sources_models.SchoolMasterData.objects.filter(
+            status=sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED,
+        ).values('school_id_giga', 'country_id').annotate(
+            total_records=Count('school_id_giga', distinct=False),
+        ).order_by('-total_records').filter(total_records__gt=1)
+
+        logger.debug('Queryset to get all the old records to delete where more than 1 record are in PUBLISHED '
+                     'for same School GIGA ID: {0}'.format(rows_with_more_than_1_record_in_published.query))
+
+        for row in rows_with_more_than_1_record_in_published:
+            for row_to_delete in sources_models.SchoolMasterData.objects.filter(
+                school_id_giga=row['school_id_giga'],
+                country_id=row['country_id'],
+            ).order_by('-published_at')[1:]:
+                row_to_delete.delete()
+        task_instance.info('Deleted rows where more than 1 record are in PUBLISHED for same School GIGA ID')
+
+        # Delete all the old records where more than 1 record are in is_read=True
+        # by keeping at least 1 PUBLISHED row for same School GIGA ID
         rows_with_more_than_1_record_in_read = sources_models.SchoolMasterData.objects.filter(
             is_read=True,
         ).values('school_id_giga', 'country_id').annotate(
             total_records=Count('school_id_giga', distinct=False),
         ).order_by('-total_records').filter(total_records__gt=1)
 
-        logger.debug('Queryset to get all the old records to delete where more than 1 record are in is_read=True '
-                     'for same School GIGA ID: {0}'.format(rows_with_more_than_1_record_in_read.query))
+        logger.debug('Queryset to get all the old records to delete where more than 1 record are in is_read=True'
+                     ' by keeping at least 1 PUBLISHED row for same School GIGA ID: {0}'.format(
+            rows_with_more_than_1_record_in_read.query))
 
         for row in rows_with_more_than_1_record_in_read:
             for row_to_delete in sources_models.SchoolMasterData.objects.filter(
                 school_id_giga=row['school_id_giga'],
                 country_id=row['country_id'],
             ).order_by('-published_at')[1:]:
-                row_to_delete.delete()
-        task_instance.info('Deleted rows where more than 1 record are in is_read=True for same School GIGA ID')
+                if row_to_delete.status != sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED:
+                    row_to_delete.delete()
+        task_instance.info('Deleted rows where more than 1 record are in is_read=True '
+                           'by keeping at least 1 PUBLISHED row for same School GIGA ID')
 
         background_task_utilities.task_on_complete(task_instance)
     else:
