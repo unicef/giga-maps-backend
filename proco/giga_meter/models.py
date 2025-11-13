@@ -307,3 +307,40 @@ class GigaMeter_SchoolStatic(TimeStampedModel, models.Model):
         app_label = app_config.app_name
         managed = False
         db_table = 'master_sync_school_static'
+
+
+# Model mapping used for Ping scale
+class GigaMeter_ConnectivityPingChecks(models.Model):
+    """
+    CREATE TABLE IF NOT EXISTS public.connectivity_ping_checks
+    (
+        id integer NOT NULL DEFAULT nextval('connectivity_ping_checks_id_seq'::regclass),
+        "timestamp" timestamp(6) with time zone,
+        is_connected boolean,
+        error_message text COLLATE pg_catalog."default",
+        giga_id_school text COLLATE pg_catalog."default" NOT NULL,
+        app_local_uuid text COLLATE pg_catalog."default" NOT NULL,
+        device_id text COLLATE pg_catalog."default" NOT NULL,
+        created_at timestamp(6) with time zone DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text),
+        latency double precision,
+        CONSTRAINT connectivity_ping_checks_pkey PRIMARY KEY (id)
+    )
+    """
+    timestamp = models.DateTimeField()
+    is_connected = models.BooleanField()
+    error_message = models.TextField(blank=True, null=True)
+    giga_id_school = models.TextField(blank=False, null=False)
+    app_local_uuid = models.TextField(blank=False, null=False)
+    device_id = models.TextField(blank=False, null=False)
+    created_at = models.DateTimeField()
+    latency = models.FloatField(blank=True, null=True)
+
+    objects = models.Manager()
+
+    class Meta:
+        app_label = app_config.app_name
+        managed = False
+        db_table = 'connectivity_ping_checks'
+
+    def __str__(self):
+        return f'{self.giga_id_school} - {self.device_id} - {self.created_at} - {self.is_connected}'

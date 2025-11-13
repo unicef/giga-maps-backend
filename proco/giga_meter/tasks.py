@@ -442,3 +442,24 @@ def scheduler_for_populate_school_geopoint_field(country_iso3_format):
         background_task_utilities.task_on_complete(task_instance)
     else:
         logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+
+
+@app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)
+def scheduler_for_backup_giga_meter_connectivity_ping_data(start_date, end_date):
+    task_key = f'scheduler_for_backup_giga_meter_connectivity_ping_data_for_{start_date}_country_at_{end_date}'
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(
+        task_id,
+        task_key,
+        f'Backup GigaMeter Connectivity Ping data for dates between {start_date} - {end_date}')
+
+    if task_instance:
+        task_instance.info(f'Not found running job for "Backup GigaMeter Connectivity Ping data" utility handler: {task_key}')
+        cmd_args = [f'-start_date={start_date}', f'-end_date={end_date}']
+
+        call_command('backup_giga_meter_connectivity_ping_data', *cmd_args)
+        task_instance.info('Completed "Backup GigaMeter Connectivity Ping data" utility handler.')
+
+        background_task_utilities.task_on_complete(task_instance)
+    else:
+        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
