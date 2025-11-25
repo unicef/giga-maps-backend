@@ -171,11 +171,28 @@ class MasterDataSourceModelMixin(DataSourceModelMixin):
     pop_within_1km = models.PositiveIntegerField(blank=True, default=None, null=True)  # pop_within_1km
     pop_within_2km = models.PositiveIntegerField(blank=True, default=None, null=True)  # pop_within_2km
     pop_within_3km = models.PositiveIntegerField(blank=True, default=None, null=True)  # pop_within_3km
-
     # No Mapping
     connectivity = models.CharField(blank=True, null=True, max_length=255)
-
+    connectivity_govt = models.CharField(blank=True, null=True, max_length=255)  # connectivity
+    connectivity_type_govt = models.CharField(blank=True, null=True, max_length=255)  # connectivity_type
+    connectivity_govt_collection_year = models.PositiveIntegerField(blank=True, default=None, null=True)
+    download_speed_contracted = models.FloatField(blank=True, default=None, null=True)  # download_speed_contracted
+    num_computers = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_computers
+    num_tablets = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_tablets
+    computer_availability = models.CharField(blank=True, null=True, max_length=255)  # computer_availability
+    electricity_availability = models.CharField(blank=True, null=True, max_length=255)  # electricity_availability
+    electricity_type = models.CharField(blank=True, null=True, max_length=255)  # electricity_type
+    water_availability = models.CharField(blank=True, null=True, max_length=255)  # running_water
+    sustainable_business_model = models.CharField(blank=True, null=True, max_length=255)  # sustainable_business_model
+    device_availability = models.CharField(blank=True, null=True, max_length=255)  # device_availability
+    facility_establishment_year = models.PositiveIntegerField(blank=True, default=None, null=True) 
+    facility_data_source = models.CharField(blank=True, null=True, max_length=255)
+    facility_data_collection_year = models.CharField(blank=True, null=True, max_length=255)
+    facility_data_collection_modality = models.CharField(blank=True, null=True, max_length=255)
     version = models.PositiveIntegerField(blank=True, default=None, null=True)
+    is_facility_open = models.CharField(blank=True, null=True, max_length=10)
+    num_adm_personnel = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_adm_personnel
+
 
     # When pulled from Source API
     ROW_STATUS_DRAFT = 'DRAFT'
