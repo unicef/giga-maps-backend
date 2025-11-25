@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 
 from django.conf import settings
 from django.core.cache import cache
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 from model_utils.models import TimeStampedModel
@@ -160,37 +161,37 @@ class HealthEntityMasterData(TimeStampedModel, core_models.MasterDataSourceModel
     facility_accessibility = models.CharField(blank=True, null=True, max_length=10) # Yes/No/Null/Unknown
     distance_to_closest_settlement = models.PositiveIntegerField(blank=True, default=None, null=True)
     distance_to_country_boundary = models.PositiveIntegerField(blank=True, default=None, null=True)
-    facility_level = models.CharField(blank=True, null=True, max_length=10)
-    num_healthworkers = models.PositiveIntegerField(blank=True, default=None, null=True)
-    num_beds_tot = models.PositiveIntegerField(blank=True, default=None, null=True)
-    num_beds_icu = models.PositiveIntegerField(blank=True, default=None, null=True)
-    num_theatres = models.PositiveIntegerField(blank=True, default=None, null=True)
-    num_toilets = models.PositiveIntegerField(blank=True, default=None, null=True)
-    power_backup_system = models.CharField(blank=True, null=True, max_length=10)
-    num_outpatients = models.PositiveIntegerField(blank=True, default=None, null=True)
-    num_inpatients = models.PositiveIntegerField(blank=True, default=None, null=True)
-    licensing_status = models.CharField(blank=True, null=True, max_length=10)
-    facility_hours = models.CharField(blank=True, null=True, max_length=10)
-    emergency_services_available = models.CharField(blank=True, null=True, max_length=10)
-    staff_doctors = models.PositiveIntegerField(blank=True, default=None, null=True)
-    staff_nurses = models.PositiveIntegerField(blank=True, default=None, null=True)
-    staff_midwives = models.PositiveIntegerField(blank=True, default=None, null=True)
-    staff_laboratorians = models.PositiveIntegerField(blank=True, default=None, null=True)
-    staff_pharmacists = models.PositiveIntegerField(blank=True, default=None, null=True)
-    cold_chain_available = models.CharField(blank=True, null=True, max_length=10)
-    waste_management_system = models.CharField(blank=True, null=True, max_length=10)
-    hmis_system = models.CharField(blank=True, null=True, max_length=10)
+    facility_level = models.CharField(max_length=20) # Community|Primary|Secondary|Tertiary|Quaternary
+    num_healthworkers = models.PositiveIntegerField(blank=True, default=None, null=True) # min=0, max=6000
+    num_beds_tot = models.PositiveIntegerField(blank=True, default=None, null=True) # min = 0; max = 10000
+    num_beds_icu = models.PositiveIntegerField(blank=True, default=None, null=True) # min = 0; max = 5000
+    num_theatres = models.PositiveIntegerField(blank=True, default=None, null=True) # min = 0; max = 200
+    num_toilets = models.PositiveIntegerField(blank=True, default=None, null=True) # min = 0; max = 500
+    power_backup_system = models.CharField(blank=True, null=True, max_length=10) # yes|no
+    num_outpatients = models.PositiveIntegerField(blank=True, default=None, null=True) # <20000
+    num_inpatients = models.PositiveIntegerField(blank=True, default=None, null=True) # <20000
+    licensing_status = models.CharField(max_length=20) # licensed|provisional|expired|suspended|not_applicable
+    facility_hours = models.CharField(max_length=30) # 24_7 | weekdays_daytime | weekdays_extended | seasonal | unknown | other
+    emergency_services_available = models.CharField(blank=True, null=True, max_length=10) # yes|no
+    staff_doctors = models.PositiveIntegerField(blank=True, default=None, null=True) # max=2000
+    staff_nurses = models.PositiveIntegerField(blank=True, default=None, null=True) # max=4000
+    staff_midwives = models.PositiveIntegerField(blank=True, default=None, null=True) # max=500
+    staff_laboratorians = models.PositiveIntegerField(blank=True, default=None, null=True) # max=500
+    staff_pharmacists = models.PositiveIntegerField(blank=True, default=None, null=True) # max=500
+    cold_chain_available = models.CharField(blank=True, null=True, max_length=10) # yes|no
+    waste_management_system = models.CharField(blank=True, null=True, max_length=50) # incinerator|pit|contracted_service|none|other
+    hmis_system = models.CharField(max_length=10) # yes|no
     catchment_population = models.PositiveIntegerField(blank=True, default=None, null=True)
-    services_offered = models.CharField(blank=True, null=True, max_length=10)
-    facility_id_govt = models.CharField(blank=True, null=True, max_length=10) # external id with which table?
-    facility_id_govt_type = models.CharField(blank=True, null=True, max_length=10)
-    download_speed_govt = models.FloatField(blank=True, null=True)
-    facility_address = models.CharField(blank=True, null=True, max_length=10)
-    refugee_camp = models.CharField(blank=True, null=True, max_length=10)
-    patients_refugees = models.CharField(blank=True, null=True, max_length=10)
-    connectivity_start_gov = models.CharField(blank=True, null=True, max_length=10)
-    connectivity_start_contract_gov = models.CharField(blank=True, null=True, max_length=10)
-    connectivity_ever_connected = models.CharField(blank=True, null=True, max_length=10)
+    services_offered = models.CharField(blank=True, null=True, max_length=50) # outpatient|inpatient|maternity|surgery|laboratory|pharmacy|radiology|dialysis|mental_health|immunization|HIV|TB|NCD_clinic|pediatrics|geriatrics|physiotherapy|dental
+    facility_id_govt = models.CharField(max_length=50)
+    facility_id_govt_type = models.CharField(blank=True, null=True, max_length=50)
+    download_speed_govt = models.FloatField(blank=True, null=True) # min = 0; max = 200
+    facility_address = models.CharField(blank=True, null=True, max_length=10) # min = 1000; max = current year
+    refugee_camp = models.CharField(blank=True, null=True, max_length=10) # yes|no
+    patients_refugees = models.CharField(blank=True, null=True, max_length=10) # yes|no
+    connectivity_start_gov = models.CharField(blank=True, null=True, max_length=10) # MM: min =1; max=12|YYYY: min = 1000; max = current year
+    connectivity_start_contract_gov = models.CharField(blank=True, null=True, max_length=10)# MM: min =1; max=12|YYYY: min = 1000; max = current year
+    connectivity_ever_connected = models.CharField(blank=True, null=True, max_length=10) # yes|no
 
    
 
