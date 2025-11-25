@@ -173,26 +173,25 @@ class MasterDataSourceModelMixin(DataSourceModelMixin):
     pop_within_3km = models.PositiveIntegerField(blank=True, default=None, null=True)  # pop_within_3km
     # No Mapping
     connectivity = models.CharField(blank=True, null=True, max_length=255)
-    connectivity_govt = models.CharField(blank=True, null=True, max_length=255)  # connectivity
-    connectivity_type_govt = models.CharField(blank=True, null=True, max_length=255)  # connectivity_type
-    connectivity_govt_collection_year = models.PositiveIntegerField(blank=True, default=None, null=True)
-    download_speed_contracted = models.FloatField(blank=True, default=None, null=True)  # download_speed_contracted
-    num_computers = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_computers
-    num_tablets = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_tablets
-    computer_availability = models.CharField(blank=True, null=True, max_length=255)  # computer_availability
-    electricity_availability = models.CharField(blank=True, null=True, max_length=255)  # electricity_availability
-    electricity_type = models.CharField(blank=True, null=True, max_length=255)  # electricity_type
-    water_availability = models.CharField(blank=True, null=True, max_length=255)  # running_water
-    sustainable_business_model = models.CharField(blank=True, null=True, max_length=255)  # sustainable_business_model
-    device_availability = models.CharField(blank=True, null=True, max_length=255)  # device_availability
-    facility_establishment_year = models.PositiveIntegerField(blank=True, default=None, null=True) 
+    connectivity_govt = models.CharField(default='N/A', max_length=10)  # yes|no
+    connectivity_type_govt = models.CharField(blank=True, null=True, max_length=50)  # connectivity_type
+    connectivity_govt_collection_year = models.PositiveIntegerField(blank=True, default=None, null=True) #min = 2000; max = current year
+    download_speed_contracted = models.FloatField(default='N/A')  # min = 0; max = 500
+    num_computers = models.PositiveIntegerField(blank=True, default=None, null=True)  # min = 0; max = 500
+    num_tablets = models.PositiveIntegerField(blank=True, default=None, null=True)  # min = 0; max = 200
+    computer_availability = models.CharField(default='N/A', max_length=10)  # yes|no
+    electricity_availability = models.CharField( default='N/A', max_length=10)  # yes|no
+    electricity_type = models.CharField(blank=True, null=True, max_length=50)  # electrical grid|diesel generator|solar power station|other 
+    water_availability = models.CharField(default='N/A', max_length=10)  # yes|no
+    sustainable_business_model = models.CharField(blank=True, null=True, max_length=10)  # yes|no
+    device_availability = models.CharField(blank=True, null=True, max_length=10)  # yes|no
+    facility_establishment_year = models.PositiveIntegerField(blank=True, default=None, null=True) # min = 1000; max = current year
     facility_data_source = models.CharField(blank=True, null=True, max_length=255)
-    facility_data_collection_year = models.CharField(blank=True, null=True, max_length=255)
-    facility_data_collection_modality = models.CharField(blank=True, null=True, max_length=255)
+    facility_data_collection_year = models.PositiveIntegerField(blank=True, default=None, null=True) # min = 1000; max = current year
+    facility_data_collection_modality = models.CharField(blank=True, null=True, max_length=50) # online|in-person|phone|other
     version = models.PositiveIntegerField(blank=True, default=None, null=True)
-    is_facility_open = models.CharField(blank=True, null=True, max_length=10)
-    num_adm_personnel = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_adm_personnel
-
+    is_facility_open = models.CharField(blank=True, null=True, max_length=10) # yes|no
+    num_adm_personnel = models.PositiveIntegerField(blank=True, default=None, null=True)  # min=0, max=2000
 
     # When pulled from Source API
     ROW_STATUS_DRAFT = 'DRAFT'
@@ -274,7 +273,7 @@ class BaseMasterStatusModel(models.Model):
     computer_lab = models.NullBooleanField(default=None)
 
     download_speed_benchmark = models.FloatField(blank=True, default=None, null=True)
-    download_speed_contracted = models.FloatField(blank=True, default=None, null=True)
+    download_speed_contracted = models.FloatField(blank=True, default=None, null=True) #min = 0; max = 500
 
     electricity_type = models.CharField(blank=True, null=True, max_length=255)
     num_adm_personnel = models.PositiveIntegerField(blank=True, default=None, null=True)
@@ -302,7 +301,7 @@ class BaseMasterStatusModel(models.Model):
     disputed_region = models.BooleanField(default=False)
 
     connectivity_govt = models.NullBooleanField(default=None)
-    connectivity_type_govt = models.CharField(blank=True, null=True, max_length=255)
+    connectivity_type_govt = models.CharField(blank=True, null=True, max_length=255) #fiber|xdsl|wired|cellular|p2mp|wireless|p2p wireless|satellite|other
     connectivity_type = models.CharField(blank=True, null=True, max_length=255)
     connectivity_type_root = models.CharField(blank=True, null=True, max_length=255)
 
