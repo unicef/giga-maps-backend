@@ -159,7 +159,7 @@ class HealthEntityMasterData(TimeStampedModel, core_models.MasterDataSourceModel
     hf_pop_est = models.PositiveIntegerField(blank=True, default=None, null=True)
     health_service_provider = models.CharField(blank=True, null=True, max_length=255) # Public|Private|Charitable|Other
     facility_accessibility = models.CharField(blank=True, null=True, max_length=10) # Yes/No/Null/Unknown
-    distance_to_closest_settlement = models.PositiveIntegerField(blank=True, default=None, null=True)
+    distance_to_closest_settlement = models.PositiveIntegerField(blank=True, null=True)
     distance_to_country_boundary = models.PositiveIntegerField(blank=True, default=None, null=True)
     facility_level = models.CharField(max_length=20) # Community|Primary|Secondary|Tertiary|Quaternary
     num_healthworkers = models.PositiveIntegerField(blank=True, default=None, null=True) # min=0, max=6000
