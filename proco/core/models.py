@@ -273,7 +273,7 @@ class BaseMasterStatusModel(models.Model):
     computer_lab = models.NullBooleanField(default=None)
 
     download_speed_benchmark = models.FloatField(blank=True, default=None, null=True)
-    download_speed_contracted = models.FloatField(blank=True, null=True) #min = 0; max = 500
+    download_speed_contracted = models.FloatField(blank=True, default=None, null=True) #min = 0; max = 500
 
     electricity_type = models.CharField(blank=True, null=True, max_length=255)
     num_adm_personnel = models.PositiveIntegerField(blank=True, default=None, null=True)
@@ -288,7 +288,7 @@ class BaseMasterStatusModel(models.Model):
     pop_within_2km = models.PositiveIntegerField(blank=True, default=None, null=True)
     pop_within_3km = models.PositiveIntegerField(blank=True, default=None, null=True)
 
-    connectivity_govt_collection_year = models.PositiveSmallIntegerField(blank=True, null=True)
+    connectivity_govt_collection_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
     connectivity_govt_ingestion_timestamp = CustomDateTimeField(null=True, blank=True)
 
     num_tablets = models.PositiveIntegerField(blank=True, default=None, null=True)
