@@ -2,7 +2,6 @@ from datetime import datetime, timedelta
 
 from django.conf import settings
 from django.core.cache import cache
-from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 from model_utils.models import TimeStampedModel
@@ -170,8 +169,8 @@ class HealthEntityMasterData(TimeStampedModel, core_models.MasterDataSourceModel
     power_backup_system = models.CharField(blank=True, null=True, max_length=10) # yes|no
     num_outpatients = models.PositiveIntegerField(blank=True, default=None, null=True) # <20000
     num_inpatients = models.PositiveIntegerField(blank=True, default=None, null=True) # <20000
-    licensing_status = models.CharField(max_length=20) # licensed|provisional|expired|suspended|not_applicable
-    facility_hours = models.CharField(max_length=30) # 24_7 | weekdays_daytime | weekdays_extended | seasonal | unknown | other
+    licensing_status = models.CharField(max_length=50) # licensed|provisional|expired|suspended|not_applicable
+    facility_hours = models.CharField(max_length=50) # 24_7 | weekdays_daytime | weekdays_extended | seasonal | unknown | other
     emergency_services_available = models.CharField(blank=True, null=True, max_length=10) # yes|no
     staff_doctors = models.PositiveIntegerField(blank=True, default=None, null=True) # max=2000
     staff_nurses = models.PositiveIntegerField(blank=True, default=None, null=True) # max=4000
@@ -182,9 +181,15 @@ class HealthEntityMasterData(TimeStampedModel, core_models.MasterDataSourceModel
     waste_management_system = models.CharField(blank=True, null=True, max_length=50) # incinerator|pit|contracted_service|none|other
     hmis_system = models.CharField(max_length=10) # yes|no
     catchment_population = models.PositiveIntegerField(blank=True, default=None, null=True)
-    services_offered = models.CharField(blank=True, null=True, max_length=50) # outpatient|inpatient|maternity|surgery|laboratory|pharmacy|radiology|dialysis|mental_health|immunization|HIV|TB|NCD_clinic|pediatrics|geriatrics|physiotherapy|dental
+    services_offered = models.CharField(blank=True, null=True, max_length=100) # outpatient|inpatient|maternity|surgery|laboratory|pharmacy|radiology|dialysis|mental_health|immunization|HIV|TB|NCD_clinic|pediatrics|geriatrics|physiotherapy|dental
     facility_id_govt = models.CharField(max_length=50)
     facility_id_govt_type = models.CharField(blank=True, null=True, max_length=50)
+    facility_establishment_year = models.PositiveSmallIntegerField(blank=True, null=True) # min = 1000; max = current year
+    facility_data_source = models.CharField(blank=True, null=True, max_length=255)
+    facility_data_collection_year = models.PositiveSmallIntegerField(blank=True, null=True) # min = 1000; max = current year
+    facility_data_collection_modality = models.CharField(blank=True, null=True, max_length=255) # online|in-person|phone|other
+    is_facility_open = models.CharField(blank=True, null=True, max_length=10) # yes|no
+    
     download_speed_govt = models.FloatField(blank=True, null=True) # min = 0; max = 200
     facility_address = models.CharField(blank=True, null=True, max_length=10) # min = 1000; max = current year
     refugee_camp = models.CharField(blank=True, null=True, max_length=10) # yes|no
