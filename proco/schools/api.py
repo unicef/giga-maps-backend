@@ -544,6 +544,9 @@ class SchoolStatusConnectivityTileGenerator(BaseTileGenerator):
         elif 'school_id__in' in query_param_keys:
             table_configs['school_ids'] = [s_id.strip() for s_id in query_params['school_id__in'].split(',')]
 
+        if 'exclude_schools_same_coords_except_id' in query_param_keys:
+            table_configs['exclude_schools_same_coords_except_id'] = str(query_params['exclude_schools_same_coords_except_id']).strip()
+
         table_configs['school_filters'] = core_utilities.get_filter_sql(
             request, 'schools', 'schools_school')
         table_configs['school_static_filters'] = core_utilities.get_filter_sql(
@@ -558,6 +561,7 @@ class SchoolStatusConnectivityTileGenerator(BaseTileGenerator):
         tbl['admin1_condition'] = ''
         tbl['school_condition'] = ''
         tbl['random_order'] = ''
+        tbl['same_school_coords_condition'] = ''
 
         self.update_kwargs(request, tbl)
 
@@ -582,6 +586,7 @@ class SchoolStatusConnectivityTileGenerator(BaseTileGenerator):
                     {admin1_condition}
                     {school_condition}
                     {school_weekly_condition}
+                    {same_school_coords_condition}
                     {random_order}
                     {limit_condition}
             )
@@ -641,7 +646,16 @@ class SchoolStatusConnectivityTileGenerator(BaseTileGenerator):
                 tbl['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
 
             tbl['limit_condition'] = 'LIMIT ' + str(limit)
-
+        if tbl.get('exclude_schools_same_coords_except_id'):
+            tbl['same_school_coords_condition'] = f"""
+                            AND (
+                                schools_school.id = {tbl['exclude_schools_same_coords_except_id']}
+                                OR NOT ST_Equals(
+                                    schools_school.geopoint,
+                                    (SELECT geopoint FROM schools_school WHERE id = {tbl['exclude_schools_same_coords_except_id']})
+                                )
+                            )
+                        """
         return sql_tmpl.format(**tbl)
 
 @method_decorator([
