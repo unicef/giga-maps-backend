@@ -1093,8 +1093,8 @@ class BaseDataLayerAPIViewSet(APIView):
         elif 'school_id__in' in query_param_keys:
             self.kwargs['school_ids'] = [s_id.strip() for s_id in query_params['school_id__in'].split(',')]
 
-        if 'school_id_to_handle_dup' in query_param_keys:
-            self.kwargs['school_id_to_handle_dup'] = str(query_params['school_id_to_handle_dup']).strip()
+        if 'exclude_schools_same_coords_except_id' in query_param_keys:
+            self.kwargs['exclude_schools_same_coords_except_id'] = str(query_params['exclude_schools_same_coords_except_id']).strip()
 
         self.kwargs['is_weekly'] = False if query_params.get('is_weekly', 'true') == 'false' else True
         self.kwargs['benchmark'] = 'national' if query_params.get('benchmark', 'global') == 'national' else 'global'
@@ -2185,7 +2185,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                         {country_condition}
                         {admin1_condition}
                         {school_condition}
-                        {dedup_condition}
+                        {same_school_coords_condition}
                         {school_weekly_condition}
                         AND rt_status."rt_registered" = True
                         AND rt_status."rt_registration_date"::date <= '{end_date}'
@@ -2215,7 +2215,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         kwargs['limit_condition'] = ''
         kwargs['random_order'] = ''
         kwargs['random_select_list'] = ''
-        kwargs['dedup_condition'] = ''
+        kwargs['same_school_coords_condition'] = ''
 
         add_random_condition = True
 
@@ -2282,13 +2282,13 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
 
-        if kwargs.get('school_id_to_handle_dup'):
-            kwargs['dedup_condition'] = f"""
+        if kwargs.get('exclude_schools_same_coords_except_id'):
+            kwargs['same_school_coords_condition'] = f"""
                                         AND (
-                                            schools_school.id = {kwargs['school_id_to_handle_dup']}
+                                            schools_school.id = {kwargs['exclude_schools_same_coords_except_id']}
                                             OR NOT ST_Equals(
                                                 schools_school.geopoint,
-                                                (SELECT geopoint FROM schools_school WHERE id = {kwargs['school_id_to_handle_dup']})
+                                                (SELECT geopoint FROM schools_school WHERE id = {kwargs['exclude_schools_same_coords_except_id']})
                                             )
                                         )
                                     """
@@ -2348,7 +2348,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             {country_condition}
             {admin1_condition}
             {school_condition}
-            {dedup_condition}
+            {same_school_coords_condition}
             {school_weekly_condition}
             {random_order}
             {limit_condition}
@@ -2370,7 +2370,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         kwargs['limit_condition'] = ''
         kwargs['random_order'] = ''
         kwargs['random_select_list'] = ''
-        kwargs['dedup_condition'] = ''
+        kwargs['same_school_coords_condition'] = ''
 
         add_random_condition = True
 
@@ -2399,13 +2399,13 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             kwargs['country_condition'] = 'AND schools_school."country_id" IN ({0})'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
-        if kwargs.get('school_id_to_handle_dup'):
-            kwargs['dedup_condition'] = f"""
+        if kwargs.get('exclude_schools_same_coords_except_id'):
+            kwargs['same_school_coords_condition'] = f"""
                                         AND (
-                                            sch.id = {kwargs['school_id_to_handle_dup']}
+                                            sch.id = {kwargs['exclude_schools_same_coords_except_id']}
                                             OR NOT ST_Equals(
                                                 sch.geopoint,
-                                                (SELECT geopoint FROM schools_school WHERE id = {kwargs['school_id_to_handle_dup']})
+                                                (SELECT geopoint FROM schools_school WHERE id = {kwargs['exclude_schools_same_coords_except_id']})
                                             )
                                         )
                                     """
