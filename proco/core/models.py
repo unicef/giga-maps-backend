@@ -171,11 +171,22 @@ class MasterDataSourceModelMixin(DataSourceModelMixin):
     pop_within_1km = models.PositiveIntegerField(blank=True, default=None, null=True)  # pop_within_1km
     pop_within_2km = models.PositiveIntegerField(blank=True, default=None, null=True)  # pop_within_2km
     pop_within_3km = models.PositiveIntegerField(blank=True, default=None, null=True)  # pop_within_3km
-
     # No Mapping
     connectivity = models.CharField(blank=True, null=True, max_length=255)
-
+    connectivity_govt = models.CharField(blank=True, null=True, max_length=255)   # yes|no
+    connectivity_type_govt = models.CharField(blank=True, null=True, max_length=255)  # fiber|xdsl|wired|cellular|p2mp|wireless|p2p wireless|satellite|other
+    connectivity_govt_collection_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True) #min = 2000; max = current year
+    download_speed_contracted = models.FloatField(blank=True, default=None, null=True)   # min = 0; max = 500
+    num_computers = models.PositiveIntegerField(blank=True, default=None, null=True) # min = 0; max = 500
+    num_tablets = models.PositiveIntegerField(blank=True, default=None, null=True) # min = 0; max = 200
+    computer_availability = models.CharField(blank=True, null=True, max_length=255)   # yes|no
+    electricity_availability = models.CharField(blank=True, null=True, max_length=255) # yes|no
+    electricity_type = models.CharField(blank=True, null=True, max_length=255)  # electrical grid|diesel generator|solar power station|other 
+    water_availability = models.CharField(blank=True, null=True, max_length=255)  # yes|no
+    sustainable_business_model = models.CharField(blank=True, null=True, max_length=255) # yes|no
+    device_availability = models.CharField(blank=True, null=True, max_length=255)  # yes|no
     version = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_adm_personnel = models.PositiveIntegerField(blank=True, default=None, null=True)   # min=0, max=2000
 
     # When pulled from Source API
     ROW_STATUS_DRAFT = 'DRAFT'

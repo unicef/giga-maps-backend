@@ -51,20 +51,12 @@ class SchoolMasterData(TimeStampedModel, core_models.MasterDataSourceModelMixin)
     school_establishment_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
 
     # SchoolWeeklyStatus Fields
-    download_speed_contracted = models.FloatField(blank=True, default=None, null=True)  # download_speed_contracted
     num_computers_desired = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_computers_desired
-    electricity_type = models.CharField(blank=True, null=True, max_length=255)  # electricity_type
-    num_adm_personnel = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_adm_personnel
     num_students = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_students
     num_teachers = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_teachers
     num_classrooms = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_classroom
     num_latrines = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_latrines
-    water_availability = models.CharField(blank=True, null=True, max_length=255)  # running_water
-    electricity_availability = models.CharField(blank=True, null=True, max_length=255)  # electricity_availability
     computer_lab = models.CharField(blank=True, null=True, max_length=255)  # computer_lab
-    num_computers = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_computers
-    connectivity_govt = models.CharField(blank=True, null=True, max_length=255)  # connectivity
-    connectivity_type_govt = models.CharField(blank=True, null=True, max_length=255)  # connectivity_type
     cellular_coverage_availability = models.CharField(blank=True, null=True, max_length=255)  # coverage_availability
     cellular_coverage_type = models.CharField(blank=True, null=True, max_length=255)  # coverage_type
     fiber_node_distance = models.FloatField(blank=True, default=None, null=True)  # fiber_node_distance
@@ -89,7 +81,6 @@ class SchoolMasterData(TimeStampedModel, core_models.MasterDataSourceModelMixin)
     # connectivity_govt_ingestion_timestamp
     connectivity_govt_ingestion_timestamp = core_models.CustomDateTimeField(null=True, blank=True)
     # connectivity_govt_collection_year
-    connectivity_govt_collection_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
     disputed_region = models.CharField(blank=True, null=True, max_length=255)  # disputed_region
 
     # SchoolRealTimeRegistration
@@ -100,7 +91,6 @@ class SchoolMasterData(TimeStampedModel, core_models.MasterDataSourceModelMixin)
     download_speed_benchmark = models.FloatField(blank=True, default=None, null=True)  # download_speed_benchmark
 
     # New fields on 23rd Sept
-    computer_availability = models.CharField(blank=True, null=True, max_length=255)  # computer_availability
 
     num_students_girls = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_students_girls
     num_students_boys = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_students_boys
@@ -109,10 +99,7 @@ class SchoolMasterData(TimeStampedModel, core_models.MasterDataSourceModelMixin)
     num_teachers_male = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_teachers_male
 
     teachers_trained  = models.CharField(blank=True, null=True, max_length=255)  # teachers_trained
-    sustainable_business_model = models.CharField(blank=True, null=True, max_length=255)  # sustainable_business_model
-    device_availability = models.CharField(blank=True, null=True, max_length=255)  # device_availability
 
-    num_tablets = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_tablets
     num_robotic_equipment = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_robotic_equipment
 
     building_id_govt = models.CharField(blank=True, null=True, max_length=255)  # building_id_govt
@@ -169,97 +156,49 @@ class HealthEntityMasterData(TimeStampedModel, core_models.MasterDataSourceModel
 
     govt_pop_est = models.PositiveIntegerField(blank=True, default=None, null=True)
     hf_pop_est = models.PositiveIntegerField(blank=True, default=None, null=True)
-    is_facility_open = models.CharField(blank=True, null=True, max_length=10) # Yes/No/Null
     health_service_provider = models.CharField(blank=True, null=True, max_length=255) # Public|Private|Charitable|Other
     facility_accessibility = models.CharField(blank=True, null=True, max_length=10) # Yes/No/Null/Unknown
-    # distance_to_closest_settlement
-    # distance_to_country_boundary
-    # facility_level
-    # num_healthworkers
+    distance_to_closest_settlement = models.PositiveIntegerField(blank=True, null=True)
+    distance_to_country_boundary = models.PositiveIntegerField(blank=True, default=None, null=True)
+    facility_level = models.CharField(max_length=20) # Community|Primary|Secondary|Tertiary|Quaternary
+    num_healthworkers = models.PositiveIntegerField(blank=True, default=None, null=True) # min=0, max=6000
+    num_beds_tot = models.PositiveIntegerField(blank=True, default=None, null=True) # min = 0; max = 10000
+    num_beds_icu = models.PositiveIntegerField(blank=True, default=None, null=True) # min = 0; max = 5000
+    num_theatres = models.PositiveIntegerField(blank=True, default=None, null=True) # min = 0; max = 200
+    num_toilets = models.PositiveIntegerField(blank=True, default=None, null=True) # min = 0; max = 500
+    power_backup_system = models.CharField(blank=True, null=True, max_length=10) # yes|no
+    num_outpatients = models.PositiveIntegerField(blank=True, default=None, null=True) # <20000
+    num_inpatients = models.PositiveIntegerField(blank=True, default=None, null=True) # <20000
+    licensing_status = models.CharField(max_length=50) # licensed|provisional|expired|suspended|not_applicable
+    facility_hours = models.CharField(max_length=50) # 24_7 | weekdays_daytime | weekdays_extended | seasonal | unknown | other
+    emergency_services_available = models.CharField(blank=True, null=True, max_length=10) # yes|no
+    staff_doctors = models.PositiveIntegerField(blank=True, default=None, null=True) # max=2000
+    staff_nurses = models.PositiveIntegerField(blank=True, default=None, null=True) # max=4000
+    staff_midwives = models.PositiveIntegerField(blank=True, default=None, null=True) # max=500
+    staff_laboratorians = models.PositiveIntegerField(blank=True, default=None, null=True) # max=500
+    staff_pharmacists = models.PositiveIntegerField(blank=True, default=None, null=True) # max=500
+    cold_chain_available = models.CharField(blank=True, null=True, max_length=10) # yes|no
+    waste_management_system = models.CharField(blank=True, null=True, max_length=50) # incinerator|pit|contracted_service|none|other
+    hmis_system = models.CharField(max_length=10) # yes|no
+    catchment_population = models.PositiveIntegerField(blank=True, default=None, null=True)
+    services_offered = models.CharField(blank=True, null=True, max_length=100) # outpatient|inpatient|maternity|surgery|laboratory|pharmacy|radiology|dialysis|mental_health|immunization|HIV|TB|NCD_clinic|pediatrics|geriatrics|physiotherapy|dental
+    facility_id_govt = models.CharField(max_length=50)
+    facility_id_govt_type = models.CharField(blank=True, null=True, max_length=50)
+    facility_establishment_year = models.PositiveSmallIntegerField(blank=True, null=True) # min = 1000; max = current year
+    facility_data_source = models.CharField(blank=True, null=True, max_length=255)
+    facility_data_collection_year = models.PositiveSmallIntegerField(blank=True, null=True) # min = 1000; max = current year
+    facility_data_collection_modality = models.CharField(blank=True, null=True, max_length=255) # online|in-person|phone|other
+    is_facility_open = models.CharField(blank=True, null=True, max_length=10) # yes|no
+    
+    download_speed_govt = models.FloatField(blank=True, null=True) # min = 0; max = 200
+    facility_address = models.CharField(blank=True, null=True, max_length=10) # min = 1000; max = current year
+    refugee_camp = models.CharField(blank=True, null=True, max_length=10) # yes|no
+    patients_refugees = models.CharField(blank=True, null=True, max_length=10) # yes|no
+    connectivity_start_gov = models.CharField(blank=True, null=True, max_length=10) # MM: min =1; max=12|YYYY: min = 1000; max = current year
+    connectivity_start_contract_gov = models.CharField(blank=True, null=True, max_length=10)# MM: min =1; max=12|YYYY: min = 1000; max = current year
+    connectivity_ever_connected = models.CharField(blank=True, null=True, max_length=10) # yes|no
 
-    schools_within_1km = models.PositiveIntegerField(blank=True, default=None, null=True)  # schools_within_1km
-    schools_within_2km = models.PositiveIntegerField(blank=True, default=None, null=True)  # schools_within_2km
-    schools_within_3km = models.PositiveIntegerField(blank=True, default=None, null=True)  # schools_within_3km
-
-
-    facility_id_govt = models.CharField(blank=True, null=True, max_length=255, db_index=True)  # School.external_id
-
-
-
-    education_level = models.CharField(blank=True, null=True, max_length=255)  # School.education_level
-    education_level_govt = models.CharField(blank=True, null=True, max_length=255)  # School.education_level_govt
-
-    school_funding_type = models.CharField(blank=True, null=True, max_length=255)  # School.school_type
-    school_establishment_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
-
-    # SchoolWeeklyStatus Fields
-    download_speed_contracted = models.FloatField(blank=True, default=None, null=True)  # download_speed_contracted
-    num_computers_desired = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_computers_desired
-    electricity_type = models.CharField(blank=True, null=True, max_length=255)  # electricity_type
-    num_adm_personnel = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_adm_personnel
-    num_students = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_students
-    num_teachers = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_teachers
-    num_classrooms = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_classroom
-    num_latrines = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_latrines
-    water_availability = models.CharField(blank=True, null=True, max_length=255)  # running_water
-    electricity_availability = models.CharField(blank=True, null=True, max_length=255)  # electricity_availability
-    computer_lab = models.CharField(blank=True, null=True, max_length=255)  # computer_lab
-    num_computers = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_computers
-    connectivity_govt = models.CharField(blank=True, null=True, max_length=255)  # connectivity
-    connectivity_type_govt = models.CharField(blank=True, null=True, max_length=255)  # connectivity_type
-    cellular_coverage_availability = models.CharField(blank=True, null=True, max_length=255)  # coverage_availability
-    cellular_coverage_type = models.CharField(blank=True, null=True, max_length=255)  # coverage_type
-    fiber_node_distance = models.FloatField(blank=True, default=None, null=True)  # fiber_node_distance
-    microwave_node_distance = models.FloatField(blank=True, default=None, null=True)  # microwave_node_distance
-
-
-
-    nearest_LTE_distance = models.FloatField(blank=True, default=None, null=True)  # nearest_lte_distance
-    nearest_UMTS_distance = models.FloatField(blank=True, default=None, null=True)  # nearest_umts_distance
-    nearest_GSM_distance = models.FloatField(blank=True, default=None, null=True)  # nearest_gsm_distance
-    nearest_NR_distance = models.FloatField(blank=True, default=None, null=True)  # nearest_nr_distance
-
-
-
-    school_data_source = models.CharField(blank=True, null=True, max_length=255)  # school_data_source
-    # school_data_collection_year
-    school_data_collection_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
-    # school_data_collection_modality
-    school_data_collection_modality = models.CharField(blank=True, null=True, max_length=255)
-    # school_location_ingestion_timestamp
-    school_location_ingestion_timestamp = core_models.CustomDateTimeField(null=True, blank=True)
-    # connectivity_govt_ingestion_timestamp
-    connectivity_govt_ingestion_timestamp = core_models.CustomDateTimeField(null=True, blank=True)
-    # connectivity_govt_collection_year
-    connectivity_govt_collection_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
-    disputed_region = models.CharField(blank=True, null=True, max_length=255)  # disputed_region
-
-    # SchoolRealTimeRegistration
-    connectivity_RT = models.CharField(blank=True, null=True, max_length=255)  # rt_registered
-    connectivity_RT_datasource = models.CharField(blank=True, null=True, max_length=255)  # rt_source
-    connectivity_RT_ingestion_timestamp = core_models.CustomDateTimeField(null=True, blank=True)  # rt_registration_date
-
-    download_speed_benchmark = models.FloatField(blank=True, default=None, null=True)  # download_speed_benchmark
-
-    # New fields on 23rd Sept
-    computer_availability = models.CharField(blank=True, null=True, max_length=255)  # computer_availability
-
-    num_students_girls = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_students_girls
-    num_students_boys = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_students_boys
-    num_students_other = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_students_other
-    num_teachers_female = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_teachers_female
-    num_teachers_male = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_teachers_male
-
-    teachers_trained  = models.CharField(blank=True, null=True, max_length=255)  # teachers_trained
-    sustainable_business_model = models.CharField(blank=True, null=True, max_length=255)  # sustainable_business_model
-    device_availability = models.CharField(blank=True, null=True, max_length=255)  # device_availability
-
-    num_tablets = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_tablets
-    num_robotic_equipment = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_robotic_equipment
-
-    building_id_govt = models.CharField(blank=True, null=True, max_length=255)  # building_id_govt
-    num_schools_per_building = models.PositiveIntegerField(blank=True, default=None, null=True)  # num_schools_per_building
-
+   
 
 class DailyCheckAppMeasurementData(core_models.DataSourceModelMixin):
     CACHE_KEY = 'last_dailycheckapp_measurement_at'
