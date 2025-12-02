@@ -547,7 +547,7 @@ def email_reminder_to_editor_and_publisher_for_review_waiting_records():
         task_id, task_key, 'Send reminder email to Editor and Publisher to review the school master rows')
 
     if task_instance:
-        task_instance.debug('Not found running job for reminder email task: {}'.format(task_key))
+        task_instance.info('Not found running job for reminder email task: {}'.format(task_key))
 
         ds_settings = settings.DATA_SOURCE_CONFIG.get('SCHOOL_MASTER')
         review_grace_period = core_utilities.convert_to_int(ds_settings['REVIEW_GRACE_PERIOD_IN_HRS'], default='48')
