@@ -297,7 +297,6 @@ class BaseMasterStatusModel(models.Model):
 
     connectivity_govt = models.NullBooleanField(default=None)
     connectivity_type_govt = models.CharField(blank=True, null=True, max_length=255)
-    connectivity_type = models.CharField(blank=True, null=True, max_length=255)
     connectivity_type_root = models.CharField(blank=True, null=True, max_length=255)
 
     nearest_lte_distance = models.FloatField(blank=True, default=None, null=True)
@@ -310,11 +309,22 @@ class BaseMasterStatusModel(models.Model):
     data_collection_modality = models.CharField(blank=True, null=True, max_length=255)
     location_ingestion_timestamp = CustomDateTimeField(null=True, blank=True)
 
-    connectivity = models.NullBooleanField(default=None)
 
     coverage_type = models.CharField(max_length=8, default='unknown')
 
     version = models.PositiveIntegerField(blank=True, default=None, null=True)
+    latitude = models.FloatField(blank=True, default=None, null=True)
+    longitude = models.FloatField(blank=True, default=None, null=True)
+    admin1 = models.CharField(max_length=255, blank=True, null=True)
+    admin1_id_giga = models.CharField(max_length=50, null=True, blank=True)
+    admin2 = models.CharField(max_length=255, blank=True, null=True)
+    admin2_id_giga = models.CharField(max_length=50, null=True, blank=True)
+    admin3 = models.CharField(max_length=255, blank=True, null=True)
+    admin4 = models.CharField(max_length=255, blank=True, null=True)
+    connectivity = models.CharField(blank=True, null=True, max_length=255)
+    connectivity_type = models.CharField(blank=True, null=True, max_length=255)
+    pop_within_5km = models.PositiveIntegerField(blank=True, default=None, null=True)  # pop_within_5km
+    pop_within_10km = models.PositiveIntegerField(blank=True, default=None, null=True)  # pop_within_10km
 
     class Meta:
         abstract = True
