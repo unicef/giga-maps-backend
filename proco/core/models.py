@@ -181,7 +181,7 @@ class MasterDataSourceModelMixin(DataSourceModelMixin):
     num_tablets = models.PositiveIntegerField(blank=True, default=None, null=True) # min = 0; max = 200
     computer_availability = models.CharField(blank=True, null=True, max_length=255)   # yes|no
     electricity_availability = models.CharField(blank=True, null=True, max_length=255) # yes|no
-    electricity_type = models.CharField(blank=True, null=True, max_length=255)  # electrical grid|diesel generator|solar power station|other 
+    electricity_type = models.CharField(blank=True, null=True, max_length=255)  # electrical grid|diesel generator|solar power station|other
     water_availability = models.CharField(blank=True, null=True, max_length=255)  # yes|no
     sustainable_business_model = models.CharField(blank=True, null=True, max_length=255) # yes|no
     device_availability = models.CharField(blank=True, null=True, max_length=255)  # yes|no

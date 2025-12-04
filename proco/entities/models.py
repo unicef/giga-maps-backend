@@ -175,7 +175,7 @@ class HealthMasterStatus(core_models.BaseModelMixin, core_models.BaseMasterStatu
     facility_id_govt_type = models.CharField(blank=True, null=True, max_length=50)
     facility_establishment_year = models.PositiveSmallIntegerField(blank=True, null=True)
     download_speed_govt = models.FloatField(blank=True, default=None, null=True)
-    facility_address = models.CharField(blank=True, null=True, max_length=10) 
+    facility_address = models.CharField(blank=True, null=True, max_length=10)
     facility_data_source = models.CharField(blank=True, null=True, max_length=255)
     facility_data_collection_year = models.PositiveSmallIntegerField(blank=True, null=True)
     facility_data_collection_modality = models.NullBooleanField(default=None)
