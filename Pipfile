@@ -40,10 +40,8 @@ djangorestframework = ">=3.10"
 drf-secure-token = "*"
 gunicorn = "*"
 futures = "==3.1.1"
-# BlobPermissions not available in 12 release (https://github.com/Azure/azure-sdk-for-python/blob/22be12d5fa3604acde0695705993347787497a2e/sdk/storage/azure-storage-blob/CHANGELOG.md#1200b4-2019-10-08)
 azure-storage-blob = "<12.0.0"
 django-storages = {version = "*", extras = ["azure"]}
-# django-storages = "==1.11.1"
 django-compressor = "*"
 boto3 = "*"
 Django = ">=2.2,<3"
@@ -63,8 +61,6 @@ django-modeladmin-reorder = "*"
 django-redis = "==5.2.0"
 redis = "==5.2.1"
 numpy = "==1.20.1"
-# The sklearn PyPI package is deprecated use scikit-learn instead
-#sklearn = "*"
 scikit-learn = "==1.3.2"
 django-mptt-admin = "*"
 isoweek = "*"
@@ -84,6 +80,8 @@ django-prometheus = "==2.2.0"
 celery-redbeat = "==2.2.0"
 flower = "==2.0.1"
 django-dynamic-db-router = "==0.3.0"
+deltalake = "==0.12.0"
+#azure-storage-file-datalake = "==12.13.1"
 
 [requires]
 python_version = "3.8"
