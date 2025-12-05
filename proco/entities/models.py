@@ -139,8 +139,8 @@ class HealthMasterStatus(core_models.BaseModelMixin, core_models.BaseMasterStatu
     facility_name =  models.CharField(max_length=1000)
     facility_type = models.CharField(blank=True, null=True, max_length=255)
     facility_ownership = models.CharField(blank=True, null=True, max_length=255)
-    num_community_health_workers = models.PositiveIntegerField(blank=True, default=None, null=True)
-    num_community_health_workers_within_5km = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_of_community_health_workers = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_of_community_health_workers_within_5km = models.PositiveIntegerField(blank=True, default=None, null=True)
     area_type = models.CharField(blank=True, null=True, max_length=255)
     govt_pop_est = models.PositiveIntegerField(blank=True, default=None, null=True)  # govt_pop_est
     hf_pop_est = models.PositiveIntegerField(blank=True, default=None, null=True)
