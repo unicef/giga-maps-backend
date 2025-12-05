@@ -150,7 +150,7 @@ class HealthMasterStatus(core_models.BaseModelMixin, core_models.BaseMasterStatu
     distance_to_closest_settlement = models.PositiveIntegerField(blank=True, null=True)
     distance_to_country_boundary = models.PositiveIntegerField(blank=True, default=None, null=True)
     facility_level = models.CharField(max_length=20)
-    num_healthworkers = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_of_healthworkers = models.PositiveIntegerField(blank=True, default=None, null=True)
     num_beds_tot = models.PositiveIntegerField(blank=True, default=None, null=True)  # min = 0; max = 10000
     num_beds_icu = models.PositiveIntegerField(blank=True, default=None, null=True)  # min = 0; max = 5000
     num_theatres = models.PositiveIntegerField(blank=True, default=None, null=True)  # min = 0; max = 200
@@ -170,7 +170,8 @@ class HealthMasterStatus(core_models.BaseModelMixin, core_models.BaseMasterStatu
     waste_management_system = models.CharField(blank=True, null=True, max_length=50) # incinerator|pit|contracted_service|none|other
     hmis_system = models.NullBooleanField(default=None) # yes|no
     catchment_population = models.PositiveIntegerField(blank=True, default=None, null=True)
-    services_offered = models.CharField(blank=True, null=True, max_length=100) # outpatient|inpatient|maternity|surgery|laboratory|pharmacy|radiology|dialysis|mental_health|immunization|HIV|TB|NCD_clinic|pediatrics|geriatrics|physiotherapy|dental
+    # outpatient|inpatient|maternity|surgery|laboratory|pharmacy|radiology|dialysis|mental_health|immunization|HIV|TB|NCD_clinic|pediatrics|geriatrics|physiotherapy|dental
+    services_offered = models.CharField(blank=True, null=True, max_length=100) 
     facility_id_govt = models.CharField(max_length=50)
     facility_id_govt_type = models.CharField(blank=True, null=True, max_length=50)
     facility_establishment_year = models.PositiveSmallIntegerField(blank=True, null=True)
@@ -179,7 +180,6 @@ class HealthMasterStatus(core_models.BaseModelMixin, core_models.BaseMasterStatu
     facility_data_source = models.CharField(blank=True, null=True, max_length=255)
     facility_data_collection_year = models.PositiveSmallIntegerField(blank=True, null=True)
     facility_data_collection_modality = models.NullBooleanField(default=None)
-    is_facility_open = models.CharField(blank=True, null=True, max_length=10) # yes|no
     refugee_camp = models.NullBooleanField(default=None)
     patients_refugees = models.NullBooleanField(default=None)
     connectivity_start_gov = models.CharField(blank=True, null=True, max_length=10) # MM: min =1; max=12|YYYY: min = 1000; max = current year
