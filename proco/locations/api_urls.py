@@ -18,6 +18,7 @@ urlpatterns = [
     path('search-countries/', api.CountrySearchStatListAPIView.as_view(), name='search-countries-admin-schools'),
     # Cognitive Search Index based searching for Schools
     path('gsearch/', api.AggregateSearchViewSet.as_view(), name='global-search-filter'),
+    path('gentitysearch/', api.AggregateSearchEntityViewSet.as_view(), name='global-search-filter'),
 
     path('country/', api.CountryDataViewSet.as_view({
         'get': 'list',
