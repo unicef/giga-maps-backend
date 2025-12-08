@@ -132,6 +132,61 @@ class HealthMasterStatus(core_models.BaseModelMixin, core_models.BaseMasterStatu
         on_delete=models.DO_NOTHING,
         verbose_name='Master Sync'
     )
+    health_id_giga = models.CharField(max_length=255)
+    dhis2_id = models.CharField(blank=True, null=True, max_length=255)
+    hims_id = models.CharField(blank=True, null=True, max_length=255)
+    hfml_id = models.CharField(blank=True, null=True, max_length=255)
+    facility_name =  models.CharField(max_length=1000)
+    facility_type = models.CharField(blank=True, null=True, max_length=255)
+    facility_ownership = models.CharField(blank=True, null=True, max_length=255)
+    num_of_community_health_workers = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_of_community_health_workers_within_5km = models.PositiveIntegerField(blank=True, default=None, null=True)
+    area_type = models.CharField(blank=True, null=True, max_length=255)
+    govt_pop_est = models.PositiveIntegerField(blank=True, default=None, null=True)  # govt_pop_est
+    hf_pop_est = models.PositiveIntegerField(blank=True, default=None, null=True)
+    is_facility_open = models.NullBooleanField(default=None)
+    health_service_provider = models.CharField(blank=True, null=True, max_length=255)
+    facility_accessibility = models.NullBooleanField(default=None)
+    distance_to_closest_settlement = models.PositiveIntegerField(blank=True, null=True)
+    distance_to_country_boundary = models.PositiveIntegerField(blank=True, default=None, null=True)
+    facility_level = models.CharField(max_length=20)
+    num_of_healthworkers = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_beds_tot = models.PositiveIntegerField(blank=True, default=None, null=True)  # min = 0; max = 10000
+    num_beds_icu = models.PositiveIntegerField(blank=True, default=None, null=True)  # min = 0; max = 5000
+    num_theatres = models.PositiveIntegerField(blank=True, default=None, null=True)  # min = 0; max = 200
+    num_toilets = models.PositiveIntegerField(blank=True, default=None, null=True)  # min = 0; max = 500
+    power_backup_system = models.NullBooleanField(default=None)  # yes|no
+    num_outpatients = models.PositiveIntegerField(blank=True, default=None, null=True)  # <20000
+    num_inpatients = models.PositiveIntegerField(blank=True, default=None, null=True)  # <20000
+    licensing_status = models.CharField(max_length=50)  # licensed|provisional|expired|suspended|not_applicable
+    facility_hours = models.CharField(max_length=50)  # 24_7 | weekdays_daytime | weekdays_extended | seasonal | unknown | other
+    emergency_services_available = models.NullBooleanField(default=None) # yes|no
+    staff_doctors = models.PositiveIntegerField(blank=True, default=None, null=True) # max=2000
+    staff_nurses = models.PositiveIntegerField(blank=True, default=None, null=True) # max=4000
+    staff_midwives = models.PositiveIntegerField(blank=True, default=None, null=True) # max=500
+    staff_laboratorians = models.PositiveIntegerField(blank=True, default=None, null=True) # max=500
+    staff_pharmacists = models.PositiveIntegerField(blank=True, default=None, null=True) # max=500
+    cold_chain_available = models.NullBooleanField(default=None) # yes|no
+    waste_management_system = models.CharField(blank=True, null=True, max_length=50) # incinerator|pit|contracted_service|none|other
+    hmis_system = models.NullBooleanField(default=None) # yes|no
+    catchment_population = models.PositiveIntegerField(blank=True, default=None, null=True)
+    # outpatient|inpatient|maternity|surgery|laboratory|pharmacy|radiology|dialysis|mental_health|immunization|HIV|TB|NCD_clinic|pediatrics|geriatrics|physiotherapy|dental
+    services_offered = models.CharField(blank=True, null=True, max_length=100) 
+    facility_id_govt = models.CharField(max_length=50)
+    facility_id_govt_type = models.CharField(blank=True, null=True, max_length=50)
+    facility_establishment_year = models.PositiveSmallIntegerField(blank=True, null=True)
+    download_speed_govt = models.FloatField(blank=True, default=None, null=True)
+    facility_address = models.CharField(blank=True, null=True, max_length=10)
+    facility_data_source = models.CharField(blank=True, null=True, max_length=255)
+    facility_data_collection_year = models.PositiveSmallIntegerField(blank=True, null=True)
+    facility_data_collection_modality = models.NullBooleanField(default=None)
+    refugee_camp = models.NullBooleanField(default=None)
+    patients_refugees = models.NullBooleanField(default=None)
+    connectivity_start_gov = models.CharField(blank=True, null=True, max_length=10) # MM: min =1; max=12|YYYY: min = 1000; max = current year
+    connectivity_start_contract_gov = models.CharField(blank=True, null=True, max_length=10)# MM: min =1; max=12|YYYY: min = 1000; max = current year
+    connectivity_ever_connected = models.NullBooleanField(default=None) # yes|no
+
+
 
     class Meta:
         ordering = ('id',)
