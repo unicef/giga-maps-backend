@@ -1,16 +1,25 @@
 import logging
 
 from django.conf import settings
+from django.http import JsonResponse
 from django.db.models.functions.text import Lower
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_control
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import mixins, viewsets
+from rest_framework import mixins, viewsets, status as rest_status
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework.utils.urls import remove_query_param
+from proco.utils.cache import cache_manager, custom_cache_control
 
 from proco.entities.models import Entity
+from proco.entities.serializers import ListEntitySerializer
 from proco.locations.models import Country
+from proco.schools.api import ConnectivityTileRequestHandler, BaseTileGenerator, ConnectivityTileGenerator
+from proco.utils.cache import custom_cache_control
 from proco.utils.mixins import CachedListMixin
+from proco.core import utils as core_utilities
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -58,3 +67,253 @@ class EntitiesViewSet(
     def get_queryset(self):
         return super().get_queryset().filter(country=self.get_country())
 
+
+class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
+    def __init__(self, table_config):
+        super().__init__()
+        self.table_config = table_config
+
+    def update_kwargs(self, request, table_configs):
+        query_params = request.query_params.dict()
+        query_param_keys = query_params.keys()
+
+        if 'country_id' in query_param_keys:
+            table_configs['country_ids'] = [query_params['country_id'], ]
+        elif 'country_id__in' in query_param_keys:
+            table_configs['country_ids'] = [c_id.strip() for c_id in query_params['country_id__in'].split(',')]
+
+        if 'admin1_id' in query_param_keys:
+            table_configs['admin1_ids'] = [query_params['admin1_id']]
+        elif 'admin1_id__in' in query_param_keys:
+            table_configs['admin1_ids'] = [a_id.strip() for a_id in query_params['admin1_id__in'].split(',')]
+
+        if 'entity_id' in query_param_keys:
+            table_configs['entity_ids'] = [str(query_params['entity_id']).strip()]
+        elif 'entity_id__in' in query_param_keys:
+            table_configs['entity_ids'] = [s_id.strip() for s_id in query_params['entity_id__in'].split(',')]
+
+        table_configs['entity_filters'] = core_utilities.get_filter_sql(
+            request, 'entity', 'entities_entity')
+        table_configs['entity_static_filters'] = core_utilities.get_filter_sql(
+            request, 'entity_static', 'entities_healthmasterstatus')
+        table_configs['entity_real_time_filters'] = core_utilities.get_filter_sql(
+            request, 'entity_real_time', 'connection_statistics_entityweeklystatus')
+
+    def envelope_to_sql(self, env, request):
+        tbl = self.table_config.copy()
+        tbl['env'] = self.envelope_to_bounds_sql(env)
+
+        tbl['limit_condition'] = ''
+        tbl['country_condition'] = ''
+        tbl['admin1_condition'] = ''
+        tbl['entity_condition'] = ''
+        tbl['random_order'] = ''
+
+        self.update_kwargs(request, tbl)
+
+        """sql with join and connectivity_speed"""
+        sql_tmpl = """
+            WITH bounds AS (
+                SELECT {env} AS geom,
+                {env}::box2d AS b2d
+            ),
+            mvtgeom AS (
+                SELECT ST_AsMVTGeom(ST_Transform({table}.geopoint, 3857), bounds.b2d) AS geom,
+                {table}.id,
+                CASE WHEN {table}.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                    WHEN {table}.connectivity_status = 'no' THEN 'not_connected'
+                    ELSE 'unknown'
+                END AS connectivity_status
+                FROM {table}
+                INNER JOIN bounds ON ST_Intersects({table}.geopoint, ST_Transform(bounds.geom, {srid}))
+                {entity_weekly_join}
+                {entity_master_join}
+                WHERE {table}."deleted" IS NULL
+                    AND {table}.entity_name = '{entity}'
+                    {country_condition}
+                    {admin1_condition}
+                    {entity_condition}
+                    {entity_weekly_condition}
+                    {entity_master_condition}
+                    {random_order}
+                    {limit_condition}
+            )
+            SELECT ST_AsMVT(DISTINCT mvtgeom.*) FROM mvtgeom;
+        """
+
+        tbl['entity_weekly_join'] = ''
+        tbl['entity_weekly_condition'] = ''
+        tbl['entity_master_join'] = ''
+        tbl['entity_master_condition'] = ''
+
+        add_random_condition = True
+
+        if len(tbl.get('entity_ids', [])) > 0:
+            add_random_condition = False
+            tbl['entity_condition'] = 'AND {table}."id" IN ({ids})'.format(
+                table=tbl['table'],
+                ids=','.join([str(entity_id) for entity_id in tbl['entity_ids']])
+            )
+        elif len(tbl.get('admin1_ids', [])) > 0:
+            if settings.ADMIN_MAP_API_SAMPLING_LIMIT:
+                tbl['MAP_API_SAMPLING_LIMIT'] = settings.ADMIN_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
+                add_random_condition = False
+
+            tbl['admin1_condition'] = 'AND {table}."admin1_id" IN ({ids})'.format(
+                table=tbl['table'],
+                ids=",".join(str(aid) for aid in tbl.get('admin1_ids', []))
+            )
+
+        elif len(tbl.get('country_ids', [])) > 0:
+            if settings.COUNTRY_MAP_API_SAMPLING_LIMIT:
+                tbl['MAP_API_SAMPLING_LIMIT'] = settings.COUNTRY_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
+                add_random_condition = False
+
+            tbl['country_condition'] = 'AND {table}."country_id" IN ({ids})'.format(
+                table=tbl['table'],
+                ids=",".join(str(cid) for cid in tbl.get('country_ids', []))
+            )
+
+        if len(tbl['entity_filters']) > 0:
+            tbl['entity_condition'] += ' AND ' + tbl['entity_filters']
+
+        if len(tbl['entity_real_time_filters']) > 0:
+            tbl['entity_weekly_join'] = """
+            INNER JOIN "connection_statistics_entityweeklystatus"
+                ON {table}."last_weekly_status_id" = connection_statistics_entityweeklystatus."id"
+            """.format(table=tbl['table'])
+
+            tbl['entity_weekly_condition'] = ' AND ' + tbl['entity_real_time_filters']
+
+        if len(tbl['entity_static_filters']) > 0:
+            tbl['entity_master_join'] = """
+            INNER JOIN "entities_healthmasterstatus"
+                ON {table}."id" = entities_healthmasterstatus."entity_id"
+            """.format(table=tbl['table'])
+
+            tbl['entity_master_condition'] = ' AND ' + tbl['entity_static_filters']
+
+        if add_random_condition:
+            if 'limit' in request.query_params:
+                limit = request.query_params['limit']
+                tbl['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+            elif tbl.get('MAP_API_SAMPLING_LIMIT'):
+                limit = tbl['MAP_API_SAMPLING_LIMIT']
+                tbl['random_order'] = 'ORDER BY random()'
+            else:
+                limit = '50000'
+                tbl['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+
+            tbl['limit_condition'] = 'LIMIT ' + str(limit)
+        return sql_tmpl.format(**tbl)
+
+
+@method_decorator([
+    custom_cache_control(
+        public=True,
+        max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE,
+        cache_status_codes=[rest_status.HTTP_200_OK,],
+    )
+], name='dispatch')
+class EntityConnectivityTileRequestHandler(APIView):
+    CACHE_KEY = 'cache'
+    CACHE_KEY_PREFIX = 'CONNECTIVITY_TILES_MAP'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        table_config = {
+            'table': 'entities_entity',
+            'srid': '4326',
+            'geomColumn': 'geopoint',
+            'attrColumns': 'id',
+        }
+        self.tile_generator = EntityStatusConnectivityTileGenerator(table_config)
+
+    def get_cache_key(self):
+        params = dict(self.request.query_params)
+        params.pop(self.CACHE_KEY, None)
+
+        entity = getattr(self, "entity", None)
+        param_string = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+
+        return f"{self.CACHE_KEY_PREFIX}_{entity}_tiles_{param_string}"
+
+    def get(self, request, *args, **kwargs):
+        entity = kwargs.get("entity")
+        self.entity = entity
+        use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
+        request_path = remove_query_param(request.get_full_path(), 'cache')
+        cache_key = self.get_cache_key()
+
+        response = None
+        if use_cached_data:
+            response = cache_manager.get(cache_key)
+
+        if not response:
+            try:
+                response = self.tile_generator.generate_tile(request)
+
+                cache_manager.set(cache_key, response, request_path=request_path,
+                                  soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
+            except Exception as ex:
+                logger.error('Exception occurred for school connectivity tiles endpoint: {}'.format(ex))
+                response = Response({'error': 'An error occurred while processing the request'}, status=500)
+
+        return response
+
+
+@method_decorator([
+    custom_cache_control(
+        public=True,
+        max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE,
+        cache_status_codes=[rest_status.HTTP_200_OK],
+    )
+], name='dispatch')
+class EntityConnectivityStatusTileRequestHandler(EntityConnectivityTileRequestHandler):
+
+    ENTITY_CONFIG = {
+        "health": {
+            "table": "entities_entity",
+            "srid": "4326",
+            "geomColumn": "geopoint",
+            "attrColumns": "id",
+            "tile_generator_class": EntityStatusConnectivityTileGenerator,
+            "cache_prefix": "ENTITY_STATUS_CONNECTIVITY_TILES_MAP"
+        }
+    }
+
+    def dispatch(self, request, *args, **kwargs):
+        entity = kwargs.get("entity")
+        self.entity = entity
+        entity_config = self.ENTITY_CONFIG.get(entity)
+        if not entity_config:
+            return JsonResponse({"error": "Invalid entity"}, status=400)
+
+        table_config = {
+            "entity": entity,
+            "table": entity_config["table"],
+            "srid": entity_config["srid"],
+            "geomColumn": entity_config["geomColumn"],
+            "attrColumns": entity_config["attrColumns"],
+        }
+
+        tile_gen_class = entity_config["tile_generator_class"]
+        self.tile_generator = tile_gen_class(table_config)
+
+        self.CACHE_KEY_PREFIX = entity_config["cache_prefix"]
+
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_cache_key(self):
+        params = dict(self.request.query_params)
+        params.pop(self.CACHE_KEY, None)
+
+        entity = getattr(self, "entity", None)
+        param_string = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+
+        return f"{self.CACHE_KEY_PREFIX}_{entity}_tiles_{param_string}"
