@@ -32,7 +32,7 @@ from proco.core import utils as core_utilities
 from proco.core.viewsets import BaseModelViewSet
 from proco.data_sources.models import SchoolMasterData
 from proco.locations.models import Country, CountryAdminMetadata
-from proco.locations.search_indexes import SchoolIndex
+from proco.locations.search_indexes import SchoolIndex, EntityIndex
 from proco.locations.serializers import (
     CountryCSVSerializer,
     CountrySerializer,
@@ -683,6 +683,44 @@ class AggregateSearchViewSet(BaseSearchMixin, ListAPIView):
         resp_data['count'] = counts
         resp_data['results'] = list(data)
         return Response(resp_data)
+    
+
+class AggregateSearchEntityViewSet(BaseSearchMixin, ListAPIView):
+    """
+    AggregateSearchViewSet
+        Endpoint to use the Cognitive search index.
+        Inherits: BaseSearchMixin, ListAPIView
+    """
+    index_class = EntityIndex
+
+    base_auth_permissions = (
+        permissions.AllowAny,
+    )
+
+    filterset_fields = {
+        'id': ['exact', 'in', 'notexact'],
+        'country_id': ['exact', 'in', 'notexact'],
+        'admin1_id': ['exact', 'in', 'notexact'],
+        'admin2_id': ['exact', 'in', 'notexact'],
+        'admin1_name': ['exact', 'in', 'notexact'],
+        'admin2_name': ['exact', 'in', 'notexact'],
+    }
+
+    filter_field_type = {
+        'id': SearchFieldDataType.Int64,
+        'country_id': SearchFieldDataType.Int64,
+        'admin1_id': SearchFieldDataType.Int64,
+        'admin2_id': SearchFieldDataType.Int64,
+    }
+
+    def list(self, request, *args, **kwargs):
+        resp_data = OrderedDict()
+        data = self.index_search(request, *args, **kwargs)
+        counts = data.get_count()
+        resp_data['count'] = counts
+        resp_data['results'] = list(data)
+        return Response(resp_data)
+
 
 
 class CountryAdminMetadataViewSet(BaseModelViewSet):
