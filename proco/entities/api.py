@@ -118,18 +118,18 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
                 {env}::box2d AS b2d
             ),
             mvtgeom AS (
-                SELECT ST_AsMVTGeom(ST_Transform({table}.geopoint, 3857), bounds.b2d) AS geom,
-                {table}.id,
-                CASE WHEN {table}.connectivity_status IN ('good', 'moderate') THEN 'connected'
-                    WHEN {table}.connectivity_status = 'no' THEN 'not_connected'
+                SELECT ST_AsMVTGeom(ST_Transform(entities_entity.geopoint, 3857), bounds.b2d) AS geom,
+                entities_entity.id,
+                CASE WHEN entities_entity.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                    WHEN entities_entity.connectivity_status = 'no' THEN 'not_connected'
                     ELSE 'unknown'
                 END AS connectivity_status
-                FROM {table}
-                INNER JOIN bounds ON ST_Intersects({table}.geopoint, ST_Transform(bounds.geom, {srid}))
+                FROM entities_entity
+                INNER JOIN bounds ON ST_Intersects(entities_entity.geopoint, ST_Transform(bounds.geom, {srid}))
                 {entity_weekly_join}
                 {entity_master_join}
-                WHERE {table}."deleted" IS NULL
-                    AND {table}.entity_name = '{entity}'
+                WHERE entities_entity."deleted" IS NULL
+                    AND entities_entity.entity_name = '{entity}'
                     {country_condition}
                     {admin1_condition}
                     {entity_condition}
@@ -150,10 +150,10 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
 
         if len(tbl.get('entity_ids', [])) > 0:
             add_random_condition = False
-            tbl['entity_condition'] = 'AND {table}."id" IN ({ids})'.format(
-                table=tbl['table'],
-                ids=','.join([str(entity_id) for entity_id in tbl['entity_ids']])
+            tbl['entity_condition'] = 'AND entities_entity."id" IN ({0})'.format(
+            ','.join([str(entity_id) for entity_id in tbl['entity_ids']])
             )
+
         elif len(tbl.get('admin1_ids', [])) > 0:
             if settings.ADMIN_MAP_API_SAMPLING_LIMIT:
                 tbl['MAP_API_SAMPLING_LIMIT'] = settings.ADMIN_MAP_API_SAMPLING_LIMIT
@@ -161,9 +161,8 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
             else:
                 add_random_condition = False
 
-            tbl['admin1_condition'] = 'AND {table}."admin1_id" IN ({ids})'.format(
-                table=tbl['table'],
-                ids=",".join(str(aid) for aid in tbl.get('admin1_ids', []))
+            tbl['admin1_condition'] = 'AND entities_entity."admin1_id" IN ({0})'.format(
+                ','.join([str(admin1_id) for admin1_id in tbl['admin1_ids']])
             )
 
         elif len(tbl.get('country_ids', [])) > 0:
@@ -173,9 +172,8 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
             else:
                 add_random_condition = False
 
-            tbl['country_condition'] = 'AND {table}."country_id" IN ({ids})'.format(
-                table=tbl['table'],
-                ids=",".join(str(cid) for cid in tbl.get('country_ids', []))
+            tbl['country_condition'] = 'AND entities_entity."country_id" IN ({0})'.format(
+                ','.join([str(country_id) for country_id in tbl['country_ids']])
             )
 
         if len(tbl['entity_filters']) > 0:
@@ -184,16 +182,16 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
         if len(tbl['entity_real_time_filters']) > 0:
             tbl['entity_weekly_join'] = """
             INNER JOIN "connection_statistics_entityweeklystatus"
-                ON {table}."last_weekly_status_id" = connection_statistics_entityweeklystatus."id"
-            """.format(table=tbl['table'])
+                ON entities_entity."last_weekly_status_id" = connection_statistics_entityweeklystatus."id"
+            """
 
             tbl['entity_weekly_condition'] = ' AND ' + tbl['entity_real_time_filters']
 
         if len(tbl['entity_static_filters']) > 0:
             tbl['entity_master_join'] = """
             INNER JOIN "entities_healthmasterstatus"
-                ON {table}."id" = entities_healthmasterstatus."entity_id"
-            """.format(table=tbl['table'])
+                ON entities_entity."last_weekly_status_id" = {master_data}."id"
+            """.format(master_data=tbl['master_data'])
 
             tbl['entity_master_condition'] = ' AND ' + tbl['entity_static_filters']
 
@@ -283,7 +281,8 @@ class EntityConnectivityStatusTileRequestHandler(EntityConnectivityTileRequestHa
             "geomColumn": "geopoint",
             "attrColumns": "id",
             "tile_generator_class": EntityStatusConnectivityTileGenerator,
-            "cache_prefix": "ENTITY_STATUS_CONNECTIVITY_TILES_MAP"
+            "cache_prefix": "ENTITY_STATUS_CONNECTIVITY_TILES_MAP",
+            "master_data": "entities_healthmasterstatus"
         }
     }
 
@@ -300,6 +299,7 @@ class EntityConnectivityStatusTileRequestHandler(EntityConnectivityTileRequestHa
             "srid": entity_config["srid"],
             "geomColumn": entity_config["geomColumn"],
             "attrColumns": entity_config["attrColumns"],
+            "master_data": entity_config["master_data"]
         }
 
         tile_gen_class = entity_config["tile_generator_class"]
