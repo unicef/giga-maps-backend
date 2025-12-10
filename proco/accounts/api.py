@@ -2162,7 +2162,9 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     True AS is_rt_connected,
                     sds.{col_name} AS field_avg,
                     {case_conditions}
-                    'connected' AS connectivity_status
+                    'connected' AS connectivity_status,
+                    (COUNT(*) OVER (PARTITION BY "schools_school".geopoint) > 1)
+                    AS has_multiple_school_on_same_lat_lng
                 FROM schools_school
                 INNER JOIN bounds ON ST_Intersects("schools_school".geopoint, ST_Transform(bounds.geom, 4326))
                 INNER JOIN (
@@ -2338,6 +2340,8 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 {random_select_list}
                 schools_school.id,
                 {table_name}."{col_name}" AS field_value,
+                (COUNT(*) OVER (PARTITION BY schools_school.geopoint) > 1)
+                    AS has_multiple_school_on_same_lat_lng,
                 'connected' AS connectivity_status,
                 {label_case_statements}
             FROM schools_school
