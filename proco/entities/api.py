@@ -190,8 +190,8 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
         if len(tbl['entity_static_filters']) > 0:
             tbl['entity_master_join'] = """
             INNER JOIN "entities_healthmasterstatus"
-                ON entities_entity."last_weekly_status_id" = {master_data}."id"
-            """.format(master_data=tbl['master_data'])
+                ON entities_entity."last_master_status_id" = {master_data_table}."id"
+            """.format(master_data_table=tbl['master_data_table'])
 
             tbl['entity_master_condition'] = ' AND ' + tbl['entity_static_filters']
 
@@ -282,7 +282,7 @@ class EntityConnectivityStatusTileRequestHandler(EntityConnectivityTileRequestHa
             "attrColumns": "id",
             "tile_generator_class": EntityStatusConnectivityTileGenerator,
             "cache_prefix": "ENTITY_STATUS_CONNECTIVITY_TILES_MAP",
-            "master_data": "entities_healthmasterstatus"
+            "master_data_table": "entities_healthmasterstatus"
         }
     }
 
@@ -299,7 +299,7 @@ class EntityConnectivityStatusTileRequestHandler(EntityConnectivityTileRequestHa
             "srid": entity_config["srid"],
             "geomColumn": entity_config["geomColumn"],
             "attrColumns": entity_config["attrColumns"],
-            "master_data": entity_config["master_data"]
+            "master_data_table": entity_config["master_data_table"]
         }
 
         tile_gen_class = entity_config["tile_generator_class"]
