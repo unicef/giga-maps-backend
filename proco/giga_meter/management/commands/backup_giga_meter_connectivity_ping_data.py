@@ -40,6 +40,11 @@ class Command(BaseCommand):
     def handle(self, **options):
         logger.info('Started Backup of "GigaMeter Connectivity Ping data" utility.\n')
 
+        from proco.giga_meter.utils import save_data_to_deltalake
+
+        save_data_to_deltalake(None)
+        exit(0)
+
         start_date = date_utilities.to_date(options.get('start_date'))
         end_date = date_utilities.to_date(options.get('end_date'))
 

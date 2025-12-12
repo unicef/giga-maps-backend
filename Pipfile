@@ -81,7 +81,7 @@ celery-redbeat = "==2.2.0"
 flower = "==2.0.1"
 django-dynamic-db-router = "==0.3.0"
 deltalake = "==0.12.0"
-#azure-storage-file-datalake = "==12.13.1"
+azure-storage-file-datalake = "==12.14.0"
 
 [requires]
 python_version = "3.8"
