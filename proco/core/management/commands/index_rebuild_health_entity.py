@@ -54,7 +54,7 @@ def create_index():
 
     logger.info('Index name: {0}'.format(EntityIndex.Meta.index_name))
 
-    index = EntityIndex(
+    index = SearchIndex(
         name=EntityIndex.Meta.index_name,
         fields=fields,
         scoring_profiles=scoring_profiles,
@@ -71,16 +71,22 @@ def create_index():
 def clear_index():
     search_client = SearchClient(cognitive_search_settings['SEARCH_ENDPOINT'], EntityIndex.Meta.index_name,
                                  AzureKeyCredential(cognitive_search_settings['SEARCH_API_KEY']))
-
-    doc_counts = search_client.get_document_count()
-    logger.info("There are {0} documents in the {1} search index.".format(
-        doc_counts, repr(EntityIndex.Meta.index_name)))
-
-    if doc_counts > 0:
-        all_docs = search_client.search('*')
-        logger.info('All documents: {0}'.format(all_docs))
-
-        search_client.delete_documents(all_docs)
+    all_docs = search_client.search(
+        search_text="*",
+        select=["entity_id"]
+    )
+    ids = []
+    for doc in all_docs:
+        key_value = doc.get("entity_id")
+        if key_value is not None:
+            ids.append(key_value)
+    logger.info("Total docs to delete: %d", len(ids))
+    BATCH_SIZE = 1000
+    for i in range(0, len(ids), BATCH_SIZE):
+        batch_ids = ids[i:i+BATCH_SIZE]
+        to_delete = [{"entity_id": doc_id} for doc_id in batch_ids]
+        result = search_client.delete_documents(documents=to_delete)
+        logger.info("Deleted batch %d..%d (count=%d)", i, i+len(batch_ids)-1, len(batch_ids))
 
 
 def collect_data(country_id, entity_id):
@@ -108,7 +114,6 @@ def collect_data(country_id, entity_id):
         admin2_name=F('admin2__name'),
         row_score=Case(When(srr__id__isnull=True, then=Value(0)), default=1, output_field=IntegerField())
     ).values(*qry_fields).order_by(*EntityIndex.Meta.ordering).distinct(*qry_fields)
-
     if country_id:
         qs = qs.filter(country_id=country_id)
 
@@ -127,8 +132,6 @@ def collect_data(country_id, entity_id):
         docs.append(qry_data)
 
     logger.info('Total records to upload: {0}'.format(len(docs)))
-    # docs = docs[0:100000]
-    # print('Total records to upload: {0}'.format(len(docs)))
     return docs
 
 
