@@ -432,7 +432,7 @@ DATA_SOURCE_CONFIG = {
     },
     'HEALTH_MASTER': {
         'SHARE_NAME': env('HEALTH_MASTER_SHARE_NAME', default='gold'),
-        'SCHEMA_NAME': env('HEALTH_MASTER_SCHEMA_NAME', default='school-master'),
+        'SCHEMA_NAME': env('HEALTH_MASTER_SCHEMA_NAME', default='health-master'),
         'REVIEW_GRACE_PERIOD_IN_HRS': env('HEALTH_MASTER_REVIEW_GRACE_PERIOD_IN_HRS', default='48'),
         'DASHBOARD_URL': env('HEALTH_MASTER_DASHBOARD_URL', default=None),
         'SHARE_CREDENTIALS_VERSION': env('HEALTH_MASTER_SHARE_CREDENTIALS_VERSION', default=1),

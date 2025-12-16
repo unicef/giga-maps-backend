@@ -74,14 +74,11 @@ def load_entity_data_from_health_master_apis(country_iso3_format=None):
     open(profile_file, 'w').write(json.dumps(profile_json))
     # Create a SharingClient.
     client = source_utilities.ProcoSharingClient(profile_file)
-    print('clinet', client)
     health_master_share = client.get_share(share_name)
-    print('health_master_share', health_master_share)
 
     changes_for_countries = {}
     deleted_entities = []
     if health_master_share:
-        print('schema_name', schema_name)
         health_master_schema = client.get_schema(health_master_share, schema_name)
         if health_master_schema:
             schema_tables = client.list_tables(health_master_schema)
@@ -911,7 +908,7 @@ def cleanup_school_master_rows():
         logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
-# @app.task(soft_time_limit=6 * 60 * 60, time_limit=6 * 60 * 60)
+@app.task(soft_time_limit=6 * 60 * 60, time_limit=6 * 60 * 60)
 def update_entity_static_data(*args, country_iso3_format=None):
     """
     Background task to Get Static data to Proco DB
