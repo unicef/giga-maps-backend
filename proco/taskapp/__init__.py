@@ -51,6 +51,12 @@ def finalize_setup(sender, **kwargs):
             'schedule': crontab(hour='*/4', minute=47),
             'args': (),
         },
+        'proco.data_sources.tasks.update_entity_static_data': {
+            'task': 'proco.data_sources.tasks.update_entity_static_data',
+            # Executes at 4:00 AM every day
+            'schedule': crontab(hour='*/4', minute=52),
+            'args': (),
+        },
         'proco.data_sources.tasks.update_live_data': {
             'task': 'proco.data_sources.tasks.update_live_data',
             'schedule': crontab(hour='2,8,14,20', minute=10),

@@ -430,6 +430,17 @@ DATA_SOURCE_CONFIG = {
         'EXPIRATION_TIME': env('SCHOOL_MASTER_EXPIRATION_TIME', default=None),
         'COUNTRY_EXCLUSION_LIST': env('SCHOOL_MASTER_COUNTRY_EXCLUSION_LIST', default='').split(','),
     },
+    'HEALTH_MASTER': {
+        'SHARE_NAME': env('HEALTH_MASTER_SHARE_NAME', default='gold'),
+        'SCHEMA_NAME': env('HEALTH_MASTER_SCHEMA_NAME', default='school-master'),
+        'REVIEW_GRACE_PERIOD_IN_HRS': env('HEALTH_MASTER_REVIEW_GRACE_PERIOD_IN_HRS', default='48'),
+        'DASHBOARD_URL': env('HEALTH_MASTER_DASHBOARD_URL', default=None),
+        'SHARE_CREDENTIALS_VERSION': env('HEALTH_MASTER_SHARE_CREDENTIALS_VERSION', default=1),
+        'ENDPOINT': env('HEALTH_MASTER_ENDPOINT', default=None),
+        'BEARER_TOKEN': env('HEALTH_MASTER_BEARER_TOKEN', default=None),
+        'EXPIRATION_TIME': env('HEALTH_MASTER_EXPIRATION_TIME', default=None),
+        'COUNTRY_EXCLUSION_LIST': env('HEALTH_MASTER_COUNTRY_EXCLUSION_LIST', default='').split(','),
+    },
     'QOS': {
         'SHARE_NAME': env('QOS_SHARE_NAME', default='gold'),
         'SCHEMA_NAME': env('QOS_SCHEMA_NAME', default='qos'),
