@@ -577,7 +577,9 @@ class SchoolStatusConnectivityTileGenerator(BaseTileGenerator):
                 CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
                     WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
                     ELSE 'unknown'
-                END AS connectivity_status
+                END AS connectivity_status,
+                (COUNT(*) OVER (PARTITION BY schools_school.geopoint) > 1)
+                AS has_multiple_school_on_same_lat_lng
                 FROM schools_school
                 INNER JOIN bounds ON ST_Intersects(schools_school.geopoint, ST_Transform(bounds.geom, {srid}))
                 {school_weekly_join}
