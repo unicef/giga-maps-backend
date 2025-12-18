@@ -10,6 +10,7 @@ from django.contrib.gis.geos import Point
 from django.core.management import call_command
 from django.db.models import Count
 from django.db.utils import DataError
+from django.core.exceptions import ImproperlyConfigured
 from requests.exceptions import HTTPError
 
 from proco.accounts import utils as account_utilities
@@ -35,6 +36,7 @@ from proco.schools.models import School
 from proco.taskapp import app
 from proco.utils.dates import format_date
 from proco.utils.tasks import populate_school_new_fields_task
+from proco.data_sources import constants
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -42,6 +44,64 @@ logger = logging.getLogger('gigamaps.' + __name__)
 @app.task
 def finalize_task():
     return 'Done'
+
+
+def validate_config(config: dict, parent: str, *children: str):
+    if not config:
+        raise ImproperlyConfigured(
+            "DATA_SOURCE_CONFIG is missing from settings."
+        )
+    if parent not in config:
+        raise ImproperlyConfigured(
+            f"Missing required config section: DATA_SOURCE_CONFIG['{parent}']"
+        )
+    parent_config = config[parent]
+    missing = [key for key in children if key not in parent_config]
+    if missing:
+        raise ImproperlyConfigured(
+            f"Missing required config keys in DATA_SOURCE_CONFIG['{parent}']: "
+            f"{', '.join(missing)}"
+        )
+    return parent_config
+
+
+def validate_and_sync_schema_table_data(profile_file, schema_name, share_name, country_iso3_format, country_codes_for_exclusion, errors):
+    client = source_utilities.ProcoSharingClient(profile_file)
+    health_master_share = client.get_share(share_name)
+    changes_for_countries = {}
+    deleted_entities = []
+    if health_master_share:
+        health_master_schema = client.get_schema(health_master_share, schema_name)
+        if health_master_schema:
+            schema_tables = client.list_tables(health_master_schema)
+            logger.debug('All tables ready to access: {0}'.format(schema_tables))
+
+            health_master_fields = [f.name for f in sources_models.HealthEntityMasterData._meta.get_fields()]
+            for schema_table in schema_tables:
+                logger.debug('#' * 10)
+                logger.debug('Table: %s', schema_table)
+                if country_iso3_format and country_iso3_format != schema_table.name:
+                    continue
+                if len(country_codes_for_exclusion) > 0 and schema_table.name in country_codes_for_exclusion:
+                    logger.warning('Country with ISO3 Format ({0}) configured to exclude from Health Master data pull. '
+                                'Hence skipping the load for this country code.'.format(schema_table.name))
+                    continue
+                try:
+                    source_utilities.vaildate_master_version_and_sync_health_master_data(
+                        profile_file, share_name, schema_name, schema_table.name, changes_for_countries,
+                        deleted_entities, health_master_fields)
+                except (HTTPError, DataError, ValueError) as ex:
+                    logger.error('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
+                    errors.append('{0} : {1} - {2}'.format(schema_table.name, type(ex).__name__, str(ex)))
+                except Exception as ex:
+                    logger.error('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
+                    errors.append('{0} : {1} - {2}'.format(schema_table.name, type(ex).__name__, str(ex)))
+                return changes_for_countries, deleted_entities, errors
+        else:
+            logger.error('Health Master schema ({0}) does not exist to use for share ({1}).'.format(schema_name,
+                                                                                                    share_name))
+    else:
+        logger.error('Health Master share ({0}) does not exist to use.'.format(share_name))
 
 
 def load_entity_data_from_health_master_apis(country_iso3_format=None):
@@ -53,12 +113,14 @@ def load_entity_data_from_health_master_apis(country_iso3_format=None):
     logger.info('Starting loading the health master data from API to DB.')
 
     errors = []
-    ds_settings = settings.DATA_SOURCE_CONFIG.get('HEALTH_MASTER')
+    ds_settings = validate_config(settings.DATA_SOURCE_CONFIG,
+        "HEALTH_MASTER", "SHARE_NAME", "SCHEMA_NAME", "DASHBOARD_URL", "COUNTRY_EXCLUSION_LIST",
+        "SHARE_CREDENTIALS_VERSION", "ENDPOINT", "BEARER_TOKEN", "EXPIRATION_TIME"
+    )
     share_name = ds_settings['SHARE_NAME']
     schema_name = ds_settings['SCHEMA_NAME']
     dashboard_url = ds_settings['DASHBOARD_URL']
     country_codes_for_exclusion = ds_settings['COUNTRY_EXCLUSION_LIST']
-    
     profile_json = {
         'shareCredentialsVersion': ds_settings.get('SHARE_CREDENTIALS_VERSION', 1),
         'endpoint': ds_settings.get('ENDPOINT'),
@@ -73,45 +135,8 @@ def load_entity_data_from_health_master_apis(country_iso3_format=None):
     )
     open(profile_file, 'w').write(json.dumps(profile_json))
     # Create a SharingClient.
-    client = source_utilities.ProcoSharingClient(profile_file)
-    health_master_share = client.get_share(share_name)
+    changes_for_countries, deleted_entities, errors = validate_and_sync_schema_table_data(profile_file, schema_name, share_name, country_iso3_format, country_codes_for_exclusion, errors)
 
-    changes_for_countries = {}
-    deleted_entities = []
-    if health_master_share:
-        health_master_schema = client.get_schema(health_master_share, schema_name)
-        if health_master_schema:
-            schema_tables = client.list_tables(health_master_schema)
-            logger.debug('All tables ready to access: {0}'.format(schema_tables))
-
-            health_master_fields = [f.name for f in sources_models.HealthEntityMasterData._meta.get_fields()]
-            for schema_table in schema_tables:
-                logger.debug('#' * 10)
-                logger.debug('Table: %s', schema_table)
-
-                if country_iso3_format and country_iso3_format != schema_table.name:
-                    continue
-
-                if len(country_codes_for_exclusion) > 0 and schema_table.name in country_codes_for_exclusion:
-                    logger.warning('Country with ISO3 Format ({0}) configured to exclude from Health Master data pull. '
-                                'Hence skipping the load for this country code.'.format(schema_table.name))
-                    continue
-                try:
-                    source_utilities.sync_health_master_data(
-                        profile_file, share_name, schema_name, schema_table.name, changes_for_countries,
-                        deleted_entities, health_master_fields)
-                except (HTTPError, DataError, ValueError) as ex:
-                    logger.error('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
-                    errors.append('{0} : {1} - {2}'.format(schema_table.name, type(ex).__name__, str(ex)))
-                except Exception as ex:
-                    logger.error('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
-                    errors.append('{0} : {1} - {2}'.format(schema_table.name, type(ex).__name__, str(ex)))
-
-        else:
-            logger.error('Health Master schema ({0}) does not exist to use for share ({1}).'.format(schema_name,
-                                                                                                    share_name))
-    else:
-        logger.error('Health Master share ({0}) does not exist to use.'.format(share_name))
     try:
         os.remove(profile_file)
     except OSError:
@@ -908,7 +933,7 @@ def cleanup_school_master_rows():
         logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
-@app.task(soft_time_limit=6 * 60 * 60, time_limit=6 * 60 * 60)
+@app.task(soft_time_limit=constants.soft_time_limit, time_limit=constants.time_limit)
 def update_entity_static_data(*args, country_iso3_format=None):
     """
     Background task to Get Static data to Proco DB
