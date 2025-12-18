@@ -65,7 +65,7 @@ def validate_config(config: dict, parent: str, *children: str):
     return parent_config
 
 
-def validate_and_sync_schema_table_data(profile_file, schema_name, share_name, country_iso3_format, country_codes_for_exclusion, errors):
+def validate_schema_and_sync_schema_table_data(profile_file, schema_name, share_name, country_iso3_format, country_codes_for_exclusion, errors):
     client = source_utilities.ProcoSharingClient(profile_file)
     health_master_share = client.get_share(share_name)
     changes_for_countries = {}
@@ -135,7 +135,7 @@ def load_entity_data_from_health_master_apis(country_iso3_format=None):
     )
     open(profile_file, 'w').write(json.dumps(profile_json))
     # Create a SharingClient.
-    changes_for_countries, deleted_entities, errors = validate_and_sync_schema_table_data(profile_file, schema_name, share_name, country_iso3_format, country_codes_for_exclusion, errors)
+    changes_for_countries, deleted_entities, errors = validate_schema_and_sync_schema_table_data(profile_file, schema_name, share_name, country_iso3_format, country_codes_for_exclusion, errors)
 
     try:
         os.remove(profile_file)

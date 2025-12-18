@@ -409,7 +409,7 @@ def sort_and_modify_dataframe(loaded_data_df, health_master_fields, changes_for_
     return cols_to_delete
 
 
-def sync_data_frame_data(loaded_data_df, cols_to_delete, country, deleted_entities):
+def sync_data_frame(loaded_data_df, cols_to_delete, country, deleted_entities):
         insert_entries = []
         remove_entries = []
         for _, row in loaded_data_df.iterrows():
@@ -510,7 +510,7 @@ def vaildate_master_version_and_sync_health_master_data(profile_file, share_name
     if len(loaded_data_df) > 0:
         # Sort the values based on _commit_timestamp ASC
         cols_to_delete = sort_and_modify_dataframe(loaded_data_df, health_master_fields, changes_for_countries, table_current_version, country, table_name, pull_datetime)
-        sync_data_frame_data(loaded_data_df, cols_to_delete, country, deleted_entities)
+        sync_data_frame(loaded_data_df, cols_to_delete, country, deleted_entities)
     else:
         logger.info('No data to update in current table: {0}.'.format(table_name))
 
