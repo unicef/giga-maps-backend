@@ -5,7 +5,9 @@ import uuid
 
 from celery import chain
 from celery import current_task
+from datetime import datetime, timedelta
 from django.conf import settings
+from django.core.management import call_command
 from django.db.models import Count
 from django.db.utils import DataError
 from requests.exceptions import HTTPError
@@ -410,3 +412,30 @@ def handle_giga_meter_school_master_data_sync(*args):
     else:
         logger.warning('Giga Meter - School Master data synch disabled from config. '
                      'To enable it, please update "GIGA_METER_ENABLE_AUTO_SYNC" configuration.')
+
+
+@app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)
+def scheduler_for_backup_giga_meter_connectivity_ping_data(*args, start_date=None, end_date=None):
+    till_date = None
+    if not start_date or not end_date:
+        retention_days = settings.AZURE_DELTALAKE_CONFIG.get('DATA_RETENTION_DAYS', 180)
+        n_days_old = datetime.now() - timedelta(days=retention_days)
+        till_date = format_date(core_utilities.get_current_datetime_object(timestamp=n_days_old))
+    else:
+        till_date = end_date
+    task_key = f'scheduler_for_backup_giga_meter_connectivity_ping_data_for_country_at_{till_date}'
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(
+        task_id,
+        task_key,
+        f'Backup GigaMeter Connectivity Ping data before {till_date}')
+
+    if task_instance:
+        task_instance.info(f'Not found running job for "Backup GigaMeter Connectivity Ping data" utility handler: {task_key}')
+        cmd_args = [f'-start_date={start_date}', f'-end_date={end_date}', f'-till_date={till_date}']
+        call_command('backup_giga_meter_connectivity_ping_data', *cmd_args)
+        task_instance.info('Completed "Backup GigaMeter Connectivity Ping data" utility handler.')
+
+        background_task_utilities.task_on_complete(task_instance)
+    else:
+        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
