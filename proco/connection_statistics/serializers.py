@@ -104,6 +104,7 @@ class SchoolDailyStatusSerializer(serializers.ModelSerializer):
             'connectivity_speed',
             'connectivity_upload_speed',
             'connectivity_latency',
+            'uptime',
         )
         read_only_fields = fields
 
