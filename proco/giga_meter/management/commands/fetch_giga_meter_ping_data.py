@@ -1,4 +1,5 @@
 from django.core.management.base import BaseCommand
+
 from proco.giga_meter.tasks import fetch_and_aggregate_ping_data
 
 
@@ -26,7 +27,8 @@ class Command(BaseCommand):
         try:
             if use_celery:
                 fetch_and_aggregate_ping_data.delay(date_str=date_str)
-                self.stdout.write(self.style.SUCCESS("Successfully submitted GigaMeter ping data aggregation task to Celery."))
+                self.stdout.write(
+                    self.style.SUCCESS("Successfully submitted GigaMeter ping data aggregation task to Celery."))
             else:
                 fetch_and_aggregate_ping_data(date_str=date_str)
                 self.stdout.write(self.style.SUCCESS("Successfully aggregated GigaMeter ping data."))
