@@ -12,17 +12,17 @@ class Command(BaseCommand):
             help='Date to fetch data for (YYYY-MM-DD). Defaults to yesterday.',
         )
         parser.add_argument(
-            '--celery',
+            '--schedule',
             action='store_true',
             help='Execute the task asynchronously using Celery.',
         )
 
     def handle(self, *args, **options):
         date_str = options.get('date')
-        use_celery = options.get('celery')
-        
+        use_celery = options.get('schedule')
+
         self.stdout.write(f"Starting GigaMeter ping data fetch for date: {date_str or 'Yesterday'}")
-        
+
         try:
             if use_celery:
                 fetch_and_aggregate_ping_data.delay(date_str=date_str)
