@@ -540,3 +540,6 @@ GIGA_NEWS_LETTER_URL = env(
     'GIGA_NEWS_LETTER_URL',
     default='https://gigaconnect.us1.list-manage.com/subscribe?u=ad5a5d41f9573f4114f531faa&id=64ba229224',
 )
+
+SCHOOL_MASTER_DATA_CHANGES_SLACK_WEBHOOK_URL = env('SCHOOL_MASTER_DATA_CHANGES_SLACK_WEBHOOK_URL', default=None)
+APP_ENVIRONMENT = env('APP_ENVIRONMENT', default='DEV')
