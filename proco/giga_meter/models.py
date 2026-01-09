@@ -307,3 +307,23 @@ class GigaMeter_SchoolStatic(TimeStampedModel, models.Model):
         app_label = app_config.app_name
         managed = False
         db_table = 'master_sync_school_static'
+
+
+class ConnectivityPingChecksDailyAggr(models.Model):
+    timestamp_date = models.DateTimeField()
+    giga_id_school = models.CharField(max_length=50, db_index=True)
+    browser_id = models.CharField(max_length=50, null=True, blank=True)
+    is_connected_true = models.IntegerField()
+    is_connected_all = models.IntegerField()
+    uptime = models.FloatField()
+    unloaded_latency_avg = models.FloatField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = app_config.app_name
+        managed = False
+        db_table = 'connectivity_ping_checks_daily_aggr'
+        indexes = [
+            models.Index(fields=['giga_id_school', 'timestamp_date']),
+            models.Index(fields=['giga_id_school', 'browser_id', 'timestamp_date']),
+        ]
