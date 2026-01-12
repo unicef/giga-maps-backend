@@ -8,6 +8,7 @@ from simple_history.models import HistoricalRecords
 
 from proco.core.managers import BaseManager
 from django.utils.translation import gettext_lazy as _
+from django.core.cache import cache
 
 
 class PositiveBigIntegerField(models.IntegerField):
@@ -145,6 +146,185 @@ class DataSourceModelMixin(models.Model):
     pulled_at = CustomDateTimeField(null=True, blank=True, verbose_name='Pulled at Date')
 
     objects = models.Manager()
+
+    class Meta:
+        abstract = True
+
+
+class MasterDataSourceModelMixin(DataSourceModelMixin):
+    """
+    MasterDataSourceModelMixin
+        This represents the common properties of the Data Source Models.
+    Inherits : `DataSourceModelMixin`
+    """
+
+    DATA_VERSION_CACHE_KEY = 'master_data_last_version_{0}'
+
+    latitude = models.FloatField(blank=True, default=None, null=True)
+    longitude = models.FloatField(blank=True, default=None, null=True)
+
+    admin1 = models.CharField(max_length=255, blank=True, null=True)
+    admin1_id_giga = models.CharField(max_length=50, null=True, blank=True)
+    admin2 = models.CharField(max_length=255, blank=True, null=True)
+    admin2_id_giga = models.CharField(max_length=50, null=True, blank=True)
+
+    pop_within_1km = models.PositiveIntegerField(blank=True, default=None, null=True)  # pop_within_1km
+    pop_within_2km = models.PositiveIntegerField(blank=True, default=None, null=True)  # pop_within_2km
+    pop_within_3km = models.PositiveIntegerField(blank=True, default=None, null=True)  # pop_within_3km
+    # No Mapping
+    connectivity = models.CharField(blank=True, null=True, max_length=255)
+    connectivity_govt = models.CharField(blank=True, null=True, max_length=255)   # yes|no
+    connectivity_type_govt = models.CharField(blank=True, null=True, max_length=255)  # fiber|xdsl|wired|cellular|p2mp|wireless|p2p wireless|satellite|other
+    connectivity_govt_collection_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True) #min = 2000; max = current year
+    download_speed_contracted = models.FloatField(blank=True, default=None, null=True)   # min = 0; max = 500
+    num_computers = models.PositiveIntegerField(blank=True, default=None, null=True) # min = 0; max = 500
+    num_tablets = models.PositiveIntegerField(blank=True, default=None, null=True) # min = 0; max = 200
+    computer_availability = models.CharField(blank=True, null=True, max_length=255)   # yes|no
+    electricity_availability = models.CharField(blank=True, null=True, max_length=255) # yes|no
+    electricity_type = models.CharField(blank=True, null=True, max_length=255)  # electrical grid|diesel generator|solar power station|other
+    water_availability = models.CharField(blank=True, null=True, max_length=255)  # yes|no
+    sustainable_business_model = models.CharField(blank=True, null=True, max_length=255) # yes|no
+    device_availability = models.CharField(blank=True, null=True, max_length=255)  # yes|no
+    version = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_adm_personnel = models.PositiveIntegerField(blank=True, default=None, null=True)   # min=0, max=2000
+
+    # When pulled from Source API
+    ROW_STATUS_DRAFT = 'DRAFT'
+    # When updated by Editor after pull
+    ROW_STATUS_UPDATED_IN_DRAFT = 'UPDATED_IN_DRAFT'
+    # Send for the publishing by Editor to Publisher
+    ROW_STATUS_DRAFT_LOCKED = 'DRAFT_LOCKED'
+    # Updated by the Publisher
+    ROW_STATUS_UPDATED_IN_DRAFT_LOCKED = 'UPDATED_IN_DRAFT_LOCKED'
+    # Published by Publisher
+    ROW_STATUS_PUBLISHED = 'PUBLISHED'
+    # Deleted by Publisher
+    ROW_STATUS_DELETED = 'DELETED'
+    ROW_STATUS_DELETED_PUBLISHED = 'DELETED_PUBLISHED'
+    ROW_STATUS_DISCARDED = 'DISCARDED'
+
+    ROW_STATUS_CHOICES = (
+        (ROW_STATUS_DRAFT, 'In Draft'),
+        (ROW_STATUS_UPDATED_IN_DRAFT, 'UPDATED BY EDITOR'),
+        (ROW_STATUS_DRAFT_LOCKED, 'ASSIGNED To PUBLISHER'),
+        (ROW_STATUS_UPDATED_IN_DRAFT_LOCKED, 'UPDATED BY PUBLISHER'),
+        (ROW_STATUS_PUBLISHED, 'Published'),
+        (ROW_STATUS_DELETED, 'Deleted'),
+        (ROW_STATUS_DELETED_PUBLISHED, 'Published Deleted'),
+        (ROW_STATUS_DISCARDED, 'Discarded'),
+    )
+
+    status = models.CharField(max_length=50, choices=ROW_STATUS_CHOICES, default=ROW_STATUS_DRAFT, db_index=True)
+
+    modified_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        null=True,
+        related_name='updated_%(class)ss',
+        on_delete=models.DO_NOTHING,
+        verbose_name='Last Updated By'
+    )
+
+    published_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        null=True,
+        related_name='source_published_%(class)ss',
+        on_delete=models.DO_NOTHING,
+        verbose_name='Published By'
+    )
+    published_at = CustomDateTimeField(db_index=True, null=True, blank=True)
+
+    is_read = models.BooleanField(default=False)
+
+    history = HistoricalRecords(inherit=True)
+
+    class Meta:
+        abstract = True
+        ordering = ['created']
+
+    @classmethod
+    def get_last_version(cls, iso3_format):
+        last_data_version = cache.get(cls.DATA_VERSION_CACHE_KEY.format(iso3_format))
+        if not last_data_version:
+            latest_records = cls.objects.filter(
+                country__iso3_format=iso3_format,
+                version__isnull=False,
+            ).order_by('-created').first()
+            if latest_records:
+                last_data_version = latest_records.version
+        return last_data_version
+
+    @classmethod
+    def set_last_version(cls, value, iso3_format):
+        cache.set(cls.DATA_VERSION_CACHE_KEY.format(iso3_format), value)
+
+
+class BaseMasterStatusModel(models.Model):
+    establishment_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
+
+    water_availability = models.NullBooleanField(default=None)
+    electricity_availability = models.NullBooleanField(default=None)
+    computer_lab = models.NullBooleanField(default=None)
+
+    download_speed_benchmark = models.FloatField(blank=True, default=None, null=True)
+    download_speed_contracted = models.FloatField(blank=True, default=None, null=True)
+
+    electricity_type = models.CharField(blank=True, null=True, max_length=255)
+    num_adm_personnel = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    num_computers_desired = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_computers = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    fiber_node_distance = models.FloatField(blank=True, default=None, null=True)
+    microwave_node_distance = models.FloatField(blank=True, default=None, null=True)
+
+    pop_within_1km = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_within_2km = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_within_3km = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    connectivity_govt_collection_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
+    connectivity_govt_ingestion_timestamp = CustomDateTimeField(null=True, blank=True)
+
+    num_tablets = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_robotic_equipment = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    sustainable_business_model = models.NullBooleanField(default=None)
+    computer_availability = models.NullBooleanField(default=None)
+    device_availability = models.NullBooleanField(default=None)
+
+    disputed_region = models.BooleanField(default=False)
+
+    connectivity_govt = models.NullBooleanField(default=None)
+    connectivity_type_govt = models.CharField(blank=True, null=True, max_length=255)
+    connectivity_type_root = models.CharField(blank=True, null=True, max_length=255)
+
+    nearest_lte_distance = models.FloatField(blank=True, default=None, null=True)
+    nearest_umts_distance = models.FloatField(blank=True, default=None, null=True)
+    nearest_gsm_distance = models.FloatField(blank=True, default=None, null=True)
+    nearest_nr_distance = models.FloatField(blank=True, default=None, null=True)
+
+    data_source = models.CharField(blank=True, null=True, max_length=255)
+    data_collection_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
+    data_collection_modality = models.CharField(blank=True, null=True, max_length=255)
+    location_ingestion_timestamp = CustomDateTimeField(null=True, blank=True)
+
+
+    coverage_type = models.CharField(max_length=8, default='unknown')
+
+    version = models.PositiveIntegerField(blank=True, default=None, null=True)
+    latitude = models.FloatField(blank=True, default=None, null=True)
+    longitude = models.FloatField(blank=True, default=None, null=True)
+    admin1 = models.CharField(max_length=255, blank=True, null=True)
+    admin1_id_giga = models.CharField(max_length=50, null=True, blank=True)
+    admin2 = models.CharField(max_length=255, blank=True, null=True)
+    admin2_id_giga = models.CharField(max_length=50, null=True, blank=True)
+    admin3 = models.CharField(max_length=255, blank=True, null=True)
+    admin4 = models.CharField(max_length=255, blank=True, null=True)
+    connectivity = models.CharField(blank=True, null=True, max_length=255)
+    connectivity_type = models.CharField(blank=True, null=True, max_length=255)
+    pop_within_5km = models.PositiveIntegerField(blank=True, default=None, null=True)  # pop_within_5km
+    pop_within_10km = models.PositiveIntegerField(blank=True, default=None, null=True)  # pop_within_10km
 
     class Meta:
         abstract = True
