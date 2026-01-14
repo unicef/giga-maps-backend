@@ -77,7 +77,7 @@ class Entity(TimeStampedModel):
 
     last_master_status_id = core_models.PositiveBigIntegerField(null=True, blank=True, default=None)
 
-    deleted_at = CustomDateTimeField(db_index=True, null=True, blank=True)
+    deleted = CustomDateTimeField(db_index=True, null=True, blank=True)
 
     objects = BaseManager()
 
