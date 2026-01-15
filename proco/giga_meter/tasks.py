@@ -2,7 +2,7 @@ import json
 import logging
 import os
 import uuid
-from datetime import timedelta, date
+from datetime import timedelta, date, datetime
 from typing import List, Dict, Iterator
 
 from celery import chain
@@ -438,11 +438,22 @@ def fetch_aggregated_ping_data(
     )
 
 
-def fetch_all_school_map() -> Dict[str, School]:
-    school_map: Dict[str, School] = {}
+def fetch_all_school_map(start_date: date, end_date: date, ) -> Dict[str, School]:
+    """Fetch only schools that have ping data for the date range"""
+    giga_ids = (
+        giga_meter_models.ConnectivityPingChecksDailyAggr.objects
+        .filter(timestamp_date__date__range=(start_date, end_date))
+        .values_list("giga_id_school", flat=True)
+        .distinct()
+    )
 
+    giga_ids_list = list(giga_ids)
+
+    # Fetch only relevant schools
+    school_map: Dict[str, School] = {}
     for school in (
         School.objects
+            .filter(giga_id_school__in=giga_ids_list)
             .only("id", "giga_id_school")
             .iterator(chunk_size=5_000)
     ):
@@ -497,16 +508,51 @@ def bulk_upsert_school_status(batch: List[SchoolDailyStatus]) -> None:
     if not batch:
         return
 
-    SchoolDailyStatus.objects.bulk_create(
-        batch,
-        update_conflicts=True,
-        unique_fields=["school", "date", "live_data_source"],
-        update_fields=[
-            "uptime",
-            "connectivity_latency",
-            "connectivity_speed",
-        ],
+    # Get existing records
+    existing_keys = set()
+    existing_records = {}
+
+    for status in batch:
+        key = (status.school_id, status.date, status.live_data_source)
+        existing_keys.add(key)
+
+    # Fetch existing records
+    existing_qs = SchoolDailyStatus.objects.filter(
+        school_id__in=[s.school_id for s in batch],
+        date__in=list(set(s.date for s in batch)),
+        live_data_source__in=list(set(s.live_data_source for s in batch)),
     )
+
+    for record in existing_qs:
+        key = (record.school_id, record.date, record.live_data_source)
+        existing_records[key] = record
+
+    # Separate into updates and creates
+    to_create = []
+    to_update = []
+
+    for status in batch:
+        key = (status.school_id, status.date, status.live_data_source)
+
+        if key in existing_records:
+            # Update existing record
+            existing = existing_records[key]
+            existing.uptime = status.uptime
+            existing.connectivity_latency = status.connectivity_latency
+            existing.connectivity_speed = getattr(status, 'connectivity_speed', None)
+            to_update.append(existing)
+        else:
+            to_create.append(status)
+
+    # Bulk operations
+    if to_create:
+        SchoolDailyStatus.objects.bulk_create(to_create)
+
+    if to_update:
+        SchoolDailyStatus.objects.bulk_update(
+            to_update,
+            fields=['uptime', 'connectivity_latency', 'connectivity_speed']
+        )
 
 
 def run_ping_aggregation(
@@ -517,9 +563,9 @@ def run_ping_aggregation(
 ) -> None:
     logger.info(f"Aggregating ping data from {start_date} to {end_date}")
     task_instance.info(f"Aggregating ping data from {start_date} to {end_date}")
-
+    school_map = fetch_all_school_map(start_date, end_date)
+    logger.info(f"Found {len(school_map)} schools with ping data")
     aggregated_rows = fetch_aggregated_ping_data(start_date, end_date)
-    school_map = fetch_all_school_map()
 
     total_records = 0
     batch_count = 0
@@ -531,7 +577,7 @@ def run_ping_aggregation(
 
         if batch_count % 10 == 0:
             logger.info(f"Processed {total_records} records so far")
-
+    logger.info(f"Upserted {total_records} SchoolDailyStatus records")
     task_instance.info(f"Upserted {total_records} SchoolDailyStatus records")
 
 
@@ -566,7 +612,7 @@ def fetch_and_aggregate_ping_data(date_str=None, force_tasks=False):
 
     try:
         if date_str:
-            target_date = core_utilities.get_timezone_converted_value(date_str).date()
+            target_date = core_utilities.get_timezone_converted_value(datetime.strptime(date_str, "%Y-%m-%d")).date()
         else:
             target_date = (
                 core_utilities.get_current_datetime_object().date()
