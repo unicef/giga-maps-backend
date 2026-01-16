@@ -123,7 +123,7 @@ class APICategoriesViewSet(BaseModelViewSet):
 class APIKeysViewSet(BaseModelViewSet):
     """
     APIKeysViewSet
-        This class is used to list all API keys.
+        This class is used to update the API key valid_to date value.
         Inherits: BaseModelViewSet
     """
     model = accounts_models.APIKey
@@ -525,6 +525,9 @@ class InvalidateCacheByPattern(APIView):
                 country_id = payload.get('id', None)
                 country_code = payload.get('code', None)
                 keys = [
+                    "*GLOBAL_STATS_",
+                    "*CONNECTIVITY_STATS_*",
+                    "*CONNECTIVITY_TILES_MAP*benchmark*global*indicator*download*limit*",
                     "*COUNTRIES_LIST_",
                     "*PUBLISHED_LAYERS_LIST_*",
                     "*GLOBAL_COUNTRY_SEARCH_MAPPING_",
@@ -1089,6 +1092,9 @@ class BaseDataLayerAPIViewSet(APIView):
             self.kwargs['school_ids'] = [str(query_params['school_id']).strip()]
         elif 'school_id__in' in query_param_keys:
             self.kwargs['school_ids'] = [s_id.strip() for s_id in query_params['school_id__in'].split(',')]
+
+        if 'exclude_schools_same_coords_except_id' in query_param_keys:
+            self.kwargs['exclude_schools_same_coords_except_id'] = str(query_params['exclude_schools_same_coords_except_id']).strip()
 
         self.kwargs['is_weekly'] = False if query_params.get('is_weekly', 'true') == 'false' else True
         self.kwargs['benchmark'] = 'national' if query_params.get('benchmark', 'global') == 'national' else 'global'
@@ -1778,6 +1784,75 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
         return query.format(**kwargs)
 
+    def get_school_ids_at_same_location(self, request, school_id, country_id):
+        """Get school_ids at same location"""
+        response = {"count": 0, "school_ids": []}
+
+        count_query = """
+        SELECT
+            count(s.id)
+        FROM
+            schools_school s
+        WHERE
+            s.deleted IS NULL
+            AND s.id != {school_id}
+            AND s.geopoint = (SELECT geopoint FROM schools_school WHERE id = {school_id})
+        """.format(school_id=school_id)
+
+        schools_count = db_utilities.sql_to_response(count_query, label=self.__class__.__name__, db_var=settings.READ_ONLY_DB_KEY)
+        total_count = schools_count[0].get('count', 0) if schools_count else 0
+        if total_count == 0:
+            return response
+
+        try:
+            limit = int(request.query_params.get("limit_same_location_schools", 300))
+            limit = limit if limit > 0 else 300
+        except ValueError:
+            limit = 300
+        try:
+            offset = int(request.query_params.get("offset_same_location_schools", 0))
+            offset = max(offset, 0)
+        except ValueError:
+            offset = 0
+
+        query = """
+        SELECT
+            s.id
+        FROM
+            schools_school s
+        LEFT JOIN
+            connection_statistics_schoolrealtimeregistration srr ON s.id = srr.school_id
+            AND srr.deleted IS NULL
+            AND srr.rt_registration_date <= '{end_date}'
+        WHERE
+            s.deleted IS NULL
+            AND s.id != {school_id}
+            AND s.country_id = {country_id}
+            AND s.geopoint = (SELECT geopoint FROM schools_school WHERE id = {school_id})
+        ORDER BY
+            CASE
+                WHEN srr.rt_registered = true THEN 1
+                WHEN s.connectivity_status IN ('good', 'moderate') THEN 2
+                WHEN s.connectivity_status = 'no' THEN 3
+                ELSE 4
+            END ASC,
+            s.name_lower ASC
+        LIMIT {limit}
+        OFFSET {offset}
+        """.format(
+            school_id=school_id,
+            country_id=country_id,
+            limit=limit,
+            offset=offset,
+            end_date=self.kwargs.get('end_date', core_utilities.get_current_datetime_object().date())
+        )
+
+        sql_response = db_utilities.sql_to_response(query, label=self.__class__.__name__, db_var=settings.READ_ONLY_DB_KEY)
+        if sql_response:
+            response['count'] = total_count
+            response['school_ids'] = [r.get('id') for r in sql_response]
+        return response
+
     def get(self, request, *args, **kwargs):
         use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
         request_path = remove_query_param(request.get_full_path(), 'cache')
@@ -1868,9 +1943,16 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                                                               label=self.__class__.__name__,
                                                               db_var=settings.READ_ONLY_DB_KEY)
                     graph_data, positive_speeds = self.generate_graph_data()
+                    sorted_info_panel_school_list = []
 
                     if len(info_panel_school_list) > 0:
-                        for info_panel_school in info_panel_school_list:
+                        # Perform sorting based on the same order of school ids provided in the query param
+                        for school_id in self.kwargs.get('school_ids', []):
+                            for school_details in info_panel_school_list:
+                                if str(school_details['id']) == str(school_id):
+                                    sorted_info_panel_school_list.append(school_details)
+
+                        for info_panel_school in sorted_info_panel_school_list:
                             info_panel_school['geopoint'] = json.loads(info_panel_school['geopoint'])
                             info_panel_school['statistics'] = list(filter(
                                 lambda s: s['school_id'] == info_panel_school['id'], statistics))[-1]
@@ -1905,8 +1987,14 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                                 'convert_unit': self.kwargs.get('convert_unit'),
                                 'display_unit': display_unit,
                             }
+                            if request.query_params.get('include_same_location_schools') == 'true':
+                                info_panel_school['schools_at_same_location'] = self.get_school_ids_at_same_location(
+                                    request,
+                                    info_panel_school.get('id'),
+                                    info_panel_school.get('country_id'),
+                                )
 
-                    response = info_panel_school_list
+                    response = sorted_info_panel_school_list
                 else:
                     is_data_synced_qs = SchoolWeeklyStatus.objects.filter(
                         school__realtime_registration_status__rt_registered=True,
@@ -2001,13 +2089,24 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                                                               label=self.__class__.__name__,
                                                               db_var=settings.READ_ONLY_DB_KEY)
 
+                    sorted_info_panel_school_list = []
                     if len(info_panel_school_list) > 0:
-                        for info_panel_school in info_panel_school_list:
+                        # Perform sorting based on the same order of school ids provided in the query param
+                        for school_id in self.kwargs.get('school_ids', []):
+                            for school_details in info_panel_school_list:
+                                if str(school_details['id']) == str(school_id):
+                                    sorted_info_panel_school_list.append(school_details)
+
+                        for info_panel_school in sorted_info_panel_school_list:
                             info_panel_school['geopoint'] = json.loads(info_panel_school['geopoint'])
                             info_panel_school['statistics'] = list(filter(
                                 lambda s: s['school_id'] == info_panel_school['id'], statistics))[-1]
+                            if request.query_params.get('include_same_location_schools') == 'true':
+                                info_panel_school['schools_at_same_location'] = self.get_school_ids_at_same_location(
+                                    request, info_panel_school.get('id'), info_panel_school.get('country_id')
+                                )
 
-                    response = info_panel_school_list
+                    response = sorted_info_panel_school_list
                 else:
                     query_labels = []
                     query_response = db_utilities.sql_to_response(self.get_static_info_query(query_labels),
@@ -2063,7 +2162,9 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     True AS is_rt_connected,
                     sds.{col_name} AS field_avg,
                     {case_conditions}
-                    'connected' AS connectivity_status
+                    'connected' AS connectivity_status,
+                    (COUNT(*) OVER (PARTITION BY "schools_school".geopoint) > 1)
+                    AS has_multiple_school_on_same_lat_lng
                 FROM schools_school
                 INNER JOIN bounds ON ST_Intersects("schools_school".geopoint, ST_Transform(bounds.geom, 4326))
                 INNER JOIN (
@@ -2086,6 +2187,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                         {country_condition}
                         {admin1_condition}
                         {school_condition}
+                        {same_school_coords_condition}
                         {school_weekly_condition}
                         AND rt_status."rt_registered" = True
                         AND rt_status."rt_registration_date"::date <= '{end_date}'
@@ -2115,6 +2217,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         kwargs['limit_condition'] = ''
         kwargs['random_order'] = ''
         kwargs['random_select_list'] = ''
+        kwargs['same_school_coords_condition'] = ''
 
         add_random_condition = True
 
@@ -2181,6 +2284,17 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
 
+        if kwargs.get('exclude_schools_same_coords_except_id'):
+            kwargs['same_school_coords_condition'] = f"""
+                                        AND (
+                                            schools_school.id = {kwargs['exclude_schools_same_coords_except_id']}
+                                            OR NOT ST_Equals(
+                                                schools_school.geopoint,
+                                                (SELECT geopoint FROM schools_school WHERE id = {kwargs['exclude_schools_same_coords_except_id']})
+                                            )
+                                        )
+                                    """
+
         if len(kwargs['school_filters']) > 0:
             kwargs['school_condition'] += ' AND ' + kwargs['school_filters']
 
@@ -2226,6 +2340,8 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 {random_select_list}
                 schools_school.id,
                 {table_name}."{col_name}" AS field_value,
+                (COUNT(*) OVER (PARTITION BY schools_school.geopoint) > 1)
+                    AS has_multiple_school_on_same_lat_lng,
                 'connected' AS connectivity_status,
                 {label_case_statements}
             FROM schools_school
@@ -2236,6 +2352,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             {country_condition}
             {admin1_condition}
             {school_condition}
+            {same_school_coords_condition}
             {school_weekly_condition}
             {random_order}
             {limit_condition}
@@ -2257,6 +2374,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         kwargs['limit_condition'] = ''
         kwargs['random_order'] = ''
         kwargs['random_select_list'] = ''
+        kwargs['same_school_coords_condition'] = ''
 
         add_random_condition = True
 
@@ -2285,6 +2403,16 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             kwargs['country_condition'] = 'AND schools_school."country_id" IN ({0})'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
+        if kwargs.get('exclude_schools_same_coords_except_id'):
+            kwargs['same_school_coords_condition'] = f"""
+                                        AND (
+                                            sch.id = {kwargs['exclude_schools_same_coords_except_id']}
+                                            OR NOT ST_Equals(
+                                                sch.geopoint,
+                                                (SELECT geopoint FROM schools_school WHERE id = {kwargs['exclude_schools_same_coords_except_id']})
+                                            )
+                                        )
+                                    """
 
         if len(kwargs['school_filters']) > 0:
             kwargs['school_condition'] += ' AND ' + kwargs['school_filters']
@@ -2350,7 +2478,6 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
             kwargs['limit_condition'] = 'LIMIT ' + str(limit)
             kwargs['random_select_list'] = 'random(),'
-
         return query.format(**kwargs)
 
     def cache_enabled(self, data_layer_instance):
@@ -2708,6 +2835,79 @@ class AdvanceFiltersViewSet(BaseModelViewSet):
 
         return super().apply_queryset_filters(queryset)
 
+    def perform_update(self, serializer):
+        """Handle filter updates and invalidate related default filter values if options are changed or filter type changed"""
+        instance = serializer.instance
+        old_options = copy.deepcopy(instance.options) or {}
+        old_type = instance.type
+
+        updated_instance = serializer.save()
+        new_options = updated_instance.options or {}
+
+        if old_type != updated_instance.type: # filter type changed invalidate the default filter without choices check
+            message="filter_type changed from {o} to {n}".format(o=old_type, n=updated_instance.type)
+            self._invalidate_default_values(updated_instance, {}, bypass_default_value_check=True, message=message)
+            return updated_instance
+
+        if (
+            updated_instance.type in [
+                accounts_models.AdvanceFilter.TYPE_DROPDOWN, accounts_models.AdvanceFilter.TYPE_DROPDOWN_MULTISELECT
+            ]
+        ):
+            old_live = bool(old_options.get("live_choices"))
+            new_live = bool(new_options.get("live_choices"))
+            if old_live != new_live:
+                # if choice type changed from static to live or live to static then invalidate without choices check
+                old_type = "Live Choices" if old_live else "Static Choices"
+                new_type = "Live Choices" if new_live else "Static Choices"
+                message = "choice type changed from {o} to {n}".format(o=old_type, n=new_type)
+                self._invalidate_default_values(updated_instance, {}, bypass_default_value_check=True, message=message)
+                return updated_instance
+            self._invalidate_incompatible_default_values(updated_instance, old_options, new_options)
+        return updated_instance
+
+    def _invalidate_incompatible_default_values(self, filter_instance, old_options, new_options):
+        """ Invalidate default filter values that are no longer in sync with the updated filter options """
+        try:
+            old_choices = {c.get("value") for c in old_options.get("choices", []) if isinstance(c, dict) and "value" in c}
+            new_choices = {c.get("value") for c in new_options.get("choices", []) if isinstance(c, dict) and "value" in c}
+
+            if old_choices != new_choices:
+                self._invalidate_default_values(filter_instance, new_choices)
+
+        except Exception as e:
+            logger.error(f"Error invalidating default values for filter {filter_instance.code}: {str(e)}")
+
+    def _invalidate_default_values(self, filter_instance, new_choices, bypass_default_value_check=False, message="filter options changes"):
+        """Remove default filter values when its options or filter type change."""
+        relationships = accounts_models.AdvanceFilterCountryRelationship.objects.filter(
+            advance_filter=filter_instance,
+            is_default=True,
+            deleted__isnull=True
+        )
+        for relationship in relationships:
+            if bypass_default_value_check or self._has_invalid_default_values(relationship, new_choices):
+                invalid_values = relationship.default_filter_values
+                relationship.default_filter_values = {}
+                relationship.is_default = False
+                relationship.save(update_fields=["default_filter_values", "is_default"])
+                logger.warning(
+                    f"Cleared default filter values {invalid_values} for filter '{filter_instance.code}' "
+                    f"for country '{relationship.country.name}' due to {message}."
+                )
+
+    def _has_invalid_default_values(self, relationship, valid_choices):
+        """ Check if relationship has default values that are no longer valid """
+        if not relationship.default_filter_values:
+            return True
+
+        for _, value in relationship.default_filter_values.items():
+            values = value if isinstance(value, list) else [value]
+            if any(v not in valid_choices for v in values):
+                return True
+
+        return False
+
     def perform_destroy(self, instance):
         """
         Delete the filter from Admin portal listing only if its in Draft or Disabled mode.
@@ -2823,3 +3023,35 @@ class ColumnConfigurationChoicesViewSet(BaseModelViewSet):
         core_permissions.IsUserAuthenticated,
         core_permissions.CanPublishAdvanceFilter,
     )
+
+
+class AllPublishedAdvanceFiltersViewSet(BaseModelViewSet):
+    """
+    AllPublishedAdvanceFiltersViewSet
+    - returns list of all Published filters with their live_choices as options.
+    - required to created default filter logic: TECH-7454
+    """
+    model = accounts_models.AdvanceFilter
+    serializer_class = serializers.PublishedAdvanceFiltersListSerializer
+    permit_list_expands = ['column_configuration']
+
+    apply_query_pagination = True
+
+    permission_classes = (
+        core_permissions.IsUserAuthenticated,
+    )
+
+    def apply_queryset_filters(self, queryset):
+        """
+        Override if applying more complex filters to queryset.
+        """
+        queryset = queryset.filter(
+            status=accounts_models.AdvanceFilter.FILTER_STATUS_PUBLISHED,
+            active_countries__deleted__isnull=True,
+        ).distinct()
+
+        return super().apply_queryset_filters(queryset)
+
+    def update_serializer_context(self, context):
+        context['country_id'] = self.kwargs.get('country_id')
+        return context

@@ -48,7 +48,6 @@ logger = logging.getLogger('gigamaps.' + __name__)
 def finalize_task():
     return 'Done'
 
-
 def load_data_from_school_master_apis(country_iso3_format=None):
     """
     Background task which handles School Master Data source changes from APIs to PROCO DB
@@ -465,10 +464,13 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                         school_weekly.save()
 
                         rt_registered = None
-                        if not core_utilities.is_blank_string(row.connectivity_RT):
+                        if (
+                            not core_utilities.is_blank_string(row.connectivity_RT) and
+                            row.connectivity_RT_ingestion_timestamp is not None
+                        ):
                             rt_registered = str(row.connectivity_RT).lower() in core_configs.true_choices
 
-                        if rt_registered is not None and row.connectivity_RT_ingestion_timestamp is not None:
+                        if rt_registered is not None:
                             school_rt_qs = statistics_models.SchoolRealTimeRegistration.objects.filter(school=school)
                             if school_rt_qs.exists():
                                 school_rt_instance = school_rt_qs.order_by('-created').first()
@@ -622,7 +624,7 @@ def email_reminder_to_editor_and_publisher_for_review_waiting_records():
         task_id, task_key, 'Send reminder email to Editor and Publisher to review the school master rows')
 
     if task_instance:
-        task_instance.debug('Not found running job for reminder email task: {}'.format(task_key))
+        task_instance.info('Not found running job for reminder email task: {}'.format(task_key))
 
         ds_settings = settings.DATA_SOURCE_CONFIG.get('SCHOOL_MASTER')
         review_grace_period = core_utilities.convert_to_int(ds_settings['REVIEW_GRACE_PERIOD_IN_HRS'], default='48')
@@ -1109,6 +1111,40 @@ def scheduler_for_data_loss_recovery_for_qos_dates(
 
         call_command('data_loss_recovery_for_qos_dates', *cmd_args)
         task_instance.info('Completed QoS data loss recovery utility handler.')
+
+        background_task_utilities.task_on_complete(task_instance)
+    else:
+        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+
+
+@app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)
+def scheduler_for_data_loss_recovery_for_school_master_version(
+    country_iso3_format,
+    pull_data,
+    pull_version,
+):
+    current_datetime = core_utilities.get_current_datetime_object()
+    task_key = 'scheduler_for_data_loss_recovery_for_school_master_version_{code}_{current_time}'.format(
+        current_time=format_date(current_datetime, frmt='%d%m%Y_%H'),
+        code=country_iso3_format,
+    )
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(task_id, task_key, 'Data loss recovery for School Master versions')
+
+    if task_instance:
+        logger.debug('Not found running job for school master data loss utility handler: {0}'.format(task_key))
+        cmd_args = []
+        if country_iso3_format:
+            cmd_args.append('-country_code={0}'.format(country_iso3_format))
+
+        if pull_data is True:
+            cmd_args.append('--pull_data')
+
+        if pull_version:
+            cmd_args.append('-pull_version={0}'.format(pull_version))
+
+        call_command('data_loss_recovery_for_school_master_version', *cmd_args)
+        task_instance.info('Completed School Master data loss recovery utility handler.')
 
         background_task_utilities.task_on_complete(task_instance)
     else:
