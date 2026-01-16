@@ -120,7 +120,7 @@ class HealthEntityMasterData(TimeStampedModel, core_models.MasterDataSourceModel
         entity_models.Entity,
         blank=True,
         null=True,
-        related_name='health_entity',
+        related_name='health_master_data',
         on_delete=models.DO_NOTHING,
         verbose_name='Health Entity'
     )

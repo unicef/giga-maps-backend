@@ -6,7 +6,7 @@ from django.db.models import Q
 from django.db.models.constraints import UniqueConstraint
 from django.utils import timezone
 from django.utils.translation import ugettext as _
-from model_utils.models import TimeStampedModel
+from timezone_field import TimeZoneField
 
 from proco.core import exceptions as core_exceptions
 from proco.core.managers import BaseManager
@@ -16,17 +16,17 @@ from proco.core import models as core_models
 
 
 ENTITY_TYPE_CHOICES = (
-    ("SCHOOL", "school"),
-    ("HEALTH", "health"),
-    ("LIBRARY", "library"),
+    ("school", "School"),
+    ("health", "Health"),
+    ("library", "Library"),
 )
 
 
-class Entity(TimeStampedModel):
-    entity_name = models.CharField(
+class Entity(core_models.BaseModelMixin):
+    entity_type = models.CharField(
         max_length=20,
         choices=ENTITY_TYPE_CHOICES,
-        default="HEALTH",
+        default="health",
         db_index=True,
     )
 
@@ -75,28 +75,48 @@ class Entity(TimeStampedModel):
     connectivity_status = models.CharField(max_length=10, blank=True, default='unknown')
     coverage_status = models.CharField(max_length=10, blank=True, default='unknown')
 
+    # Common Infrastructure Fields
+    water_availability = models.BooleanField(null=True, blank=True, default=None)
+    electricity_availability = models.BooleanField(null=True, blank=True, default=None)
+    electricity_type = models.CharField(blank=True, null=True, max_length=255)
+
+    # Population Data
+    pop_within_1km = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_within_2km = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_within_3km = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_within_5km = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_within_10km = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    # Government Connectivity Data
+    connectivity_govt = models.BooleanField(null=True, blank=True, default=None)
+    connectivity_type_govt = models.CharField(blank=True, null=True, max_length=255)
+    connectivity_govt_collection_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
+
+    # Data Source Information
+    data_source = models.CharField(blank=True, null=True, max_length=255)
+    data_collection_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
+    data_collection_modality = models.CharField(blank=True, null=True, max_length=255)
+
     last_master_status_id = core_models.PositiveBigIntegerField(null=True, blank=True, default=None)
 
-    deleted_at = CustomDateTimeField(db_index=True, null=True, blank=True)
-
-    objects = BaseManager()
-
     class Meta:
+        db_table = 'entities_entity'
         ordering = ('id',)
         constraints = [
-            UniqueConstraint(fields=['entity_name', 'country', 'giga_id', 'deleted'],
+            UniqueConstraint(fields=['entity_type', 'country', 'giga_id', 'deleted'],
                              name='entities_giga_id_unique_with_deleted'),
-            UniqueConstraint(fields=['entity_name', 'country', 'giga_id'],
+            UniqueConstraint(fields=['entity_type', 'country', 'giga_id'],
                              condition=Q(deleted=None),
                              name='entities_giga_id_unique_without_deleted'),
         ]
 
     def __str__(self):
-        return f'{self.entity_name} - {self.country} - {self.admin1} - {self.name}'
+        return f'{self.entity_type} - {self.country} - {self.admin1} - {self.name}'
 
     def save(self, **kwargs):
         self.name_lower = str(self.name).lower()
-        self.external_id = str(self.external_id).lower()
+        if self.external_id:
+            self.external_id = str(self.external_id).lower()
         super().save(**kwargs)
 
     def delete(self, *args, **kwargs):
@@ -108,108 +128,202 @@ class Entity(TimeStampedModel):
             self.deleted = timezone.now()
             self.save()
 
+        # Cascade to entity-specific models
+        entity_specific = self.get_entity_specific_model()
+        if entity_specific:
+            entity_specific.delete(force=force)
+
         self.daily_status.all().update(deleted=timezone.now())
         self.weekly_status.all().update(deleted=timezone.now())
 
-    def get_model_class_from_entity_name(self):
+    def get_entity_specific_model(self):
         """
-        Returns model class from a name of app_label.ModelName format.
-        :return Model:
+        Returns the entity-specific model instance
         """
-        model = 'connection_statistics.SchoolWeeklyStatus'
+        if self.entity_type == 'health':
+            return getattr(self, 'health_entity', None)
+        elif self.entity_type == 'school':
+            return getattr(self, 'school_entity', None)
+        elif self.entity_type == 'library':
+            return getattr(self, 'library_entity', None)
+        return None
+
+    def get_master_data_model_class(self):
+        """
+        Returns master data model class for approval workflow
+        """
+        model_mapping = {
+            'health': 'data_sources.HealthEntityMasterData',
+            'school': 'data_sources.SchoolMasterData',
+            'library': 'data_sources.LibraryEntityMasterData',  # Future
+        }
+
+        model_path = model_mapping.get(self.entity_type)
+        if not model_path:
+            raise core_exceptions.InvalidModelNameFormatError(model=f'No master data model for entity_type: {self.entity_type}')
 
         try:
-            if self.entity_name == 'health':
-                model = 'entities.HealthMasterStatus'
-            app_name, model_name = model.split('.')
-            model = apps.get_model(app_name, model_name)
-            return model
+            app_name, model_name = model_path.split('.')
+            return apps.get_model(app_name, model_name)
         except (ValueError, ContentType.DoesNotExist):
-            raise core_exceptions.InvalidModelNameFormatError(model=model)
+            raise core_exceptions.InvalidModelNameFormatError(model=model_path)
 
 
-class HealthMasterStatus(core_models.BaseModelMixin, core_models.BaseMasterStatusModel):
+class HealthEntity(core_models.BaseModelMixin):
     """
-    SchoolMasterStatus
-        This class define model used to store School Master Data.
-    Inherits : `BaseModelMixin`
+    HealthEntity - Operational health facility data
+    Contains health-specific fields that are actively used in the system
     """
-
-    entity = models.ForeignKey(
+    entity = models.OneToOneField(
         Entity,
-        blank=False,
-        null=False,
-        related_name='master_status',
-        on_delete=models.DO_NOTHING,
-        verbose_name='Master Sync'
+        on_delete=models.CASCADE,
+        related_name='health_entity',
+        limit_choices_to={'entity_type': 'health'}
     )
-    health_id_giga = models.CharField(max_length=255, blank=True, db_index=True)
-    dhis2_id = models.CharField(blank=True, null=True, max_length=255)
-    hims_id = models.CharField(blank=True, null=True, max_length=255)
-    hfml_id = models.CharField(blank=True, null=True, max_length=255)
-    facility_name =  models.CharField(max_length=1000, blank=True)
+
+    # Health Facility Identifiers
+    dhis2_id = models.CharField(blank=True, null=True, max_length=255, db_index=True)
+    hims_id = models.CharField(blank=True, null=True, max_length=255, db_index=True)
+    hfml_id = models.CharField(blank=True, null=True, max_length=255, db_index=True)
+    facility_id_govt = models.CharField(max_length=50, blank=True, db_index=True)
+
+    # Basic Facility Information
     facility_type = models.CharField(blank=True, null=True, max_length=255)
     facility_ownership = models.CharField(blank=True, null=True, max_length=255)
-    num_of_community_health_workers = models.PositiveIntegerField(blank=True, default=None, null=True)
-    num_of_community_health_workers_within_5km = models.PositiveIntegerField(blank=True, default=None, null=True)
-    area_type = models.CharField(blank=True, null=True, max_length=255)
-    govt_pop_est = models.PositiveIntegerField(blank=True, default=None, null=True)  # govt_pop_est
-    hf_pop_est = models.PositiveIntegerField(blank=True, default=None, null=True)
-    is_facility_open = models.NullBooleanField(default=None)
+    facility_level = models.CharField(max_length=20, blank=True)  # Primary, Secondary, Tertiary
     health_service_provider = models.CharField(blank=True, null=True, max_length=255)
-    facility_accessibility = models.NullBooleanField(default=None)
-    distance_to_closest_settlement = models.PositiveIntegerField(blank=True, null=True)
-    distance_to_country_boundary = models.PositiveIntegerField(blank=True, default=None, null=True)
-    facility_level = models.CharField(max_length=20, blank=True)
-    num_of_healthworkers = models.PositiveIntegerField(blank=True, default=None, null=True)
-    num_beds_tot = models.PositiveIntegerField(blank=True, default=None, null=True)  # min = 0; max = 10000
-    num_beds_icu = models.PositiveIntegerField(blank=True, default=None, null=True)  # min = 0; max = 5000
-    num_theatres = models.PositiveIntegerField(blank=True, default=None, null=True)  # min = 0; max = 200
-    num_toilets = models.PositiveIntegerField(blank=True, default=None, null=True)  # min = 0; max = 500
-    power_backup_system = models.NullBooleanField(default=None)  # yes|no
-    num_outpatients = models.PositiveIntegerField(blank=True, default=None, null=True)  # <20000
-    num_inpatients = models.PositiveIntegerField(blank=True, default=None, null=True)  # <20000
-    licensing_status = models.CharField(max_length=50, blank=True)  #
-    # licensed|provisional|expired|suspended|not_applicable
-    facility_hours = models.CharField(max_length=50, blank=True)  # 24_7 | weekdays_daytime | weekdays_extended |
-    # seasonal | unknown | other
-    emergency_services_available = models.NullBooleanField(default=None) # yes|no
-    staff_doctors = models.PositiveIntegerField(blank=True, default=None, null=True) # max=2000
-    staff_nurses = models.PositiveIntegerField(blank=True, default=None, null=True) # max=4000
-    staff_midwives = models.PositiveIntegerField(blank=True, default=None, null=True) # max=500
-    staff_laboratorians = models.PositiveIntegerField(blank=True, default=None, null=True) # max=500
-    staff_pharmacists = models.PositiveIntegerField(blank=True, default=None, null=True) # max=500
-    cold_chain_available = models.NullBooleanField(default=None) # yes|no
-    waste_management_system = models.CharField(blank=True, null=True, max_length=50) # incinerator|pit|contracted_service|none|other
-    hmis_system = models.NullBooleanField(default=None) # yes|no
+
+    # Facility Status
+    is_facility_open = models.BooleanField(null=True, blank=True, default=None)
+    licensing_status = models.CharField(max_length=50, blank=True)
+    facility_hours = models.CharField(max_length=50, blank=True)
+    establishment_year = models.PositiveSmallIntegerField(blank=True, null=True)
+
+    # Capacity Information
+    num_beds_total = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_beds_icu = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_theatres = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_toilets = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    # Staff Information
+    num_healthworkers = models.PositiveIntegerField(blank=True, default=None, null=True)
+    staff_doctors = models.PositiveIntegerField(blank=True, default=None, null=True)
+    staff_nurses = models.PositiveIntegerField(blank=True, default=None, null=True)
+    staff_midwives = models.PositiveIntegerField(blank=True, default=None, null=True)
+    staff_laboratorians = models.PositiveIntegerField(blank=True, default=None, null=True)
+    staff_pharmacists = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    # Services
+    emergency_services_available = models.BooleanField(null=True, blank=True, default=None)
+    services_offered = models.CharField(blank=True, null=True, max_length=500)
+
+    # Infrastructure
+    power_backup_system = models.BooleanField(null=True, blank=True, default=None)
+    cold_chain_available = models.BooleanField(null=True, blank=True, default=None)
+    waste_management_system = models.CharField(blank=True, null=True, max_length=50)
+    hmis_system = models.BooleanField(null=True, blank=True, default=None)
+
+    # Population and Outreach
     catchment_population = models.PositiveIntegerField(blank=True, default=None, null=True)
-    # outpatient|inpatient|maternity|surgery|laboratory|pharmacy|radiology|dialysis|mental_health|immunization|HIV|TB|NCD_clinic|pediatrics|geriatrics|physiotherapy|dental
-    services_offered = models.CharField(blank=True, null=True, max_length=100)
-    facility_id_govt = models.CharField(max_length=50, blank=True)
-    facility_id_govt_type = models.CharField(blank=True, null=True, max_length=50)
-    facility_establishment_year = models.PositiveSmallIntegerField(blank=True, null=True)
-    download_speed_govt = models.FloatField(blank=True, default=None, null=True)
-    facility_address = models.CharField(blank=True, null=True, max_length=10)
-    facility_data_source = models.CharField(blank=True, null=True, max_length=255)
-    facility_data_collection_year = models.PositiveSmallIntegerField(blank=True, null=True)
-    facility_data_collection_modality = models.NullBooleanField(default=None)
-    refugee_camp = models.NullBooleanField(default=None)
-    patients_refugees = models.NullBooleanField(default=None)
-    connectivity_start_gov = models.CharField(blank=True, null=True, max_length=10) # MM: min =1; max=12|YYYY: min = 1000; max = current year
-    connectivity_start_contract_gov = models.CharField(blank=True, null=True, max_length=10)# MM: min =1; max=12|YYYY: min = 1000; max = current year
-    connectivity_ever_connected = models.NullBooleanField(default=None) # yes|no
+    num_outpatients = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_inpatients = models.PositiveIntegerField(blank=True, default=None, null=True)
 
+    # Contact Information
+    facility_address = models.CharField(blank=True, null=True, max_length=255)
 
+    # Network Infrastructure (for telemedicine)
+    fiber_node_distance = models.FloatField(blank=True, default=None, null=True)
+    microwave_node_distance = models.FloatField(blank=True, default=None, null=True)
+    nearest_lte_distance = models.FloatField(blank=True, default=None, null=True)
+    nearest_umts_distance = models.FloatField(blank=True, default=None, null=True)
+    nearest_gsm_distance = models.FloatField(blank=True, default=None, null=True)
+    nearest_nr_distance = models.FloatField(blank=True, default=None, null=True)
+
+    # Administrative
+    num_adm_personnel = models.PositiveIntegerField(blank=True, default=None, null=True)
+    disputed_region = models.BooleanField(default=False)
 
     class Meta:
+        db_table = 'entities_health_entity'
         ordering = ('id',)
         constraints = [
-            UniqueConstraint(fields=['entity', 'version', 'deleted'],
-                             name='entities_master_status_unique_with_deleted'),
-            UniqueConstraint(fields=['entity', 'version'],
-                             condition=Q(deleted=None),
-                             name='entities_master_status_unique_without_deleted'),
+            UniqueConstraint(fields=['entity', 'deleted'],
+                           name='health_entity_unique_with_deleted'),
+            UniqueConstraint(fields=['entity'],
+                           condition=Q(deleted=None),
+                           name='health_entity_unique_without_deleted'),
         ]
 
     def __str__(self):
-        return f'{self.entity} - {self.version}'
+        return f'Health: {self.entity.name}'
+
+
+class SchoolEntity(core_models.BaseModelMixin):
+    """
+    SchoolEntity - Operational school data
+    Mirrors existing School model fields for consistency
+    """
+    entity = models.OneToOneField(
+        Entity,
+        on_delete=models.CASCADE,
+        related_name='school_entity',
+        limit_choices_to={'entity_type': 'school'}
+    )
+
+    # School Identifiers
+    school_id_govt = models.CharField(blank=True, null=True, max_length=255, db_index=True)
+
+    # Geographic Details
+    timezone = TimeZoneField(blank=True, null=True)
+    gps_confidence = models.FloatField(null=True, blank=True)
+    altitude = models.PositiveIntegerField(blank=True, default=0)
+    address = models.CharField(blank=True, max_length=255)
+    postal_code = models.CharField(blank=True, max_length=128)
+    email = models.EmailField(max_length=128, null=True, blank=True, default=None)
+
+    # Education Information
+    education_level = models.CharField(blank=True, max_length=255)
+    education_level_lower = models.CharField(blank=True, max_length=255, editable=False, db_index=True)
+    education_level_govt = models.CharField(blank=True, null=True, max_length=255)
+    education_level_govt_lower = models.CharField(blank=True, null=True, max_length=255, editable=False, db_index=True)
+    education_level_regional = models.CharField(max_length=255, blank=True)
+    school_type = models.CharField(blank=True, max_length=64, db_index=True)
+    school_type_lower = models.CharField(blank=True, max_length=64, editable=False, db_index=True)
+
+    # School Status
+    establishment_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
+
+    # Education Technology Infrastructure
+    computer_lab = models.BooleanField(null=True, blank=True, default=None)
+    computer_availability = models.BooleanField(null=True, blank=True, default=None)
+    num_computers = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_computers_desired = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_tablets = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_robotic_equipment = models.PositiveIntegerField(blank=True, default=None, null=True)
+    device_availability = models.BooleanField(null=True, blank=True, default=None)
+    # Education Business Model
+    sustainable_business_model = models.BooleanField(null=True, blank=True, default=None)
+
+    class Meta:
+        db_table = 'entities_school_entity'
+        ordering = ('id',)
+        constraints = [
+            UniqueConstraint(fields=['entity', 'deleted'],
+                           name='school_entity_unique_with_deleted'),
+            UniqueConstraint(fields=['entity'],
+                           condition=Q(deleted=None),
+                           name='school_entity_unique_without_deleted'),
+        ]
+
+    def save(self, **kwargs):
+        # Maintain lowercase fields for search optimization
+        if self.education_level:
+            self.education_level_lower = str(self.education_level).lower()
+        if self.education_level_govt:
+            self.education_level_govt_lower = str(self.education_level_govt).lower()
+        if self.school_type:
+            self.school_type_lower = str(self.school_type).lower()
+        super().save(**kwargs)
+
+    def __str__(self):
+        return f'School: {self.entity.name}'

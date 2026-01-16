@@ -2,7 +2,7 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 
 from proco.connection_statistics.models import EntityWeeklyStatus
-from proco.entities.models import HealthMasterStatus
+from proco.data_sources.models import HealthEntityMasterData
 
 @receiver(post_save, sender=EntityWeeklyStatus)
 def update_entity_last_weekly_status(instance, created=False, **kwargs):
@@ -16,7 +16,7 @@ def update_entity_last_weekly_status(instance, created=False, **kwargs):
         entity.save()
 
 
-@receiver(post_save, sender=HealthMasterStatus)
+@receiver(post_save, sender=HealthEntityMasterData)
 def update_entity_last_master_status_id(instance, created=False, **kwargs):
     if created:
         entity = instance.entity
