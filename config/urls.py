@@ -36,6 +36,7 @@ urlpatterns = [
         path('auth/', include('proco.custom_auth.api_urls')),
         path('locations/', include('proco.locations.api_urls')),
         path('locations/', include('proco.schools.api_urls')),
+        path('locations/', include('proco.entities.api_urls')),
         path('background/', include('proco.background.api_urls')),
         path('statistics/', include('proco.connection_statistics.api_urls')),
         path('contact/', include('proco.contact.api_urls')),

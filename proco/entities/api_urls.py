@@ -10,4 +10,7 @@ app_name = 'entities'
 
 urlpatterns = [
     path('', include(country_entities.urls)),
+    path('v2/entities/tiles/connectivity_status/',
+     api.EntityConnectivityStatusTileRequestHandler.as_view(),
+     name='tiles-entity-connectivity-status-view')
 ]
