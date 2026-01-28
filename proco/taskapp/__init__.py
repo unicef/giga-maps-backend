@@ -71,7 +71,7 @@ def finalize_setup(sender, **kwargs):
         },
         'proco.utils.tasks.populate_school_registration_data': {
             'task': 'proco.utils.tasks.populate_school_registration_data',
-            'schedule': crontab(hour=2, minute=40),
+            'schedule': crontab(hour='2,8,14,20', minute=50),
             'args': (),
         },
         'proco.data_sources.tasks.handle_published_school_master_data_row': {
@@ -106,6 +106,11 @@ def finalize_setup(sender, **kwargs):
             'task': 'proco.giga_meter.tasks.handle_giga_meter_school_master_data_sync',
             # Executes once in a day at 8:30 PM
             'schedule': crontab(hour=20, minute=30),
+            'args': (),
+        },
+        'proco.giga_meter.tasks.fetch_and_aggregate_ping_data': {
+            'task': 'proco.giga_meter.tasks.fetch_and_aggregate_ping_data',
+            'schedule': crontab(hour='0', minute=15),
             'args': (),
         },
     })

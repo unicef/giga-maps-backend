@@ -58,6 +58,7 @@ class ConnectivityStatistics(models.Model):
         choices=statistics_configs.LIVE_DATA_SOURCE_CHOICES,
         default=statistics_configs.UNKNOWN_SOURCE,
     )
+    uptime = models.FloatField(help_text=_('percentage'), blank=True, null=True, default=None)
 
     deleted = core_models.CustomDateTimeField(db_index=True, null=True, blank=True)
 
