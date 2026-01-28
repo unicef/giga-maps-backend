@@ -140,6 +140,9 @@ def compare_target_model_changes(current_row, school):
         'rt_registration': {}
     }
 
+    if not school:
+        return changes
+
     # Handle Scpecial Case for Lat/Lon & admin1_id_giga/admin2_id_giga School Model
     if current_row.longitude != school.geopoint.x:
         changes['school_model']['longitude'] = 1
