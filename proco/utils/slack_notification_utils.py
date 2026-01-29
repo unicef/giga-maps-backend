@@ -187,9 +187,11 @@ def compare_target_model_changes(current_row, school):
             if is_different_value(current_val, previous_val, source_field):
                 changes['school_weekly'][source_field] = 1
     else:
-        # school_weekly obj doesn't exist make all columns as updated
+        # school_weekly obj doesn't exist make all columns as updated if there value exists
         for target_field, source_field in SCHOOLWEEKLYSTATUS_SCHOOLMASTERDATA_FIELD_MAPPING.items():
-            changes['school_weekly'][source_field] = 1
+            current_val = getattr(current_row, source_field, None)
+            if not core_utilities.is_blank_string(current_val):
+                changes['school_weekly'][source_field] = 1
 
     # Check SchoolRealTimeRegistration changes
     school_rt = statistics_models.SchoolRealTimeRegistration.objects.filter(school=school).last()
@@ -201,9 +203,13 @@ def compare_target_model_changes(current_row, school):
             if is_different_value(current_val, previous_val, source_field):
                 changes['rt_registration'][source_field] = 1
     else:
-        # school_rt obj doesn't exist make all columns as updated
-        for target_field, source_field in SCHOOLREALTIMEREGISTRATION_SCHOOLMASTERDATA_FIELD_MAPPING.items():
-            changes['rt_registration'][source_field] = 1
+        rt_registered = None
+        if not core_utilities.is_blank_string(current_row.connectivity_RT):
+            rt_registered = str(current_row.connectivity_RT).lower() in core_configs.true_choices
+        if rt_registered is not None and current_row.connectivity_RT_ingestion_timestamp is not None:
+            # school_rt obj doesn't exist make all columns as updated if there value exists
+            for target_field, source_field in SCHOOLREALTIMEREGISTRATION_SCHOOLMASTERDATA_FIELD_MAPPING.items():
+                changes['rt_registration'][source_field] = 1
     return changes
 
 
