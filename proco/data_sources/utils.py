@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from datetime import timedelta
-from typing import Optional
+from typing import Optional, Any
 
 import delta_sharing
 import numpy as np
@@ -100,17 +100,32 @@ def normalize_qos_data_frame(df):
     return df
 
 
-def has_changes_for_review(row, school):
+def _values_equal(a: Any, b: Any) -> bool:
+    """
+    Null-safe equality check.
+    Treats NaN, NaT, and None as equal if both sides are missing.
+    """
+    if (pd.isna(a) and pd.isna(b)) or (a is None and b is None):
+        return True
+    return a == b
+
+def has_changes_for_review(row, school) -> bool:
+    """
+    Compare a DataFrame row with an existing School model instance.
+    Returns True if any meaningful change is detected; False otherwise.
+
+    This preserves the original control flow and column accesses, but uses
+    null-safe comparisons so NaN/NaT/None do not cause false positives.
+    """
     if school:
-        if row['school_name'].lower() != school.name.lower():
+        if not _values_equal(row['school_name'].lower(), school.name.lower()):
             return True
 
         old_external_id = None \
             if core_utilities.is_blank_string(school.external_id) else str(school.external_id).lower()
         new_external_id = None \
             if core_utilities.is_blank_string(row['school_id_govt']) else str(row['school_id_govt']).lower()
-
-        if old_external_id != new_external_id:
+        if not _values_equal(old_external_id, new_external_id):
             return True
 
         old_admin1_id = None
@@ -118,8 +133,7 @@ def has_changes_for_review(row, school):
             old_admin1_id = str(school.admin1.giga_id_admin).lower()
         new_admin1_id = None \
             if core_utilities.is_blank_string(row['admin1_id_giga']) else str(row['admin1_id_giga']).lower()
-
-        if old_admin1_id != new_admin1_id:
+        if not _values_equal(old_admin1_id, new_admin1_id):
             return True
 
         old_admin2_id = None
@@ -127,14 +141,13 @@ def has_changes_for_review(row, school):
             old_admin2_id = str(school.admin2.giga_id_admin).lower()
         new_admin2_id = None \
             if core_utilities.is_blank_string(row['admin2_id_giga']) else str(row['admin2_id_giga']).lower()
-
-        if old_admin2_id != new_admin2_id:
+        if not _values_equal(old_admin2_id, new_admin2_id):
             return True
 
         old_lat = school.geopoint.y
         new_lat = row['latitude']
         if (
-            old_lat != new_lat and
+            not _values_equal(old_lat, new_lat) and
             (
                 str(old_lat).split('.')[0] != str(new_lat).split('.')[0] or
                 str(old_lat).split('.')[1][:5] != str(new_lat).split('.')[1][:5]
@@ -145,7 +158,7 @@ def has_changes_for_review(row, school):
         old_long = school.geopoint.x
         new_long = row['longitude']
         if (
-            old_long != new_long and
+            not _values_equal(old_long, new_long) and
             (
                 str(old_long).split('.')[0] != str(new_long).split('.')[0] or
                 str(old_long).split('.')[1][:5] != str(new_long).split('.')[1][:5]
@@ -157,18 +170,20 @@ def has_changes_for_review(row, school):
             if core_utilities.is_blank_string(school.education_level) else str(school.education_level).lower()
         new_education_level = None \
             if core_utilities.is_blank_string(row['education_level']) else str(row['education_level']).lower()
-
-        if old_education_level != new_education_level:
+        if not _values_equal(old_education_level, new_education_level):
             return True
 
         school_rt_instance = SchoolRealTimeRegistration.objects.filter(school=school).order_by('-created').first()
         old_connectivity_rt = school_rt_instance.rt_registered if school_rt_instance else None
 
         new_connectivity_rt = None
-        if not core_utilities.is_blank_string(row['connectivity_RT']):
+        if (
+            not pd.isnull(row['connectivity_RT']) and
+            not pd.isnull(row['connectivity_RT_ingestion_timestamp'])
+        ):
             new_connectivity_rt = str(row['connectivity_RT']).lower() in core_configs.true_choices
 
-        if old_connectivity_rt != new_connectivity_rt:
+        if not _values_equal(old_connectivity_rt, new_connectivity_rt):
             return True
         return False
     return True

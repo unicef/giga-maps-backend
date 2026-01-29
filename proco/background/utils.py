@@ -8,14 +8,14 @@ def task_on_start(task_id, unique_name, description, check_previous=False):
     try:
         task = BackgroundTask.objects.filter(name=unique_name).first()
         if task:
-            return
+            return None
         else:
             if check_previous and BackgroundTask.objects.filter(
                 description=description,
                 created_at__gte=get_current_datetime_object() - timedelta(hours=12),
                 status=BackgroundTask.STATUSES.running,
             ).exists():
-                return
+                return None
             else:
                 task = BackgroundTask.objects.create(
                     task_id=task_id,
@@ -26,7 +26,7 @@ def task_on_start(task_id, unique_name, description, check_previous=False):
                 )
                 return task
     except:
-        return
+        return None
 
 
 def task_on_complete(task):
