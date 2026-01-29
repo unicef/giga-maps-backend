@@ -1337,6 +1337,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         LEFT JOIN "connection_statistics_schoolrealtimeregistration" AS srr
             ON schools_school."id" = srr."school_id"
             AND srr."deleted" IS NULL
+            AND srr."rt_registration_date"::date <= '{end_date}'
         LEFT JOIN (
             SELECT "schools_school"."id" AS school_id,
                 {col_function} AS "{col_name}"
