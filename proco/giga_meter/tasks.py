@@ -429,8 +429,7 @@ def fetch_aggregated_ping_data(
         .filter(timestamp_date__date__range=(start_date, end_date))
         .values("timestamp_date__date", "giga_id_school")
         .annotate(
-            total_connected=Sum("is_connected_true"),
-            total_checks=Sum("is_connected_all"),
+            avg_uptime=Avg("uptime"),
             avg_latency=Avg("unloaded_latency_avg"),
         )
         .order_by("timestamp_date__date", "giga_id_school")
@@ -470,16 +469,11 @@ def stream_school_daily_status(
     batch: List[SchoolDailyStatus] = []
 
     for row in aggregated_rows:
-        total_checks = row["total_checks"] or 0
-        if total_checks <= 0:
-            continue
-
         school = school_map.get(row["giga_id_school"])
         if school is None:
             continue
 
-        total_connected = row["total_connected"] or 0
-        uptime = (total_connected / total_checks) * 100
+        uptime = float(row["avg_uptime"])
 
         avg_latency = row["avg_latency"]
         if avg_latency is not None:
