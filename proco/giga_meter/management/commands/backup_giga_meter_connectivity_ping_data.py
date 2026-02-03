@@ -72,8 +72,8 @@ class Command(BaseCommand):
         schedule_tasks = options.get('schedule_tasks')
         if schedule_tasks:
             giga_meter_tasks.scheduler_for_backup_giga_meter_connectivity_ping_data.delay(
-                date_utilities.format_date(date_list[0]),
-                date_utilities.format_date(date_list[-1]),
+                start_date=date_utilities.format_date(date_list[0]),
+                end_date=date_utilities.format_date(date_list[-1]),
             )
             logger.info('Completed scheduling the "GigaMeter Connectivity Ping data" utility successfully.\n')
             sys.exit(0)

@@ -677,8 +677,6 @@ def scheduler_for_backup_giga_meter_connectivity_ping_data(*args, start_date=Non
         n_days_old = datetime.now() - timedelta(days=retention_days)
         till_date = format_date(core_utilities.get_current_datetime_object(timestamp=n_days_old))
     else:
-        start_date = format_date(start_date)
-        end_date = format_date(end_date)
         till_date = end_date
     task_key = f'scheduler_for_backup_giga_meter_connectivity_ping_data_for_country_at_{till_date}'
     task_id = current_task.request.id or str(uuid.uuid4())
