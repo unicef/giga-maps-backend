@@ -1,4 +1,5 @@
 import logging
+import sys
 from datetime import timedelta
 
 from django.core.management.base import BaseCommand
@@ -43,10 +44,9 @@ class Command(BaseCommand):
 
         if start_date and start_date > end_date:
             logger.error('Start date value can not be greater than end_date.')
-            exit(0)
+            sys.exit(0)
 
         till_date = date_utilities.to_date(options.get('till_date'))
-
         # Use either start_date and end_date or till_date
         # Only process dates that have non-deleted records
         if start_date and end_date:
@@ -67,7 +67,7 @@ class Command(BaseCommand):
                 logger.error(f'Ping data is not available for date range. Start Date: {start_date}, End Date: {end_date}.')
             else:
                 logger.error(f'Ping data is not available for before date: {till_date}.')
-            exit(0)
+            sys.exit(0)
 
         schedule_tasks = options.get('schedule_tasks')
         if schedule_tasks:
@@ -76,7 +76,7 @@ class Command(BaseCommand):
                 date_utilities.format_date(date_list[-1]),
             )
             logger.info('Completed scheduling the "GigaMeter Connectivity Ping data" utility successfully.\n')
-            exit(0)
+            sys.exit(0)
 
         logger.info(f'Starting backup for date range between '
                     f'{date_utilities.format_date(date_list[0])} - {date_utilities.format_date(date_list[-1])}')
@@ -99,6 +99,6 @@ class Command(BaseCommand):
 
         except Exception as e:
             logger.error(f'Backup operation failed: {str(e)}')
-            exit(1)
+            sys.exit(1)
 
         logger.info('Completed "GigaMeter Connectivity Ping data" utility successfully.\n')

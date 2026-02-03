@@ -339,7 +339,7 @@ class GigaMeter_ConnectivityPingChecks(models.Model):
         error_message    TEXT,
         giga_id_school   TEXT NOT NULL,
         app_local_uuid   TEXT NOT NULL,
-        device_id        TEXT NOT NULL,
+        browser_id        TEXT NOT NULL,
         created_at       TIMESTAMPTZ(6) DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
         latency          DOUBLE PRECISION,
         deleted_at       TIMESTAMPTZ(6),
@@ -351,7 +351,7 @@ class GigaMeter_ConnectivityPingChecks(models.Model):
     error_message = models.TextField(blank=True, null=True)
     giga_id_school = models.TextField(blank=False, null=False)
     app_local_uuid = models.TextField(blank=False, null=False)
-    device_id = models.TextField(blank=False, null=False)
+    browser_id = models.TextField(blank=False, null=False)
     created_at = models.DateTimeField()
     latency = models.FloatField(blank=True, null=True)
     deleted_at = models.DateTimeField(blank=True, null=True)
@@ -365,4 +365,4 @@ class GigaMeter_ConnectivityPingChecks(models.Model):
         db_table = 'connectivity_ping_checks'
 
     def __str__(self):
-        return f'{self.giga_id_school} - {self.device_id} - {self.created_at} - {self.is_connected}'
+        return f'{self.giga_id_school} - {self.browser_id} - {self.created_at} - {self.is_connected}'

@@ -673,10 +673,12 @@ def fetch_and_aggregate_ping_data(date_str=None, force_tasks=False):
 def scheduler_for_backup_giga_meter_connectivity_ping_data(*args, start_date=None, end_date=None):
     till_date = None
     if not start_date or not end_date:
-        retention_days = settings.AZURE_DELTALAKE_CONFIG.get('DATA_RETENTION_DAYS', 180)
+        retention_days = settings.AZURE_DELTALAKE_CONFIG.get('GIGA_METER_PING_BACKUP').get('DATA_RETENTION_DAYS')
         n_days_old = datetime.now() - timedelta(days=retention_days)
         till_date = format_date(core_utilities.get_current_datetime_object(timestamp=n_days_old))
     else:
+        start_date = format_date(start_date)
+        end_date = format_date(end_date)
         till_date = end_date
     task_key = f'scheduler_for_backup_giga_meter_connectivity_ping_data_for_country_at_{till_date}'
     task_id = current_task.request.id or str(uuid.uuid4())

@@ -19,7 +19,7 @@ class Migration(migrations.Migration):
                 ('error_message', models.TextField(blank=True, null=True)),
                 ('giga_id_school', models.TextField()),
                 ('app_local_uuid', models.TextField()),
-                ('device_id', models.TextField()),
+                ('browser_id', models.TextField()),
                 ('created_at', models.DateTimeField()),
                 ('latency', models.FloatField(blank=True, null=True)),
                 ('deleted_at', models.DateTimeField(blank=True, null=True)),
