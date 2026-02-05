@@ -8,6 +8,7 @@ from celery import chain, chord, group, current_task
 from django.conf import settings
 from django.contrib.gis.geos import Point
 from django.core.management import call_command
+from django.core.exceptions import ImproperlyConfigured
 from django.db.models import Count
 from django.db.utils import DataError
 from requests.exceptions import HTTPError
@@ -25,9 +26,10 @@ from proco.core import utils as core_utilities
 from proco.core.config import app_config as core_configs
 from proco.custom_auth import models as auth_models
 from proco.custom_auth.utils import get_user_emails_for_permissions
-from proco.data_sources import models as sources_models
+from proco.data_sources import models as sources_models, constants
 from proco.data_sources import utils as source_utilities
 from proco.data_sources.config import app_config as sources_config
+from proco.data_sources.constants import SOFT_TIME_LIMIT, TIME_LIMIT
 from proco.data_sources.models import QoSData
 from proco.locations.models import Country, CountryAdminMetadata
 from proco.schools.models import School
@@ -1081,3 +1083,173 @@ def scheduler_for_data_loss_recovery_for_school_master_version(
         background_task_utilities.task_on_complete(task_instance)
     else:
         logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+
+
+def validate_config(config: dict, parent: str, *children: str):
+    if not config:
+        raise ImproperlyConfigured(
+            "DATA_SOURCE_CONFIG is missing from settings."
+        )
+    if parent not in config:
+        raise ImproperlyConfigured(
+            f"Missing required config section: DATA_SOURCE_CONFIG['{parent}']"
+        )
+    parent_config = config[parent]
+    missing = [key for key in children if key not in parent_config]
+    if missing:
+        raise ImproperlyConfigured(
+            f"Missing required config keys in DATA_SOURCE_CONFIG['{parent}']: "
+            f"{', '.join(missing)}"
+        )
+    return parent_config
+
+
+def validate_schema_and_sync_schema_table_data(profile_file, schema_name, share_name, country_iso3_format, country_codes_for_exclusion, errors):
+    # Create a SharingClient.
+    client = source_utilities.ProcoSharingClient(profile_file)
+    health_master_share = client.get_share(share_name)
+    changes_for_countries = {}
+    deleted_entities = []
+    if health_master_share:
+        health_master_schema = client.get_schema(health_master_share, schema_name)
+        if health_master_schema:
+            schema_tables = client.list_tables(health_master_schema)
+            logger.debug('All tables ready to access: {0}'.format(schema_tables))
+
+            health_master_fields = [f.name for f in sources_models.HealthEntityMasterData._meta.get_fields()]
+            for schema_table in schema_tables:
+                logger.debug('#' * 10)
+                logger.debug('Table: %s', schema_table)
+                if country_iso3_format and country_iso3_format != schema_table.name:
+                    continue
+                if len(country_codes_for_exclusion) > 0 and schema_table.name in country_codes_for_exclusion:
+                    logger.warning('Country with ISO3 Format ({0}) configured to exclude from Health Master data pull. '
+                                'Hence skipping the load for this country code.'.format(schema_table.name))
+                    continue
+                try:
+                    source_utilities.vaildate_master_version_and_sync_health_master_data(
+                        profile_file, share_name, schema_name, schema_table.name, changes_for_countries,
+                        deleted_entities, health_master_fields)
+                except (HTTPError, DataError, ValueError) as ex:
+                    logger.error('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
+                    errors.append('{0} : {1} - {2}'.format(schema_table.name, type(ex).__name__, str(ex)))
+                except Exception as ex:
+                    logger.error('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
+                    errors.append('{0} : {1} - {2}'.format(schema_table.name, type(ex).__name__, str(ex)))
+                return changes_for_countries, deleted_entities, errors
+        else:
+            logger.error('Health Master schema ({0}) does not exist to use for share ({1}).'.format(schema_name,
+                                                                                                    share_name))
+    else:
+        logger.error('Health Master share ({0}) does not exist to use.'.format(share_name))
+
+
+def load_entity_data_from_health_master_apis(country_iso3_format=None):
+    """
+    Background task which handles Health Master Data source changes from APIs to PROCO DB
+    Execution Frequency: Once in a week
+    """
+    logger.info('Starting loading the health master data from API to DB.')
+
+    errors = []
+    ds_settings = validate_config(settings.DATA_SOURCE_CONFIG,
+        "HEALTH_MASTER", "SHARE_NAME", "SCHEMA_NAME", "DASHBOARD_URL", "COUNTRY_EXCLUSION_LIST",
+        "SHARE_CREDENTIALS_VERSION", "ENDPOINT", "BEARER_TOKEN", "EXPIRATION_TIME"
+    )
+    share_name = ds_settings['SHARE_NAME']
+    schema_name = ds_settings['SCHEMA_NAME']
+    dashboard_url = ds_settings['DASHBOARD_URL']
+    country_codes_for_exclusion = ds_settings['COUNTRY_EXCLUSION_LIST']
+    profile_json = {
+        'shareCredentialsVersion': ds_settings.get('SHARE_CREDENTIALS_VERSION', 1),
+        'endpoint': ds_settings.get('ENDPOINT'),
+        'bearerToken': ds_settings.get('BEARER_TOKEN'),
+        'expirationTime': ds_settings.get('EXPIRATION_TIME')
+    }
+    profile_file = os.path.join(
+        settings.BASE_DIR,
+        'health_master_profile_{dt}.share'.format(
+            dt=format_date(core_utilities.get_current_datetime_object())
+        )
+    )
+    open(profile_file, 'w').write(json.dumps(profile_json))
+
+    changes_for_countries, deleted_entities, errors = validate_schema_and_sync_schema_table_data(profile_file, schema_name, share_name, country_iso3_format, country_codes_for_exclusion, errors)
+
+    try:
+        os.remove(profile_file)
+    except OSError:
+        pass
+
+
+    has_data_changes = len(list(filter(lambda val: val, list(changes_for_countries.values())))) > 0
+
+    if has_data_changes or len(errors) > 0 or len(deleted_entities) > 0:
+        # 2. For Change Detection:
+        # a) When a change is detected in the external data source (Health master data source),
+        # then system should trigger an email notification to the designated editor and publisher.
+        # b) The email notification should include information about name of the changed data source and
+        # a link to the interface in which reviewer can view the updated data.
+
+        editors_and_publishers = get_user_emails_for_permissions([
+            auth_models.RolePermission.CAN_UPDATE_SCHOOL_MASTER_DATA,
+            auth_models.RolePermission.CAN_PUBLISH_SCHOOL_MASTER_DATA,
+        ])
+
+        if len(editors_and_publishers) > 0:
+            email_subject = sources_config.health_master_update_email_subject_format % (
+                core_utilities.get_project_title()
+            )
+
+            email_message = sources_config.health_master_update_email_message_format
+            delete_msg = ''
+
+            if len(deleted_entities) > 0:
+                if len(deleted_entities) > 5:
+                    delete_msg = """
+                    Deleted Entities count: {0}
+                    """.format(len(deleted_entities))
+                else:
+                    delete_msg = """
+                    Deleted entities details from school master data source:
+                        {0}
+                    """.format('\n'.join(deleted_entities))
+
+            error_msg = ''
+            if len(errors) > 0:
+                error_msg = """
+                Few records failed due to the following errors in the Health Master Data Source. We kindly request you to correct these errors so that the skipped records will be available for preview and publish next time:
+                {}
+                """.format('\n'.join(['{0}) {1}'.format(index, errors[index]) for index in range(len(errors))]))
+            email_message = email_message.format(
+                delete_msg=delete_msg,
+                dashboard_url='Dashboard url: {}'.format(dashboard_url) if dashboard_url else '',
+                error_msg=error_msg,
+            )
+
+            email_content = {'subject': email_subject, 'message': email_message}
+            account_utilities.send_email_over_mailjet_service(editors_and_publishers, **email_content)
+
+
+@app.task(soft_time_limit=SOFT_TIME_LIMIT, time_limit=TIME_LIMIT)
+def update_entity_static_data(*args, country_iso3_format=None):
+    """
+    Background task to Get Static data to Proco DB
+    1. Health Master Data source
+    Execution Frequency: Once in a week/once in 2 weeks
+    """
+    task_key = 'update_entity_static_data{current_time}'.format(
+        current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
+
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(
+        task_id, task_key, 'Sync Static Data from Health Master sources', check_previous=True)
+    if task_instance:
+        logger.debug('Not found running job for static data pull handler: {}'.format(task_key))
+        load_entity_data_from_health_master_apis(country_iso3_format=country_iso3_format)
+        task_instance.info('Completed the load data from Health Master API call')
+        cleanup_school_master_rows.s()
+        task_instance.info('Scheduled cleanup school master rows')
+        background_task_utilities.task_on_complete(task_instance)
+    else:
+        logger.error('Found Job with "{0}" name so skipping current iteration'.format(task_key))

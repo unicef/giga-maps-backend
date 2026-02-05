@@ -5,6 +5,7 @@ from django.db.models.constraints import UniqueConstraint
 from jsonfield import JSONField
 
 from proco.core import models as core_models
+from proco.entities.models import ENTITY_TYPE_CHOICES
 from proco.locations.models import Country
 
 
@@ -367,6 +368,12 @@ class DataLayer(core_models.BaseModel):
         (LAYER_STATUS_DISABLED, 'Disabled'),
     )
 
+    entity_type = models.CharField(
+        max_length=20,
+        choices=ENTITY_TYPE_CHOICES,
+        default="school",
+        db_index=True,
+    )
     icon = models.TextField(null=True, blank=True)
 
     # Unique

@@ -415,6 +415,7 @@ if ENABLE_AZURE_COGNITIVE_SEARCH:
         'SEARCH_API_KEY': env('SEARCH_API_KEY', default=None),
         'COUNTRY_INDEX_NAME': env('COUNTRY_INDEX_NAME', default='giga_countries'),
         'SCHOOL_INDEX_NAME': env('SCHOOL_INDEX_NAME', default='giga_schools'),
+        'ENTITIES_INDEX_NAME': env('ENTITIES_INDEX_NAME', default='giga_entities'),
     }
 
 DATA_SOURCE_CONFIG = {
@@ -428,6 +429,17 @@ DATA_SOURCE_CONFIG = {
         'BEARER_TOKEN': env('SCHOOL_MASTER_BEARER_TOKEN', default=None),
         'EXPIRATION_TIME': env('SCHOOL_MASTER_EXPIRATION_TIME', default=None),
         'COUNTRY_EXCLUSION_LIST': env('SCHOOL_MASTER_COUNTRY_EXCLUSION_LIST', default='').split(','),
+    },
+    'HEALTH_MASTER': {
+        'SHARE_NAME': env('HEALTH_MASTER_SHARE_NAME', default='gold'),
+        'SCHEMA_NAME': env('HEALTH_MASTER_SCHEMA_NAME', default='health-master'),
+        'REVIEW_GRACE_PERIOD_IN_HRS': env('HEALTH_MASTER_REVIEW_GRACE_PERIOD_IN_HRS', default='48'),
+        'DASHBOARD_URL': env('HEALTH_MASTER_DASHBOARD_URL', default=None),
+        'SHARE_CREDENTIALS_VERSION': env('HEALTH_MASTER_SHARE_CREDENTIALS_VERSION', default=1),
+        'ENDPOINT': env('HEALTH_MASTER_ENDPOINT', default=None),
+        'BEARER_TOKEN': env('HEALTH_MASTER_BEARER_TOKEN', default=None),
+        'EXPIRATION_TIME': env('HEALTH_MASTER_EXPIRATION_TIME', default=None),
+        'COUNTRY_EXCLUSION_LIST': env('HEALTH_MASTER_COUNTRY_EXCLUSION_LIST', default='').split(','),
     },
     'QOS': {
         'SHARE_NAME': env('QOS_SHARE_NAME', default='gold'),
@@ -512,6 +524,7 @@ READ_ONLY_DATABASE_ALLOWED_REQUESTS = [
     'download-schools',
     'download-countries',
     'search-countries-admin-schools',
+    'search-countries-admin-entities',
     # 'get-time-player-data-v2',
     'tiles-view',
 ]

@@ -34,6 +34,11 @@ def finalize_setup(sender, **kwargs):
             'schedule': crontab(hour=2, minute=0),
             'args': (),
         },
+        'proco.utils.tasks.rebuild_entities_index': {
+            'task': 'proco.utils.tasks.rebuild_entities_index',
+            'schedule': crontab(hour=2, minute=0),
+            'args': (),
+        },
         # New
         'proco.schools.tasks.update_school_records': {
             'task': 'proco.schools.tasks.update_school_records',
@@ -106,6 +111,12 @@ def finalize_setup(sender, **kwargs):
             'task': 'proco.giga_meter.tasks.handle_giga_meter_school_master_data_sync',
             # Executes once in a day at 8:30 PM
             'schedule': crontab(hour=20, minute=30),
+            'args': (),
+        },
+        'proco.data_sources.tasks.update_entity_static_data': {
+            'task': 'proco.data_sources.tasks.update_entity_static_data',
+            # Executes at 4:00 AM every day
+            'schedule': crontab(hour='*/4', minute=52),
             'args': (),
         },
     })

@@ -814,3 +814,165 @@ def sync_qos_realtime_data(country_id):
     logger.info('Loading the remaining ({0}) data to "RealTimeConnectivity" table.'.format(len(realtime)))
     if len(realtime) > 0:
         RealTimeConnectivity.objects.bulk_create(realtime)
+
+
+def normalize_health_entity_name(health_name):
+    # If its blank string then put default value
+    if pd.isna(health_name) or core_utilities.is_blank_string(health_name):
+        return 'Name unknown'
+
+    # Remove space from start and end if present
+    # Replace the 2 times double quotes ("") with 1 time double quotes (")
+    school_name = str(health_name).strip().replace('""', '"')
+
+    # If health entity name start & ends with ", then remove these from start and end
+    if (len(health_name) >= 2 and health_name[0] == health_name[-1]) and health_name.startswith(("'", '"')):
+        health_name = health_name[1:-1]
+
+    return health_name
+
+
+def normalize_health_entity_master_data_frame(df):
+    df['entity_name'] = df['entity_name'].apply(normalize_health_entity_name)
+    if 'facility_id_govt' in list(df.columns.tolist()):
+        df['facility_id_govt'] = df['facility_id_govt'].fillna('thisnanwillreplaceback').apply(
+            lambda val: str(val).lower()).replace('thisnanwillreplaceback', np.nan)
+    else:
+        df['facility_id_govt'] = None
+    return df
+
+
+def sort_and_modify_dataframe(loaded_data_df, health_master_fields, changes_for_countries, table_current_version, country, table_name, pull_datetime ):
+    loaded_data_df = loaded_data_df.sort_values(
+            by=[DeltaSharingReader._commit_version_col_name(), DeltaSharingReader._commit_timestamp_col_name()],
+            na_position='first')
+    loaded_data_df.drop_duplicates(
+        subset=['health_id_giga'],
+        keep='last',
+        inplace=True,
+    )
+    loaded_data_df = loaded_data_df[loaded_data_df[DeltaSharingReader._change_type_col_name()].isin(
+        ['insert', 'update_postimage', 'remove', 'delete'])]
+
+    logger.debug('Total count of rows in the data after duplicate cleanup: {0}'.format(len(loaded_data_df)))
+
+    df_columns = list(loaded_data_df.columns.tolist())
+    cols_to_delete = list(set(df_columns) - set(health_master_fields)) + ['id', 'created', 'modified', 'health_id',
+                                                                        'country_id', 'status',
+                                                                        'modified_by', 'published_by',
+                                                                        'published_at', 'is_read', ]
+    logger.debug('All Health Master API response columns: {}'.format(df_columns))
+    logger.debug('All Health Master API response columns to delete: {}'.format(
+        list(set(df_columns) - set(health_master_fields))))
+    changes_for_countries[table_name] = True
+    loaded_data_df = normalize_health_entity_master_data_frame(loaded_data_df)
+    loaded_data_df['version'] = table_current_version
+    loaded_data_df['country'] = country
+    loaded_data_df['pulled_at'] = pull_datetime
+    return cols_to_delete
+
+
+def sync_data_frame(loaded_data_df, cols_to_delete, country, deleted_entities):
+        insert_entries = []
+        remove_entries = []
+        for _, row in loaded_data_df.iterrows():
+            change_type = row[DeltaSharingReader._change_type_col_name()]
+            row.drop(
+                labels=cols_to_delete,
+                inplace=True,
+                errors='ignore',
+            )
+            if change_type in ['insert', 'update_postimage']:
+                entity = Entity.objects.filter(
+                    country=country,
+                    giga_id=row['health_id_giga'],
+                ).first()
+                # Publish entities directly
+                if entity:
+                    row['health_id'] = entity.id
+                    row['status'] = sources_models.HealthEntityMasterData.ROW_STATUS_PUBLISHED
+                    row['published_at'] = core_utilities.get_current_datetime_object()
+                row_as_dict = parse_row(row)
+                insert_entries.append(sources_models.HealthEntityMasterData(**row_as_dict))
+                if len(insert_entries) == 5000:
+                    logger.debug('Loading the data to "HealthMasterData" table as it has reached 5000 benchmark.')
+                    sources_models.HealthEntityMasterData.objects.bulk_create(insert_entries)
+                    insert_entries = []
+                    logger.debug('#' * 10)
+                    logger.debug('\n\n')
+            elif change_type in ['remove', 'delete']:
+                entity = Entity.objects.filter(
+                    country=country,
+                    giga_id=row['health_id_giga'],
+                ).first()
+                # Entity can be deleted only if its already present in Giga DB
+                if entity:
+                    row['entity_id'] = entity.id
+                    row['status'] = sources_models.HealthEntityMasterData.ROW_STATUS_DELETED_PUBLISHED
+                    row['modified'] = core_utilities.get_current_datetime_object()
+
+                    row_as_dict = parse_row(row)
+                    remove_entries.append(sources_models.HealthEntityMasterData(**row_as_dict))
+                if len(remove_entries) == 5000:
+                    logger.info('Loading the data to "HeathEntityMasterData" table as it has reached 5000 benchmark.')
+                    sources_models.HealthEntityMasterData.objects.bulk_create(remove_entries)
+                    remove_entries = []
+                    logger.debug('#' * 10)
+                    logger.debug('\n\n')
+        logger.info('Loading the remaining ({0}) data to "HeathEntityMasterData" table.'.format(len(insert_entries)))
+        if len(insert_entries) > 0:
+            sources_models.HealthEntityMasterData.objects.bulk_create(insert_entries)
+        logger.info('Removing ({0}) records from "HeathEntityMasterData" table.'.format(len(remove_entries)))
+        if len(remove_entries) > 0:
+            sources_models.HealthEntityMasterData.objects.bulk_create(remove_entries)
+            deleted_entities.extend(
+                [country.name + ' : ' + health_master_row.facility_name for health_master_row in remove_entries])
+
+
+def vaildate_master_version_and_sync_health_master_data(profile_file, share_name, schema_name, table_name, changes_for_countries, deleted_entities,
+                            health_master_fields):
+    country = Country.objects.filter(iso3_format=table_name, ).first()
+    logger.debug('Country object: {0}'.format(country))
+
+    if not country:
+        logger.error('Country with ISO3 Format ({0}) not found in DB. '
+                     'Hence skipping the load for current table.'.format(table_name))
+        raise ValueError(f"Invalid 'iso3_format': {table_name}")
+
+    table_last_data_version = sources_models.HealthEntityMasterData.get_last_version(table_name)
+    logger.debug('Table last data version present in DB: {0}'.format(table_last_data_version))
+
+    # Create a url to access a shared table.
+    # A table path is the profile file path following with `#` and the fully qualified name of a table
+    # (`<share-name>.<schema-name>.<table-name>`).
+    table_url = profile_file + "#{share_name}.{schema_name}.{table_name}".format(
+        share_name=share_name,
+        schema_name=schema_name,
+        table_name=table_name,
+    )
+    logger.debug('Table URL: %s', table_url)
+
+    table_current_version = delta_sharing.get_table_version(table_url)
+    logger.debug('Table current version from API: {0}'.format(table_current_version))
+
+    if table_last_data_version == table_current_version:
+        logger.info('Both Health Master data version in DB and Table version from API, are same. '
+                    'Hence skipping the data update for current country ({0}).'.format(country))
+        return
+
+    loaded_data_df = delta_sharing.load_table_changes_as_pandas(
+        table_url,
+        table_last_data_version,
+        table_current_version,
+        None,
+        None,
+    )
+    logger.debug('Total count of rows in the data: {0}'.format(len(loaded_data_df)))
+    pull_datetime = core_utilities.get_current_datetime_object()
+
+    if len(loaded_data_df) > 0:
+        # Sort the values based on _commit_timestamp ASC
+        cols_to_delete = sort_and_modify_dataframe(loaded_data_df, health_master_fields, changes_for_countries, table_current_version, country, table_name, pull_datetime)
+        sync_data_frame(loaded_data_df, cols_to_delete, country, deleted_entities)
+    else:
+        logger.info('No data to update in current table: {0}.'.format(table_name))
