@@ -2,20 +2,27 @@ import json
 import logging
 import os
 import uuid
+from datetime import timedelta, date, datetime
+from typing import List, Dict, Iterator
 
 from celery import chain
 from celery import current_task
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Count
+from django.db.models import Sum, Avg
 from django.db.utils import DataError
 from requests.exceptions import HTTPError
 
 from proco.background import utils as background_task_utilities
+from proco.connection_statistics.config import app_config as statistics_configs
+from proco.connection_statistics.models import SchoolDailyStatus
 from proco.core import utils as core_utilities
 from proco.core.config import app_config as core_configs
 from proco.data_sources import utils as data_sources_utilities
 from proco.giga_meter import models as giga_meter_models
 from proco.giga_meter import utils as giga_meter_utilities
+from proco.schools.models import School
 from proco.taskapp import app
 from proco.utils.dates import format_date
 
@@ -190,25 +197,25 @@ def giga_meter_handle_published_school_master_data_row(*args, country_ids=None, 
                             'electricity_type': row.electricity_type,
                             'num_adm_personnel': row.num_adm_personnel,
                             'num_students': row.num_students,
-                            'num_teachers' : row.num_teachers,
-                            'num_classrooms' : row.num_classrooms,
-                            'num_latrines' : row.num_latrines,
-                            'water_availability' : None
+                            'num_teachers': row.num_teachers,
+                            'num_classrooms': row.num_classrooms,
+                            'num_latrines': row.num_latrines,
+                            'water_availability': None
                             if core_utilities.is_blank_string(row.water_availability)
                             else str(row.water_availability).lower() in core_configs.true_choices,
-                            'electricity_availability' : None
+                            'electricity_availability': None
                             if core_utilities.is_blank_string(row.electricity_availability)
                             else str(row.electricity_availability).lower() in core_configs.true_choices,
-                            'computer_lab' : None
+                            'computer_lab': None
                             if core_utilities.is_blank_string(row.computer_lab)
                             else str(row.computer_lab).lower() in core_configs.true_choices,
-                            'num_computers' : row.num_computers,
+                            'num_computers': row.num_computers,
                             'connectivity_govt': None
                             if (core_utilities.is_blank_string(row.connectivity_govt) or
-                               str(row.connectivity_govt).lower() == 'unknown')
+                                str(row.connectivity_govt).lower() == 'unknown')
                             else str(row.connectivity_govt).lower() in core_configs.true_choices,
                             'connectivity_type_govt': row.connectivity_type_govt,
-                            'connectivity_type':  row.connectivity_type,
+                            'connectivity_type': row.connectivity_type,
                             'connectivity_type_root': row.connectivity_type_root,
                             'cellular_coverage_availability': None
                             if core_utilities.is_blank_string(row.cellular_coverage_availability)
@@ -267,7 +274,7 @@ def giga_meter_handle_published_school_master_data_row(*args, country_ids=None, 
 
                     if school_static_created:
                         school.last_school_static = school_static
-                        school.save(update_fields=['last_school_static',])
+                        school.save(update_fields=['last_school_static', ])
 
                     row.delete()
 
@@ -329,7 +336,7 @@ def giga_meter_handle_deleted_school_master_data_row(*args, country_ids=None, fo
 
                     if school:
                         school.deleted = current_date
-                        school.save(update_fields=['deleted',])
+                        school.save(update_fields=['deleted', ])
 
                     row.delete()
                 except Exception as ex:
@@ -409,4 +416,213 @@ def handle_giga_meter_school_master_data_sync(*args):
             logger.error('Found Job with "{0}" name so skipping current iteration'.format(task_key))
     else:
         logger.warning('Giga Meter - School Master data synch disabled from config. '
-                     'To enable it, please update "GIGA_METER_ENABLE_AUTO_SYNC" configuration.')
+                       'To enable it, please update "GIGA_METER_ENABLE_AUTO_SYNC" configuration.')
+
+
+def fetch_aggregated_ping_data(
+    start_date: date,
+    end_date: date,
+    chunk_size: int = 10_000,
+):
+    return (
+        giga_meter_models.ConnectivityPingChecksDailyAggr.objects
+        .filter(timestamp_date__date__range=(start_date, end_date))
+        .values("timestamp_date__date", "giga_id_school")
+        .annotate(
+            avg_uptime=Avg("uptime"),
+            avg_latency=Avg("unloaded_latency_avg"),
+        )
+        .order_by("timestamp_date__date", "giga_id_school")
+        .iterator(chunk_size=chunk_size)
+    )
+
+
+def fetch_all_school_map(start_date: date, end_date: date, ) -> Dict[str, School]:
+    """Fetch only schools that have ping data for the date range"""
+    giga_ids = (
+        giga_meter_models.ConnectivityPingChecksDailyAggr.objects
+        .filter(timestamp_date__date__range=(start_date, end_date))
+        .values_list("giga_id_school", flat=True)
+        .distinct()
+    )
+
+    giga_ids_list = list(giga_ids)
+
+    # Fetch only relevant schools
+    school_map: Dict[str, School] = {}
+    for school in (
+        School.objects
+            .filter(giga_id_school__in=giga_ids_list)
+            .only("id", "giga_id_school")
+            .iterator(chunk_size=5_000)
+    ):
+        school_map[school.giga_id_school] = school
+
+    return school_map
+
+
+def stream_school_daily_status(
+    aggregated_rows,
+    school_map: Dict[str, School],
+    batch_size: int = 5_000,
+) -> Iterator[List[SchoolDailyStatus]]:
+    batch: List[SchoolDailyStatus] = []
+
+    for row in aggregated_rows:
+        school = school_map.get(row["giga_id_school"])
+        if school is None:
+            continue
+
+        uptime = float(row["avg_uptime"])
+
+        avg_latency = row["avg_latency"]
+        if avg_latency is not None:
+            avg_latency = float(avg_latency)
+
+        batch.append(
+            SchoolDailyStatus(
+                school=school,
+                date=row["timestamp_date__date"],
+                live_data_source=statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE,
+                uptime=uptime,
+                connectivity_latency=avg_latency,
+            )
+        )
+
+        if len(batch) >= batch_size:
+            yield batch
+            batch = []
+
+    if batch:
+        yield batch
+
+
+@transaction.atomic
+def bulk_upsert_school_status(batch: List[SchoolDailyStatus]) -> None:
+    if not batch:
+        return
+
+    # Get existing records
+    existing_keys = set()
+    existing_records = {}
+
+    for status in batch:
+        key = (status.school_id, status.date, status.live_data_source)
+        existing_keys.add(key)
+
+    # Fetch existing records
+    existing_qs = SchoolDailyStatus.objects.filter(
+        school_id__in=[s.school_id for s in batch],
+        date__in=list(set(s.date for s in batch)),
+        live_data_source__in=list(set(s.live_data_source for s in batch)),
+    )
+
+    for record in existing_qs:
+        key = (record.school_id, record.date, record.live_data_source)
+        existing_records[key] = record
+
+    # Separate into updates and creates
+    to_create = []
+    to_update = []
+
+    for status in batch:
+        key = (status.school_id, status.date, status.live_data_source)
+
+        if key in existing_records:
+            # Update existing record
+            existing = existing_records[key]
+            existing.uptime = status.uptime
+            existing.connectivity_latency = status.connectivity_latency
+            existing.connectivity_speed = getattr(status, 'connectivity_speed', None)
+            to_update.append(existing)
+        else:
+            to_create.append(status)
+
+    # Bulk operations
+    if to_create:
+        SchoolDailyStatus.objects.bulk_create(to_create)
+
+    if to_update:
+        SchoolDailyStatus.objects.bulk_update(
+            to_update,
+            fields=['uptime', 'connectivity_latency', 'connectivity_speed']
+        )
+
+
+def run_ping_aggregation(
+    start_date: date,
+    end_date: date,
+    task_instance,
+    logger,
+) -> None:
+    logger.info(f"Aggregating ping data from {start_date} to {end_date}")
+    task_instance.info(f"Aggregating ping data from {start_date} to {end_date}")
+    school_map = fetch_all_school_map(start_date, end_date)
+    logger.info(f"Found {len(school_map)} schools with ping data")
+    aggregated_rows = fetch_aggregated_ping_data(start_date, end_date)
+
+    total_records = 0
+    batch_count = 0
+
+    for batch in stream_school_daily_status(aggregated_rows, school_map):
+        bulk_upsert_school_status(batch)
+        total_records += len(batch)
+        batch_count += 1
+
+        if batch_count % 10 == 0:
+            logger.info(f"Processed {total_records} records so far")
+    logger.info(f"Upserted {total_records} SchoolDailyStatus records")
+    task_instance.info(f"Upserted {total_records} SchoolDailyStatus records")
+
+
+@app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)
+def fetch_and_aggregate_ping_data(date_str=None, force_tasks=False):
+    if not settings.GIGA_METER_ENABLE_AUTO_SYNC:
+        logger.warning(
+            'Giga Meter - Ping data sync is disabled from config. '
+            'To enable it, update "GIGA_METER_ENABLE_AUTO_SYNC".'
+        )
+        return
+
+    timestamp = core_utilities.get_current_datetime_object()
+    timestamp_str = format_date(
+        timestamp,
+        frmt="%d%m%Y_%H%M%S" if force_tasks else "%d%m%Y_%H",
+    )
+
+    task_key = f"fetch_and_aggregate_ping_data_status_{timestamp_str}"
+    task_id = current_task.request.id or str(uuid.uuid4())
+
+    task_instance = background_task_utilities.task_on_start(
+        task_id,
+        task_key,
+        "Giga Meter - Fetch and aggregate ping data",
+        check_previous=True,
+    )
+
+    if not task_instance:
+        logger.error(f'Found running job with key "{task_key}", skipping.')
+        return
+
+    try:
+        if date_str:
+            target_date = core_utilities.get_timezone_converted_value(datetime.strptime(date_str, "%Y-%m-%d")).date()
+        else:
+            target_date = (
+                core_utilities.get_current_datetime_object().date()
+                - timedelta(days=1)
+            )
+
+        run_ping_aggregation(
+            start_date=target_date,
+            end_date=target_date,
+            task_instance=task_instance,
+            logger=logger,
+        )
+
+    except Exception as exc:
+        logger.exception("Error during GigaMeter ping aggregation")
+        task_instance.info(f"Error: {exc}")
+
+    finally:
+        background_task_utilities.task_on_complete(task_instance)
