@@ -25,6 +25,7 @@ from proco.accounts import models as accounts_models
 from proco.accounts import serializers
 from proco.accounts import utils as account_utilities
 from proco.accounts.config import app_config as account_config
+from proco.accounts.v2 import entity_serializers
 from proco.connection_statistics import models as statistics_models
 from proco.connection_statistics.config import app_config as statistics_configs
 from proco.connection_statistics.models import SchoolWeeklyStatus, EntityWeeklyStatus
@@ -1923,3 +1924,415 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                               soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
 
         return Response(data=response)
+
+
+class EntityDataLayersViewSet(BaseModelViewSet):
+    model = accounts_models.DataLayer
+    serializer_class = entity_serializers.EntityDataLayersListSerializer
+
+    action_serializers = {
+        'create': entity_serializers.CreateEntityDataLayersSerializer,
+        'partial_update': entity_serializers.UpdateEntityDataLayerSerializer,
+    }
+
+    permission_classes = (
+        core_permissions.IsUserAuthenticated,
+        core_permissions.CanViewDataLayer,
+        core_permissions.CanAddDataLayer,
+        core_permissions.CanUpdateDataLayer,
+        core_permissions.CanDeleteDataLayer,
+    )
+
+    filter_backends = (
+        DjangoFilterBackend,
+        NullsAlwaysLastOrderingFilter,
+        SearchFilter,
+    )
+
+    ordering_field_names = ['-last_modified_at', 'name']
+    apply_query_pagination = True
+
+    filterset_fields = {
+        'id': ['exact', 'in'],
+        'status': ['iexact', 'in', 'exact'],
+        'published_by_id': ['exact', 'in'],
+        'name': ['iexact', 'in', 'exact'],
+        'entity_type': ['iexact', 'in', 'exact'],
+    }
+
+    search_fields = ('name', 'code', 'type', 'entity_type',)
+
+    permit_list_expands = ['created_by', 'published_by', 'last_modified_by']
+
+    def update_serializer_context(self, context):
+        data_source_instances = []
+        if self.request.data.get('data_sources_list'):
+            data_source_instances = list(accounts_models.DataSource.objects.filter(
+                id__in=self.request.data.get('data_sources_list')
+            ))
+
+        if len(data_source_instances) > 0:
+            context['data_sources_list'] = data_source_instances
+        return context
+
+    def apply_queryset_filters(self, queryset):
+        """
+        Override if applying more complex filters to queryset.
+        :param queryset:
+        :return queryset:
+        """
+
+        query_params = self.request.query_params.dict()
+        query_param_keys = query_params.keys()
+
+        if 'country_id' in query_param_keys:
+            queryset = queryset.filter(
+                active_countries__country=query_params['country_id'],
+                active_countries__deleted__isnull=True,
+            )
+        elif 'country_id__in' in query_param_keys:
+            queryset = queryset.filter(
+                active_countries__country_id__in=[c_id.strip() for c_id in query_params['country_id__in'].split(',')],
+                active_countries__deleted__isnull=True,
+            )
+
+        if 'is_default' in query_param_keys:
+            is_default = str(query_params['is_default']).lower() == 'true'
+            queryset = queryset.filter(
+                active_countries__is_default=is_default,
+                active_countries__deleted__isnull=True,
+            )
+
+        return super().apply_queryset_filters(queryset)
+
+    def perform_destroy(self, instance):
+        """
+        perform_destroy
+        :param instance:
+        :return:
+        """
+        instance.deleted = core_utilities.get_current_datetime_object()
+        instance.last_modified_at = core_utilities.get_current_datetime_object()
+        instance.last_modified_by = core_utilities.get_current_user(request=self.request)
+        return super().perform_destroy(instance)
+
+
+class EntityDataLayerPublishViewSet(BaseModelViewSet):
+    model = accounts_models.DataLayer
+    serializer_class = entity_serializers.PublishEntityDataLayerSerializer
+
+    permission_classes = (
+        core_permissions.IsUserAuthenticated,
+        core_permissions.CanPublishDataLayer,
+    )
+
+
+# class EntityDataLayerPreviewViewSet(APIView):
+#     model = accounts_models.DataLayer
+#
+#     permission_classes = (
+#         core_permissions.IsUserAuthenticated,
+#         core_permissions.CanPreviewDataLayer,
+#     )
+#
+#     def get_map_query(self, kwargs):
+#         query = """
+#         SELECT schools_school.id,
+#             CASE WHEN rt_status.rt_registered = True AND rt_status.rt_registration_date <= '{end_date}' THEN True
+#                     ELSE False
+#             END AS is_rt_connected,
+#             {case_conditions}
+#             CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
+#                 WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
+#                 ELSE 'unknown'
+#             END AS connectivity_status,
+#             ST_AsGeoJSON(ST_Transform(schools_school.geopoint, 4326)) AS geopoint
+#         FROM schools_school
+#         INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
+#         INNER JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = schools_school.id
+#         LEFT JOIN (
+#             SELECT "schools_school"."id" AS school_id,
+#                 AVG(t."{col_name}") AS "{col_name}"
+#             FROM "schools_school"
+#             INNER JOIN "connection_statistics_schooldailystatus" t ON "schools_school"."id" = t."school_id"
+#             WHERE (
+#                 {country_condition}
+#                 "schools_school"."deleted" IS NULL
+#                 AND t."deleted" IS NULL
+#                 AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
+#                 AND t."live_data_source" IN ({live_source_types})
+#             )
+#             GROUP BY "schools_school"."id"
+#             ORDER BY "schools_school"."id" ASC
+#         ) AS sds ON sds.school_id = schools_school.id
+#         WHERE schools_school."deleted" IS NULL
+#             AND rt_status."deleted" IS NULL
+#             AND rt_status."rt_registered" = True
+#             AND rt_status."rt_registration_date"::date <= '{end_date}'
+#         {country_condition_outer}
+#         ORDER BY random()
+#         LIMIT 1000
+#         """
+#
+#         legend_configs = kwargs['legend_configs']
+#         if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
+#             label_cases = []
+#             for title, values_and_label in legend_configs.items():
+#                 values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
+#                                      values_and_label.get('values', [])))
+#
+#                 if len(values) > 0:
+#                     is_sql_value = 'SQL:' in values[0]
+#                     if is_sql_value:
+#                         sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+#                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
+#                 else:
+#                     label_cases.append("ELSE '{label}'".format(label=title))
+#
+#             kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS connectivity,'
+#         else:
+#             kwargs['case_conditions'] = """
+#                         CASE WHEN sds.{col_name} > {benchmark_value} THEN 'good'
+#                             WHEN sds.{col_name} <= {benchmark_value} and sds.{col_name} >= {base_benchmark} THEN 'moderate'
+#                             WHEN sds.{col_name} < {base_benchmark}  THEN 'bad'
+#                             ELSE 'unknown'
+#                         END AS connectivity,
+#                     """.format(**kwargs)
+#
+#             if kwargs['is_reverse'] is True:
+#                 kwargs['case_conditions'] = """
+#                             CASE WHEN sds.{col_name} < {benchmark_value}  THEN 'good'
+#                                 WHEN sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark} THEN 'moderate'
+#                                 WHEN sds.{col_name} > {base_benchmark} THEN 'bad'
+#                                 ELSE 'unknown'
+#                             END AS connectivity,
+#                         """.format(**kwargs)
+#
+#         if len(kwargs['country_ids']) > 0:
+#             kwargs['country_condition'] = '"schools_school"."country_id" IN ({0}) AND'.format(
+#                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
+#             )
+#             kwargs['country_condition_outer'] = 'AND schools_school."country_id" IN ({0})'.format(
+#                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
+#             )
+#         else:
+#             kwargs['country_condition'] = ''
+#             kwargs['country_condition_outer'] = ''
+#
+#         return query.format(**kwargs)
+#
+#
+#     def get_static_map_query(self, kwargs):
+#         query = """
+#             SELECT
+#                 schools_school.id,
+#                 schools_school.name,
+#                 {table_name}."{col_name}",
+#                 ST_AsGeoJSON(ST_Transform(schools_school.geopoint, 4326)) as geopoint,
+#                 {label_case_statements}
+#             FROM schools_school
+#             INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
+#             WHERE schools_school."deleted" IS NULL {country_condition}
+#             ORDER BY random()
+#             LIMIT 1000
+#             """
+#
+#         kwargs['country_condition'] = ''
+#
+#         if len(kwargs['country_ids']) > 0:
+#             kwargs['country_condition'] = 'AND schools_school.country_id IN ({0})'.format(
+#                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
+#             )
+#
+#         legend_configs = kwargs['legend_configs']
+#         label_cases = []
+#         values_l = []
+#         parameter_col_type = kwargs['parameter_col'].get('type', 'str').lower()
+#         kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'sws')
+#
+#         for title, values_and_label in legend_configs.items():
+#             values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
+#                                  values_and_label.get('values', [])))
+#
+#             if len(values) > 0:
+#                 is_sql_value = 'SQL:' in values[0]
+#                 if is_sql_value:
+#                     sql_statement = str(','.join(values)).replace('SQL:', '').format(
+#                         table_name=kwargs['table_name'],
+#                         col_name=kwargs['col_name'],
+#                     )
+#                     label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
+#                 else:
+#                     values_l.extend(values)
+#                     if parameter_col_type == 'str':
+#                         label_cases.append(
+#                             """WHEN LOWER({table_name}."{col_name}") IN ({value}) THEN '{label}'""".format(
+#                                 table_name=kwargs['table_name'],
+#                                 col_name=kwargs['col_name'],
+#                                 label=title,
+#                                 value=','.join(["'" + str(v).lower() + "'" for v in values])
+#                             ))
+#                     elif parameter_col_type == 'int':
+#                         label_cases.append(
+#                             """WHEN {table_name}."{col_name}" IN ({value}) THEN '{label}'""".format(
+#                                 table_name=kwargs['table_name'],
+#                                 col_name=kwargs['col_name'],
+#                                 label=title,
+#                                 value=','.join([str(v) for v in values])
+#                             ))
+#             else:
+#                 label_cases.append("ELSE '{label}'".format(label=title))
+#
+#         kwargs['label_case_statements'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
+#
+#         return query.format(**kwargs)
+#
+#
+#     def get(self, request, *args, **kwargs):
+#         data_layer_instance = get_object_or_404(accounts_models.DataLayer.objects.all(), pk=self.kwargs.get('pk'))
+#         data_sources = data_layer_instance.data_sources.all()
+#
+#         country_ids = data_layer_instance.applicable_countries
+#         parameter_col = data_sources.first().data_source_column
+#
+#         parameter_column_name = str(parameter_col['name'])
+#         legend_configs = data_layer_instance.legend_configs
+#
+#         if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+#             live_data_sources = ['UNKNOWN']
+#             for d in data_sources:
+#                 source_type = d.data_source.data_source_type
+#                 if source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_QOS:
+#                     live_data_sources.append(statistics_configs.QOS_SOURCE)
+#                 elif source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP:
+#                     live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
+#
+#             global_benchmark = data_layer_instance.global_benchmark.get('value')
+#             benchmark_base = str(parameter_col.get('base_benchmark', 1))
+#
+#             data_layer_qs = statistics_models.SchoolDailyStatus.objects.all()
+#             if len(country_ids) > 0:
+#                 data_layer_qs = data_layer_qs.filter(school__country__in=country_ids)
+#
+#             date = core_utilities.get_current_datetime_object().date() - timedelta(days=6)
+#
+#             latest_school_daily_instance = data_layer_qs.order_by('-date').first()
+#             if latest_school_daily_instance:
+#                 date = latest_school_daily_instance.date
+#
+#             start_date = date - timedelta(days=date.weekday())
+#             end_date = start_date + timedelta(days=6)
+#             query_kwargs = {
+#                 'col_name': parameter_column_name,
+#                 'benchmark_value': global_benchmark,
+#                 'global_benchmark': global_benchmark,
+#                 'base_benchmark': benchmark_base,
+#                 'country_ids': country_ids,
+#                 'start_date': start_date,
+#                 'end_date': end_date,
+#                 'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
+#                 'parameter_col': parameter_col,
+#                 'is_reverse': data_layer_instance.is_reverse,
+#                 'legend_configs': legend_configs,
+#             }
+#
+#             map_points = db_utilities.sql_to_response(self.get_map_query(query_kwargs), label=self.__class__.__name__)
+#         else:
+#             query_kwargs = {
+#                 'col_name': parameter_column_name,
+#                 'legend_configs': legend_configs,
+#                 'country_ids': country_ids,
+#                 'parameter_col': parameter_col,
+#             }
+#
+#             map_points = db_utilities.sql_to_response(self.get_static_map_query(query_kwargs),
+#                                                       label=self.__class__.__name__)
+#
+#         if map_points:
+#             for map_point in map_points:
+#                 map_point['geopoint'] = json.loads(map_point['geopoint'])
+#         return Response(data={'map': map_points})
+
+
+class PublishedEntityDataLayersViewSet(CachedListMixin, BaseModelViewSet):
+    """
+    PublishedEntityDataLayersViewSet
+    Cache Attr:
+        Auto Cache: Not required
+        Call Cache: Yes
+    """
+    LIST_CACHE_KEY_PREFIX = 'PUBLISHED_LAYERS_LIST_ENTITIES'
+
+    model = accounts_models.DataLayer
+    serializer_class = entity_serializers.EntityDataLayersListSerializer
+
+    base_auth_permissions = (
+        permissions.AllowAny,
+    )
+
+    filter_backends = (
+        DjangoFilterBackend,
+        NullsAlwaysLastOrderingFilter,
+    )
+
+    ordering_field_names = ['-last_modified_at', 'name']
+    apply_query_pagination = True
+
+    filterset_fields = {
+        'id': ['exact', 'in'],
+        'published_by_id': ['exact', 'in'],
+        'name': ['iexact', 'in', 'exact'],
+        'entity_type': ['iexact', 'in', 'exact'],
+    }
+
+    permit_list_expands = ['created_by', 'published_by', 'last_modified_by']
+
+    def apply_queryset_filters(self, queryset):
+        """
+        Override if applying more complex filters to queryset.
+        :param queryset:
+        :return queryset:
+        """
+        queryset = queryset.filter(status=self.kwargs.get('status', 'PUBLISHED'))
+
+        query_params = self.request.query_params.dict()
+        query_param_keys = query_params.keys()
+
+        if 'country_id' in query_param_keys:
+            queryset = queryset.filter(
+                active_countries__country=query_params['country_id'],
+                active_countries__deleted__isnull=True,
+            )
+        elif 'country_id__in' in query_param_keys:
+            queryset = queryset.filter(
+                active_countries__country_id__in=[c_id.strip() for c_id in query_params['country_id__in'].split(',')],
+                active_countries__deleted__isnull=True,
+            )
+
+        if 'is_default' in query_param_keys:
+            is_default = str(query_params['is_default']).lower() == 'true'
+            queryset = queryset.filter(
+                active_countries__is_default=is_default,
+                active_countries__deleted__isnull=True,
+            )
+
+        return super().apply_queryset_filters(queryset)
+
+
+class EntityDataLayerMetadataViewSet(BaseModelViewSet):
+    model = accounts_models.DataLayer
+
+    serializer_class = entity_serializers.EntityDataLayersListSerializer
+
+    base_auth_permissions = (
+        permissions.AllowAny,
+    )
+
+    permit_list_expands = ['created_by', 'published_by', 'last_modified_by']
+
+    def get_object(self):
+        return get_object_or_404(
+            accounts_models.DataLayer.objects.all(),
+            pk=self.kwargs.get('pk'),
+            status=accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
+        )
