@@ -20,8 +20,8 @@ urlpatterns = [
     path('layers/<int:pk>/publish/', entity_api.EntityDataLayerPublishViewSet.as_view({
         'put': 'partial_update',
     }), name='publish-data-layer-entities'),
-    # path('layers/<int:pk>/preview/', entity_api.EntityDataLayerPreviewViewSet.as_view(),
-    # name='preview-data-layer-entities'),
+    path('layers/<int:pk>/preview/', entity_api.EntityDataLayerPreviewViewSet.as_view(),
+    name='preview-data-layer-entities'),
 
     path('layers/<int:pk>/metadata/', entity_api.EntityDataLayerMetadataViewSet.as_view({
         'get': 'retrieve',
