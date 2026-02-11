@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 from rest_framework.utils.urls import remove_query_param
 from proco.utils.cache import cache_manager, custom_cache_control
 
-from proco.entities.models import Entity
+from proco.entities.models import Entity, ENTITY_TYPE_CHOICES
 from proco.entities.serializers import ListEntitySerializer
 from proco.locations.models import Country
 from proco.schools.api import ConnectivityTileRequestHandler, BaseTileGenerator, ConnectivityTileGenerator
@@ -327,3 +327,13 @@ class EntityConnectivityStatusTileRequestHandler(EntityConnectivityTileRequestHa
         param_string = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
 
         return f"{self.CACHE_KEY_PREFIX}_{entity}_tiles_{param_string}"
+
+
+class EntityTypeListAPIView(APIView):
+    def get(self, request):
+
+        entity_types = [value for _, value in ENTITY_TYPE_CHOICES]
+        return Response(
+            {"entity_type": entity_types},
+            status=200
+        )
