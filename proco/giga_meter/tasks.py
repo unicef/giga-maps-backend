@@ -9,10 +9,8 @@ import requests
 from celery import chain
 from celery import current_task
 from django.conf import settings
-from django.db import transaction
 from django.contrib.gis.geos import Point
 from django.core.management import call_command
-from django.db import transaction
 from django.db import transaction
 from django.db.models import Count
 from django.db.utils import DataError
