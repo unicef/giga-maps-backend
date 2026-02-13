@@ -17,6 +17,7 @@ from proco.background import utils as background_task_utilities
 from proco.core import utils as core_utilities
 from proco.core.config import app_config as core_configs
 from proco.data_sources import utils as data_sources_utilities
+from proco.data_sources.utils import get_request_headers
 from proco.giga_meter import models as giga_meter_models
 from proco.giga_meter import utils as giga_meter_utilities
 from proco.taskapp import app
@@ -454,68 +455,135 @@ def scheduler_for_populate_school_geopoint_field(country_iso3_format):
         logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
-def fetch_aggregated_ping_data(
+def fetch_aggregated_ping_data_from_api(
     start_date: date,
     end_date: date,
-    chunk_size: int = 10_000,
-):
-    return (
-        giga_meter_models.ConnectivityPingChecksDailyAggr.objects
-        .filter(timestamp_date__date__range=(start_date, end_date))
-        .values("timestamp_date__date", "giga_id_school")
-        .annotate(
-            avg_uptime=Avg("uptime"),
-            avg_latency=Avg("unloaded_latency_avg"),
-        )
-        .order_by("timestamp_date__date", "giga_id_school")
-        .iterator(chunk_size=chunk_size)
-    )
+    logger,
+) -> Iterator[Dict]:
+    """
+    Fetch aggregated ping data from the external Giga Meter API.
+    Iterates through pages and yields records.
+    """
+    base_url = settings.DATA_SOURCE_CONFIG['DAILY_CHECK_APP']['BASE_URL']
+
+    api_endpoint = f"{base_url}/ping-aggregation/records"
+
+    page = 1
+    page_size = 100
+
+    request_config = {
+        'url': api_endpoint,
+        'method': 'GET',
+        'auth_token_required': True
+    }
+
+    headers = get_request_headers(request_config)
+
+    while True:
+        params = {
+            'from': start_date.strftime('%Y-%m-%d'),
+            'to': end_date.strftime('%Y-%m-%d'),
+            'page': page,
+            'pageSize': page_size
+        }
+
+        try:
+            logger.info(f"Fetching page {page} from {api_endpoint} with params {params}")
+            response = requests.get(api_endpoint, params=params, headers=headers)
+
+            if response.status_code != status.HTTP_200_OK:
+                logger.error(f"Failed to fetch data: {response.status_code} - {response.text}")
+                raise HTTPError(f"API returned {response.status_code}")
+
+            json_response = response.json()
+            data = json_response.get('data', [])
+
+            if not data:
+                logger.info("No more data received.")
+                break
+
+            for record in data:
+                yield {
+                    "timestamp_date__date": start_date,
+                    "giga_id_school": record.get("giga_id_school"),
+                    "avg_uptime": record.get("uptime"),
+                    "avg_latency": record.get("unloaded_latency_avg"),
+                }
+
+            # Check pagination
+            meta = json_response.get('meta', {})
+            total = meta.get('total', 0)
+            if len(data) < page_size:
+                break
+
+            page += 1
+
+        except Exception as e:
+            logger.error(f"Error fetching page {page}: {e}")
+            raise
 
 
-def fetch_all_school_map(start_date: date, end_date: date, ) -> Dict[str, School]:
-    """Fetch only schools that have ping data for the date range"""
-    giga_ids = (
-        giga_meter_models.ConnectivityPingChecksDailyAggr.objects
-        .filter(timestamp_date__date__range=(start_date, end_date))
-        .values_list("giga_id_school", flat=True)
-        .distinct()
-    )
+def fetch_all_school_map(giga_ids: List[str]) -> Dict[str, School]:
+    """Fetch only schools that are in the list of giga_ids"""
+    # Optimized to take a list of IDs directly, instead of querying DB for IDs again
 
-    giga_ids_list = list(giga_ids)
-
-    # Fetch only relevant schools
     school_map: Dict[str, School] = {}
-    for school in (
-        School.objects
-            .filter(giga_id_school__in=giga_ids_list)
-            .only("id", "giga_id_school")
-            .iterator(chunk_size=5_000)
-    ):
-        school_map[school.giga_id_school] = school
+    if not giga_ids:
+        return school_map
+
+    chunk_size = 5000
+    for i in range(0, len(giga_ids), chunk_size):
+        chunk_ids = giga_ids[i:i + chunk_size]
+        for school in (
+            School.objects
+                .filter(giga_id_school__in=chunk_ids)
+                .only("id", "giga_id_school")
+                .iterator(chunk_size=1000)
+        ):
+            school_map[school.giga_id_school] = school
 
     return school_map
 
 
 def stream_school_daily_status(
-    aggregated_rows,
-    school_map: Dict[str, School],
+    aggregated_rows_iterator,
     batch_size: int = 5_000,
 ) -> Iterator[List[SchoolDailyStatus]]:
-    batch: List[SchoolDailyStatus] = []
+    batch_rows = []
 
-    for row in aggregated_rows:
+    count = 0
+    for row in aggregated_rows_iterator:
+        batch_rows.append(row)
+        count += 1
 
+        if len(batch_rows) >= batch_size:
+            # Process batch
+            yield from process_batch(batch_rows)
+            batch_rows = []
+
+    if batch_rows:
+        yield from process_batch(batch_rows)
+
+
+def process_batch(rows):
+    giga_ids = list(set(r["giga_id_school"] for r in rows if r.get("giga_id_school")))
+    school_map = fetch_all_school_map(giga_ids)
+
+    result_batch = []
+    for row in rows:
         school = school_map.get(row["giga_id_school"])
         if school is None:
             continue
 
-        uptime = float(row["avg_uptime"])
+        uptime = row.get("avg_uptime")
+        if uptime is not None:
+            uptime = float(uptime)
 
-        avg_latency = row["avg_latency"]
+        avg_latency = row.get("avg_latency")
         if avg_latency is not None:
             avg_latency = float(avg_latency)
 
-        batch.append(
+        result_batch.append(
             SchoolDailyStatus(
                 school=school,
                 date=row["timestamp_date__date"],
@@ -524,13 +592,7 @@ def stream_school_daily_status(
                 connectivity_latency=avg_latency,
             )
         )
-
-        if len(batch) >= batch_size:
-            yield batch
-            batch = []
-
-    if batch:
-        yield batch
+    yield result_batch
 
 
 @transaction.atomic
@@ -538,51 +600,65 @@ def bulk_upsert_school_status(batch: List[SchoolDailyStatus]) -> None:
     if not batch:
         return
 
-    # Get existing records
-    existing_keys = set()
-    existing_records = {}
+    deduplicated_batch = {}
+    for item in batch:
+        key = (item.school_id, item.date, item.live_data_source)
+        deduplicated_batch[key] = item
 
-    for status in batch:
-        key = (status.school_id, status.date, status.live_data_source)
-        existing_keys.add(key)
+    unique_batch = list(deduplicated_batch.values())
 
-    # Fetch existing records
+    # Fetch existing records to separate updates from creates
     existing_qs = SchoolDailyStatus.objects.filter(
-        school_id__in=[s.school_id for s in batch],
-        date__in=list(set(s.date for s in batch)),
-        live_data_source__in=list(set(s.live_data_source for s in batch)),
+        school_id__in=[s.school_id for s in unique_batch],
+        date__in=list(set(s.date for s in unique_batch)),
+        live_data_source__in=list(set(s.live_data_source for s in unique_batch)),
     )
 
+    existing_records = {}
     for record in existing_qs:
         key = (record.school_id, record.date, record.live_data_source)
         existing_records[key] = record
 
-    # Separate into updates and creates
     to_create = []
     to_update = []
 
-    for status in batch:
-        key = (status.school_id, status.date, status.live_data_source)
+    for item in unique_batch:
+        key = (item.school_id, item.date, item.live_data_source)
 
         if key in existing_records:
             # Update existing record
             existing = existing_records[key]
-            existing.uptime = status.uptime
-            existing.connectivity_latency = status.connectivity_latency
-            existing.connectivity_speed = getattr(status, 'connectivity_speed', None)
+            existing.uptime = item.uptime
+            existing.connectivity_latency = item.connectivity_latency
+            existing.connectivity_speed = getattr(item, 'connectivity_speed', None)
             to_update.append(existing)
         else:
-            to_create.append(status)
+            to_create.append(item)
+    try:
+        if to_update:
+            SchoolDailyStatus.objects.bulk_update(
+                to_update,
+                fields=['uptime', 'connectivity_latency', 'connectivity_speed']
+            )
 
-    # Bulk operations
-    if to_create:
-        SchoolDailyStatus.objects.bulk_create(to_create)
+        if to_create:
+            SchoolDailyStatus.objects.bulk_create(to_create)
 
-    if to_update:
-        SchoolDailyStatus.objects.bulk_update(
-            to_update,
-            fields=['uptime', 'connectivity_latency', 'connectivity_speed']
-        )
+    except (DataError, Exception)as e:
+
+        logger.warning(f"Bulk operation failed ({e}), falling back to iterative update_or_create.")
+
+        for item in unique_batch:
+            SchoolDailyStatus.objects.update_or_create(
+                school_id=item.school_id,
+                date=item.date,
+                live_data_source=item.live_data_source,
+                defaults={
+                    'uptime': item.uptime,
+                    'connectivity_latency': item.connectivity_latency,
+                    'connectivity_speed': getattr(item, 'connectivity_speed', None),
+                }
+            )
 
 
 def run_ping_aggregation(
@@ -591,22 +667,22 @@ def run_ping_aggregation(
     task_instance,
     logger,
 ) -> None:
-    logger.info(f"Aggregating ping data from {start_date} to {end_date}")
-    task_instance.info(f"Aggregating ping data from {start_date} to {end_date}")
-    school_map = fetch_all_school_map(start_date, end_date)
-    logger.info(f"Found {len(school_map)} schools with ping data")
-    aggregated_rows = fetch_aggregated_ping_data(start_date, end_date)
+    logger.info(f"Aggregating ping data from {start_date} to {end_date} (API Source)")
+    task_instance.info(f"Aggregating ping data from {start_date} to {end_date} (API Source)")
+
+    aggregated_rows_iterator = fetch_aggregated_ping_data_from_api(start_date, end_date, logger)
 
     total_records = 0
     batch_count = 0
 
-    for batch in stream_school_daily_status(aggregated_rows, school_map):
+    for batch in stream_school_daily_status(aggregated_rows_iterator):
         bulk_upsert_school_status(batch)
         total_records += len(batch)
         batch_count += 1
 
         if batch_count % 10 == 0:
             logger.info(f"Processed {total_records} records so far")
+
     logger.info(f"Upserted {total_records} SchoolDailyStatus records")
     task_instance.info(f"Upserted {total_records} SchoolDailyStatus records")
 
@@ -623,7 +699,7 @@ def fetch_and_aggregate_ping_data(date_str=None, force_tasks=False):
     timestamp = core_utilities.get_current_datetime_object()
     timestamp_str = format_date(
         timestamp,
-        frmt="%d%m%Y_%H%M%S" if force_tasks else "%d%m%Y_%H",
+        frmt="%d%m%Y_%H%M%S" if force_tasks else "%d%m%Y_%H%M`",
     )
 
     task_key = f"fetch_and_aggregate_ping_data_status_{timestamp_str}"
@@ -633,7 +709,6 @@ def fetch_and_aggregate_ping_data(date_str=None, force_tasks=False):
         task_id,
         task_key,
         "Giga Meter - Fetch and aggregate ping data",
-        check_previous=True,
     )
 
     if not task_instance:
@@ -662,7 +737,6 @@ def fetch_and_aggregate_ping_data(date_str=None, force_tasks=False):
 
     finally:
         background_task_utilities.task_on_complete(task_instance)
-
 
 @app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)
 def scheduler_for_backup_giga_meter_connectivity_ping_data(*args, start_date=None, end_date=None):
