@@ -1760,7 +1760,7 @@ class PublishEntityDataLayerSerializer(BaseDataLayerCRUDSerializer):
             'icon',
             'code',
             'name',
-            'entity_type'
+            'entity_type',
             'description',
             'version',
             'type',

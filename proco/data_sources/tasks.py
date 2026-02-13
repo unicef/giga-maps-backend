@@ -1116,7 +1116,7 @@ def validate_schema_and_sync_schema_table_data(profile_file, schema_name, share_
             schema_tables = client.list_tables(health_master_schema)
             logger.debug('All tables ready to access: {0}'.format(schema_tables))
 
-            health_master_fields = [f.name for f in sources_models.HealthEntityMasterData._meta.get_fields()]
+            health_master_fields = [f.name for f in sources_models.HealthEntityMasterIntermediateData._meta.get_fields()]
             for schema_table in schema_tables:
                 logger.debug('#' * 10)
                 logger.debug('Table: %s', schema_table)

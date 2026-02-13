@@ -1,11 +1,13 @@
+import logging
+
 from django.apps.registry import apps
-from django.contrib.contenttypes.models import ContentType
 from django.contrib.gis.db.models import PointField
 from django.db import models
 from django.db.models import Q
 from django.db.models.constraints import UniqueConstraint
 from django.utils import timezone
 from django.utils.translation import ugettext as _
+from jsonfield import JSONField
 from timezone_field import TimeZoneField
 
 from proco.core import exceptions as core_exceptions
@@ -14,20 +16,190 @@ from proco.core.models import CustomDateTimeField
 from proco.locations.models import Country, CountryAdminMetadata
 from proco.core import models as core_models
 
+logger = logging.getLogger('gigamaps.' + __name__)
 
-ENTITY_TYPE_CHOICES = (
-    ("school", "School"),
-    ("health", "Health"),
-    ("library", "Library"),
-)
+
+class EntityType(core_models.BaseModelMixin):
+    """ EntityType: Database-driven registry of entity types. """
+
+    code = models.CharField(
+        max_length=20,
+        unique=True,
+        db_index=True,
+        verbose_name='Type Code',
+        help_text='Unique short code, e.g. "school", "health", "library"',
+    )
+
+    name = models.CharField(
+        max_length=100,
+        verbose_name='Display Name',
+        help_text='Human-readable name, e.g. "School", "Health Facility"',
+    )
+
+    description = models.TextField(blank=True, default='')
+
+    is_active = models.BooleanField(
+        default=True,
+        db_index=True,
+        help_text='Inactive types are hidden from APIs and UI',
+    )
+
+    display_order = models.PositiveSmallIntegerField(
+        default=0,
+        help_text='Lower values appear first in lists',
+    )
+
+    detail_model = models.CharField(
+        max_length=100,
+        blank=True,
+        default='',
+        help_text='App label + model name for entity-specific model, e.g. "entities.HealthEntity"',
+    )
+
+    # Related name on Entity that points to the OneToOne detail model (e.g. "health_entity")
+    detail_related_name = models.CharField(
+        max_length=50,
+        blank=True,
+        default='',
+        help_text='Related name on Entity for the OneToOne detail model, e.g. "health_entity"',
+    )
+
+    # App label + model name for the master data model (e.g. "data_sources.HealthEntityMasterIntermediateData")
+    master_data_model = models.CharField(
+        max_length=100,
+        blank=True,
+        default='',
+        help_text='App label + model name for master data model, e.g. "data_sources.HealthEntityMasterIntermediateData"',
+    )
+
+    extra_config = JSONField(
+        null=True,
+        blank=True,
+        default=dict,
+        help_text='Additional type-specific configuration as JSON',
+    )
+
+    is_legacy = models.BooleanField(
+        default=False,
+        help_text='If True, this type maps to the legacy School model instead of Entity',
+    )
+
+    class Meta:
+        db_table = 'entities_entity_type'
+        ordering = ('display_order', 'code')
+        verbose_name = 'Entity Type'
+        verbose_name_plural = 'Entity Types'
+        constraints = [
+            UniqueConstraint(
+                fields=['code', 'deleted'],
+                name='entity_type_code_unique_with_deleted',
+            ),
+            UniqueConstraint(
+                fields=['code'],
+                condition=Q(deleted=None),
+                name='entity_type_code_unique_without_deleted',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.name} ({self.code})'
+
+    def save(self, **kwargs):
+        self.code = str(self.code).lower().strip()
+        super().save(**kwargs)
+
+    def get_detail_model_class(self):
+        """
+        Returns the Django model class for the entity-specific detail model.
+        Returns None if not configured.
+        """
+        if not self.detail_model:
+            return None
+        try:
+            app_label, model_name = self.detail_model.split('.')
+            return apps.get_model(app_label, model_name)
+        except (ValueError, LookupError) as e:
+            logger.warning('Failed to resolve detail model "%s" for entity type "%s": %s',
+                           self.detail_model, self.code, e)
+            return None
+
+    def get_tile_config(self):
+        """
+        Returns tile generation configuration dict for this entity type.
+        Uses extra_config JSON field for tile_cache_prefix and tile_master_data_table.
+        """
+        extra = self.extra_config or {}
+        return {
+            'table': 'entities_entity',
+            'srid': '4326',
+            'geomColumn': 'geopoint',
+            'attrColumns': 'id',
+            'cache_prefix': extra.get('tile_cache_prefix', f'{self.code.upper()}_STATUS_CONNECTIVITY_TILES_MAP'),
+            'master_data_table': extra.get('tile_master_data_table', ''),
+        }
+
+    def get_master_data_model_class(self):
+        """
+        Returns the Django model class for the master data model.
+        Returns None if not configured.
+        """
+        if not self.master_data_model:
+            return None
+        try:
+            app_label, model_name = self.master_data_model.split('.')
+            return apps.get_model(app_label, model_name)
+        except (ValueError, LookupError) as e:
+            logger.warning('Failed to resolve master data model "%s" for entity type "%s": %s',
+                           self.master_data_model, self.code, e)
+            return None
+
+    def get_detail_instance(self, entity):
+        """
+        Given an Entity instance, returns the related entity-specific detail instance.
+        Returns None if not configured or not found.
+        """
+        if not self.detail_related_name:
+            return None
+        return getattr(entity, self.detail_related_name, None)
+
+    @classmethod
+    def get_by_code(cls, code):
+        """
+        Retrieve an active EntityType by its code. Returns None if not found.
+        """
+        try:
+            return cls.objects.get(code=code, deleted__isnull=True, is_active=True)
+        except cls.DoesNotExist:
+            return None
+
+    @classmethod
+    def get_all_active(cls):
+        """
+        Returns queryset of all active entity types.
+        """
+        return cls.objects.filter(deleted__isnull=True, is_active=True).order_by('display_order', 'code')
+
+    @classmethod
+    def get_choices(cls):
+        """
+        Returns entity type choices suitable for CharField choices parameter.
+        """
+        choices = cls.objects.filter(
+            deleted__isnull=True,
+            is_active=True,
+        ).order_by('display_order', 'code').values_list('code', 'name')
+        if choices.exists():
+            return tuple(choices)
+        return []
 
 
 class Entity(core_models.BaseModelMixin):
-    entity_type = models.CharField(
-        max_length=20,
-        choices=ENTITY_TYPE_CHOICES,
-        default="health",
-        db_index=True,
+    entity_type = models.ForeignKey(
+        EntityType,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name='entities',
     )
 
     external_id = models.CharField(max_length=50, blank=True, db_index=True)
@@ -136,38 +308,29 @@ class Entity(core_models.BaseModelMixin):
         self.daily_status.all().update(deleted=timezone.now())
         self.weekly_status.all().update(deleted=timezone.now())
 
+    def get_entity_type_config(self):
+        """
+        Returns the EntityType registry object for this entity.
+        """
+        return self.entity_type
+
     def get_entity_specific_model(self):
         """
-        Returns the entity-specific model instance
+        Returns the entity-specific model instance using the EntityType registry.
         """
-        if self.entity_type == 'health':
-            return getattr(self, 'health_entity', None)
-        elif self.entity_type == 'school':
-            return getattr(self, 'school_entity', None)
-        elif self.entity_type == 'library':
-            return getattr(self, 'library_entity', None)
-        return None
+        entity_type_config = self.get_entity_type_config()
+        if entity_type_config:
+            return entity_type_config.get_detail_instance(self)
 
     def get_master_data_model_class(self):
         """
-        Returns master data model class for approval workflow
+        Returns master data model class for approval workflow using the EntityType registry.
         """
-        model_mapping = {
-            'health': 'data_sources.HealthEntityMasterData',
-            'school': 'data_sources.SchoolMasterData',
-            'library': 'data_sources.LibraryEntityMasterData',  # Future
-        }
-
-        model_path = model_mapping.get(self.entity_type)
-        if not model_path:
-            raise core_exceptions.InvalidModelNameFormatError(model=f'No master data model for entity_type: {self.entity_type}')
-
-        try:
-            app_name, model_name = model_path.split('.')
-            return apps.get_model(app_name, model_name)
-        except (ValueError, ContentType.DoesNotExist):
-            raise core_exceptions.InvalidModelNameFormatError(model=model_path)
-
+        entity_type_config = self.get_entity_type_config()
+        if entity_type_config:
+            model_class = entity_type_config.get_master_data_model_class()
+            if model_class:
+                return model_class
 
 class HealthEntity(core_models.BaseModelMixin):
     """
@@ -178,7 +341,7 @@ class HealthEntity(core_models.BaseModelMixin):
         Entity,
         on_delete=models.CASCADE,
         related_name='health_entity',
-        limit_choices_to={'entity_type': 'health'}
+        limit_choices_to={'entity_type__code': 'health'}
     )
 
     # Health Facility Identifiers
@@ -256,74 +419,3 @@ class HealthEntity(core_models.BaseModelMixin):
 
     def __str__(self):
         return f'Health: {self.entity.name}'
-
-
-class SchoolEntity(core_models.BaseModelMixin):
-    """
-    SchoolEntity - Operational school data
-    Mirrors existing School model fields for consistency
-    """
-    entity = models.OneToOneField(
-        Entity,
-        on_delete=models.CASCADE,
-        related_name='school_entity',
-        limit_choices_to={'entity_type': 'school'}
-    )
-
-    # School Identifiers
-    school_id_govt = models.CharField(blank=True, null=True, max_length=255, db_index=True)
-
-    # Geographic Details
-    timezone = TimeZoneField(blank=True, null=True)
-    gps_confidence = models.FloatField(null=True, blank=True)
-    altitude = models.PositiveIntegerField(blank=True, default=0)
-    address = models.CharField(blank=True, max_length=255)
-    postal_code = models.CharField(blank=True, max_length=128)
-    email = models.EmailField(max_length=128, null=True, blank=True, default=None)
-
-    # Education Information
-    education_level = models.CharField(blank=True, max_length=255)
-    education_level_lower = models.CharField(blank=True, max_length=255, editable=False, db_index=True)
-    education_level_govt = models.CharField(blank=True, null=True, max_length=255)
-    education_level_govt_lower = models.CharField(blank=True, null=True, max_length=255, editable=False, db_index=True)
-    education_level_regional = models.CharField(max_length=255, blank=True)
-    school_type = models.CharField(blank=True, max_length=64, db_index=True)
-    school_type_lower = models.CharField(blank=True, max_length=64, editable=False, db_index=True)
-
-    # School Status
-    establishment_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
-
-    # Education Technology Infrastructure
-    computer_lab = models.BooleanField(null=True, blank=True, default=None)
-    computer_availability = models.BooleanField(null=True, blank=True, default=None)
-    num_computers = models.PositiveIntegerField(blank=True, default=None, null=True)
-    num_computers_desired = models.PositiveIntegerField(blank=True, default=None, null=True)
-    num_tablets = models.PositiveIntegerField(blank=True, default=None, null=True)
-    num_robotic_equipment = models.PositiveIntegerField(blank=True, default=None, null=True)
-    device_availability = models.BooleanField(null=True, blank=True, default=None)
-    # Education Business Model
-    sustainable_business_model = models.BooleanField(null=True, blank=True, default=None)
-
-    class Meta:
-        db_table = 'entities_school_entity'
-        ordering = ('id',)
-        constraints = [
-            UniqueConstraint(fields=['entity', 'deleted'],
-                           name='school_entity_unique_with_deleted'),
-            UniqueConstraint(fields=['entity'],
-                           condition=Q(deleted=None),
-                           name='school_entity_unique_without_deleted'),
-        ]
-
-    def save(self, **kwargs):
-        # Maintain lowercase fields for search optimization
-        if self.education_level:
-            self.education_level_lower = str(self.education_level).lower()
-        if self.education_level_govt:
-            self.education_level_govt_lower = str(self.education_level_govt).lower()
-        if self.school_type:
-            self.school_type_lower = str(self.school_type).lower()
-        super().save(**kwargs)
-
-    def __str__(self):
-        return f'School: {self.entity.name}'

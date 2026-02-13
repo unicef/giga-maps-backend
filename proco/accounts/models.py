@@ -5,7 +5,7 @@ from django.db.models.constraints import UniqueConstraint
 from jsonfield import JSONField
 
 from proco.core import models as core_models
-from proco.entities.models import ENTITY_TYPE_CHOICES
+from proco.entities.models import EntityType
 from proco.locations.models import Country
 
 
@@ -368,10 +368,12 @@ class DataLayer(core_models.BaseModel):
         (LAYER_STATUS_DISABLED, 'Disabled'),
     )
 
-    entity_type = models.CharField(
-        max_length=20,
-        choices=ENTITY_TYPE_CHOICES,
-        default="school",
+    entity_type = models.ForeignKey(
+        EntityType,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='data_layers',
         db_index=True,
     )
     icon = models.TextField(null=True, blank=True)
@@ -430,6 +432,13 @@ class DataLayer(core_models.BaseModel):
 
     class Meta:
         ordering = ['last_modified_at']
+
+    @property
+    def entity_name(self):
+        """Returns the entity type code string for use in raw SQL table names and filters."""
+        if self.entity_type:
+            return self.entity_type.code
+        return 'school'
 
     def save(self, **kwargs):
         self.code = str(self.code).upper()

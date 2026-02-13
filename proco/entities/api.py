@@ -1,6 +1,7 @@
 import logging
 
 from django.conf import settings
+from django.db import models
 from django.http import JsonResponse
 from django.db.models.functions.text import Lower
 from django.shortcuts import get_object_or_404
@@ -13,7 +14,7 @@ from rest_framework.views import APIView
 from rest_framework.utils.urls import remove_query_param
 from proco.utils.cache import cache_manager, custom_cache_control
 
-from proco.entities.models import Entity, ENTITY_TYPE_CHOICES
+from proco.entities.models import Entity, EntityType
 from proco.entities.serializers import ListEntitySerializer
 from proco.locations.models import Country
 from proco.schools.api import ConnectivityTileRequestHandler, BaseTileGenerator, ConnectivityTileGenerator
@@ -331,9 +332,29 @@ class EntityConnectivityStatusTileRequestHandler(EntityConnectivityTileRequestHa
 
 class EntityTypeListAPIView(APIView):
     def get(self, request):
-
-        entity_types = [value for _, value in ENTITY_TYPE_CHOICES]
-        return Response(
-            {"entity_type": entity_types},
-            status=200
+        active_types = EntityType.get_all_active().annotate(
+            entity_count=models.Count(
+                'entities',
+                filter=models.Q(entities__deleted__isnull=True),
+            )
         )
+
+        entity_type_names = []
+        entity_type_details = {}
+
+        for et in active_types:
+            entity_type_names.append(et.code)
+            entity_type_details[et.code] = {
+                'id': et.id,
+                'code': et.code,
+                'name': et.name,
+                'description': et.description,
+                'display_order': et.display_order,
+                'is_legacy': et.is_legacy,
+                'extra_config': et.extra_config or {},
+            }
+
+        response_data = {'entity_types': entity_type_names}
+        response_data.update(entity_type_details)
+
+        return Response(response_data, status=200)

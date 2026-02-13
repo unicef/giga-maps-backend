@@ -554,7 +554,7 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
                     WHERE (
                         "entities_entity"."deleted" IS NULL
                         AND rt_status."deleted" IS NULL
-                        AND entities_entity.entity_type = '{entity_name}'
+                        AND entities_entity.entity_type_id = (SELECT id FROM entities_entity_type WHERE code = '{entity_name}' AND deleted IS NULL)
                         {country_condition}
                         {admin1_condition}
                         {entity_condition}
@@ -712,7 +712,7 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
             INNER JOIN entities_{entity_name}_entity ews ON entities_entity.last_weekly_status_id = ews.id
             {entity_master_table_condition}
             WHERE entities_entity."deleted" IS NULL
-            AND entities_entity.entity_type = '{entity_name}'
+            AND entities_entity.entity_type_id = (SELECT id FROM entities_entity_type WHERE code = '{entity_name}' AND deleted IS NULL)
             {country_condition}
             {admin1_condition}
             {entity_condition}
@@ -981,7 +981,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 )
             WHERE (
                 "entities_entity"."deleted" IS NULL
-                AND entities_entity.entity_type = '{entity_name}'
+                AND entities_entity.entity_type_id = (SELECT id FROM entities_entity_type WHERE code = '{entity_name}' AND deleted IS NULL)
                 AND "connection_statistics_entityrealtimeregistration"."deleted" IS NULL
                 {country_condition}
                 {admin1_condition}
@@ -1135,14 +1135,14 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 )
             WHERE ("entities_entity"."id" IN ({ids})
                 AND "entities_entity"."deleted" IS NULL
-                AND entities_entity.entity_type = '{entity_name}')
+                AND entities_entity.entity_type_id = (SELECT id FROM entities_entity_type WHERE code = '{entity_name}' AND deleted IS NULL))
             GROUP BY "entities_entity"."id"
             ORDER BY "entities_entity"."id" ASC
         ) AS eds ON eds.entity_id = entities_entity.id
         WHERE "entities_entity"."id" IN ({ids})
             AND c."deleted" IS NULL
             AND entities_entity."deleted" IS NULL
-            AND entities_entity.entity_type = '{entity_name}'
+            AND entities_entity.entity_type_id = (SELECT id FROM entities_entity_type WHERE code = '{entity_name}' AND deleted IS NULL)
         GROUP BY entities_entity."id", err."rt_registered", err."rt_registration_date",
             adm1_metadata."name", adm1_metadata."description_ui_label",
             adm2_metadata."name", adm2_metadata."description_ui_label",
@@ -1211,7 +1211,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             ON "entities_entity"."last_weekly_status_id" = ehs."id"
         WHERE "entities_entity"."deleted" IS NULL
             AND "entities_entity"."id" IN ({ids})
-            AND entities_entity.entity_type = '{entity_name}'
+            AND entities_entity.entity_type_id = (SELECT id FROM entities_entity_type WHERE code = '{entity_name}' AND deleted IS NULL)
         """.format(ids=','.join(self.kwargs['entity_ids']), entity_name=self.kwargs['entity_name'])
 
         return query
@@ -1378,7 +1378,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         INNER JOIN connection_statistics_entityweeklystatus sws ON "entities_entity"."last_weekly_status_id" = ews."id"
         {school_weekly_join}
         WHERE "entities_entity"."deleted" IS NULL
-        AND entities_entity.entity_type = '{entity_name}'
+        AND entities_entity.entity_type_id = (SELECT id FROM entities_entity_type WHERE code = '{entity_name}' AND deleted IS NULL)
         {country_condition}
         {admin1_condition}
         {school_condition}
@@ -1620,7 +1620,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             AND err.rt_registration_date <= '{end_date}'
         WHERE
             e.deleted IS NULL
-            AND e.entity_type = '{entity_name}'
+            AND e.entity_type_id = (SELECT id FROM entities_entity_type WHERE code = '{entity_name}' AND deleted IS NULL)
             AND e.id != {entity_id}
             AND e.country_id = {country_id}
             AND e.geopoint = (SELECT geopoint FROM entities_entity WHERE id = {entity_id})
@@ -1957,10 +1957,10 @@ class EntityDataLayersViewSet(BaseModelViewSet):
         'status': ['iexact', 'in', 'exact'],
         'published_by_id': ['exact', 'in'],
         'name': ['iexact', 'in', 'exact'],
-        'entity_type': ['iexact', 'in', 'exact'],
+        'entity_type__code': ['iexact', 'in', 'exact'],
     }
 
-    search_fields = ('name', 'code', 'type', 'entity_type',)
+    search_fields = ('name', 'code', 'type', 'entity_type__code',)
 
     permit_list_expands = ['created_by', 'published_by', 'last_modified_by']
 
@@ -2283,7 +2283,7 @@ class PublishedEntityDataLayersViewSet(CachedListMixin, BaseModelViewSet):
         'id': ['exact', 'in'],
         'published_by_id': ['exact', 'in'],
         'name': ['iexact', 'in', 'exact'],
-        'entity_type': ['iexact', 'in', 'exact'],
+        'entity_type__code': ['iexact', 'in', 'exact'],
     }
 
     permit_list_expands = ['created_by', 'published_by', 'last_modified_by']

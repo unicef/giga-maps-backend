@@ -107,9 +107,9 @@ class SchoolMasterData(TimeStampedModel, core_models.MasterDataSourceModelMixin)
                                                            null=True)  # num_schools_per_building
 
 
-class HealthEntityMasterData(TimeStampedModel, core_models.MasterDataSourceModelMixin):
+class HealthEntityMasterIntermediateData(TimeStampedModel, core_models.MasterDataSourceModelMixin):
     """
-    HealthEntityMasterData
+    HealthEntityMasterIntermediateData
         This class define model used to store Health Entity Master Data.
     Inherits : `DataSourceModelMixin`
     """

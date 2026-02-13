@@ -890,13 +890,13 @@ def sync_data_frame(loaded_data_df, cols_to_delete, country, deleted_entities):
                 # Publish entities directly
                 if entity:
                     row['health_id'] = entity.id
-                    row['status'] = sources_models.HealthEntityMasterData.ROW_STATUS_PUBLISHED
+                    row['status'] = sources_models.HealthEntityMasterIntermediateData.ROW_STATUS_PUBLISHED
                     row['published_at'] = core_utilities.get_current_datetime_object()
                 row_as_dict = parse_row(row)
-                insert_entries.append(sources_models.HealthEntityMasterData(**row_as_dict))
+                insert_entries.append(sources_models.HealthEntityMasterIntermediateData(**row_as_dict))
                 if len(insert_entries) == 5000:
                     logger.debug('Loading the data to "HealthMasterData" table as it has reached 5000 benchmark.')
-                    sources_models.HealthEntityMasterData.objects.bulk_create(insert_entries)
+                    sources_models.HealthEntityMasterIntermediateData.objects.bulk_create(insert_entries)
                     insert_entries = []
                     logger.debug('#' * 10)
                     logger.debug('\n\n')
@@ -908,23 +908,23 @@ def sync_data_frame(loaded_data_df, cols_to_delete, country, deleted_entities):
                 # Entity can be deleted only if its already present in Giga DB
                 if entity:
                     row['entity_id'] = entity.id
-                    row['status'] = sources_models.HealthEntityMasterData.ROW_STATUS_DELETED_PUBLISHED
+                    row['status'] = sources_models.HealthEntityMasterIntermediateData.ROW_STATUS_DELETED_PUBLISHED
                     row['modified'] = core_utilities.get_current_datetime_object()
 
                     row_as_dict = parse_row(row)
-                    remove_entries.append(sources_models.HealthEntityMasterData(**row_as_dict))
+                    remove_entries.append(sources_models.HealthEntityMasterIntermediateData(**row_as_dict))
                 if len(remove_entries) == 5000:
                     logger.info('Loading the data to "HeathEntityMasterData" table as it has reached 5000 benchmark.')
-                    sources_models.HealthEntityMasterData.objects.bulk_create(remove_entries)
+                    sources_models.HealthEntityMasterIntermediateData.objects.bulk_create(remove_entries)
                     remove_entries = []
                     logger.debug('#' * 10)
                     logger.debug('\n\n')
         logger.info('Loading the remaining ({0}) data to "HeathEntityMasterData" table.'.format(len(insert_entries)))
         if len(insert_entries) > 0:
-            sources_models.HealthEntityMasterData.objects.bulk_create(insert_entries)
+            sources_models.HealthEntityMasterIntermediateData.objects.bulk_create(insert_entries)
         logger.info('Removing ({0}) records from "HeathEntityMasterData" table.'.format(len(remove_entries)))
         if len(remove_entries) > 0:
-            sources_models.HealthEntityMasterData.objects.bulk_create(remove_entries)
+            sources_models.HealthEntityMasterIntermediateData.objects.bulk_create(remove_entries)
             deleted_entities.extend(
                 [country.name + ' : ' + health_master_row.facility_name for health_master_row in remove_entries])
 
@@ -939,7 +939,7 @@ def vaildate_master_version_and_sync_health_master_data(profile_file, share_name
                      'Hence skipping the load for current table.'.format(table_name))
         raise ValueError(f"Invalid 'iso3_format': {table_name}")
 
-    table_last_data_version = sources_models.HealthEntityMasterData.get_last_version(table_name)
+    table_last_data_version = sources_models.HealthEntityMasterIntermediateData.get_last_version(table_name)
     logger.debug('Table last data version present in DB: {0}'.format(table_last_data_version))
 
     # Create a url to access a shared table.
