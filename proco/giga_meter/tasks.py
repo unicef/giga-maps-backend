@@ -3,6 +3,7 @@ import logging
 import os
 import uuid
 
+import requests
 from celery import chain
 from celery import current_task
 from datetime import datetime, timedelta
@@ -12,6 +13,7 @@ from django.core.management import call_command
 from django.db.models import Count
 from django.db.utils import DataError
 from requests.exceptions import HTTPError
+from rest_framework import status
 
 from proco.background import utils as background_task_utilities
 from proco.core import utils as core_utilities
