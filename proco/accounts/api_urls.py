@@ -57,8 +57,6 @@ urlpatterns = [
     path('data_sources/<int:pk>/publish/', api.DataSourcePublishViewSet.as_view({
         'put': 'partial_update',
     }), name='publish-data-source'),
-    # v2 routes are available under the /v2/ prefix. Frontend may call
-    path('v2/', include('proco.accounts.v2.api_urls')),
     path('layers/', api.DataLayersViewSet.as_view({
         'get': 'list',
         'post': 'create',
