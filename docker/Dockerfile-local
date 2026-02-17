@@ -38,6 +38,6 @@ ADD Pipfile.lock /code/Pipfile.lock
 
 WORKDIR /code/
 
-RUN pipenv install --dev
+RUN PIP_NO_CACHE_DIR=1 pipenv install --dev --ignore-pipfile
 
 EXPOSE 8000
