@@ -332,12 +332,7 @@ class EntityConnectivityStatusTileRequestHandler(EntityConnectivityTileRequestHa
 
 class EntityTypeListAPIView(APIView):
     def get(self, request):
-        active_types = EntityType.get_all_active().annotate(
-            entity_count=models.Count(
-                'entities',
-                filter=models.Q(entities__deleted__isnull=True),
-            )
-        )
+        active_types = EntityType.get_all_active()
 
         entity_type_names = []
         entity_type_details = {}
@@ -345,7 +340,6 @@ class EntityTypeListAPIView(APIView):
         for et in active_types:
             entity_type_names.append(et.code)
             entity_type_details[et.code] = {
-                'id': et.id,
                 'code': et.code,
                 'name': et.name,
                 'description': et.description,
