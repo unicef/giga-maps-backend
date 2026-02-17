@@ -694,7 +694,6 @@ def fetch_and_aggregate_ping_data(date_str=None, force_tasks=False):
         else:
             target_date = (
                 core_utilities.get_current_datetime_object().date()
-                - timedelta(days=1)
             )
 
         run_ping_aggregation(
