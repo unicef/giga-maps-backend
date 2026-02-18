@@ -3,6 +3,7 @@ from rest_framework.routers import SimpleRouter
 
 from proco.entities import api as entities_api
 from proco.accounts.v2 import entity_api
+from proco.accounts.v2 import entity_filter_api
 
 country_entities = SimpleRouter()
 country_entities.register(r'(?P<country_code>\w+)', entities_api.EntitiesViewSet, basename='entities')
@@ -46,6 +47,32 @@ urlpatterns = [
     path('layers/<str:status>/', entity_api.PublishedEntityDataLayersViewSet.as_view({
         'get': 'list',
     }), name='list-published-data-layers-entities'),
+
+    # Entity column configurations
+    path('column_configurations/', entity_filter_api.EntityColumnConfigurationViewSet.as_view({
+        'get': 'list',
+    }), name='list-entity-column-configurations'),
+    path('column_configurations/<int:pk>/choices/', entity_filter_api.EntityColumnConfigurationChoicesViewSet.as_view({
+        'get': 'retrieve',
+    }), name='retrieve-entity-column-configuration-choices'),
+
+    # Entity advance filters - CRUD
+    path('filters/', entity_filter_api.EntityAdvanceFiltersViewSet.as_view({
+        'get': 'list',
+        'post': 'create',
+    }), name='list-or-create-entity-filters'),
+    path('filters/<int:pk>/', entity_filter_api.EntityAdvanceFiltersViewSet.as_view({
+        'put': 'partial_update',
+        'delete': 'destroy',
+    }), name='update-or-delete-entity-filter'),
+    path('filters/<int:pk>/publish/', entity_filter_api.EntityAdvanceFiltersPublishViewSet.as_view({
+        'put': 'partial_update',
+    }), name='publish-entity-filter'),
+
+    # Published entity filters
+    path('filters/<str:status>/<int:country_id>/', entity_filter_api.PublishedEntityAdvanceFiltersViewSet.as_view({
+        'get': 'list',
+    }), name='list-published-entity-filters'),
 
     # Entity list by country (Should be at last)
     path('', include(country_entities.urls)),

@@ -550,6 +550,15 @@ class ColumnConfiguration(core_models.BaseModelMixin):
     is_filter_applicable = models.BooleanField(default=False)
     options = JSONField(null=True, default=dict)
 
+    entity_type = models.ForeignKey(
+        'entities.EntityType',
+        null=True,
+        blank=True,
+        related_name='column_configurations',
+        on_delete=models.DO_NOTHING,
+        help_text='Entity type this column configuration applies to. NULL means legacy school-only.',
+    )
+
     class Meta:
         ordering = ['last_modified_at']
 
@@ -645,6 +654,15 @@ class AdvanceFilter(core_models.BaseModel):
         max_length=20,
         choices=FILTER_QUERY_PARAM_CHOICES,
         default=FILTER_QUERY_PARAM_IEXACT,
+    )
+
+    entity_type = models.ForeignKey(
+        'entities.EntityType',
+        null=True,
+        blank=True,
+        related_name='advance_filters',
+        on_delete=models.DO_NOTHING,
+        help_text='Entity type this filter applies to. NULL means legacy school-only.',
     )
 
     class Meta:
