@@ -4,6 +4,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from proco.entities.models import EntityType
+from proco.accounts.models import DataLayer, ColumnConfiguration, AdvanceFilter
 from proco.core.utils import get_current_datetime_object
 
 
@@ -71,17 +72,22 @@ def seed_entity_types():
             sys.stdout.write(f'\n✗ Error processing EntityType {entity_data["code"]}: {e}')
 
 
+def map_entity_types_to_data_sources():
+    """
+    Map EntityType to existing data sources.
+    """
+    try:
+        school_entity_type = EntityType.objects.get(code='school')
+        DataLayer.objects.filter(entity_type__isnull=True).update(entity_type=school_entity_type)
+        ColumnConfiguration.objects.filter(entity_type__isnull=True).update(entity_type=school_entity_type)
+        AdvanceFilter.objects.filter(entity_type__isnull=True).update(entity_type=school_entity_type)
+
+        sys.stdout.write('\n✓ Mapped EntityTypes to their corresponding data sources successfully.')
+    except Exception as e:
+        sys.stdout.write(f'\n✗ Error mapping EntityTypes to data sources: {e}')
+
 class Command(BaseCommand):
     help = 'Seed EntityType records for school (legacy) and health facilities'
-
-    def add_arguments(self, parser):
-        parser.add_argument(
-            '--reset',
-            action='store_true',
-            dest='reset',
-            default=False,
-            help='If provided, soft-delete all existing EntityTypes before seeding',
-        )
 
     def handle(self, **options):
         sys.stdout.write('\n' + '=' * 60)
@@ -89,14 +95,8 @@ class Command(BaseCommand):
         sys.stdout.write('\n' + '=' * 60)
 
         with transaction.atomic():
-            if options.get('reset', False):
-                sys.stdout.write('\n⚠ Resetting: Soft-deleting all existing EntityTypes...')
-                deleted_count = EntityType.objects.filter(deleted__isnull=True).update(
-                    deleted=get_current_datetime_object()
-                )
-                sys.stdout.write(f'\n✓ Soft-deleted {deleted_count} EntityType(s)')
-
             seed_entity_types()
+            map_entity_types_to_data_sources()
 
         sys.stdout.write('\n' + '=' * 60)
         sys.stdout.write('\n✓ EntityType seeding completed successfully!')

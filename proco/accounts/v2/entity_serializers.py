@@ -1346,6 +1346,7 @@ class EntityDataLayersListSerializer(FlexFieldsModelSerializer):
     benchmark_metadata = serializers.SerializerMethodField()
 
     active_countries_list = serializers.JSONField()
+    entity_type_code = serializers.CharField(source='entity_type.code')
 
     class Meta:
         model = accounts_models.DataLayer
@@ -1359,6 +1360,7 @@ class EntityDataLayersListSerializer(FlexFieldsModelSerializer):
             'type',
             'category',
             'entity_type',
+            'entity_type_code',
             'applicable_countries',
             'global_benchmark',
             'legend_configs',
