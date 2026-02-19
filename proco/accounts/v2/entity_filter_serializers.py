@@ -229,7 +229,7 @@ class PublishedEntityAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
 class EntityAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
     active_countries_list = serializers.JSONField()
     options = serializers.JSONField()
-    entity_type_code = serializers.CharField(source='entity_type.code')
+    entity_type__code = serializers.CharField(source='entity_type.code')
 
     class Meta:
         model = accounts_models.AdvanceFilter
@@ -246,7 +246,7 @@ class EntityAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
             'published_by',
             'active_countries_list',
             'entity_type',
-            'entity_type_code',
+            'entity_type__code',
         )
 
         expandable_fields = {
@@ -390,7 +390,7 @@ class UpdateEntityAdvanceFilterSerializer(BaseEntityAdvanceFilterListCRUDSeriali
 
 class PublishEntityAdvanceFilterSerializer(serializers.ModelSerializer):
     options = serializers.JSONField(required=False)
-    entity_type_code = serializers.CharField(source='entity_type.code', read_only=True)
+    entity_type__code = serializers.CharField(source='entity_type.code', read_only=True)
 
     class Meta:
         model = accounts_models.AdvanceFilter
@@ -408,7 +408,7 @@ class PublishEntityAdvanceFilterSerializer(serializers.ModelSerializer):
             'published_by',
             'published_at',
             'entity_type',
-            'entity_type_code',
+            'entity_type__code',
         )
 
         fields = read_only_fields + (
@@ -492,7 +492,7 @@ class EntityColumnConfigurationChoicesSerializer(FlexFieldsModelSerializer):
 
 class EntityColumnConfigurationListSerializer(FlexFieldsModelSerializer):
     options = serializers.JSONField()
-    entity_type_code = serializers.CharField(source='entity_type.code')
+    entity_type__code = serializers.CharField(source='entity_type.code')
 
     class Meta:
         model = accounts_models.ColumnConfiguration
@@ -508,5 +508,5 @@ class EntityColumnConfigurationListSerializer(FlexFieldsModelSerializer):
             'is_filter_applicable',
             'options',
             'entity_type',
-            'entity_type_code',
+            'entity_type__code',
         )
