@@ -24,6 +24,7 @@ from proco.core import utils as core_utilities
 from proco.core.config import app_config as core_configs
 from proco.custom_auth.models import ApplicationUser
 from proco.data_sources import models as sources_models
+from proco.entities.models import Entity
 from proco.locations.models import Country
 from proco.schools.models import School
 from proco.utils.dates import format_date
@@ -204,6 +205,35 @@ def parse_row(row):
             row[timestamp_col_name] = value.tz_localize(response_timezone)
 
     return row.to_dict()
+
+
+def parse_row_safe(row):
+    row = row.copy()
+    row = row.replace({np.nan: None, pd.NaT: None})
+
+    for col in [
+        'timestamp',
+        'school_location_ingestion_timestamp',
+        'connectivity_RT_ingestion_timestamp',
+        'connectivity_govt_ingestion_timestamp',
+        '_commit_timestamp',   # ← this is the culprit
+    ]:
+        value = row.get(col)
+
+        if value is None:
+            continue
+
+        # Epoch milliseconds → pandas Timestamp
+        if isinstance(value, (int, float)):
+            row[col] = pd.to_datetime(value, unit="ms", utc=True)
+            continue
+
+        # Naive pandas timestamp → localize
+        if hasattr(value, "tz_localize") and value.tzinfo is None:
+            row[col] = value.tz_localize(response_timezone)
+
+    return row.to_dict()
+
 
 
 def sync_school_master_data(profile_file, share_name, schema_name, table_name, changes_for_countries, deleted_schools,
@@ -815,7 +845,7 @@ def sync_qos_realtime_data(country_id):
     if len(realtime) > 0:
         RealTimeConnectivity.objects.bulk_create(realtime)
 
-
+#Need to check this
 def normalize_health_entity_name(health_name):
     # If its blank string then put default value
     if pd.isna(health_name) or core_utilities.is_blank_string(health_name):
@@ -823,17 +853,21 @@ def normalize_health_entity_name(health_name):
 
     # Remove space from start and end if present
     # Replace the 2 times double quotes ("") with 1 time double quotes (")
-    school_name = str(health_name).strip().replace('""', '"')
+    health_name = str(health_name).strip().replace('""', '"')
 
     # If health entity name start & ends with ", then remove these from start and end
-    if (len(health_name) >= 2 and health_name[0] == health_name[-1]) and health_name.startswith(("'", '"')):
+    if (
+        len(health_name) >= 2
+        and health_name[0] == health_name[-1]
+        and health_name.startswith(("'", '"'))
+    ):
         health_name = health_name[1:-1]
 
     return health_name
 
 
 def normalize_health_entity_master_data_frame(df):
-    df['entity_name'] = df['entity_name'].apply(normalize_health_entity_name)
+    df['facility_name'] = df['facility_name'].apply(normalize_health_entity_name)
     if 'facility_id_govt' in list(df.columns.tolist()):
         df['facility_id_govt'] = df['facility_id_govt'].fillna('thisnanwillreplaceback').apply(
             lambda val: str(val).lower()).replace('thisnanwillreplaceback', np.nan)
@@ -872,7 +906,7 @@ def sort_and_modify_dataframe(loaded_data_df, health_master_fields, changes_for_
     return cols_to_delete
 
 
-def sync_data_frame(loaded_data_df, cols_to_delete, country, deleted_entities):
+def sync_health_data(loaded_data_df, cols_to_delete, country, deleted_entities):
         insert_entries = []
         remove_entries = []
         for _, row in loaded_data_df.iterrows():
@@ -911,7 +945,7 @@ def sync_data_frame(loaded_data_df, cols_to_delete, country, deleted_entities):
                     row['status'] = sources_models.HealthEntityMasterIntermediateData.ROW_STATUS_DELETED_PUBLISHED
                     row['modified'] = core_utilities.get_current_datetime_object()
 
-                    row_as_dict = parse_row(row)
+                    row_as_dict = parse_row_safe(row)
                     remove_entries.append(sources_models.HealthEntityMasterIntermediateData(**row_as_dict))
                 if len(remove_entries) == 5000:
                     logger.info('Loading the data to "HeathEntityMasterData" table as it has reached 5000 benchmark.')
@@ -973,6 +1007,6 @@ def vaildate_master_version_and_sync_health_master_data(profile_file, share_name
     if len(loaded_data_df) > 0:
         # Sort the values based on _commit_timestamp ASC
         cols_to_delete = sort_and_modify_dataframe(loaded_data_df, health_master_fields, changes_for_countries, table_current_version, country, table_name, pull_datetime)
-        sync_data_frame(loaded_data_df, cols_to_delete, country, deleted_entities)
+        sync_health_data(loaded_data_df, cols_to_delete, country, deleted_entities)
     else:
         logger.info('No data to update in current table: {0}.'.format(table_name))

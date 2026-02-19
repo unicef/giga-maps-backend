@@ -6,6 +6,7 @@ from datetime import timedelta
 
 from celery import chain, chord, group, current_task
 from django.conf import settings
+from django.apps import apps
 from django.contrib.gis.geos import Point
 from django.core.management import call_command
 from django.core.exceptions import ImproperlyConfigured
@@ -31,6 +32,7 @@ from proco.data_sources import utils as source_utilities
 from proco.data_sources.config import app_config as sources_config
 from proco.data_sources.constants import SOFT_TIME_LIMIT, TIME_LIMIT
 from proco.data_sources.models import QoSData
+from proco.entities.models import EntityType, Entity
 from proco.locations.models import Country, CountryAdminMetadata
 from proco.schools.models import School
 from proco.taskapp import app
@@ -1211,7 +1213,7 @@ def load_entity_data_from_health_master_apis(country_iso3_format=None):
                     """.format(len(deleted_entities))
                 else:
                     delete_msg = """
-                    Deleted entities details from school master data source:
+                    Deleted entities details from health master data source:
                         {0}
                     """.format('\n'.join(deleted_entities))
 
@@ -1253,3 +1255,151 @@ def update_entity_static_data(*args, country_iso3_format=None):
         background_task_utilities.task_on_complete(task_instance)
     else:
         logger.error('Found Job with "{0}" name so skipping current iteration'.format(task_key))
+
+
+@app.task(soft_time_limit=3 * 55 * 60, time_limit=3 * 55 * 60)
+def handle_published_entity_master_data_row(published_row=None, country_ids=None):
+    """
+    Background task to handle all the published rows of school master data source
+
+    Execution Frequency: Every 12 hours
+    """
+    logger.info('Handling the published health master data rows.')
+
+    entity_type = EntityType.objects.get(code='health')
+
+    master_model = apps.get_model(*entity_type.master_data_model.split('.'))
+    detail_model = (
+        apps.get_model(*entity_type.detail_model.split('.'))
+        if entity_type.detail_model else None
+    )
+
+    if country_ids and len(country_ids) > 0:
+        task_key = 'handle_published_entity_master_data_row_status_{current_time}_country_ids_{ids}'.format(
+            current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'),
+            ids='_'.join([str(c_id) for c_id in country_ids]),
+        )
+        task_description = 'Handle published entity master data rows for countries'
+    elif published_row:
+        task_key = 'handle_published_entity_master_data_row_status_{current_time}_row_id_{ids}'.format(
+            current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'),
+            ids=published_row.id,
+        )
+        task_description = 'Handle published entity master data row for single record'
+    else:
+        task_key = 'handle_published_entity_master_data_row_status_{current_time}'.format(
+            current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
+        task_description = 'Handle published entity master data rows'
+
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(
+        task_id, task_key, task_description)
+
+    if task_instance:
+        logger.debug('Not found running job for published rows handler task: {}'.format(task_key))
+        updated_entity_ids = []
+        created_entity_ids = []
+
+        # Manually updating the records as PUBLISHED
+        master_model.objects.filter(
+            is_read=False
+        ).update(
+            status=master_model.ROW_STATUS_PUBLISHED
+        )
+
+        new_published_records = master_model.objects.filter(
+            status=master_model.ROW_STATUS_PUBLISHED,
+            is_read=False,
+        )
+
+        if published_row:
+            new_published_records = new_published_records.filter(pk=published_row.id)
+
+        if country_ids and len(country_ids) > 0:
+            new_published_records = new_published_records.filter(country_id__in=country_ids)
+
+        task_instance.info('Total published records to update: {}'.format(new_published_records.count()))
+
+        for data_chunk in core_utilities.queryset_iterator(new_published_records, chunk_size=100, print_msg=False):
+            for row in data_chunk:
+                try:
+                    admin1_instance = None
+                    if not core_utilities.is_blank_string(row.admin1_id_giga):
+                        admin1_instance = CountryAdminMetadata.objects.filter(
+                            country=row.country,
+                            giga_id_admin=row.admin1_id_giga,
+                            layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN1,
+                        ).first()
+
+                    admin2_instance = None
+                    if not core_utilities.is_blank_string(row.admin2_id_giga):
+                        admin2_instance = CountryAdminMetadata.objects.filter(
+                            country=row.country,
+                            giga_id_admin=row.admin2_id_giga,
+                            layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN2,
+                        ).first()
+
+                    row_data = {
+                        f.name: getattr(row, f.name)
+                        for f in row._meta.fields
+                    }
+                    entity_field_names = {f.name for f in Entity._meta.fields}
+                    entity_defaults = {
+                        k: v for k, v in row_data.items()
+                        if k in entity_field_names
+                    }
+                    entity_defaults['entity_type'] = entity_type
+                    entity_defaults['geopoint'] = Point(row.longitude, row.latitude)
+                    entity_defaults['admin1']  = admin1_instance
+                    entity_defaults['admin2'] = admin2_instance
+
+                    entity, created = Entity.objects.update_or_create(
+                        giga_id=row.health_id_giga,
+                        external_id=row.facility_id_govt,
+                        name= row.facility_name,
+                        defaults=entity_defaults
+                    )
+
+                    # To update HealthEntity
+                    detail_entity_field_names = {f.name for f in detail_model._meta.fields}
+                    detail_entity_defaults = {
+                        k: v for k, v in row_data.items()
+                        if k in detail_entity_field_names
+                    }
+                    # detail_entity_defaults['entity'] = entity
+                    detail_entity_defaults.pop('entity', None)
+
+                    if detail_model:
+                        detail_model.objects.update_or_create(
+                            entity=entity,
+                            defaults=detail_entity_defaults,
+                        )
+
+                    # date = core_utilities.get_current_datetime_object().date()
+
+                    row.is_read = True
+                    row.entity = entity
+                    row.save()
+
+                    # updated_entity_ids.append(entity.id)
+                    # if created:
+                    #     created_entity_ids.append(entity.id)
+                except Exception as ex:
+                    logger.debug('Error reported on publishing: {0}'.format(ex))
+                    logger.debug('Record: {0}'.format(row.__dict__))
+                    task_instance.info('Error reported for ID ({0}) on publishing: {1}'.format(row.id, ex))
+
+        # Need to update the below tasks once ready
+        # if len(updated_entity_ids) > 0:
+        #     for i in range(0, len(updated_entity_ids), 20):
+        #         populate_school_new_fields_task.delay(None, None, None, school_ids=updated_entity_ids[i:i + 20])
+        #
+        #
+        # for new_entity_id in created_entity_ids:
+        #     # As it's a new entity added through Entity Master record publishing, add the school to search index
+        #     cmd_args = ['--update_index', '-entity_id={0}'.format(new_entity_id)]
+        #     call_command('index_rebuild_schools', *cmd_args)
+
+        background_task_utilities.task_on_complete(task_instance)
+    else:
+        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
