@@ -1,0 +1,91 @@
+version: "3"
+
+services:
+  db:
+    container_name: proco_dev_db
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile-db-local
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: proco
+    volumes:
+      - "proco_local_db_data:/var/lib/postgresql/data"
+      - "../postgres_data:/postgres_data"
+    ports:
+      - "7432:5432"
+
+  redis:
+    restart: always
+    image: redis:latest
+    expose:
+      - "6379"
+
+  backend:
+    container_name: proco_dev_backend
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile-local
+    command: bash -c "echo 'Waiting for DB to be ready...' && until PGPASSWORD=test psql -h db -U test -d gigameter -c 'SELECT 1' >/dev/null 2>&1; do echo 'DB not ready yet, retrying in 5s...'; sleep 5; done && echo 'DB is ready!' && pipenv run python manage.py runserver 0.0.0.0:8000"
+    ports:
+      - "8000:8000"
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      DATABASE_URL: postgis://test:test@db/proco
+      READ_ONLY_DATABASE_URL: postgis://test:test@db/proco?options=-c statement_timeout=300000
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND_URL: redis://redis:6379/2
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - "..:/code"
+
+  # celery_beat:
+  #   container_name: proco_dev_beat
+  #   build:
+  #     context: ..
+  #     dockerfile: docker/Dockerfile-local
+  #   command: bash -c "sleep 10 && pipenv run celery --app=proco.taskapp beat --scheduler=redbeat.RedBeatScheduler --loglevel=DEBUG"
+  #   environment:
+  #     DJANGO_SETTINGS_MODULE: config.settings.dev
+  #     DATABASE_URL: postgis://test:test@db/proco
+  #     READ_ONLY_DATABASE_URL: postgis://test:test@db/proco?options=-c statement_timeout=1800000
+  #     REDIS_URL: redis://redis:6379/0
+  #     CELERY_BROKER_URL: redis://redis:6379/1
+  #     CELERY_RESULT_BACKEND_URL: redis://redis:6379/2
+  #   volumes:
+  #     - "..:/code"
+  #   depends_on:
+  #     - db
+  #     - redis
+
+  # celery_worker:
+  #   container_name: proco_dev_celeryd
+  #   build:
+  #     context: ..
+  #     dockerfile: docker/Dockerfile-local
+  #   command: bash -c "sleep 10 && /code/celery-dev.sh --loglevel=DEBUG --task-events"
+  #   environment:
+  #     DJANGO_SETTINGS_MODULE: config.settings.dev
+  #     DATABASE_URL: postgis://test:test@db/proco
+  #     READ_ONLY_DATABASE_URL: postgis://test:test@db/proco?options=-c statement_timeout=1800000
+  #     REDIS_URL: redis://redis:6379/0
+  #     CELERY_BROKER_URL: redis://redis:6379/1
+  #     CELERY_RESULT_BACKEND_URL: redis://redis:6379/2
+  #     ENABLED_FLOWER_METRICS: true
+  #     FLOWER_BASIC_AUTH: hz195KIQ2Kvu8S9knla7lDZXIVX35mvj:TCynWCrvV5pCPpfjArcMtm40P39Od3FJ
+  #     FLOWER_PORT: 6543
+  #     FLOWER_DEBUG: false
+  #   volumes:
+  #     - "..:/code"
+  #   depends_on:
+  #     - db
+  #     - redis
+  #   ports:
+  #     - "6543:6543"
+
+volumes:
+  proco_local_db_data:
