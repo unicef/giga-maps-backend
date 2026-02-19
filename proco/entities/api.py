@@ -334,12 +334,11 @@ class EntityTypeListAPIView(APIView):
     def get(self, request):
         active_types = EntityType.get_all_active()
 
-        entity_type_names = []
-        entity_type_details = {}
+        response_data = {}
 
         for et in active_types:
-            entity_type_names.append(et.code)
-            entity_type_details[et.code] = {
+            response_data[et.code] = {
+                'id': et.id,
                 'code': et.code,
                 'name': et.name,
                 'description': et.description,
@@ -347,8 +346,5 @@ class EntityTypeListAPIView(APIView):
                 'is_legacy': et.is_legacy,
                 'extra_config': et.extra_config or {},
             }
-
-        response_data = {'entity_types': entity_type_names}
-        response_data.update(entity_type_details)
 
         return Response(response_data, status=200)
