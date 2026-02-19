@@ -185,7 +185,7 @@ class HealthEntityMasterIntermediateData(TimeStampedModel, core_models.MasterDat
     catchment_population = models.PositiveIntegerField(blank=True, default=None, null=True)
     services_offered = models.CharField(blank=True, null=True,
                                         max_length=100)  # outpatient|inpatient|maternity|surgery|laboratory|pharmacy|radiology|dialysis|mental_health|immunization|HIV|TB|NCD_clinic|pediatrics|geriatrics|physiotherapy|dental
-    facility_id_govt = models.CharField(max_length=50)
+    facility_id_govt = models.CharField(max_length=50, blank=True, null=True)
     facility_id_govt_type = models.CharField(blank=True, null=True, max_length=50)
     facility_establishment_year = models.PositiveSmallIntegerField(blank=True,
                                                                    null=True)  # min = 1000; max = current year
