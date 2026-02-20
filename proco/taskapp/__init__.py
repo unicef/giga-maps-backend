@@ -110,8 +110,7 @@ def finalize_setup(sender, **kwargs):
         },
         'proco.giga_meter.tasks.fetch_and_aggregate_ping_data': {
             'task': 'proco.giga_meter.tasks.fetch_and_aggregate_ping_data',
-            # runs every 6 hours
-            'schedule': crontab(minute=15, hour='*/6'),
+            'schedule': crontab(minute=15, hour='9,15,21,23'),
             'args': (),
         },
         'proco.giga_meter.tasks.scheduler_for_backup_giga_meter_connectivity_ping_data': {
