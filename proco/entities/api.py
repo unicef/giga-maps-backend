@@ -101,7 +101,7 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
         table_configs['entity_filters'] = core_utilities.get_filter_sql(
             request, 'entity', 'entities_entity')
         table_configs['entity_static_filters'] = core_utilities.get_filter_sql(
-            request, 'entity_static', 'entities_healthmasterstatus')
+            request, 'entity_static', 'entities_health_entity')
         table_configs['entity_real_time_filters'] = core_utilities.get_filter_sql(
             request, 'entity_real_time', 'connection_statistics_entityweeklystatus')
 
@@ -131,11 +131,12 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
                     ELSE 'unknown'
                 END AS connectivity_status
                 FROM entities_entity
+                INNER JOIN entities_entity_type ON entities_entity.entity_type_id = entities_entity_type.id
                 INNER JOIN bounds ON ST_Intersects(entities_entity.geopoint, ST_Transform(bounds.geom, {srid}))
                 {entity_weekly_join}
                 {entity_master_join}
                 WHERE entities_entity."deleted" IS NULL
-                    AND entities_entity.entity_type = '{entity}'
+                    AND entities_entity_type.code = '{entity}'
                     {country_condition}
                     {admin1_condition}
                     {entity_condition}
@@ -225,7 +226,7 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
 ], name='dispatch')
 class EntityConnectivityTileRequestHandler(APIView):
     CACHE_KEY = 'cache'
-    CACHE_KEY_PREFIX = 'CONNECTIVITY_TILES_MAP'
+    CACHE_KEY_PREFIX = 'ENTITY_CONNECTIVITY_TILES_MAP'
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -263,7 +264,7 @@ class EntityConnectivityTileRequestHandler(APIView):
                 cache_manager.set(cache_key, response, request_path=request_path,
                                   soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
             except Exception as ex:
-                logger.error('Exception occurred for school connectivity tiles endpoint: {}'.format(ex))
+                logger.error('Exception occurred for entity connectivity tiles endpoint: {}'.format(ex))
                 response = Response({'error': 'An error occurred while processing the request'}, status=500)
 
         return response
