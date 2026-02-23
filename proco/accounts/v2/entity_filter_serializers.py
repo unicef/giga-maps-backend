@@ -451,19 +451,54 @@ class EntityColumnConfigurationChoicesSerializer(FlexFieldsModelSerializer):
         join_condition = ''
         filter_condition = ''
 
-        select_qry = """
-        SELECT DISTINCT {col} AS {col_name}
-        FROM entities_entity AS entities
-        {join_condition}
-        WHERE entities.deleted IS NULL
-            {filter_condition}
-        ORDER BY {col_name} ASC NULLS LAST
-        """
+        # Determine if we should query legacy schools or entities based on entity_type
+        entity_type = instance.entity_type
+        use_legacy_schools = entity_type is None or (entity_type and entity_type.is_legacy)
 
-        if parameter_table == 'entity_static':
-            join_condition = ('INNER JOIN connection_statistics_entityweeklystatus AS entity_static '
-                              'ON entities.last_weekly_status_id = entity_static.id')
-            filter_condition = 'AND entity_static.deleted IS NULL'
+        if use_legacy_schools:
+            # Query legacy schools_school table (same as ColumnConfigurationChoicesSerializer)
+            select_qry = """
+            SELECT DISTINCT {col} AS {col_name}
+            FROM schools_school AS schools
+            {join_condition}
+            WHERE schools.deleted IS NULL
+                {filter_condition}
+            ORDER BY {col_name} ASC NULLS LAST
+            """
+
+            if parameter_table == 'school_static':
+                join_condition = ('INNER JOIN connection_statistics_schoolweeklystatus AS school_static '
+                                  'ON schools.last_weekly_status_id = school_static.id')
+                filter_condition = 'AND school_static.deleted IS NULL'
+        else:
+            # Query entities_entity table for non-legacy entities
+            select_qry = """
+            SELECT DISTINCT {col} AS {col_name}
+            FROM entities_entity AS entities
+            {join_condition}
+            WHERE entities.deleted IS NULL
+                {filter_condition}
+            ORDER BY {col_name} ASC NULLS LAST
+            """
+
+            # Handle entity_static (EntityWeeklyStatus) JOIN
+            if parameter_table == 'entity_static':
+                join_condition = ('INNER JOIN connection_statistics_entityweeklystatus AS entity_static '
+                                  'ON entities.last_weekly_status_id = entity_static.id')
+                filter_condition = 'AND entity_static.deleted IS NULL'
+            # Dynamically handle entity-specific detail tables (e.g., health, library, etc.)
+            elif entity_type and entity_type.detail_model and parameter_table not in ['entities', 'entity_static']:
+                from django.apps import apps
+                app_label, model_name = entity_type.detail_model.split('.')
+                try:
+                    detail_model_class = apps.get_model(app_label, model_name)
+                    detail_table_name = detail_model_class._meta.db_table
+                except LookupError:
+                    detail_table_name = f"{app_label}_{model_name.lower()}"
+
+                join_condition = (f'INNER JOIN {detail_table_name} AS {parameter_table} '
+                                  f'ON entities.id = {parameter_table}.entity_id')
+                filter_condition = f'AND {parameter_table}.deleted IS NULL'
 
         sql_qry = select_qry.format(
             col_name=parameter_field,
@@ -473,6 +508,9 @@ class EntityColumnConfigurationChoicesSerializer(FlexFieldsModelSerializer):
             filter_condition=filter_condition)
 
         data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__)
+        if data is None:
+            return choices
+
         for value in data:
             field_value = value[parameter_field]
             if core_utilities.is_blank_string(field_value):
