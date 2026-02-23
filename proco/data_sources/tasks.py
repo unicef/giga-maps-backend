@@ -2,9 +2,11 @@ import json
 import logging
 import os
 import uuid
+from collections import defaultdict
 from datetime import timedelta
 
 from celery import chain, chord, group, current_task
+from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 from django.contrib.gis.geos import Point
 from django.core.management import call_command
@@ -34,6 +36,10 @@ from proco.schools.models import School
 from proco.taskapp import app
 from proco.utils.dates import format_date
 from proco.utils.tasks import populate_school_new_fields_task
+from proco.utils.slack_notification_utils import (
+    calculate_school_master_delta_changes, compare_target_model_changes, format_changes_for_slack
+)
+from proco.utils.slack_notification_service import SlackNotificationService
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -175,9 +181,13 @@ def load_data_from_school_master_apis(country_iso3_format=None):
             email_content = {'subject': email_subject, 'message': email_message}
             account_utilities.send_email_over_mailjet_service(editors_and_publishers, **email_content)
 
+        # Send Slack Notification
+        for country_iso3_format, _ in changes_for_countries.items():
+            send_school_master_data_change_slack_notification.delay(country_iso3_format)
 
-@app.task(soft_time_limit=3 * 55 * 60, time_limit=3 * 55 * 60)
-def handle_published_school_master_data_row(published_row=None, country_ids=None):
+
+@app.task(soft_time_limit=3 * 55 * 60, time_limit=3 * 60 * 60)
+def handle_published_school_master_data_row(published_row=None, country_ids=None, publish_source='auto_publish'):
     """
     Background task to handle all the published rows of school master data source
 
@@ -190,7 +200,7 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
         'urbana': 'urban',
         'rural': 'rural',
     }
-
+    change_summary = {}
     coverage_type_choices = dict(statistics_models.SchoolWeeklyStatus.COVERAGE_TYPES).keys()
 
     if country_ids and len(country_ids) > 0:
@@ -215,258 +225,296 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
         task_id, task_key, task_description)
 
     if task_instance:
-        logger.debug('Not found running job for published rows handler task: {}'.format(task_key))
-        updated_school_ids = []
-        created_school_ids = []
+        try:
+            logger.debug('Not found running job for published rows handler task: {}'.format(task_key))
+            updated_school_ids = []
+            created_school_ids = []
 
-        new_published_records = sources_models.SchoolMasterData.objects.filter(
-            status=sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED, is_read=False,
-        )
+            new_published_records = sources_models.SchoolMasterData.objects.filter(
+                status=sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED, is_read=False,
+            )
 
-        if published_row:
-            new_published_records = new_published_records.filter(pk=published_row.id)
+            if published_row:
+                new_published_records = new_published_records.filter(pk=published_row.id)
 
-        if country_ids and len(country_ids) > 0:
-            new_published_records = new_published_records.filter(country_id__in=country_ids)
+            if country_ids and len(country_ids) > 0:
+                new_published_records = new_published_records.filter(country_id__in=country_ids)
 
-        task_instance.info('Total published records to update: {}'.format(new_published_records.count()))
+            task_instance.info('Total published records to update: {}'.format(new_published_records.count()))
 
-        for data_chunk in core_utilities.queryset_iterator(new_published_records, chunk_size=100, print_msg=False):
-            for row in data_chunk:
-                try:
-                    environment = row.school_area_type.lower() if not core_utilities.is_blank_string(
-                        row.school_area_type) else ''
-                    environment = environment_map.get(environment, '')
+            for data_chunk in core_utilities.queryset_iterator(new_published_records, chunk_size=100, print_msg=False):
+                for row in data_chunk:
+                    try:
+                        # Detecting changes for Slack Notification
+                        country_code = row.country.iso3_format
+                        if country_code not in change_summary:
+                            change_summary[country_code] = {
+                                'country_name': row.country.name,
+                                'school_model_changes': defaultdict(),
+                                'school_weekly_changes': defaultdict(),
+                                'rt_registration_changes': defaultdict(),
+                                'pulled_at_datetime': None,
+                                'new_schools': 0,
+                                'updated_schools': 0,
+                                'deleted_schools': 0
+                            }
+                        if row.school_id is None:
+                            # New Schools
+                            change_summary[country_code]['new_schools'] += 1
 
-                    admin1_instance = None
-                    if not core_utilities.is_blank_string(row.admin1_id_giga):
-                        admin1_instance = CountryAdminMetadata.objects.filter(
+                        if row.status == sources_models.SchoolMasterData.ROW_STATUS_DELETED:
+                            # Deleted Schools
+                            change_summary[country_code]['deleted_schools'] += 1
+
+                        school_changes = compare_target_model_changes(row, row.school)
+
+                        if any(school_changes.values()):
+                            change_summary[country_code]['updated_schools'] += 1
+                            # Increase column count
+                            for model_type, field_changes in school_changes.items():
+                                for field, count in field_changes.items():
+                                    change_summary[country_code][f'{model_type}_changes'].setdefault(field, 0)
+                                    change_summary[country_code][f'{model_type}_changes'][field] += count
+
+                        environment = row.school_area_type.lower() if not core_utilities.is_blank_string(
+                            row.school_area_type) else ''
+                        environment = environment_map.get(environment, '')
+
+                        admin1_instance = None
+                        if not core_utilities.is_blank_string(row.admin1_id_giga):
+                            admin1_instance = CountryAdminMetadata.objects.filter(
+                                country=row.country,
+                                giga_id_admin=row.admin1_id_giga,
+                                layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN1,
+                            ).first()
+
+                        admin2_instance = None
+                        if not core_utilities.is_blank_string(row.admin2_id_giga):
+                            admin2_instance = CountryAdminMetadata.objects.filter(
+                                country=row.country,
+                                giga_id_admin=row.admin2_id_giga,
+                                layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN2,
+                            ).first()
+
+                        school, created = School.objects.update_or_create(
+                            giga_id_school=row.school_id_giga,
                             country=row.country,
-                            giga_id_admin=row.admin1_id_giga,
-                            layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN1,
-                        ).first()
+                            defaults={
+                                'external_id': row.school_id_govt,
+                                'name': row.school_name,
+                                'geopoint': Point(x=row.longitude, y=row.latitude),
+                                'education_level': '' if core_utilities.is_blank_string(
+                                    row.education_level) else row.education_level,
+                                'education_level_govt': row.education_level_govt,
+                                'environment': environment,
+                                'school_type': '' if core_utilities.is_blank_string(
+                                    row.school_funding_type) else row.school_funding_type,
+                                'establishment_year': row.school_establishment_year,
+                                'admin1': admin1_instance,
+                                'admin2': admin2_instance,
+                            },
+                        )
 
-                    admin2_instance = None
-                    if not core_utilities.is_blank_string(row.admin2_id_giga):
-                        admin2_instance = CountryAdminMetadata.objects.filter(
-                            country=row.country,
-                            giga_id_admin=row.admin2_id_giga,
-                            layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN2,
-                        ).first()
+                        date = core_utilities.get_current_datetime_object().date()
+                        school_weekly = statistics_models.SchoolWeeklyStatus.objects.filter(
+                            school=school, week=date.isocalendar()[1], year=date.isocalendar()[0],
+                        ).last()
 
-                    school, created = School.objects.update_or_create(
-                        giga_id_school=row.school_id_giga,
-                        country=row.country,
-                        defaults={
-                            'external_id': row.school_id_govt,
-                            'name': row.school_name,
-                            'geopoint': Point(x=row.longitude, y=row.latitude),
-                            'education_level': '' if core_utilities.is_blank_string(
-                                row.education_level) else row.education_level,
-                            'education_level_govt': row.education_level_govt,
-                            'environment': environment,
-                            'school_type': '' if core_utilities.is_blank_string(
-                                row.school_funding_type) else row.school_funding_type,
-                            'establishment_year': row.school_establishment_year,
-                            'admin1': admin1_instance,
-                            'admin2': admin2_instance,
-                        },
-                    )
+                        if not school_weekly:
+                            school_weekly = statistics_models.SchoolWeeklyStatus.objects.filter(school=school).last()
 
-                    date = core_utilities.get_current_datetime_object().date()
-                    school_weekly = statistics_models.SchoolWeeklyStatus.objects.filter(
-                        school=school, week=date.isocalendar()[1], year=date.isocalendar()[0],
-                    ).last()
+                            if school_weekly:
+                                # copy latest available one
+                                school_weekly.id = None
+                                school_weekly.year = date.isocalendar()[0]
+                                school_weekly.week = date.isocalendar()[1]
+                                school_weekly.modified = core_utilities.get_current_datetime_object()
+                                school_weekly.created = core_utilities.get_current_datetime_object()
 
-                    if not school_weekly:
-                        school_weekly = statistics_models.SchoolWeeklyStatus.objects.filter(school=school).last()
+                                school_weekly.connectivity_speed = None
+                                school_weekly.connectivity_upload_speed = None
+                                school_weekly.connectivity_latency = None
+                                school_weekly.roundtrip_time = None
+                                school_weekly.jitter_download = None
+                                school_weekly.jitter_upload = None
+                                school_weekly.rtt_packet_loss_pct = None
+                                school_weekly.connectivity_speed_probe = None
+                                school_weekly.connectivity_upload_speed_probe = None
+                                school_weekly.connectivity_latency_probe = None
+                                school_weekly.connectivity_speed_mean = None
+                                school_weekly.connectivity_upload_speed_mean = None
+                            else:
+                                school_weekly = statistics_models.SchoolWeeklyStatus.objects.create(
+                                    school=school,
+                                    year=date.isocalendar()[0],
+                                    week=date.isocalendar()[1],
+                                )
 
-                        if school_weekly:
-                            # copy latest available one
-                            school_weekly.id = None
-                            school_weekly.year = date.isocalendar()[0]
-                            school_weekly.week = date.isocalendar()[1]
-                            school_weekly.modified = core_utilities.get_current_datetime_object()
-                            school_weekly.created = core_utilities.get_current_datetime_object()
+                        school_weekly.num_students = row.num_students
+                        school_weekly.num_teachers = row.num_teachers
+                        school_weekly.num_classroom = row.num_classrooms
+                        school_weekly.num_latrines = row.num_latrines
+                        school_weekly.running_water = False \
+                            if core_utilities.is_blank_string(row.water_availability) \
+                            else str(row.water_availability).lower() in core_configs.true_choices
+                        school_weekly.electricity_availability = False \
+                            if core_utilities.is_blank_string(row.electricity_availability) \
+                            else str(row.electricity_availability).lower() in core_configs.true_choices
+                        school_weekly.computer_lab = False \
+                            if core_utilities.is_blank_string(row.computer_lab) \
+                            else str(row.computer_lab).lower() in core_configs.true_choices
+                        school_weekly.num_computers = row.num_computers
 
-                            school_weekly.connectivity_speed = None
-                            school_weekly.connectivity_upload_speed = None
-                            school_weekly.connectivity_latency = None
-                            school_weekly.roundtrip_time = None
-                            school_weekly.jitter_download = None
-                            school_weekly.jitter_upload = None
-                            school_weekly.rtt_packet_loss_pct = None
-                            school_weekly.connectivity_speed_probe = None
-                            school_weekly.connectivity_upload_speed_probe = None
-                            school_weekly.connectivity_latency_probe = None
-                            school_weekly.connectivity_speed_mean = None
-                            school_weekly.connectivity_upload_speed_mean = None
+                        if (core_utilities.is_blank_string(row.connectivity_govt) or
+                            str(row.connectivity_govt).lower()  == 'unknown'):
+                            school_weekly.connectivity = None
                         else:
-                            school_weekly = statistics_models.SchoolWeeklyStatus.objects.create(
-                                school=school,
-                                year=date.isocalendar()[0],
-                                week=date.isocalendar()[1],
-                            )
+                            school_weekly.connectivity = str(row.connectivity_govt).lower() in core_configs.true_choices
 
-                    school_weekly.num_students = row.num_students
-                    school_weekly.num_teachers = row.num_teachers
-                    school_weekly.num_classroom = row.num_classrooms
-                    school_weekly.num_latrines = row.num_latrines
-                    school_weekly.running_water = False \
-                        if core_utilities.is_blank_string(row.water_availability) \
-                        else str(row.water_availability).lower() in core_configs.true_choices
-                    school_weekly.electricity_availability = False \
-                        if core_utilities.is_blank_string(row.electricity_availability) \
-                        else str(row.electricity_availability).lower() in core_configs.true_choices
-                    school_weekly.computer_lab = False \
-                        if core_utilities.is_blank_string(row.computer_lab) \
-                        else str(row.computer_lab).lower() in core_configs.true_choices
-                    school_weekly.num_computers = row.num_computers
+                        school_weekly.connectivity_type = row.connectivity_type_govt or 'unknown'
 
-                    if (core_utilities.is_blank_string(row.connectivity_govt) or
-                        str(row.connectivity_govt).lower()  == 'unknown'):
-                        school_weekly.connectivity = None
-                    else:
-                        school_weekly.connectivity = str(row.connectivity_govt).lower() in core_configs.true_choices
-
-                    school_weekly.connectivity_type = row.connectivity_type_govt or 'unknown'
-
-                    if core_utilities.is_blank_string(row.cellular_coverage_availability):
-                        school_weekly.coverage_availability = None
-                    else:
-                        school_weekly.coverage_availability = str(
-                            row.cellular_coverage_availability).lower() in core_configs.true_choices
-
-                    coverage_type = statistics_models.SchoolWeeklyStatus.COVERAGE_UNKNOWN
-                    if not core_utilities.is_blank_string(row.cellular_coverage_type):
-                        coverage_type_in_lower = str(row.cellular_coverage_type).lower()
-                        if coverage_type_in_lower in coverage_type_choices:
-                            coverage_type = coverage_type_in_lower
-                        elif coverage_type_in_lower in ['no service', 'no coverage', 'no']:
-                            coverage_type = statistics_models.SchoolWeeklyStatus.COVERAGE_NO
-
-                    school_weekly.coverage_type = coverage_type
-
-                    school_weekly.download_speed_contracted = row.download_speed_contracted
-                    school_weekly.num_computers_desired = row.num_computers_desired
-                    school_weekly.electricity_type = row.electricity_type
-                    school_weekly.num_adm_personnel = row.num_adm_personnel
-
-                    school_weekly.fiber_node_distance = row.fiber_node_distance
-                    school_weekly.microwave_node_distance = row.microwave_node_distance
-
-                    school_weekly.schools_within_1km = row.schools_within_1km
-                    school_weekly.schools_within_2km = row.schools_within_2km
-                    school_weekly.schools_within_3km = row.schools_within_3km
-
-                    school_weekly.nearest_lte_distance = row.nearest_LTE_distance
-                    school_weekly.nearest_umts_distance = row.nearest_UMTS_distance
-                    school_weekly.nearest_gsm_distance = row.nearest_GSM_distance
-                    school_weekly.nearest_nr_distance = row.nearest_NR_distance
-
-                    school_weekly.pop_within_1km = row.pop_within_1km
-                    school_weekly.pop_within_2km = row.pop_within_2km
-                    school_weekly.pop_within_3km = row.pop_within_3km
-
-                    school_weekly.school_data_source = row.school_data_source
-                    school_weekly.school_data_collection_year = row.school_data_collection_year
-                    school_weekly.school_data_collection_modality = row.school_data_collection_modality
-                    school_weekly.school_location_ingestion_timestamp = row.school_location_ingestion_timestamp
-                    school_weekly.connectivity_govt_ingestion_timestamp = row.connectivity_govt_ingestion_timestamp
-                    school_weekly.connectivity_govt_collection_year = row.connectivity_govt_collection_year
-                    school_weekly.disputed_region = False if core_utilities.is_blank_string(
-                        row.disputed_region) else str(row.disputed_region).lower() in core_configs.true_choices
-
-                    download_speed_benchmark = row.download_speed_benchmark
-                    if download_speed_benchmark:
-                        # convert Mbps to bps
-                        school_weekly.download_speed_benchmark = download_speed_benchmark * 1000 * 1000
-
-                    school_weekly.num_students_girls = row.num_students_girls
-                    school_weekly.num_students_boys = row.num_students_boys
-                    school_weekly.num_students_other = row.num_students_other
-                    school_weekly.num_teachers_female = row.num_teachers_female
-                    school_weekly.num_teachers_male = row.num_teachers_male
-                    school_weekly.num_tablets = row.num_tablets
-                    school_weekly.num_robotic_equipment = row.num_robotic_equipment
-
-                    school_weekly.computer_availability = None \
-                        if core_utilities.is_blank_string(row.computer_availability) \
-                        else str(row.computer_availability).lower() in core_configs.true_choices
-                    school_weekly.teachers_trained = None \
-                        if core_utilities.is_blank_string(row.teachers_trained) \
-                        else str(row.teachers_trained).lower() in core_configs.true_choices
-                    school_weekly.sustainable_business_model = None \
-                        if core_utilities.is_blank_string(row.sustainable_business_model) \
-                        else str(row.sustainable_business_model).lower() in core_configs.true_choices
-                    school_weekly.device_availability = None \
-                        if core_utilities.is_blank_string(row.device_availability) \
-                        else str(row.device_availability).lower() in core_configs.true_choices
-
-                    school_weekly.building_id_govt = row.building_id_govt
-                    school_weekly.num_schools_per_building = row.num_schools_per_building
-
-                    school_weekly.save()
-
-                    rt_registered = None
-                    if (
-                        not core_utilities.is_blank_string(row.connectivity_RT) and
-                        row.connectivity_RT_ingestion_timestamp is not None
-                    ):
-                        rt_registered = str(row.connectivity_RT).lower() in core_configs.true_choices
-
-                    if rt_registered is not None:
-                        school_rt_qs = statistics_models.SchoolRealTimeRegistration.objects.filter(school=school)
-                        if school_rt_qs.exists():
-                            school_rt_instance = school_rt_qs.order_by('-created').first()
-
-                            school_rt_instance.rt_registered = rt_registered
-                            school_rt_instance.rt_registration_date = row.connectivity_RT_ingestion_timestamp
-                            school_rt_instance.rt_source = row.connectivity_RT_datasource
-
-                            school_rt_instance.save()
+                        if core_utilities.is_blank_string(row.cellular_coverage_availability):
+                            school_weekly.coverage_availability = None
                         else:
-                            statistics_models.SchoolRealTimeRegistration.objects.create(
-                                school=school,
-                                rt_registered=rt_registered,
-                                rt_registration_date=row.connectivity_RT_ingestion_timestamp,
-                                rt_source=row.connectivity_RT_datasource,
-                            )
+                            school_weekly.coverage_availability = str(
+                                row.cellular_coverage_availability).lower() in core_configs.true_choices
 
-                    row.is_read = True
-                    row.school = school
-                    row.save()
+                        coverage_type = statistics_models.SchoolWeeklyStatus.COVERAGE_UNKNOWN
+                        if not core_utilities.is_blank_string(row.cellular_coverage_type):
+                            coverage_type_in_lower = str(row.cellular_coverage_type).lower()
+                            if coverage_type_in_lower in coverage_type_choices:
+                                coverage_type = coverage_type_in_lower
+                            elif coverage_type_in_lower in ['no service', 'no coverage', 'no']:
+                                coverage_type = statistics_models.SchoolWeeklyStatus.COVERAGE_NO
 
-                    updated_school_ids.append(school.id)
-                    if created:
-                        created_school_ids.append(school.id)
-                except Exception as ex:
-                    logger.error('Error reported on publishing: {0}'.format(ex))
-                    logger.error('Record: {0}'.format(row.__dict__))
-                    task_instance.info('Error reported for ID ({0}) on publishing: {1}'.format(row.id, ex))
+                        school_weekly.coverage_type = coverage_type
 
-        if len(updated_school_ids) > 0:
-            for i in range(0, len(updated_school_ids), 20):
-                populate_school_new_fields_task.delay(None, None, None, school_ids=updated_school_ids[i:i + 20])
+                        school_weekly.download_speed_contracted = row.download_speed_contracted
+                        school_weekly.num_computers_desired = row.num_computers_desired
+                        school_weekly.electricity_type = row.electricity_type
+                        school_weekly.num_adm_personnel = row.num_adm_personnel
 
+                        school_weekly.fiber_node_distance = row.fiber_node_distance
+                        school_weekly.microwave_node_distance = row.microwave_node_distance
 
-        for new_school_id in created_school_ids:
-            # As it's a new school added through School Master record publishing, add the school to search index
-            cmd_args = ['--update_index', '-school_id={0}'.format(new_school_id)]
-            call_command('index_rebuild_schools', *cmd_args)
+                        school_weekly.schools_within_1km = row.schools_within_1km
+                        school_weekly.schools_within_2km = row.schools_within_2km
+                        school_weekly.schools_within_3km = row.schools_within_3km
 
-        background_task_utilities.task_on_complete(task_instance)
+                        school_weekly.nearest_lte_distance = row.nearest_LTE_distance
+                        school_weekly.nearest_umts_distance = row.nearest_UMTS_distance
+                        school_weekly.nearest_gsm_distance = row.nearest_GSM_distance
+                        school_weekly.nearest_nr_distance = row.nearest_NR_distance
+
+                        school_weekly.pop_within_1km = row.pop_within_1km
+                        school_weekly.pop_within_2km = row.pop_within_2km
+                        school_weekly.pop_within_3km = row.pop_within_3km
+
+                        school_weekly.school_data_source = row.school_data_source
+                        school_weekly.school_data_collection_year = row.school_data_collection_year
+                        school_weekly.school_data_collection_modality = row.school_data_collection_modality
+                        school_weekly.school_location_ingestion_timestamp = row.school_location_ingestion_timestamp
+                        school_weekly.connectivity_govt_ingestion_timestamp = row.connectivity_govt_ingestion_timestamp
+                        school_weekly.connectivity_govt_collection_year = row.connectivity_govt_collection_year
+                        school_weekly.disputed_region = False if core_utilities.is_blank_string(
+                            row.disputed_region) else str(row.disputed_region).lower() in core_configs.true_choices
+
+                        download_speed_benchmark = row.download_speed_benchmark
+                        if download_speed_benchmark:
+                            # convert Mbps to bps
+                            school_weekly.download_speed_benchmark = download_speed_benchmark * 1000 * 1000
+
+                        school_weekly.num_students_girls = row.num_students_girls
+                        school_weekly.num_students_boys = row.num_students_boys
+                        school_weekly.num_students_other = row.num_students_other
+                        school_weekly.num_teachers_female = row.num_teachers_female
+                        school_weekly.num_teachers_male = row.num_teachers_male
+                        school_weekly.num_tablets = row.num_tablets
+                        school_weekly.num_robotic_equipment = row.num_robotic_equipment
+
+                        school_weekly.computer_availability = None \
+                            if core_utilities.is_blank_string(row.computer_availability) \
+                            else str(row.computer_availability).lower() in core_configs.true_choices
+                        school_weekly.teachers_trained = None \
+                            if core_utilities.is_blank_string(row.teachers_trained) \
+                            else str(row.teachers_trained).lower() in core_configs.true_choices
+                        school_weekly.sustainable_business_model = None \
+                            if core_utilities.is_blank_string(row.sustainable_business_model) \
+                            else str(row.sustainable_business_model).lower() in core_configs.true_choices
+                        school_weekly.device_availability = None \
+                            if core_utilities.is_blank_string(row.device_availability) \
+                            else str(row.device_availability).lower() in core_configs.true_choices
+
+                        school_weekly.building_id_govt = row.building_id_govt
+                        school_weekly.num_schools_per_building = row.num_schools_per_building
+
+                        school_weekly.save()
+
+                        rt_registered = None
+                        if (
+                            not core_utilities.is_blank_string(row.connectivity_RT) and
+                            row.connectivity_RT_ingestion_timestamp is not None
+                        ):
+                            rt_registered = str(row.connectivity_RT).lower() in core_configs.true_choices
+
+                        if rt_registered is not None:
+                            school_rt_qs = statistics_models.SchoolRealTimeRegistration.objects.filter(school=school)
+                            if school_rt_qs.exists():
+                                school_rt_instance = school_rt_qs.order_by('-created').first()
+
+                                school_rt_instance.rt_registered = rt_registered
+                                school_rt_instance.rt_registration_date = row.connectivity_RT_ingestion_timestamp
+                                school_rt_instance.rt_source = row.connectivity_RT_datasource
+
+                                school_rt_instance.save()
+                            else:
+                                statistics_models.SchoolRealTimeRegistration.objects.create(
+                                    school=school,
+                                    rt_registered=rt_registered,
+                                    rt_registration_date=row.connectivity_RT_ingestion_timestamp,
+                                    rt_source=row.connectivity_RT_datasource,
+                                )
+
+                        row.is_read = True
+                        row.school = school
+                        row.save()
+
+                        updated_school_ids.append(school.id)
+                        if created:
+                            created_school_ids.append(school.id)
+                    except Exception as ex:
+                        logger.error('Error reported on publishing: {0}'.format(ex))
+                        logger.error('Record: {0}'.format(row.__dict__))
+                        task_instance.info('Error reported for ID ({0}) on publishing: {1}'.format(row.id, ex))
+
+            if len(updated_school_ids) > 0:
+                for i in range(0, len(updated_school_ids), 20):
+                    populate_school_new_fields_task.delay(None, None, None, school_ids=updated_school_ids[i:i + 20])
+
+            for new_school_id in created_school_ids:
+                # As it's a new school added through School Master record publishing, add the school to search index
+                cmd_args = ['--update_index', '-school_id={0}'.format(new_school_id)]
+                call_command('index_rebuild_schools', *cmd_args)
+
+            send_slack_notifications(change_summary, publish_source=publish_source)
+            background_task_utilities.task_on_complete(task_instance)
+        except SoftTimeLimitExceeded:
+            send_slack_notifications(change_summary, publish_source=publish_source)
+            raise
+        except Exception as e:
+            raise
     else:
         logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=2 * 55 * 60, time_limit=2 * 55 * 60)
-def handle_deleted_school_master_data_row(deleted_row=None, country_ids=None):
+def handle_deleted_school_master_data_row(deleted_row=None, country_ids=None, publish_source='auto_publish'):
     """
     Background task to handle all the deleted rows of school master data source
 
     Execution Frequency: Every day
     """
+    change_summary = {}
     logger.info('Handling the deleted school master data rows.')
     if country_ids and len(country_ids) > 0:
         task_key = 'handle_deleted_school_master_data_row_status_{current_time}_country_ids_{ids}'.format(
@@ -508,6 +556,21 @@ def handle_deleted_school_master_data_row(deleted_row=None, country_ids=None):
         for data_chunk in core_utilities.queryset_iterator(new_deleted_records, chunk_size=1000):
             for row in data_chunk:
                 try:
+                    country_code = row.country.iso3_format
+                    if country_code not in change_summary:
+                        change_summary[country_code] = {
+                            'country_name': row.country.name,
+                            'school_model_changes': defaultdict(),
+                            'school_weekly_changes': defaultdict(),
+                            'rt_registration_changes': defaultdict(),
+                            'pulled_at_datetime': None,
+                            'new_schools': 0,
+                            'updated_schools': 0,
+                            'deleted_schools': 0
+                        }
+                    # Deleted Schools
+                    change_summary[country_code]['deleted_schools'] += 1
+
                     row.school.delete()
 
                     statistics_models.SchoolWeeklyStatus.objects.filter(school=row.school).update(deleted=current_date)
@@ -526,6 +589,7 @@ def handle_deleted_school_master_data_row(deleted_row=None, country_ids=None):
                     task_instance.info('Error reported for ID ({0}) on deletion: {1}'.format(row.id, ex))
 
         task_instance.info('Remaining records: {}'.format(new_deleted_records.count()))
+        send_slack_notifications(change_summary, publish_source=publish_source)
         background_task_utilities.task_on_complete(task_instance)
     else:
         logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
@@ -1081,3 +1145,68 @@ def scheduler_for_data_loss_recovery_for_school_master_version(
         background_task_utilities.task_on_complete(task_instance)
     else:
         logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+
+
+@app.task(soft_time_limit=2 * 60 * 60, time_limit=2 * 60 * 60)
+def send_school_master_data_change_slack_notification(country_iso3_format):
+    """
+    Background task to calculate delta changes and send Slack notification for school master data updates.
+    """
+    current_datetime = core_utilities.get_current_datetime_object()
+    task_key = 'send_school_master_data_change_slack_notification_{country}_{current_time}'.format(
+        country=country_iso3_format,
+        current_time=format_date(current_datetime, frmt='%d%m%Y_%H%M%S'),
+    )
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(task_id, task_key, 'Send School Master Data Changes Slack Notification')
+
+    if task_instance:
+        try:
+            logger.info(f'Calculating delta changes for {country_iso3_format}.')
+
+            country = Country.objects.filter(iso3_format=country_iso3_format).first()
+            if not country:
+                logger.error(f'Country with ISO3 Format ({country_iso3_format}) not found in DB.')
+                return None
+
+            # Get New SchoolMasterData rows
+            pulled_at_date = core_utilities.get_current_datetime_object().date()
+            school_master_data = sources_models.SchoolMasterData.objects.filter(
+                country=country,
+                pulled_at__gt=pulled_at_date
+            ).select_related('school')
+
+            # Calculate delta changes from SchoolMasterData table
+            change_summary = calculate_school_master_delta_changes(school_master_data, country)
+
+            if change_summary:
+                # Send Slack notification
+                slack_service = SlackNotificationService()
+                slack_service.send_school_master_update_notification(change_summary, publish_source='pre_review')
+
+                task_instance.info(f'Slack notification sent for {change_summary["country"]} - '
+                                 f'New: {change_summary["new_rows_count"]}, '
+                                 f'Updated: {change_summary["updated_rows_count"]}, '
+                                 f'Deleted: {change_summary["deleted_rows_count"]}')
+            else:
+                task_instance.info(f'No changes found for {country_iso3_format}')
+
+            background_task_utilities.task_on_complete(task_instance)
+
+        except Exception as e:
+            logger.error(f'Error in school master data change notification task: {str(e)}')
+            task_instance.error(f'Failed to send notification: {str(e)}')
+            background_task_utilities.task_on_complete(task_instance)
+    else:
+        logger.error(f'Found running Job with "{task_key}" name so skipping current iteration')
+
+
+def send_slack_notifications(change_summary, publish_source='auto_publish'):
+    """Send Slack notifications for published school master data changes."""
+    for country_iso3, summary in change_summary.items():
+        if not summary['new_schools'] and not summary['updated_schools'] and not summary['deleted_schools']:
+            continue
+        country = Country.objects.filter(iso3_format=country_iso3).first()
+        summary = format_changes_for_slack(country, summary)
+        slack_service = SlackNotificationService()
+        slack_service.send_school_master_update_notification(summary, publish_source=publish_source)
