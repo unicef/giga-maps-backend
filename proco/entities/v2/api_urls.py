@@ -4,6 +4,7 @@ from rest_framework.routers import SimpleRouter
 from proco.entities import api as entities_api
 from proco.accounts.v2 import entity_api
 from proco.accounts.v2 import entity_filter_api
+from proco.connection_statistics.v2 import entity_api as stats_entity_api
 
 country_entities = SimpleRouter()
 country_entities.register(r'(?P<country_code>\w+)', entities_api.EntitiesViewSet, basename='entities')
@@ -76,4 +77,7 @@ urlpatterns = [
 
     # Entity list by country (Should be at last)
     path('', include(country_entities.urls)),
+
+    # Entity Global Stat
+    path('global-stat/', stats_entity_api.EntityGlobalStatsAPIView.as_view(), name='global-stat-all-entities'),
 ]
