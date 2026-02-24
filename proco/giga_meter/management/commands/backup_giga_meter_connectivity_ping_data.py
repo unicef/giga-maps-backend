@@ -51,15 +51,15 @@ class Command(BaseCommand):
         # Only process dates that have non-deleted records
         if start_date and end_date:
             connectivity_ping_checks_qs = GigaMeter_ConnectivityPingChecks.objects.filter(
-                timestamp__date__gte=start_date,
-                timestamp__date__lte=end_date,
+                created_at__date__gte=start_date,
+                created_at__date__lte=end_date,
                 is_deleted=False,
-            ).values_list('timestamp__date', flat=True).order_by('timestamp__date').distinct('timestamp__date')
+            ).values_list('created_at__date', flat=True).order_by('created_at__date').distinct('created_at__date')
         else:
             connectivity_ping_checks_qs = GigaMeter_ConnectivityPingChecks.objects.filter(
-                timestamp__date__lte=till_date,
+                created_at__date__lte=till_date,
                 is_deleted=False,
-            ).values_list('timestamp__date', flat=True).order_by('timestamp__date').distinct('timestamp__date')
+            ).values_list('created_at__date', flat=True).order_by('created_at__date').distinct('created_at__date')
 
         date_list = list(connectivity_ping_checks_qs)
         if len(date_list) == 0:

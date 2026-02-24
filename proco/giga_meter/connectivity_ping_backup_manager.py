@@ -122,7 +122,7 @@ class ConnectivityPingBackupManager:
         try:
             # Get data for the specific date
             backup_qs = giga_meter_models.GigaMeter_ConnectivityPingChecks.objects.filter(
-                timestamp__date=backup_date,
+                created_at__date=backup_date,
                 is_deleted=False
             )
 
@@ -189,7 +189,7 @@ class ConnectivityPingBackupManager:
         try:
             with transaction.atomic():
                 deleted_count, _ = giga_meter_models.GigaMeter_ConnectivityPingChecks.objects.filter(
-                    timestamp__date__lt=hard_delete_before_date,
+                    created_at__date__lt=hard_delete_before_date,
                     is_deleted=True
                 ).delete()
 
