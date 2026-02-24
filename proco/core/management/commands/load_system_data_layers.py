@@ -38,6 +38,14 @@ data_source_json = [
                 'alias': 'Latency',
                 'base_benchmark': 1,
                 'display_unit': 'ms',
+            }, {
+                'name': 'uptime',
+                'type': 'float',
+                'unit': '%',
+                'is_parameter': True,
+                'alias': 'Uptime',
+                'base_benchmark': 99,
+                'display_unit': '%',
             }
         ],
         'status': 'PUBLISHED'
