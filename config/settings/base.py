@@ -540,3 +540,15 @@ GIGA_NEWS_LETTER_URL = env(
     'GIGA_NEWS_LETTER_URL',
     default='https://gigaconnect.us1.list-manage.com/subscribe?u=ad5a5d41f9573f4114f531faa&id=64ba229224',
 )
+
+
+AZURE_DELTALAKE_CONFIG = {
+    'GIGA_METER_PING_BACKUP': {
+        'AZURE_SAS_TOKEN': env('GIGA_METER_PING_BACKUP_AZURE_BLOB_SAS_TOKEN', default=None),
+        'AZURE_STORAGE_ACCOUNT_NAME': env('GIGA_METER_PING_BACKUP_AZURE_STORAGE_ACCOUNT_NAME', default='saunigiga'),
+        'AZURE_BLOB_CONTAINER_NAME': env('GIGA_METER_PING_BACKUP_AZURE_BLOB_CONTAINER_NAME', default='giga-dataops-dev'),
+        'DELTA_LAKE_PATH': env('GIGA_METER_PING_BACKUP_AZURE_LAKEHOUSE_PATH', default='giga_meter/ping_checks'),
+        'DATA_RETENTION_DAYS': env('GIGA_METER_PING_BACKUP_RAW_DATA_RETENTION_DAYS', default=180),
+        'HARD_DELETE_GRACE_PERIOD_DAYS': env('GIGA_METER_PING_BACKUP_HARD_DELETE_GRACE_PERIOD_DAYS', default=30),
+    }
+}
