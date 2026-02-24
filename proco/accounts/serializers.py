@@ -6,6 +6,7 @@ from math import floor, ceil
 from django.apps import apps
 from django.conf import settings
 from django.contrib.admin.models import LogEntry
+from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.validators import validate_email
 from django.db import connection
@@ -2015,6 +2016,7 @@ class DataLayerCountryRelationshipSerializer(serializers.ModelSerializer):
 
 
 class AdvanceFilterCountryRelationshipSerializer(serializers.ModelSerializer):
+    default_filter_values = serializers.JSONField()
     class Meta:
         model = accounts_models.AdvanceFilterCountryRelationship
 
@@ -2027,6 +2029,8 @@ class AdvanceFilterCountryRelationshipSerializer(serializers.ModelSerializer):
         fields = read_only_fields + (
             'advance_filter',
             'country',
+            'is_default',
+            'default_filter_values',
         )
 
         extra_kwargs = {
@@ -2043,6 +2047,15 @@ class AdvanceFilterCountryRelationshipSerializer(serializers.ModelSerializer):
 
         instance = super().create(validated_data)
         return instance
+
+    def validate(self, attrs):
+        """Validate default_filter_values on Country Edit"""
+        try:
+            instance = accounts_models.AdvanceFilterCountryRelationship(**attrs)
+            instance.clean()
+        except ValidationError as e:
+            raise serializers.ValidationError({'default_filter_values': e.messages})
+        return attrs
 
 
 class ColumnConfigurationListSerializer(FlexFieldsModelSerializer):
@@ -2092,6 +2105,7 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
     class Meta:
         model = accounts_models.AdvanceFilter
         read_only_fields = fields = (
+            'id',
             'name',
             'type',
             'description',
@@ -2138,8 +2152,9 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
                     max_value=Max(parameter_field),
                 )
 
-            country_range_json = list(
-                select_qs.values('country_id', 'min_value', 'max_value').order_by('country_id').distinct())[-1]
+            select_qs_result = list(
+                select_qs.values('country_id', 'min_value', 'max_value').order_by('country_id').distinct())
+            country_range_json = select_qs_result[-1] if len(select_qs_result) > 0 else None
 
             if country_range_json and country_range_json['min_value'] is not None and country_range_json['max_value'] is not None:
                 del country_range_json['country_id']
