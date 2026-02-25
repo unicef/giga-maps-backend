@@ -80,4 +80,6 @@ urlpatterns = [
 
     # Entity Global Stat
     path('global-stat/', stats_entity_api.EntityGlobalStatsAPIView.as_view(), name='global-stat-all-entities'),
+    path('connectivity-stat/', stats_entity_api.EntityConnectivityAPIView.as_view(),
+         name='global-connectivity-stat-entities'),
 ]
