@@ -126,7 +126,7 @@ class CountryUpdateRetrieveSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Country
-        fields = '__all__'
+        exclude=('geometry',)
 
     def validate_name(self, name):
         country_qs = Country.objects.annotate(name_lower=Lower('name')).filter(name_lower=str(name).lower())
@@ -255,6 +255,8 @@ class CountryUpdateRetrieveSerializer(serializers.ModelSerializer):
             filter_country_data = {
                 'country': country_instance.id,
                 'advance_filter': filter_dict['advance_filter_id'],
+                'is_default': filter_dict.get('is_default', False),
+                'default_filter_values': filter_dict.get('default_filter_values', {})
             }
 
             filter_country_relationships = AdvanceFilterCountryRelationshipSerializer(
@@ -303,6 +305,8 @@ class CountryUpdateRetrieveSerializer(serializers.ModelSerializer):
             filter_country_data = {
                 'country': country_instance.id,
                 'advance_filter': filter_dict['advance_filter_id'],
+                'is_default': filter_dict.get('is_default', False),
+                'default_filter_values': filter_dict.get('default_filter_values', {})
             }
 
             filter_country_relationships = AdvanceFilterCountryRelationshipSerializer(
@@ -332,6 +336,8 @@ class CountryUpdateRetrieveSerializer(serializers.ModelSerializer):
         for relationship_instance in linked_filters:
             active_filters_list.append({
                 'advance_filter_id': relationship_instance.advance_filter_id,
+                'is_default': relationship_instance.is_default,
+                'default_filter_values': relationship_instance.default_filter_values
             })
 
         setattr(instance, 'active_layers_list', active_layers_list)
@@ -443,6 +449,8 @@ class DetailCountrySerializer(BaseCountrySerializer):
         for relationship_instance in linked_filters:
             active_filters_list.append({
                 'advance_filter_id': relationship_instance.advance_filter_id,
+                'is_default': relationship_instance.is_default,
+                'default_filter_values': relationship_instance.default_filter_values
             })
 
         return active_filters_list
