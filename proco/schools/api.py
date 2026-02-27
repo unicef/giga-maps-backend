@@ -571,17 +571,27 @@ class SchoolStatusConnectivityTileGenerator(BaseTileGenerator):
                 SELECT {env} AS geom,
                 {env}::box2d AS b2d
             ),
-            mvtgeom AS (
-                SELECT ST_AsMVTGeom(ST_Transform(schools_school.geopoint, 3857), bounds.b2d) AS geom,
-                schools_school.id,
-                CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
-                    WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
-                    ELSE 'unknown'
-                END AS connectivity_status,
-                (COUNT(*) OVER (PARTITION BY schools_school.geopoint) > 1)
-                AS has_multiple_school_on_same_lat_lng
+            prioritized_schools AS (
+                SELECT
+                    schools_school.id,
+                    schools_school.geopoint,
+                    schools_school.connectivity_status,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY schools_school.geopoint
+                        ORDER BY
+                            CASE
+                                WHEN rt_status.rt_registered = true THEN 1
+                                WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 2
+                                WHEN schools_school.connectivity_status = 'no' THEN 3
+                                ELSE 4
+                            END ASC,
+                            schools_school.name_lower ASC
+                    ) AS priority_rank,
+                    (COUNT(*) OVER (PARTITION BY schools_school.geopoint) > 1) AS has_multiple_school_on_same_lat_lng
                 FROM schools_school
                 INNER JOIN bounds ON ST_Intersects(schools_school.geopoint, ST_Transform(bounds.geom, {srid}))
+                LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status ON
+                    rt_status.school_id = schools_school.id AND rt_status.deleted IS NULL
                 {school_weekly_join}
                 WHERE schools_school."deleted" IS NULL
                     {country_condition}
@@ -589,8 +599,24 @@ class SchoolStatusConnectivityTileGenerator(BaseTileGenerator):
                     {school_condition}
                     {school_weekly_condition}
                     {same_school_coords_condition}
-                    {random_order}
-                    {limit_condition}
+            ),
+            sampled_schools AS (
+                SELECT id, geopoint, connectivity_status, has_multiple_school_on_same_lat_lng
+                FROM prioritized_schools
+                WHERE priority_rank = 1
+                {random_order}
+                {limit_condition}
+            ),
+            mvtgeom AS (
+                SELECT ST_AsMVTGeom(ST_Transform(sampled_schools.geopoint, 3857), bounds.b2d) AS geom,
+                sampled_schools.id,
+                CASE WHEN sampled_schools.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                    WHEN sampled_schools.connectivity_status = 'no' THEN 'not_connected'
+                    ELSE 'unknown'
+                END AS connectivity_status,
+                sampled_schools.has_multiple_school_on_same_lat_lng
+                FROM sampled_schools
+                CROSS JOIN bounds
             )
             SELECT ST_AsMVT(DISTINCT mvtgeom.*) FROM mvtgeom;
         """
