@@ -4,6 +4,7 @@ import logging
 import pandas as pd
 from datetime import datetime, timedelta
 
+import sentry_sdk
 from azure.core.exceptions import AzureError
 from azure.storage.blob import BlockBlobService
 from django.conf import settings
@@ -31,6 +32,7 @@ class ConnectivityPingBackupManager:
         self.delta_lake_path = self.config.get('DELTA_LAKE_PATH')
         self.retention_days = self.config.get('DATA_RETENTION_DAYS')
         self.buffer_days = self.config.get('HARD_DELETE_GRACE_PERIOD_DAYS')
+        self.chunk_size = self.config.get('CHUNK_SIZE', 50000)
 
         self._validate_config()
         self._storage_client = None
@@ -118,6 +120,7 @@ class ConnectivityPingBackupManager:
         """Backup connectivity ping data for a single date"""
         logger.info(f"Starting backup for date: {backup_date}")
         parquet_file = None
+        upload_successful = False
 
         try:
             # Get data for the specific date
@@ -126,19 +129,45 @@ class ConnectivityPingBackupManager:
                 is_deleted=False
             )
 
-            if not backup_qs.exists():
+            total_count = backup_qs.count()
+            if total_count == 0:
                 logger.warning(f"No data found for date: {backup_date}")
                 return True, None
 
-            # Create DataFrame and parquet file
-            df = pd.DataFrame(backup_qs.values())
+            logger.info(f"Found {total_count} records to backup for date: {backup_date}")
+
+            # Process in chunks if dataset is large
+            if total_count > self.chunk_size:
+                logger.info(f"Large dataset detected ({total_count} records). Processing in chunks of {self.chunk_size}")
+                df_chunks = []
+
+                for offset in range(0, total_count, self.chunk_size):
+                    chunk_qs = backup_qs[offset:offset + self.chunk_size]
+                    chunk_df = pd.DataFrame(chunk_qs.values())
+                    df_chunks.append(chunk_df)
+                    logger.info(f"Processed chunk {offset//self.chunk_size + 1}: {len(chunk_df)} records")
+
+                # Concatenate all chunks
+                df = pd.concat(df_chunks, ignore_index=True)
+                logger.info(f"Combined {len(df_chunks)} chunks into single DataFrame with {len(df)} records")
+            else:
+                # Small dataset - process all at once
+                df = pd.DataFrame(backup_qs.values())
+
+            # Add deletion metadata to parquet file
+            deletion_timestamp = core_utilities.get_current_datetime_object(timestamp=datetime.now())
+            df['is_deleted'] = True
+            df['deleted_at'] = deletion_timestamp
+
+            # Create parquet file
             parquet_file = self._create_parquet_file(df, backup_date)
 
             # Upload to ADLS
             adls_path = self._upload_to_adls(parquet_file, backup_date)
             logger.info(f"Successfully uploaded to ADLS: {adls_path}")
+            upload_successful = True
 
-            # Soft delete records in database (atomic operation)
+            # CRITICAL: Only soft delete if upload is successful
             with transaction.atomic():
                 records_updated = backup_qs.update(
                     is_deleted=True,
@@ -149,8 +178,19 @@ class ConnectivityPingBackupManager:
             return True, None
 
         except Exception as e:
-            error_msg = f"Failed to backup data for date {backup_date}: {str(e)}"
-            logger.error(error_msg)
+            # Single point of Sentry error capture
+            error_msg = f"Backup failed for date {backup_date}: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            sentry_sdk.capture_exception(e)
+
+            # Add context about which stage failed
+            if not parquet_file:
+                logger.error(f"Failure occurred during data processing/parquet creation")
+            elif not upload_successful:
+                logger.error(f"Failure occurred during upload to ADLS - data preserved in database")
+            else:
+                logger.error(f"CRITICAL: Failure occurred during soft delete after successful upload - manual cleanup needed")
+
             return False, error_msg
 
         finally:
@@ -197,8 +237,10 @@ class ConnectivityPingBackupManager:
                 return deleted_count
 
         except Exception as e:
-            logger.error(f"Failed to hard delete records: {str(e)}")
-            raise ADLSBackupError(f"Hard delete operation failed: {str(e)}")
+            error_msg = f"Failed to hard delete records: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            sentry_sdk.capture_exception(e)
+            raise ADLSBackupError(error_msg) from e
 
 
 def backup_connectivity_ping_data(date_list):
@@ -207,7 +249,14 @@ def backup_connectivity_ping_data(date_list):
         backup_manager = ConnectivityPingBackupManager()
         return backup_manager.backup_date_range(date_list)
     except ADLSBackupError as e:
-        logger.error(f"Backup manager initialization failed: {str(e)}")
+        error_msg = f"Backup manager initialization failed: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        sentry_sdk.capture_exception(e)
+        return [], [str(e)]
+    except Exception as e:
+        error_msg = f"Unexpected error in backup_connectivity_ping_data: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        sentry_sdk.capture_exception(e)
         return [], [str(e)]
 
 
@@ -217,5 +266,12 @@ def hard_delete_old_ping_data(reference_date=None):
         backup_manager = ConnectivityPingBackupManager()
         return backup_manager.hard_delete_old_records(reference_date)
     except ADLSBackupError as e:
-        logger.error(f"Hard delete operation failed: {str(e)}")
+        error_msg = f"Hard delete operation failed: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        sentry_sdk.capture_exception(e)
+        return 0
+    except Exception as e:
+        error_msg = f"Unexpected error in hard_delete_old_ping_data: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        sentry_sdk.capture_exception(e)
         return 0
