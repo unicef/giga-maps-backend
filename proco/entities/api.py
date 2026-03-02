@@ -1,17 +1,23 @@
 import logging
+from collections import OrderedDict
 
 from django.conf import settings
 from django.db import models
 from django.http import JsonResponse
 from django.db.models.functions.text import Lower
+from azure.search.documents.indexes.models import SearchFieldDataType
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_control
+from rest_framework.generics import ListAPIView
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import mixins, viewsets, status as rest_status
+from rest_framework import mixins, permissions, viewsets, status as rest_status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.utils.urls import remove_query_param
+
+from proco.locations.api import BaseSearchMixin
+from proco.locations.search_indexes import EntityIndex
 from proco.utils.cache import cache_manager, custom_cache_control
 
 from proco.entities.models import Entity, EntityType
@@ -101,7 +107,7 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
         table_configs['entity_filters'] = core_utilities.get_filter_sql(
             request, 'entity', 'entities_entity')
         table_configs['entity_static_filters'] = core_utilities.get_filter_sql(
-            request, 'entity_static', 'entities_healthmasterstatus')
+            request, 'entity_static', 'entities_health_entity')
         table_configs['entity_real_time_filters'] = core_utilities.get_filter_sql(
             request, 'entity_real_time', 'connection_statistics_entityweeklystatus')
 
@@ -131,11 +137,12 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
                     ELSE 'unknown'
                 END AS connectivity_status
                 FROM entities_entity
+                INNER JOIN entities_entity_type ON entities_entity.entity_type_id = entities_entity_type.id
                 INNER JOIN bounds ON ST_Intersects(entities_entity.geopoint, ST_Transform(bounds.geom, {srid}))
                 {entity_weekly_join}
                 {entity_master_join}
                 WHERE entities_entity."deleted" IS NULL
-                    AND entities_entity.entity_type = '{entity}'
+                    AND entities_entity_type.code = '{entity}'
                     {country_condition}
                     {admin1_condition}
                     {entity_condition}
@@ -225,7 +232,7 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
 ], name='dispatch')
 class EntityConnectivityTileRequestHandler(APIView):
     CACHE_KEY = 'cache'
-    CACHE_KEY_PREFIX = 'CONNECTIVITY_TILES_MAP'
+    CACHE_KEY_PREFIX = 'ENTITY_CONNECTIVITY_TILES_MAP'
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -263,7 +270,7 @@ class EntityConnectivityTileRequestHandler(APIView):
                 cache_manager.set(cache_key, response, request_path=request_path,
                                   soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
             except Exception as ex:
-                logger.error('Exception occurred for school connectivity tiles endpoint: {}'.format(ex))
+                logger.error('Exception occurred for entity connectivity tiles endpoint: {}'.format(ex))
                 response = Response({'error': 'An error occurred while processing the request'}, status=500)
 
         return response
@@ -348,3 +355,42 @@ class EntityTypeListAPIView(APIView):
             }
 
         return Response(response_data, status=200)
+
+
+class AggregateSearchEntityViewSet(BaseSearchMixin, ListAPIView):
+    """
+    AggregateSearchViewSet
+        Endpoint to use the Cognitive search index.
+        Inherits: BaseSearchMixin, ListAPIView
+    """
+    index_class = EntityIndex
+
+    base_auth_permissions = (
+        permissions.AllowAny,
+    )
+
+    filterset_fields = {
+        'id': ['exact', 'in', 'notexact'],
+        'country_id': ['exact', 'in', 'notexact'],
+        'admin1_id': ['exact', 'in', 'notexact'],
+        'admin2_id': ['exact', 'in', 'notexact'],
+        'admin1_name': ['exact', 'in', 'notexact'],
+        'admin2_name': ['exact', 'in', 'notexact'],
+        'entity_type_code':['exact', 'in']
+    }
+
+    filter_field_type = {
+        'id': SearchFieldDataType.Int64,
+        'country_id': SearchFieldDataType.Int64,
+        'admin1_id': SearchFieldDataType.Int64,
+        'admin2_id': SearchFieldDataType.Int64,
+        'entity_type_code': SearchFieldDataType.String,
+    }
+
+    def list(self, request, *args, **kwargs):
+        resp_data = OrderedDict()
+        data = self.index_search(request, *args, **kwargs)
+        counts = data.get_count()
+        resp_data['count'] = counts
+        resp_data['results'] = list(data)
+        return Response(resp_data)
