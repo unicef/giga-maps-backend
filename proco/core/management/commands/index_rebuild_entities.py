@@ -108,12 +108,28 @@ def collect_data(country_id, entity_id):
         )
     ).annotate(
         entity_id=F('id'),
+        entity_type_code=F('entity_type__code'),
         country_name=F('country__name'),
         country_code=F('country__code'),
         admin1_name=F('admin1__name'),
         admin2_name=F('admin2__name'),
         row_score=Case(When(srr__id__isnull=True, then=Value(0)), default=1, output_field=IntegerField())
-    ).values(*qry_fields).order_by(*EntityIndex.Meta.ordering).distinct(*qry_fields)
+    ).values(
+    'entity_id',
+    'entity_type_code',
+    'id',
+    'name',
+    'giga_id',
+    'external_id',
+    'admin1_id',
+    'admin1_name',
+    'admin2_id',
+    'admin2_name',
+    'country_id',
+    'country_name',
+    'country_code',
+    'row_score',
+).order_by(*EntityIndex.Meta.ordering).distinct()
     if country_id:
         qs = qs.filter(country_id=country_id)
 

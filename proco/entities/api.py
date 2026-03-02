@@ -1,17 +1,23 @@
 import logging
+from collections import OrderedDict
 
 from django.conf import settings
 from django.db import models
 from django.http import JsonResponse
 from django.db.models.functions.text import Lower
+from azure.search.documents.indexes.models import SearchFieldDataType
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_control
+from rest_framework.generics import ListAPIView
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import mixins, viewsets, status as rest_status
+from rest_framework import mixins, permissions, viewsets, status as rest_status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.utils.urls import remove_query_param
+
+from proco.locations.api import BaseSearchMixin
+from proco.locations.search_indexes import EntityIndex
 from proco.utils.cache import cache_manager, custom_cache_control
 
 from proco.entities.models import Entity, EntityType
@@ -349,3 +355,42 @@ class EntityTypeListAPIView(APIView):
             }
 
         return Response(response_data, status=200)
+
+
+class AggregateSearchEntityViewSet(BaseSearchMixin, ListAPIView):
+    """
+    AggregateSearchViewSet
+        Endpoint to use the Cognitive search index.
+        Inherits: BaseSearchMixin, ListAPIView
+    """
+    index_class = EntityIndex
+
+    base_auth_permissions = (
+        permissions.AllowAny,
+    )
+
+    filterset_fields = {
+        'id': ['exact', 'in', 'notexact'],
+        'country_id': ['exact', 'in', 'notexact'],
+        'admin1_id': ['exact', 'in', 'notexact'],
+        'admin2_id': ['exact', 'in', 'notexact'],
+        'admin1_name': ['exact', 'in', 'notexact'],
+        'admin2_name': ['exact', 'in', 'notexact'],
+        'entity_type_code':['exact', 'in']
+    }
+
+    filter_field_type = {
+        'id': SearchFieldDataType.Int64,
+        'country_id': SearchFieldDataType.Int64,
+        'admin1_id': SearchFieldDataType.Int64,
+        'admin2_id': SearchFieldDataType.Int64,
+        'entity_type_code': SearchFieldDataType.String,
+    }
+
+    def list(self, request, *args, **kwargs):
+        resp_data = OrderedDict()
+        data = self.index_search(request, *args, **kwargs)
+        counts = data.get_count()
+        resp_data['count'] = counts
+        resp_data['results'] = list(data)
+        return Response(resp_data)

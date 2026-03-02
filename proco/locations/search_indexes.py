@@ -92,7 +92,7 @@ class SchoolIndex(object):
 class EntityIndex(object):
     entity_id = SimpleField(name='entity_id', type=SearchFieldDataType.String, key=True)
     entity_type = SimpleField(
-        name='entity_type',
+        name='entity_type_code',
         type=SearchFieldDataType.String,
         filterable=True,
         sortable=True,
@@ -171,6 +171,6 @@ class EntityIndex(object):
             'country_id', 'country_name', 'country_code',
             'admin1_id', 'admin2_id',
             'admin1_name', 'admin2_name', 'id',
-            'entity_type',
+            'entity_type_code',
         )
-        ordering = ('entity_name', '-row_score', 'country_name', 'admin1_name', 'admin2_name', 'name',)
+        ordering = ('entity_type_code', '-row_score', 'country_name', 'admin1_name', 'admin2_name', 'name',)
