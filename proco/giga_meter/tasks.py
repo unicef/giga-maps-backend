@@ -453,6 +453,10 @@ def scheduler_for_populate_school_geopoint_field(country_iso3_format):
         logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
+class AggregationOngoingException(Exception):
+    pass
+
+
 def fetch_aggregated_ping_data_from_api(
     start_date: date,
     end_date: date,
@@ -494,6 +498,12 @@ def fetch_aggregated_ping_data_from_api(
                 raise HTTPError(f"API returned {response.status_code}")
 
             json_response = response.json()
+            meta = json_response.get('meta', {})
+            
+            if meta.get("aggregationSchedulerStatus") == "on_going":
+                logger.info("API indicated ongoing aggregation. Will retry.")
+                raise AggregationOngoingException("Aggregation is currently on_going.")
+
             data = json_response.get('data', [])
 
             if not data:
@@ -697,7 +707,7 @@ def fetch_and_aggregate_ping_data(date_str=None, force_tasks=False):
     timestamp = core_utilities.get_current_datetime_object()
     timestamp_str = format_date(
         timestamp,
-        frmt="%d%m%Y_%H%M%S" if force_tasks else "%d%m%Y_%H%M`",
+        frmt="%d%m%Y_%H%M%S" if force_tasks else "%d%m%Y_%H%M",
     )
 
     task_key = f"fetch_and_aggregate_ping_data_status_{timestamp_str}"
@@ -727,6 +737,15 @@ def fetch_and_aggregate_ping_data(date_str=None, force_tasks=False):
             task_instance=task_instance,
             logger=logger,
         )
+
+    except AggregationOngoingException:
+        logger.info("Aggregation is ongoing. Scheduling a retry in 15 minutes.")
+        task_instance.info("Aggregation is ongoing on the API side. Will retry in 15 minutes.")
+        fetch_and_aggregate_ping_data.apply_async(
+            kwargs={'date_str': date_str, 'force_tasks': force_tasks},
+            countdown=15 * 60
+        )
+        return
 
     except Exception as exc:
         logger.exception("Error during GigaMeter ping aggregation")
