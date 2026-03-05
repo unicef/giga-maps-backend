@@ -38,6 +38,8 @@ class ConnectivityStatistics(models.Model):
     jitter_upload = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
     rtt_packet_loss_pct = models.FloatField(help_text=_('percentage'), blank=True, null=True, default=None)
     uptime = models.FloatField(help_text=_('percentage'), blank=True, null=True, default=None)
+    is_connected_true = models.PositiveIntegerField(help_text=_('Is Connected'), blank=True, null=True, default=None)
+    is_connected_all = models.PositiveIntegerField(help_text=_('Is Connected All'), blank=True, null=True, default=None)
 
     live_data_source = models.CharField(
         max_length=50,
