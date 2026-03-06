@@ -2336,15 +2336,23 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             SELECT {env} AS geom,
                    {env}::box2d AS b2d
         ),
-        mvtgeom AS (
-            SELECT DISTINCT ST_AsMVTGeom(ST_Transform(schools_school.geopoint, 3857), bounds.b2d) AS geom,
-                {random_select_list}
+        prioritized_schools AS (
+            SELECT
                 schools_school.id,
+                schools_school.geopoint,
+                schools_school.connectivity_status,
                 {table_name}."{col_name}" AS field_value,
-                (COUNT(*) OVER (PARTITION BY schools_school.geopoint) > 1)
-                    AS has_multiple_school_on_same_lat_lng,
-                'connected' AS connectivity_status,
-                {label_case_statements}
+                ROW_NUMBER() OVER (
+                    PARTITION BY schools_school.geopoint
+                    ORDER BY
+                        CASE
+                            WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 1
+                            WHEN schools_school.connectivity_status = 'no' THEN 2
+                            ELSE 3
+                        END ASC,
+                        schools_school.id ASC
+                ) AS priority_rank,
+                (COUNT(*) OVER (PARTITION BY schools_school.geopoint) > 1) AS has_multiple_school_on_same_lat_lng
             FROM schools_school
             INNER JOIN bounds ON ST_Intersects(schools_school.geopoint, ST_Transform(bounds.geom, 4326))
             INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
@@ -2355,8 +2363,24 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             {school_condition}
             {same_school_coords_condition}
             {school_weekly_condition}
+        ),
+        sampled_schools AS (
+            SELECT id, geopoint, field_value, has_multiple_school_on_same_lat_lng
+            FROM prioritized_schools
+            WHERE priority_rank = 1
             {random_order}
             {limit_condition}
+        ),
+        mvtgeom AS (
+            SELECT DISTINCT ST_AsMVTGeom(ST_Transform(sampled_schools.geopoint, 3857), bounds.b2d) AS geom,
+                {random_select_list}
+                sampled_schools.id,
+                sampled_schools.field_value,
+                sampled_schools.has_multiple_school_on_same_lat_lng,
+                'connected' AS connectivity_status,
+                {label_case_statements}
+            FROM sampled_schools
+            CROSS JOIN bounds
         )
         SELECT ST_AsMVT(DISTINCT mvtgeom.*) FROM mvtgeom;
         """
@@ -2407,9 +2431,9 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         if kwargs.get('exclude_schools_same_coords_except_id'):
             kwargs['same_school_coords_condition'] = f"""
                                         AND (
-                                            sch.id = {kwargs['exclude_schools_same_coords_except_id']}
+                                            schools_school.id = {kwargs['exclude_schools_same_coords_except_id']}
                                             OR NOT ST_Equals(
-                                                sch.geopoint,
+                                                schools_school.geopoint,
                                                 (SELECT geopoint FROM schools_school WHERE id = {kwargs['exclude_schools_same_coords_except_id']})
                                             )
                                         )
@@ -2464,7 +2488,13 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             else:
                 label_cases.append("ELSE '{label}'".format(label=title))
 
-        kwargs['label_case_statements'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
+        # Replace table references with sampled_schools.field_value for use in mvtgeom CTE
+        label_case_statements_str = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
+        label_case_statements_str = label_case_statements_str.replace(
+            f'{kwargs["table_name"]}."{kwargs["col_name"]}"',
+            'sampled_schools.field_value'
+        )
+        kwargs['label_case_statements'] = label_case_statements_str
 
         if add_random_condition:
             if 'limit' in request.query_params:
