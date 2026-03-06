@@ -40,6 +40,10 @@ from proco.taskapp import app
 from proco.utils.dates import format_date
 from proco.utils.slack_notification_utils import compare_target_model_changes, format_changes_for_slack
 from proco.utils.tasks import populate_school_new_fields_task
+from proco.utils.slack_notification_utils import (
+    calculate_school_master_delta_changes, compare_target_model_changes, format_changes_for_slack
+)
+from proco.utils.slack_notification_service import SlackNotificationService
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -186,7 +190,7 @@ def load_data_from_school_master_apis(country_iso3_format=None):
 
 
 @app.task(soft_time_limit=3 * 55 * 60, time_limit=3 * 60 * 60)
-def handle_published_school_master_data_row(published_row=None, country_ids=None):
+def handle_published_school_master_data_row(published_row=None, country_ids=None, publish_source='auto_publish'):
     """
     Background task to handle all the published rows of school master data source
 
@@ -200,7 +204,6 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
         'rural': 'rural',
     }
     change_summary = {}
-
     coverage_type_choices = dict(statistics_models.SchoolWeeklyStatus.COVERAGE_TYPES).keys()
 
     if country_ids and len(country_ids) > 0:
@@ -504,15 +507,18 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                 for i in range(0, len(updated_school_ids), 20):
                     populate_school_new_fields_task.delay(None, None, None, school_ids=updated_school_ids[i:i + 20])
 
+                    school_weekly.fiber_node_distance = row.fiber_node_distance
+                    school_weekly.microwave_node_distance = row.microwave_node_distance
 
             for new_school_id in created_school_ids:
                 # As it's a new school added through School Master record publishing, add the school to search index
                 cmd_args = ['--update_index', '-school_id={0}'.format(new_school_id)]
                 call_command('index_rebuild_schools', *cmd_args)
-            send_slack_notifications(change_summary)
+
+            send_slack_notifications(change_summary, publish_source=publish_source)
             background_task_utilities.task_on_complete(task_instance)
         except SoftTimeLimitExceeded:
-            send_slack_notifications(change_summary)
+            send_slack_notifications(change_summary, publish_source=publish_source)
             raise
         except Exception as e:
             raise
@@ -521,7 +527,7 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
 
 
 @app.task(soft_time_limit=2 * 55 * 60, time_limit=2 * 55 * 60)
-def handle_deleted_school_master_data_row(deleted_row=None, country_ids=None):
+def handle_deleted_school_master_data_row(deleted_row=None, country_ids=None, publish_source='auto_publish'):
     """
     Background task to handle all the deleted rows of school master data source
 
@@ -602,7 +608,7 @@ def handle_deleted_school_master_data_row(deleted_row=None, country_ids=None):
                     task_instance.info('Error reported for ID ({0}) on deletion: {1}'.format(row.id, ex))
 
         task_instance.info('Remaining records: {}'.format(new_deleted_records.count()))
-        send_slack_notifications(change_summary)
+        send_slack_notifications(change_summary, publish_source=publish_source)
         background_task_utilities.task_on_complete(task_instance)
     else:
         logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
@@ -1209,7 +1215,7 @@ def send_school_master_data_change_slack_notification(country_iso3_format):
             if change_summary:
                 # Send Slack notification
                 slack_service = SlackNotificationService()
-                slack_service.send_school_master_update_notification(change_summary)
+                slack_service.send_school_master_update_notification(change_summary, publish_source='pre_review')
 
                 task_instance.info(f'Slack notification sent for {change_summary["country"]} - '
                                  f'New: {change_summary["new_rows_count"]}, '
@@ -1228,7 +1234,7 @@ def send_school_master_data_change_slack_notification(country_iso3_format):
         logger.error(f'Found running Job with "{task_key}" name so skipping current iteration')
 
 
-def send_slack_notifications(change_summary):
+def send_slack_notifications(change_summary, publish_source='auto_publish'):
     """Send Slack notifications for published school master data changes."""
     for country_iso3, summary in change_summary.items():
         if not summary['new_schools'] and not summary['updated_schools'] and not summary['deleted_schools']:
@@ -1236,4 +1242,4 @@ def send_slack_notifications(change_summary):
         country = Country.objects.filter(iso3_format=country_iso3).first()
         summary = format_changes_for_slack(country, summary)
         slack_service = SlackNotificationService()
-        slack_service.send_school_master_update_notification(summary, is_published=True)
+        slack_service.send_school_master_update_notification(summary, publish_source=publish_source)

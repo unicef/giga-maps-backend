@@ -48,10 +48,10 @@ class SchoolMasterLoaderViewSet(APIView):
         sources_tasks.cleanup_school_master_rows()
         if iso3_format:
             countries_ids = list(Country.objects.filter(iso3_format=iso3_format).values_list('id', flat=True))
-            sources_tasks.handle_published_school_master_data_row(country_ids=countries_ids)
+            sources_tasks.handle_published_school_master_data_row(country_ids=countries_ids, publish_source='cli')
         else:
-            sources_tasks.handle_published_school_master_data_row()
-        sources_tasks.handle_deleted_school_master_data_row()
+            sources_tasks.handle_published_school_master_data_row(publish_source='cli')
+        sources_tasks.handle_deleted_school_master_data_row(publish_source='cli')
         sources_tasks.email_reminder_to_editor_and_publisher_for_review_waiting_records()
 
         return Response(data={'success': True})
@@ -370,7 +370,7 @@ class SchoolMasterDataPublishByCountryViewSet(BaseModelViewSet):
                     published_by=self.request.user,
                     published_at=core_utilities.get_current_datetime_object(),
                 )
-                sources_tasks.handle_published_school_master_data_row.delay(country_ids=country_ids)
+                sources_tasks.handle_published_school_master_data_row.delay(country_ids=country_ids, publish_source='admin_portal_country')
 
             deleted_published_instances = instances.filter(status=SchoolMasterData.ROW_STATUS_DELETED)
             if deleted_published_instances.exists():
@@ -383,7 +383,7 @@ class SchoolMasterDataPublishByCountryViewSet(BaseModelViewSet):
                     published_by=self.request.user,
                     published_at=core_utilities.get_current_datetime_object(),
                 )
-                sources_tasks.handle_deleted_school_master_data_row.delay(country_ids=country_ids)
+                sources_tasks.handle_deleted_school_master_data_row.delay(country_ids=country_ids, publish_source='admin_portal_country')
 
             return Response(data={'message': 'Country record publish started. Application will be updated in minutes.'})
 

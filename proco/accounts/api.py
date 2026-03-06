@@ -2439,6 +2439,17 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                                         )
                                     """
 
+        if kwargs.get('exclude_schools_same_coords_except_id'):
+            kwargs['same_school_coords_condition'] = f"""
+                                        AND (
+                                            schools_school.id = {kwargs['exclude_schools_same_coords_except_id']}
+                                            OR NOT ST_Equals(
+                                                schools_school.geopoint,
+                                                (SELECT geopoint FROM schools_school WHERE id = {kwargs['exclude_schools_same_coords_except_id']})
+                                            )
+                                        )
+                                    """
+
         if len(kwargs['school_filters']) > 0:
             kwargs['school_condition'] += ' AND ' + kwargs['school_filters']
 

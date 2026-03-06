@@ -719,24 +719,24 @@ class Command(BaseCommand):
             logger.info('Performing school master data source publish task handling.')
 
             if country_id:
-                sources_tasks.handle_published_school_master_data_row(country_ids=[country_id, ])
+                sources_tasks.handle_published_school_master_data_row(country_ids=[country_id, ], publish_source='cli')
             else:
                 new_published_records = SchoolMasterData.objects.filter(
                     status=SchoolMasterData.ROW_STATUS_PUBLISHED, is_read=False,
                 ).order_by('-pk')[:1000]
 
                 for row in new_published_records:
-                    sources_tasks.handle_published_school_master_data_row(published_row=row)
+                    sources_tasks.handle_published_school_master_data_row(published_row=row, publish_source='cli')
             logger.info('Completed school master data source publish task handling.\n\n')
 
         if options.get('handle_published_school_master_data_row_with_scheduler'):
             if country_id:
-                sources_tasks.handle_published_school_master_data_row.delay(country_ids=[country_id, ])
+                sources_tasks.handle_published_school_master_data_row.delay(country_ids=[country_id, ], publish_source='cli')
             else:
-                sources_tasks.handle_published_school_master_data_row.delay()
+                sources_tasks.handle_published_school_master_data_row.delay(publish_source='cli')
 
         if options.get('handle_deleted_school_master_data_row'):
-            sources_tasks.handle_deleted_school_master_data_row()
+            sources_tasks.handle_deleted_school_master_data_row(publish_source='cli')
 
         if options.get('populate_school_new_fields_with_scheduler'):
             populate_school_new_fields_task.delay(start_school_id, end_school_id, country_id)

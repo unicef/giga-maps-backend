@@ -319,10 +319,10 @@ class Command(BaseCommand):
             sources_tasks.cleanup_school_master_rows()
             logger.info(f'SchoolMaster data clean up completed successfully.\n')
 
-            sources_tasks.handle_published_school_master_data_row(country_ids=[country.id, ])
+            sources_tasks.handle_published_school_master_data_row(country_ids=[country.id, ], publish_source='cli')
             logger.info(f'SchoolMaster data publishing completed successfully.\n')
 
-            sources_tasks.handle_deleted_school_master_data_row(country_ids=[country.id, ])
+            sources_tasks.handle_deleted_school_master_data_row(country_ids=[country.id, ], publish_source='cli')
             logger.info(f'SchoolMaster data publish for deleted schools completed successfully.\n')
 
         try:
