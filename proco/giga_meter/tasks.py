@@ -2,37 +2,33 @@ import json
 import logging
 import os
 import uuid
+from datetime import timedelta, date, datetime
+from typing import List, Dict, Iterator
 
 import requests
 from celery import chain
 from celery import current_task
-from datetime import datetime, timedelta
 from django.conf import settings
 from django.contrib.gis.geos import Point
 from django.core.management import call_command
+from django.db import transaction
 from django.db.models import Count
 from django.db.utils import DataError
 from requests.exceptions import HTTPError
 from rest_framework import status
 
 from proco.background import utils as background_task_utilities
+from proco.connection_statistics.config import app_config as statistics_configs
+from proco.connection_statistics.models import SchoolDailyStatus
 from proco.core import utils as core_utilities
 from proco.core.config import app_config as core_configs
 from proco.data_sources import utils as data_sources_utilities
 from proco.data_sources.utils import get_request_headers
 from proco.giga_meter import models as giga_meter_models
 from proco.giga_meter import utils as giga_meter_utilities
+from proco.schools.models import School
 from proco.taskapp import app
 from proco.utils.dates import format_date
-
-from datetime import timedelta, date, datetime
-from typing import List, Dict, Iterator
-from django.db import transaction
-from django.db.models import Sum, Avg
-from proco.connection_statistics.config import app_config as statistics_configs
-from proco.connection_statistics.models import SchoolDailyStatus
-from proco.schools.models import School
-
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -205,25 +201,25 @@ def giga_meter_handle_published_school_master_data_row(*args, country_ids=None, 
                             'electricity_type': row.electricity_type,
                             'num_adm_personnel': row.num_adm_personnel,
                             'num_students': row.num_students,
-                            'num_teachers' : row.num_teachers,
-                            'num_classrooms' : row.num_classrooms,
-                            'num_latrines' : row.num_latrines,
-                            'water_availability' : None
+                            'num_teachers': row.num_teachers,
+                            'num_classrooms': row.num_classrooms,
+                            'num_latrines': row.num_latrines,
+                            'water_availability': None
                             if core_utilities.is_blank_string(row.water_availability)
                             else str(row.water_availability).lower() in core_configs.true_choices,
-                            'electricity_availability' : None
+                            'electricity_availability': None
                             if core_utilities.is_blank_string(row.electricity_availability)
                             else str(row.electricity_availability).lower() in core_configs.true_choices,
-                            'computer_lab' : None
+                            'computer_lab': None
                             if core_utilities.is_blank_string(row.computer_lab)
                             else str(row.computer_lab).lower() in core_configs.true_choices,
-                            'num_computers' : row.num_computers,
+                            'num_computers': row.num_computers,
                             'connectivity_govt': None
                             if (core_utilities.is_blank_string(row.connectivity_govt) or
-                               str(row.connectivity_govt).lower() == 'unknown')
+                                str(row.connectivity_govt).lower() == 'unknown')
                             else str(row.connectivity_govt).lower() in core_configs.true_choices,
                             'connectivity_type_govt': row.connectivity_type_govt,
-                            'connectivity_type':  row.connectivity_type,
+                            'connectivity_type': row.connectivity_type,
                             'connectivity_type_root': row.connectivity_type_root,
                             'cellular_coverage_availability': None
                             if core_utilities.is_blank_string(row.cellular_coverage_availability)
@@ -282,7 +278,7 @@ def giga_meter_handle_published_school_master_data_row(*args, country_ids=None, 
 
                     if school_static_created:
                         school.last_school_static = school_static
-                        school.save(update_fields=['last_school_static',])
+                        school.save(update_fields=['last_school_static', ])
 
                     row.delete()
 
@@ -344,7 +340,7 @@ def giga_meter_handle_deleted_school_master_data_row(*args, country_ids=None, fo
 
                     if school:
                         school.deleted = current_date
-                        school.save(update_fields=['deleted',])
+                        school.save(update_fields=['deleted', ])
 
                     row.delete()
                 except Exception as ex:
@@ -429,7 +425,7 @@ def handle_giga_meter_school_master_data_sync(*args):
             logger.error('Found Job with "{0}" name so skipping current iteration'.format(task_key))
     else:
         logger.warning('Giga Meter - School Master data synch disabled from config. '
-                     'To enable it, please update "GIGA_METER_ENABLE_AUTO_SYNC" configuration.')
+                       'To enable it, please update "GIGA_METER_ENABLE_AUTO_SYNC" configuration.')
 
 
 @app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)
@@ -455,6 +451,10 @@ def scheduler_for_populate_school_geopoint_field(country_iso3_format):
         background_task_utilities.task_on_complete(task_instance)
     else:
         logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+
+
+class AggregationOngoingException(Exception):
+    pass
 
 
 def fetch_aggregated_ping_data_from_api(
@@ -498,6 +498,12 @@ def fetch_aggregated_ping_data_from_api(
                 raise HTTPError(f"API returned {response.status_code}")
 
             json_response = response.json()
+            meta = json_response.get('meta', {})
+
+            if meta.get("aggregationSchedulerStatus") == "on_going":
+                logger.info("API indicated ongoing aggregation. Will retry.")
+                raise AggregationOngoingException("Aggregation is currently on_going.")
+
             data = json_response.get('data', [])
 
             if not data:
@@ -646,7 +652,7 @@ def bulk_upsert_school_status(batch: List[SchoolDailyStatus]) -> None:
         if to_create:
             SchoolDailyStatus.objects.bulk_create(to_create)
 
-    except (DataError, Exception)as e:
+    except (DataError, Exception) as e:
 
         logger.warning(f"Bulk operation failed ({e}), falling back to iterative update_or_create.")
 
@@ -701,7 +707,7 @@ def fetch_and_aggregate_ping_data(date_str=None, force_tasks=False):
     timestamp = core_utilities.get_current_datetime_object()
     timestamp_str = format_date(
         timestamp,
-        frmt="%d%m%Y_%H%M%S" if force_tasks else "%d%m%Y_%H%M`",
+        frmt="%d%m%Y_%H%M%S" if force_tasks else "%d%m%Y_%H%M",
     )
 
     task_key = f"fetch_and_aggregate_ping_data_status_{timestamp_str}"
@@ -732,12 +738,22 @@ def fetch_and_aggregate_ping_data(date_str=None, force_tasks=False):
             logger=logger,
         )
 
+    except AggregationOngoingException:
+        logger.info("Aggregation is ongoing. Scheduling a retry in 15 minutes.")
+        task_instance.info("Aggregation is ongoing on the API side. Will retry in 15 minutes.")
+        fetch_and_aggregate_ping_data.apply_async(
+            kwargs={'date_str': date_str, 'force_tasks': force_tasks},
+            countdown=15 * 60
+        )
+        return
+
     except Exception as exc:
         logger.exception("Error during GigaMeter ping aggregation")
         task_instance.info(f"Error: {exc}")
 
     finally:
         background_task_utilities.task_on_complete(task_instance)
+
 
 @app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)
 def scheduler_for_backup_giga_meter_connectivity_ping_data(*args, start_date=None, end_date=None):
@@ -756,7 +772,8 @@ def scheduler_for_backup_giga_meter_connectivity_ping_data(*args, start_date=Non
         f'Backup GigaMeter Connectivity Ping data before {till_date}')
 
     if task_instance:
-        task_instance.info(f'Not found running job for "Backup GigaMeter Connectivity Ping data" utility handler: {task_key}')
+        task_instance.info(
+            f'Not found running job for "Backup GigaMeter Connectivity Ping data" utility handler: {task_key}')
         cmd_args = [f'-start_date={start_date}', f'-end_date={end_date}', f'-till_date={till_date}']
         call_command('backup_giga_meter_connectivity_ping_data', *cmd_args)
         task_instance.info('Completed "Backup GigaMeter Connectivity Ping data" utility handler.')
