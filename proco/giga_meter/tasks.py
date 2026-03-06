@@ -457,6 +457,10 @@ def scheduler_for_populate_school_geopoint_field(country_iso3_format):
         logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
+class AggregationOngoingException(Exception):
+    pass
+
+
 def fetch_aggregated_ping_data_from_api(
     start_date: date,
     end_date: date,
@@ -498,6 +502,12 @@ def fetch_aggregated_ping_data_from_api(
                 raise HTTPError(f"API returned {response.status_code}")
 
             json_response = response.json()
+            meta = json_response.get('meta', {})
+
+            if meta.get("aggregationSchedulerStatus") == "on_going":
+                logger.info("API indicated ongoing aggregation. Will retry.")
+                raise AggregationOngoingException("Aggregation is currently on_going.")
+
             data = json_response.get('data', [])
 
             if not data:
@@ -646,7 +656,7 @@ def bulk_upsert_school_status(batch: List[SchoolDailyStatus]) -> None:
         if to_create:
             SchoolDailyStatus.objects.bulk_create(to_create)
 
-    except (DataError, Exception)as e:
+    except (DataError, Exception) as e:
 
         logger.warning(f"Bulk operation failed ({e}), falling back to iterative update_or_create.")
 
@@ -701,7 +711,7 @@ def fetch_and_aggregate_ping_data(date_str=None, force_tasks=False):
     timestamp = core_utilities.get_current_datetime_object()
     timestamp_str = format_date(
         timestamp,
-        frmt="%d%m%Y_%H%M%S" if force_tasks else "%d%m%Y_%H%M`",
+        frmt="%d%m%Y_%H%M%S" if force_tasks else "%d%m%Y_%H%M",
     )
 
     task_key = f"fetch_and_aggregate_ping_data_status_{timestamp_str}"
@@ -732,35 +742,18 @@ def fetch_and_aggregate_ping_data(date_str=None, force_tasks=False):
             logger=logger,
         )
 
+    except AggregationOngoingException:
+        logger.info("Aggregation is ongoing. Scheduling a retry in 15 minutes.")
+        task_instance.info("Aggregation is ongoing on the API side. Will retry in 15 minutes.")
+        fetch_and_aggregate_ping_data.apply_async(
+            kwargs={'date_str': date_str, 'force_tasks': force_tasks},
+            countdown=15 * 60
+        )
+        return
+
     except Exception as exc:
         logger.exception("Error during GigaMeter ping aggregation")
         task_instance.info(f"Error: {exc}")
 
     finally:
         background_task_utilities.task_on_complete(task_instance)
-
-@app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)
-def scheduler_for_backup_giga_meter_connectivity_ping_data(*args, start_date=None, end_date=None):
-    till_date = None
-    if not start_date or not end_date:
-        retention_days = settings.AZURE_DELTALAKE_CONFIG.get('GIGA_METER_PING_BACKUP').get('DATA_RETENTION_DAYS')
-        n_days_old = datetime.now() - timedelta(days=retention_days)
-        till_date = format_date(core_utilities.get_current_datetime_object(timestamp=n_days_old))
-    else:
-        till_date = end_date
-    task_key = f'scheduler_for_backup_giga_meter_connectivity_ping_data_for_country_at_{till_date}'
-    task_id = current_task.request.id or str(uuid.uuid4())
-    task_instance = background_task_utilities.task_on_start(
-        task_id,
-        task_key,
-        f'Backup GigaMeter Connectivity Ping data before {till_date}')
-
-    if task_instance:
-        task_instance.info(f'Not found running job for "Backup GigaMeter Connectivity Ping data" utility handler: {task_key}')
-        cmd_args = [f'-start_date={start_date}', f'-end_date={end_date}', f'-till_date={till_date}']
-        call_command('backup_giga_meter_connectivity_ping_data', *cmd_args)
-        task_instance.info('Completed "Backup GigaMeter Connectivity Ping data" utility handler.')
-
-        background_task_utilities.task_on_complete(task_instance)
-    else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
