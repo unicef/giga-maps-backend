@@ -526,6 +526,8 @@ def fetch_aggregated_ping_data_from_api(
 
             page += 1
 
+        except AggregationOngoingException:
+            raise
         except Exception as e:
             logger.error(f"Error fetching page {page}: {e}")
             raise
@@ -695,7 +697,7 @@ def run_ping_aggregation(
     task_instance.info(f"Upserted {total_records} SchoolDailyStatus records")
 
 
-@app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)
+@app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60, bind=True, max_retries=3)
 def fetch_and_aggregate_ping_data(date_str=None, force_tasks=False):
     if not settings.GIGA_METER_ENABLE_AUTO_SYNC:
         logger.warning(
@@ -738,6 +740,8 @@ def fetch_and_aggregate_ping_data(date_str=None, force_tasks=False):
             logger=logger,
         )
 
+        background_task_utilities.task_on_complete(task_instance)
+
     except AggregationOngoingException:
         logger.info("Aggregation is ongoing. Scheduling a retry in 15 minutes.")
         task_instance.info("Aggregation is ongoing on the API side. Will retry in 15 minutes.")
@@ -750,9 +754,6 @@ def fetch_and_aggregate_ping_data(date_str=None, force_tasks=False):
     except Exception as exc:
         logger.exception("Error during GigaMeter ping aggregation")
         task_instance.info(f"Error: {exc}")
-
-    finally:
-        background_task_utilities.task_on_complete(task_instance)
 
 
 @app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)
