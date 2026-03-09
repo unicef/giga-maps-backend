@@ -5,6 +5,7 @@ from proco.entities import api as entities_api
 from proco.accounts.v2 import entity_api
 from proco.accounts.v2 import entity_filter_api
 from proco.connection_statistics.v2 import entity_api as stats_entity_api
+from proco.locations.v2 import entity_api as locations_entity_api
 
 country_entities = SimpleRouter()
 country_entities.register(r'(?P<country_code>\w+)', entities_api.EntitiesViewSet, basename='entities')
@@ -74,6 +75,9 @@ urlpatterns = [
     path('filters/<str:status>/<int:country_id>/', entity_filter_api.PublishedEntityAdvanceFiltersViewSet.as_view({
         'get': 'list',
     }), name='list-published-entity-filters'),
+
+    path('countries/', locations_entity_api.EntityCountryViewSet.as_view({'get': 'list'})),
+    path('countries/<str:pk>/', locations_entity_api.EntityCountryViewSet.as_view({'get': 'retrieve'})),
 
     # Entity list by country (Should be at last)
     path('', include(country_entities.urls)),

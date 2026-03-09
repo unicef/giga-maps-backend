@@ -29,6 +29,7 @@ from proco.core.mixins import DownloadSerializerMixin
 from proco.custom_auth.serializers import ExpandUserSerializer
 from proco.locations import exceptions as locations_exceptions
 from proco.locations.models import Country, CountryAdminMetadata
+from proco.entities.models import Entity, EntityType
 from proco.schools.models import School
 from proco.schools.serializers import ExpandCountrySerializer
 
@@ -344,6 +345,7 @@ class ListCountrySerializer(BaseCountrySerializer):
     integration_status = serializers.SerializerMethodField()
     schools_with_data_percentage = serializers.SerializerMethodField()
     schools_total = serializers.SerializerMethodField()
+    entity_counts = serializers.SerializerMethodField()
     connectivity_availability = serializers.SerializerMethodField()
     coverage_availability = serializers.SerializerMethodField()
 
@@ -355,6 +357,7 @@ class ListCountrySerializer(BaseCountrySerializer):
             'date_of_join',
             'schools_with_data_percentage',
             'schools_total',
+            'entity_counts',
             'connectivity_availability',
             'coverage_availability',
         )
@@ -379,6 +382,29 @@ class ListCountrySerializer(BaseCountrySerializer):
         if instance.last_weekly_status:
             return instance.last_weekly_status.coverage_availability
 
+    def get_entity_counts(self, instance):
+        entity_counts = {}
+        active_entity_types = EntityType.objects.filter(
+            deleted__isnull=True,
+            is_active=True
+        ).order_by('display_order', 'code')
+
+        for entity_type in active_entity_types:
+            if entity_type.is_legacy:
+                count = School.objects.filter(
+                    country=instance,
+                    deleted__isnull=True
+                ).count()
+            else:
+                count = Entity.objects.filter(
+                    country=instance,
+                    entity_type=entity_type,
+                    deleted__isnull=True
+                ).count()
+            entity_counts[entity_type.code] = count
+
+        return entity_counts
+
     def get_data_source(self, instance):
         data_source = instance.data_source
         if core_utilities.is_blank_string(data_source):
@@ -400,6 +426,7 @@ class DetailCountrySerializer(BaseCountrySerializer):
 
     active_layers_list = serializers.SerializerMethodField()
     active_filters_list = serializers.SerializerMethodField()
+    entity_counts = serializers.SerializerMethodField()
 
     data_source = serializers.SerializerMethodField()
 
@@ -411,6 +438,7 @@ class DetailCountrySerializer(BaseCountrySerializer):
             'last_weekly_status_id',
             'active_layers_list',
             'active_filters_list',
+            'entity_counts',
         )
 
     def get_statistics(self, instance):
@@ -446,6 +474,29 @@ class DetailCountrySerializer(BaseCountrySerializer):
             })
 
         return active_filters_list
+
+    def get_entity_counts(self, instance):
+        entity_counts = {}
+        active_entity_types = EntityType.objects.filter(
+            deleted__isnull=True,
+            is_active=True
+        ).order_by('display_order', 'code')
+
+        for entity_type in active_entity_types:
+            if entity_type.is_legacy:
+                count = School.objects.filter(
+                    country=instance,
+                    deleted__isnull=True
+                ).count()
+            else:
+                count = Entity.objects.filter(
+                    country=instance,
+                    entity_type=entity_type,
+                    deleted__isnull=True
+                ).count()
+            entity_counts[entity_type.code] = count
+
+        return entity_counts
 
     def get_data_source(self, instance):
         data_source = instance.data_source

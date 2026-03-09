@@ -423,7 +423,7 @@ class PublishEntityAdvanceFilterSerializer(serializers.ModelSerializer):
         instance = super().update(instance, validated_data)
 
         args = ['--reset', '-filter_id={0}'.format(instance.id)]
-        call_command('populate_active_filters_for_countries', *args)
+        call_command('populate_entity_active_filters_for_countries', *args)
 
         return instance
 
