@@ -3,7 +3,7 @@ import logging
 import os
 import uuid
 from datetime import timedelta, date, datetime
-from typing import List, Dict, Iterator
+from typing import List, Dict, Iterator, Optional
 
 import requests
 from celery import chain
@@ -697,8 +697,13 @@ def run_ping_aggregation(
     task_instance.info(f"Upserted {total_records} SchoolDailyStatus records")
 
 
-@app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60, bind=True, max_retries=3)
-def fetch_and_aggregate_ping_data(date_str=None, force_tasks=False):
+@app.task(
+    bind=True,
+    soft_time_limit=4 * 60 * 60,
+    time_limit=4 * 60 * 60,
+    max_retries=3,
+)
+def fetch_and_aggregate_ping_data(self, date_str: Optional[str] = None, force_tasks: bool = False):
     if not settings.GIGA_METER_ENABLE_AUTO_SYNC:
         logger.warning(
             'Giga Meter - Ping data sync is disabled from config. '
