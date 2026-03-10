@@ -756,6 +756,8 @@ def fetch_and_aggregate_ping_data(date_str: Optional[str] = None, force_tasks: b
     except Exception as exc:
         logger.exception("Error during GigaMeter ping aggregation")
         task_instance.info(f"Error: {exc}")
+    finally:
+        background_task_utilities.task_on_complete(task_instance)
 
 
 @app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)
