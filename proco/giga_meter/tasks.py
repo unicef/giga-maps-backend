@@ -698,12 +698,11 @@ def run_ping_aggregation(
 
 
 @app.task(
-    bind=True,
     soft_time_limit=4 * 60 * 60,
     time_limit=4 * 60 * 60,
     max_retries=3,
 )
-def fetch_and_aggregate_ping_data(self, date_str: Optional[str] = None, force_tasks: bool = False):
+def fetch_and_aggregate_ping_data(date_str: Optional[str] = None, force_tasks: bool = False):
     if not settings.GIGA_METER_ENABLE_AUTO_SYNC:
         logger.warning(
             'Giga Meter - Ping data sync is disabled from config. '
