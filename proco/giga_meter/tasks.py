@@ -724,15 +724,13 @@ def fetch_and_aggregate_ping_data(date_str=None, force_tasks=False):
     if not task_instance:
         logger.error(f'Found running job with key "{task_key}", skipping.')
         return
-
+    if date_str:
+        target_date = core_utilities.get_timezone_converted_value(datetime.strptime(date_str, "%Y-%m-%d")).date()
+    else:
+        target_date = (
+            core_utilities.get_current_datetime_object().date()
+        )
     try:
-        if date_str:
-            target_date = core_utilities.get_timezone_converted_value(datetime.strptime(date_str, "%Y-%m-%d")).date()
-        else:
-            target_date = (
-                core_utilities.get_current_datetime_object().date()
-            )
-
         run_ping_aggregation(
             start_date=target_date,
             end_date=target_date,
@@ -746,7 +744,7 @@ def fetch_and_aggregate_ping_data(date_str=None, force_tasks=False):
         logger.info("Aggregation is ongoing. Scheduling a retry in 15 minutes.")
         task_instance.info("Aggregation is ongoing on the API side. Will retry in 15 minutes.")
         fetch_and_aggregate_ping_data.apply_async(
-            kwargs={'date_str': date_str, 'force_tasks': force_tasks},
+            kwargs={'date_str': target_date, 'force_tasks': force_tasks},
             countdown=15 * 60
         )
         return
