@@ -267,7 +267,7 @@ class EntityConnectivityAPIView(APIView):
                                 '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))), )
 
     def get(self, request, *args, **kwargs):
-        entity_type = request.query_params.get("entity_type")
+        entity_type = request.query_params.get("entity_type__code")
 
         if entity_type == LEGACY_MODEL:
             self.queryset = School.objects.all()
@@ -677,9 +677,6 @@ class EntityConnectivityAPIView(APIView):
                 'entity_static',
                 'connection_statistics_entityweeklystatus'
             )
-
-            # -------- Base queryset already set in get()
-            # self.queryset = Entity.objects.all()
 
             # -------- Apply entity_type filter
             self.queryset = self.queryset.filter(

@@ -14,10 +14,15 @@ Usage:
 """
 
 import logging
-from proco.entities.models import EntityType
+from django.apps import apps
+from django.core.exceptions import FieldDoesNotExist
+
+from proco.connection_statistics.models import EntityWeeklyStatus
+from proco.entities.models import EntityType, Entity
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
+_PARAMETER_FIELD_CACHE = {}
 
 def get_entity_type_config(code):
     """
@@ -75,3 +80,46 @@ def is_legacy_type(code):
     if entity_type:
         return entity_type.is_legacy
     return code == 'school'
+
+
+def build_parameter_config(entity_type_obj, field_name, entity_code):
+    """
+    Resolve table + column automatically from model metadata.
+    """
+    cache_key = (entity_code, field_name)
+    if cache_key in _PARAMETER_FIELD_CACHE:
+        return _PARAMETER_FIELD_CACHE[cache_key]
+
+    entity_models = []
+    detail_model = entity_type_obj.get_detail_model_class()
+
+    if detail_model:
+        entity_models.append((detail_model, "ews"))
+
+    entity_models.append((EntityWeeklyStatus, "ews"))
+
+    entity_models.append((Entity, "entities_entity"))
+
+    for model, table_alias in entity_models:
+        try:
+            field = model._meta.get_field(field_name)
+
+            config = {
+                "col_name": field.column,
+                "table_name": table_alias,
+                "db_table": model._meta.db_table,
+                "field_type": field.get_internal_type(),
+            }
+
+            _PARAMETER_FIELD_CACHE[cache_key] = config
+
+            return config
+
+        except FieldDoesNotExist:
+            continue
+
+    raise FieldDoesNotExist(
+        f'Field "{field_name}" not found in any model '
+        f'for entity "{entity_code}"'
+    )
+

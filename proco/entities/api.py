@@ -16,14 +16,16 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.utils.urls import remove_query_param
 
+from proco.entities.constants import LEGACY_MODEL, ALL_ENTITIES
 from proco.locations.api import BaseSearchMixin
-from proco.locations.search_indexes import EntityIndex
+from proco.locations.search_indexes import EntityIndex, SchoolIndex
 from proco.utils.cache import cache_manager, custom_cache_control
 
 from proco.entities.models import Entity, EntityType
 from proco.entities.serializers import ListEntitySerializer
 from proco.locations.models import Country
-from proco.schools.api import ConnectivityTileRequestHandler, BaseTileGenerator, ConnectivityTileGenerator
+from proco.schools.api import ConnectivityTileRequestHandler, BaseTileGenerator, ConnectivityTileGenerator, \
+    SchoolStatusConnectivityTileGenerator
 from proco.utils.cache import custom_cache_control
 from proco.utils.mixins import CachedListMixin
 from proco.core import utils as core_utilities
@@ -107,7 +109,7 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
         table_configs['entity_filters'] = core_utilities.get_filter_sql(
             request, 'entity', 'entities_entity')
         table_configs['entity_static_filters'] = core_utilities.get_filter_sql(
-            request, 'entity_static', 'entities_health_entity')
+            request, 'entity_static', table_configs['master_data_table'])
         table_configs['entity_real_time_filters'] = core_utilities.get_filter_sql(
             request, 'entity_real_time', 'connection_statistics_entityweeklystatus')
 
@@ -285,45 +287,33 @@ class EntityConnectivityTileRequestHandler(APIView):
 ], name='dispatch')
 class EntityConnectivityStatusTileRequestHandler(EntityConnectivityTileRequestHandler):
 
-    ENTITY_CONFIG = {
-        "health": {
-            "table": "entities_entity",
-            "srid": "4326",
-            "geomColumn": "geopoint",
-            "attrColumns": "id",
-            "cache_prefix": "HEALTH_STATUS_CONNECTIVITY_TILES_MAP",
-            "master_data_table": "entities_health_entity"
-        },
-        "school": {
-            "table": "entities_entity",
-            "srid": "4326",
-            "geomColumn": "geopoint",
-            "attrColumns": "id",
-            "cache_prefix": "SCHOOL_STATUS_CONNECTIVITY_TILES_MAP",
-            "master_data_table": "entities_school_entity"
-        }
-    }
-
     def dispatch(self, request, *args, **kwargs):
-        entity = request.GET.get("entity_type")
+        entity = request.GET.get("entity_type__code")
         if not entity:
             return JsonResponse({"error": "Missing required query param: entity_type"}, status=400)
-        entity_config = self.ENTITY_CONFIG.get(entity)
-        if not entity_config:
-            return JsonResponse({"error": f"Invalid entity_type: {entity}. Allowed: {', '.join(self.ENTITY_CONFIG)}"}, status=400)
+        try:
+            entity_type = EntityType.objects.get(code=entity)
+        except EntityType.DoesNotExist:
+            return JsonResponse(
+                {"error": f"Invalid entity_type__code: {entity}"},
+                status=400
+            )
+
+        extra_config = entity_type.extra_config or {}
 
         table_config = {
-            "entity": entity,
-            "table": entity_config["table"],
-            "srid": entity_config["srid"],
-            "geomColumn": entity_config["geomColumn"],
-            "attrColumns": entity_config["attrColumns"],
-            "master_data_table": entity_config["master_data_table"]
+            "entity": entity_type.code,
+            "table": extra_config.get("main_table"),
+            "srid": extra_config.get("srid"),
+            "master_data_table": entity_type.detail_related_name
         }
 
-        self.tile_generator = EntityStatusConnectivityTileGenerator(table_config)
+        if entity_type.code == LEGACY_MODEL:
+            self.tile_generator = SchoolStatusConnectivityTileGenerator(table_config)
+        else:
+            self.tile_generator = EntityStatusConnectivityTileGenerator(table_config)
 
-        self.CACHE_KEY_PREFIX = entity_config["cache_prefix"]
+        self.CACHE_KEY_PREFIX = extra_config.get("tile_cache_prefix")
 
         return super().dispatch(request, *args, **kwargs)
 
@@ -331,7 +321,7 @@ class EntityConnectivityStatusTileRequestHandler(EntityConnectivityTileRequestHa
         params = dict(self.request.query_params)
         params.pop(self.CACHE_KEY, None)
 
-        entity = params.get('entity_type')
+        entity = params.get('entity_type__code')
         param_string = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
 
         return f"{self.CACHE_KEY_PREFIX}_{entity}_tiles_{param_string}"
@@ -363,11 +353,13 @@ class AggregateSearchEntityViewSet(BaseSearchMixin, ListAPIView):
         Endpoint to use the Cognitive search index.
         Inherits: BaseSearchMixin, ListAPIView
     """
-    index_class = EntityIndex
 
     base_auth_permissions = (
         permissions.AllowAny,
     )
+
+    default_index_class = EntityIndex
+    school_index_class = SchoolIndex
 
     filterset_fields = {
         'id': ['exact', 'in', 'notexact'],
@@ -387,10 +379,87 @@ class AggregateSearchEntityViewSet(BaseSearchMixin, ListAPIView):
         'entity_type_code': SearchFieldDataType.String,
     }
 
+    def get_index_class(self):
+        entity_type = self.request.query_params.get("entity_type__code")
+
+        if entity_type == LEGACY_MODEL:
+            return self.school_index_class
+
+        return self.default_index_class
+
+    def sanitize_fields(self, request):
+        """
+        Remove fields not supported by selected index
+        """
+        fields = request.query_params.get("fields")
+
+        if not fields:
+            return
+
+        fields_list = fields.split(",")
+
+        # If SchoolIndex → remove entity_type_code
+        if self.index_class == self.school_index_class:
+            fields_list = [
+                f for f in fields_list
+                if f != "entity_type_code"
+            ]
+
+        mutable_querydict = request.query_params.copy()
+        mutable_querydict["fields"] = ",".join(fields_list)
+        request._request.GET = mutable_querydict
+
+    def sanitize_search_fields(self, request):
+        search_fields = request.query_params.get("search_fields")
+
+        if not search_fields:
+            return
+
+        fields_list = search_fields.split(",")
+
+        if self.index_class == self.school_index_class:
+            fields_list = [
+                "giga_id_school" if f == "giga_id" else f
+                for f in fields_list
+            ]
+
+        mutable_querydict = request.query_params.copy()
+        mutable_querydict["search_fields"] = ",".join(fields_list)
+        request._request.GET = mutable_querydict
+
     def list(self, request, *args, **kwargs):
         resp_data = OrderedDict()
-        data = self.index_search(request, *args, **kwargs)
-        counts = data.get_count()
-        resp_data['count'] = counts
-        resp_data['results'] = list(data)
+
+        entity_type = request.query_params.get("entity_type__code")
+
+        results = []
+        total_count = 0
+        original_params = request.query_params.copy()
+        if entity_type == ALL_ENTITIES:
+            index_classes = [self.school_index_class, self.default_index_class]
+        else:
+            index_classes = [self.get_index_class()]
+
+        for index in index_classes:
+            request._request.GET = original_params.copy()
+
+            self.index_class = index
+
+            self.sanitize_fields(request)
+            self.sanitize_search_fields(request)
+
+            data = self.index_search(request, *args, **kwargs)
+
+            result_list = list(data)
+
+            if index == self.school_index_class:
+                for r in result_list:
+                    r["entity_type_code"] = LEGACY_MODEL
+
+            results.extend(result_list)
+            total_count += data.get_count()
+
+        resp_data["count"] = total_count
+        resp_data["results"] = results
+
         return Response(resp_data)

@@ -469,6 +469,7 @@ class EntityWeeklyStatus(ConnectivityStatistics, TimeStampedModel, models.Model)
     year = models.PositiveSmallIntegerField(default=get_current_year)
     week = models.PositiveSmallIntegerField(default=get_current_week)
     date = models.DateField()
+    download_speed_benchmark = models.FloatField(blank=True, default=None, null=True)
 
     objects = BaseManager()
 

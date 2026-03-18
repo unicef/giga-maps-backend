@@ -20,6 +20,12 @@ urlpatterns = [
          entities_api.EntityConnectivityStatusTileRequestHandler.as_view(),
          name='tiles-entity-connectivity-status-view'),
 
+    path('layers/<int:pk>/info/', entity_api.EntityDataLayerInfoViewSet.as_view(),
+         name='entity-info-data-layer'),
+    path('layers/<int:pk>/map/', entity_api.EntityDataLayerMapViewSet.as_view(),
+         name='entity-map-data-layer'),
+
+
     # Entity data layers - CRUD
     path('layers/', entity_api.EntityDataLayersViewSet.as_view({
         'get': 'list',
@@ -30,6 +36,7 @@ urlpatterns = [
         'delete': 'destroy',
     }), name='update-or-delete-data-layer-entities'),
 
+
     # Entity data layers - publish, preview, metadata, info, map
     path('layers/<int:pk>/publish/', entity_api.EntityDataLayerPublishViewSet.as_view({
         'put': 'partial_update',
@@ -39,10 +46,7 @@ urlpatterns = [
     path('layers/<int:pk>/metadata/', entity_api.EntityDataLayerMetadataViewSet.as_view({
         'get': 'retrieve',
     }), name='metadata-data-layer-entities'),
-    path('layers/<int:pk>/info/', entity_api.EntityDataLayerInfoViewSet.as_view(),
-         name='entity-info-data-layer'),
-    path('layers/<int:pk>/map/', entity_api.EntityDataLayerMapViewSet.as_view(),
-         name='entity-map-data-layer'),
+
 
     # Published entity data layers
     path('layers/<str:status>/', entity_api.PublishedEntityDataLayersViewSet.as_view({
@@ -75,9 +79,6 @@ urlpatterns = [
         'get': 'list',
     }), name='list-published-entity-filters'),
 
-    # Entity list by country (Should be at last)
-    path('', include(country_entities.urls)),
-
     # Entity Global Stat
     path('global-stat/', stats_entity_api.EntityGlobalStatsAPIView.as_view(), name='global-stat-all-entities'),
     path('connectivity-stat/', stats_entity_api.EntityConnectivityAPIView.as_view(),
@@ -85,4 +86,7 @@ urlpatterns = [
 
     # Cognitive Search Index based searching for Entities
     path('gentity-search/', entities_api.AggregateSearchEntityViewSet.as_view(), name='global-search-filter'),
+
+    # Entity list by country (Should be at last)
+    path('', include(country_entities.urls)),
 ]
