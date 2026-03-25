@@ -125,14 +125,14 @@ class EntityGlobalStatsAPIView(APIView):
             'no_of_countries': school_connectivity_status['all_countries'],
             'countries_with_connectivity_status_mapped': school_connectivity_status[
                 'countries_with_connectivity_status_mapped'],
-            'schools_connected': school_connectivity_status['total_schools'],
-            'schools_with_connectivity_status_mapped': school_connectivity_status[
+            'entities_connected': school_connectivity_status['total_schools'],
+            'entities_with_connectivity_status_mapped': school_connectivity_status[
                 'schools_with_connectivity_status_mapped'],
             'connectivity_global_benchmark': {
                 'value': giga_connectivity_benchmark,
                 'unit': giga_connectivity_benchmark_unit,
             },
-            'connected_schools': {
+            'connected_entities': {
                 'connected': school_connectivity_status['connected'],
                 'not_connected': school_connectivity_status['not_connected'],
                 'unknown': school_connectivity_status['unknown'],
@@ -255,7 +255,7 @@ class EntityConnectivityAPIView(APIView):
     permission_classes = (AllowAny,)
 
     CACHE_KEY = 'cache'
-    CACHE_KEY_PREFIX = 'CONNECTIVITY_STATS'
+    CACHE_KEY_PREFIX = 'CONNECTIVITY_STATS_ALL_ENTITIES'
 
     school_filters = []
     school_static_filters = []
@@ -267,7 +267,7 @@ class EntityConnectivityAPIView(APIView):
                                 '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))), )
 
     def get(self, request, *args, **kwargs):
-        entity_type = request.query_params.get("entity_type")
+        entity_type = request.query_params.get("entity_type__code")
 
         if entity_type == LEGACY_MODEL:
             self.queryset = School.objects.all()
@@ -376,10 +376,10 @@ class EntityConnectivityAPIView(APIView):
         return {
             'live_avg': live_avg,
             'live_avg_connectivity': live_avg_connectivity,
-            'no_of_schools_measure': weekly_status['no_of_schools_measure'],
-            'school_with_realtime_data': weekly_status['school_with_realtime_data'],
+            'no_of_entities_measure': weekly_status['no_of_schools_measure'],
+            'entity_with_realtime_data': weekly_status['school_with_realtime_data'],
             'countries_with_realtime_data': weekly_status['countries_with_realtime_data'],
-            'real_time_connected_schools': real_time_connected_schools,
+            'real_time_connected_entities': real_time_connected_schools,
             'graph_data': graph_data,
             'is_data_synced': is_data_synced_qs.exists(),
             'benchmark_metadata': {
@@ -677,9 +677,6 @@ class EntityConnectivityAPIView(APIView):
                 'entity_static',
                 'connection_statistics_entityweeklystatus'
             )
-
-            # -------- Base queryset already set in get()
-            # self.queryset = Entity.objects.all()
 
             # -------- Apply entity_type filter
             self.queryset = self.queryset.filter(

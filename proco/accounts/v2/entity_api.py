@@ -24,6 +24,7 @@ from proco.accounts import exceptions as accounts_exceptions
 from proco.accounts import models as accounts_models
 from proco.accounts import serializers
 from proco.accounts import utils as account_utilities
+from proco.accounts.api import DataLayerInfoViewSet, DataLayerMapViewSet
 from proco.accounts.config import app_config as account_config
 from proco.accounts.v2 import entity_serializers
 from proco.connection_statistics import models as statistics_models
@@ -35,6 +36,8 @@ from proco.core import permissions as core_permissions
 from proco.core import utils as core_utilities
 from proco.core.viewsets import BaseModelViewSet
 from proco.custom_auth import models as auth_models
+from proco.entities.config import build_parameter_config, get_entity_type_config
+from proco.entities.constants import LEGACY_MODEL
 from proco.locations.models import Country
 from proco.utils import dates as date_utilities
 from proco.utils.cache import cache_manager, custom_cache_control, no_expiry_cache_manager
@@ -81,18 +84,15 @@ class BaseEntityDataLayerAPIViewSet(APIView):
         elif 'admin1_id__in' in query_param_keys:
             self.kwargs['admin1_ids'] = [a_id.strip() for a_id in query_params['admin1_id__in'].split(',')]
 
-        # if 'school_id' in query_param_keys:
-        #     self.kwargs['school_ids'] = [str(query_params['school_id']).strip()]
-        # elif 'school_id__in' in query_param_keys:
-        #     self.kwargs['school_ids'] = [s_id.strip() for s_id in query_params['school_id__in'].split(',')]
+        if 'school_id' in query_param_keys:
+            self.kwargs['school_ids'] = [str(query_params['school_id']).strip()]
+        elif 'school_id__in' in query_param_keys:
+            self.kwargs['school_ids'] = [s_id.strip() for s_id in query_params['school_id__in'].split(',')]
 
         if 'entity_id' in query_param_keys:
             self.kwargs['entity_ids'] = [str(query_params['entity_id']).strip()]
         elif 'entity_id__in' in query_param_keys:
             self.kwargs['entity_ids'] = [s_id.strip() for s_id in query_params['entity_id__in'].split(',')]
-
-        # if 'exclude_schools_same_coords_except_id' in query_param_keys:
-        #     self.kwargs['exclude_schools_same_coords_except_id'] = str(query_params['exclude_schools_same_coords_except_id']).strip()
 
         self.kwargs['is_weekly'] = False if query_params.get('is_weekly', 'true') == 'false' else True
         self.kwargs['benchmark'] = 'national' if query_params.get('benchmark', 'global') == 'national' else 'global'
@@ -100,12 +100,13 @@ class BaseEntityDataLayerAPIViewSet(APIView):
         self.kwargs['convert_unit'] = layer_instance.global_benchmark.get('convert_unit', 'mbps')
         self.kwargs['is_reverse'] = layer_instance.is_reverse
 
-        # self.kwargs['school_filters'] = core_utilities.get_filter_sql(
-        #     self.request, 'schools', 'schools_school')
-        # self.kwargs['school_static_filters'] = core_utilities.get_filter_sql(
-        #     self.request, 'school_static', 'connection_statistics_schoolweeklystatus')
+        self.kwargs['school_filters'] = core_utilities.get_filter_sql(
+            self.request, 'schools', 'schools_school')
+        self.kwargs['school_static_filters'] = core_utilities.get_filter_sql(
+            self.request, 'school_static', 'connection_statistics_schoolweeklystatus')
 
-        entity_type = query_params['entity_type'].strip().lower()
+        # entity_type = query_params['entity_type__code'].strip().lower()
+        entity_type = layer_instance.entity_type.code
         entity_static_table = f"entities_{entity_type}_entity"
 
         self.kwargs['entity_filters'] = core_utilities.get_filter_sql(
@@ -157,11 +158,6 @@ class BaseEntityDataLayerAPIViewSet(APIView):
 
         return legend_configs
 
-    def get_column_function_sql(self, parameter_col_function):
-        if isinstance(parameter_col_function, dict) and len(parameter_col_function) > 0:
-            return parameter_col_function.get('sql').format(col_name='t."{col_name}"')
-        return 'AVG(t."{col_name}")'
-
 
 @method_decorator([
     custom_cache_control(
@@ -184,342 +180,10 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
             '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))),
         )
 
-    def get_live_map_query(self, env, request):
-        query = """
-        WITH bounds AS (
-                SELECT {env} AS geom,
-                {env}::box2d AS b2d
-            ),
-            mvtgeom AS (
-                SELECT DISTINCT ST_AsMVTGeom(ST_Transform("schools_school".geopoint, 3857), bounds.b2d) AS geom,
-                    {random_select_list}
-                    "schools_school".id,
-                    True AS is_rt_connected,
-                    sds.{col_name} AS field_avg,
-                    {case_conditions}
-                    'connected' AS connectivity_status
-                FROM schools_school
-                INNER JOIN bounds ON ST_Intersects("schools_school".geopoint, ST_Transform(bounds.geom, 4326))
-                INNER JOIN (
-                    SELECT "schools_school"."id" AS school_id,
-                        "schools_school"."last_weekly_status_id",
-                        {col_function} AS "{col_name}"
-                    FROM "schools_school"
-                    INNER JOIN connection_statistics_schoolrealtimeregistration rt_status ON
-                        rt_status."school_id" = "schools_school".id
-                    {school_weekly_join}
-                    LEFT OUTER JOIN "connection_statistics_schooldailystatus" t ON (
-                        "schools_school"."id" = t."school_id"
-                        AND t."deleted" IS NULL
-                        AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
-                        AND t."live_data_source" IN ({live_source_types})
-                    )
-                    WHERE (
-                        "schools_school"."deleted" IS NULL
-                        AND rt_status."deleted" IS NULL
-                        {country_condition}
-                        {admin1_condition}
-                        {school_condition}
-                        {same_school_coords_condition}
-                        {school_weekly_condition}
-                        AND rt_status."rt_registered" = True
-                        AND rt_status."rt_registration_date"::date <= '{end_date}'
-                    )
-                    GROUP BY "schools_school"."id"
-                ) AS sds ON sds.school_id = "schools_school".id
-                {school_weekly_outer_join}
-                WHERE "schools_school"."deleted" IS NULL
-                    {random_order}
-                    {limit_condition}
-            )
-            SELECT ST_AsMVT(DISTINCT mvtgeom.*) FROM mvtgeom;
-        """
-
-        kwargs = copy.deepcopy(self.kwargs)
-
-        kwargs['country_condition'] = ''
-        kwargs['admin1_condition'] = ''
-        kwargs['school_condition'] = ''
-
-        kwargs['school_weekly_join'] = ''
-        kwargs['school_weekly_condition'] = ''
-        kwargs['school_weekly_outer_join'] = ''
-
-        kwargs['env'] = self.envelope_to_bounds_sql(env)
-
-        kwargs['limit_condition'] = ''
-        kwargs['random_order'] = ''
-        kwargs['random_select_list'] = ''
-        kwargs['same_school_coords_condition'] = ''
-
-        add_random_condition = True
-
-        legend_configs = kwargs['legend_configs']
-        if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
-            label_cases = []
-            for title, values_and_label in legend_configs.items():
-                values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
-                                     values_and_label.get('values', [])))
-
-                if len(values) > 0:
-                    is_sql_value = 'SQL:' in values[0]
-                    if is_sql_value:
-                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
-                        label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
-                else:
-                    label_cases.append("ELSE '{label}'".format(label=title))
-
-            kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status,'
-            kwargs['school_weekly_outer_join'] = """
-            INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
-            """
-        else:
-            kwargs['case_conditions'] = """
-                CASE WHEN sds.{col_name} >  {benchmark_value} THEN 'good'
-                    WHEN sds.{col_name} < {benchmark_value} AND sds.{col_name} >= {base_benchmark} THEN 'moderate'
-                    WHEN sds.{col_name} < {base_benchmark}  THEN 'bad'
-                    ELSE 'unknown'
-                END AS field_status,
-            """.format(**kwargs)
-
-            if kwargs['is_reverse'] is True:
-                kwargs['case_conditions'] = """
-                CASE WHEN sds.{col_name} < {benchmark_value}  THEN 'good'
-                    WHEN sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark} THEN 'moderate'
-                    WHEN sds.{col_name} > {base_benchmark} THEN 'bad'
-                    ELSE 'unknown'
-                END AS field_status,
-                """.format(**kwargs)
-
-        if len(kwargs.get('school_ids', [])) > 0:
-            add_random_condition = False
-            kwargs['school_condition'] = 'AND "schools_school"."id" IN ({0})'.format(
-                ','.join([str(school_id) for school_id in kwargs['school_ids']])
-            )
-        elif len(kwargs.get('admin1_ids', [])) > 0:
-            if settings.ADMIN_MAP_API_SAMPLING_LIMIT is not None:
-                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.ADMIN_MAP_API_SAMPLING_LIMIT
-                add_random_condition = True
-            else:
-                add_random_condition = False
-
-            kwargs['admin1_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
-                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
-            )
-        elif len(kwargs.get('country_ids', [])) > 0:
-            if settings.COUNTRY_MAP_API_SAMPLING_LIMIT:
-                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.COUNTRY_MAP_API_SAMPLING_LIMIT
-                add_random_condition = True
-            else:
-                add_random_condition = False
-
-            kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
-                ','.join([str(country_id) for country_id in kwargs['country_ids']])
-            )
-
-        if kwargs.get('exclude_schools_same_coords_except_id'):
-            kwargs['same_school_coords_condition'] = f"""
-                                        AND (
-                                            schools_school.id = {kwargs['exclude_schools_same_coords_except_id']}
-                                            OR NOT ST_Equals(
-                                                schools_school.geopoint,
-                                                (SELECT geopoint FROM schools_school WHERE id = {kwargs['exclude_schools_same_coords_except_id']})
-                                            )
-                                        )
-                                    """
-
-        if len(kwargs['school_filters']) > 0:
-            kwargs['school_condition'] += ' AND ' + kwargs['school_filters']
-
-        if len(kwargs['school_static_filters']) > 0:
-            kwargs['school_weekly_join'] = """
-            INNER JOIN "connection_statistics_schoolweeklystatus"
-                ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
-            """
-            kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
-
-        if add_random_condition:
-            if 'limit' in request.query_params:
-                limit = request.query_params['limit']
-                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
-            elif kwargs.get('MAP_API_SAMPLING_LIMIT'):
-                limit = kwargs['MAP_API_SAMPLING_LIMIT']
-                kwargs['random_order'] = 'ORDER BY random()'
-            else:
-                limit = '50000'
-                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
-
-            kwargs['limit_condition'] = 'LIMIT ' + str(limit)
-            kwargs['random_select_list'] = 'random(),'
-
-        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
-
-        return query.format(**kwargs)
-
     def envelope_to_sql(self, env, request):
-        # if (self.kwargs['layer_type'] == accounts_models.DataLayer.LAYER_TYPE_LIVE and
-        #     self.kwargs['entity_name'] == "health"):
-        #     return self.get_live_entity_map_query(env, request)
-        # elif (self.kwargs['layer_type'] == accounts_models.DataLayer.LAYER_TYPE_STATIC and
-        #     self.kwargs['entity_name'] == "health"):
-        #     return self.get_static_entity_map_query(env, request)
-        # elif self.kwargs['layer_type'] == accounts_models.DataLayer.LAYER_TYPE_LIVE:
-        #     return self.get_live_map_query(env, request)
-        # return self.get_static_map_query(env, request)
-
         if self.kwargs['layer_type'] == accounts_models.DataLayer.LAYER_TYPE_LIVE:
             return self.get_live_entity_map_query(env, request)
         return self.get_static_entity_map_query(env, request)
-
-    def get_static_map_query(self, env, request):
-        query = """
-        WITH
-        bounds AS (
-            SELECT {env} AS geom,
-                   {env}::box2d AS b2d
-        ),
-        mvtgeom AS (
-            SELECT DISTINCT ST_AsMVTGeom(ST_Transform(schools_school.geopoint, 3857), bounds.b2d) AS geom,
-                {random_select_list}
-                schools_school.id,
-                {table_name}."{col_name}" AS field_value,
-                'connected' AS connectivity_status,
-                {label_case_statements}
-            FROM schools_school
-            INNER JOIN bounds ON ST_Intersects(schools_school.geopoint, ST_Transform(bounds.geom, 4326))
-            INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
-            {school_weekly_join}
-            WHERE schools_school."deleted" IS NULL
-            {country_condition}
-            {admin1_condition}
-            {school_condition}
-            {same_school_coords_condition}
-            {school_weekly_condition}
-            {random_order}
-            {limit_condition}
-        )
-        SELECT ST_AsMVT(DISTINCT mvtgeom.*) FROM mvtgeom;
-        """
-
-        kwargs = copy.deepcopy(self.kwargs)
-
-        kwargs['country_condition'] = ''
-        kwargs['admin1_condition'] = ''
-        kwargs['school_condition'] = ''
-
-        kwargs['school_weekly_join'] = ''
-        kwargs['school_weekly_condition'] = ''
-
-        kwargs['env'] = self.envelope_to_bounds_sql(env)
-
-        kwargs['limit_condition'] = ''
-        kwargs['random_order'] = ''
-        kwargs['random_select_list'] = ''
-        kwargs['same_school_coords_condition'] = ''
-
-        add_random_condition = True
-
-        if len(kwargs.get('school_ids', [])) > 0:
-            add_random_condition = False
-            kwargs['school_condition'] = 'AND schools_school."id" IN ({0})'.format(
-                ','.join([str(school_id) for school_id in kwargs['school_ids']])
-            )
-        elif len(kwargs.get('admin1_ids', [])) > 0:
-            if settings.ADMIN_MAP_API_SAMPLING_LIMIT:
-                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.ADMIN_MAP_API_SAMPLING_LIMIT
-                add_random_condition = True
-            else:
-                add_random_condition = False
-
-            kwargs['admin1_condition'] = 'AND schools_school."admin1_id" IN ({0})'.format(
-                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
-            )
-        elif len(kwargs.get('country_ids', [])) > 0:
-            if settings.COUNTRY_MAP_API_SAMPLING_LIMIT:
-                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.COUNTRY_MAP_API_SAMPLING_LIMIT
-                add_random_condition = True
-            else:
-                add_random_condition = False
-
-            kwargs['country_condition'] = 'AND schools_school."country_id" IN ({0})'.format(
-                ','.join([str(country_id) for country_id in kwargs['country_ids']])
-            )
-        if kwargs.get('exclude_schools_same_coords_except_id'):
-            kwargs['same_school_coords_condition'] = f"""
-                                        AND (
-                                            sch.id = {kwargs['exclude_schools_same_coords_except_id']}
-                                            OR NOT ST_Equals(
-                                                sch.geopoint,
-                                                (SELECT geopoint FROM schools_school WHERE id = {kwargs['exclude_schools_same_coords_except_id']})
-                                            )
-                                        )
-                                    """
-
-        if len(kwargs['school_filters']) > 0:
-            kwargs['school_condition'] += ' AND ' + kwargs['school_filters']
-
-        if len(kwargs['school_static_filters']) > 0:
-            kwargs['school_weekly_join'] = """
-            INNER JOIN "connection_statistics_schoolweeklystatus"
-                ON sws."id" = "connection_statistics_schoolweeklystatus"."id"
-            """
-            kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
-
-        legend_configs = kwargs['legend_configs']
-        label_cases = []
-        values_l = []
-        parameter_col_type = kwargs['parameter_col'].get('type', 'str').lower()
-        kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'sws')
-
-        for title, values_and_label in legend_configs.items():
-            values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
-                                 values_and_label.get('values', [])))
-
-            if len(values) > 0:
-                is_sql_value = 'SQL:' in values[0]
-                if is_sql_value:
-                    sql_statement = str(','.join(values)).replace('SQL:', '').format(
-                        table_name=kwargs['table_name'],
-                        col_name=kwargs['col_name'],
-                    )
-                    label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
-                else:
-                    values_l.extend(values)
-                    if parameter_col_type == 'str':
-                        label_cases.append(
-                            """WHEN LOWER({table_name}."{col_name}") IN ({value}) THEN '{label}'""".format(
-                                table_name=kwargs['table_name'],
-                                col_name=kwargs['col_name'],
-                                label=title,
-                                value=','.join(["'" + str(v).lower() + "'" for v in values])
-                            ))
-                    elif parameter_col_type == 'int':
-                        label_cases.append(
-                            """WHEN {table_name}."{col_name}" IN ({value}) THEN '{label}'""".format(
-                                table_name=kwargs['table_name'],
-                                col_name=kwargs['col_name'],
-                                label=title,
-                                value=','.join([str(v) for v in values])
-                            ))
-            else:
-                label_cases.append("ELSE '{label}'".format(label=title))
-
-        kwargs['label_case_statements'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
-
-        if add_random_condition:
-            if 'limit' in request.query_params:
-                limit = request.query_params['limit']
-                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
-            elif kwargs.get('MAP_API_SAMPLING_LIMIT'):
-                limit = kwargs['MAP_API_SAMPLING_LIMIT']
-                kwargs['random_order'] = 'ORDER BY random()'
-            else:
-                limit = '50000'
-                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
-
-            kwargs['limit_condition'] = 'LIMIT ' + str(limit)
-            kwargs['random_select_list'] = 'random(),'
-        return query.format(**kwargs)
 
     def get_live_entity_map_query(self, env, request):
         query = """
@@ -532,15 +196,15 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
                     {random_select_list}
                     "entities_entity".id,
                     True AS is_rt_connected,
-                    sds.{col_name} AS field_avg,
+                    eds.{col_name} AS field_avg,
                     {case_conditions}
                     'connected' AS connectivity_status
                 FROM entities_entity
-                INNER JOIN bounds ON ST_Intersects("schools_school".geopoint, ST_Transform(bounds.geom, 4326))
+                INNER JOIN bounds ON ST_Intersects("entities_entity".geopoint, ST_Transform(bounds.geom, 4326))
                 INNER JOIN (
-                    SELECT "entities_entity"."id" AS school_id,
+                    SELECT "entities_entity"."id" AS entity_id,
                         "entities_entity"."last_weekly_status_id",
-                        {col_function} AS "{col_name}"
+                        AVG(t."{col_name}") AS "{col_name}"
                     FROM "entities_entity"
                     INNER JOIN connection_statistics_entityrealtimeregistration rt_status ON
                         rt_status."entity_id" = "entities_entity".id
@@ -590,11 +254,17 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
         kwargs['limit_condition'] = ''
         kwargs['random_order'] = ''
         kwargs['random_select_list'] = ''
-        # kwargs['same_school_coords_condition'] = ''
 
         add_random_condition = True
 
         legend_configs = kwargs['legend_configs']
+        entity_type_obj = get_entity_type_config(kwargs['entity_name'])
+        kwargs['parameter_col'] = build_parameter_config(
+            entity_type_obj,
+            kwargs['col_name'],
+            kwargs['entity_name']
+        )
+        kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'entities_entity')
         if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
             label_cases = []
             for title, values_and_label in legend_configs.items():
@@ -667,13 +337,13 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
             """
             kwargs['entity_weekly_condition'] = ' AND ' + kwargs['entity_real_time_filters']
 
-        if len(kwargs['entity_static_filters']) > 0:
-            kwargs['entity_master_table_join'] = """
-            INNER JOIN "entities_{entity_name}_entity"
-                ON "entities_entity"."last_master_status_id" = "entities_{entity_name}_entity"."id"
-            """.format(entity_name=kwargs['entity_name'])
+        # if len(kwargs['entity_static_filters']) > 0:
+        #     kwargs['entity_master_table_join'] = """
+        #     INNER JOIN "entities_{entity_name}_entity"
+        #         ON "entities_entity"."last_master_status_id" = "entities_{entity_name}_entity"."id"
+        #     """.format(entity_name=kwargs['entity_name'])
 
-            kwargs['entity_master_table_condition'] = ' AND ' + kwargs['entity_static_filters']
+            # kwargs['entity_master_table_condition'] = ' AND ' + kwargs['entity_static_filters']
 
         if add_random_condition:
             if 'limit' in request.query_params:
@@ -688,8 +358,6 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
 
             kwargs['limit_condition'] = 'LIMIT ' + str(limit)
             kwargs['random_select_list'] = 'random(),'
-
-        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
 
         return query.format(**kwargs)
 
@@ -709,7 +377,7 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
                 {label_case_statements}
             FROM entities_entity
             INNER JOIN bounds ON ST_Intersects(entities_entity.geopoint, ST_Transform(bounds.geom, 4326))
-            INNER JOIN entities_{entity_name}_entity ews ON entities_entity.last_weekly_status_id = ews.id
+            INNER JOIN entities_{entity_name}_entity ews ON "entities_entity"."id" = ews."entity_id"
             {entity_master_table_condition}
             WHERE entities_entity."deleted" IS NULL
             AND entities_entity.entity_type_id = (SELECT id FROM entities_entity_type WHERE code = '{entity_name}' AND deleted IS NULL)
@@ -778,7 +446,7 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
         if len(kwargs['entity_static_filters']) > 0:
             kwargs['entity_master_table_join'] = """
             INNER JOIN "entities_{entity_name}_entity"
-                ON ews."id" = "entities_{entity_name}_entity"."id"
+                ON "entities_entity"."id" = ews."entity_id"
             """.format(entity_name=kwargs['entity_name'])
 
             kwargs['entity_master_table_condition'] = ' AND ' + kwargs['entity_static_filters']
@@ -786,8 +454,14 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
         legend_configs = kwargs['legend_configs']
         label_cases = []
         values_l = []
+        entity_type_obj = get_entity_type_config(kwargs['entity_name'])
+        kwargs['parameter_col'] = build_parameter_config(
+            entity_type_obj,
+            kwargs['col_name'],
+            kwargs['entity_name']
+        )
         parameter_col_type = kwargs['parameter_col'].get('type', 'str').lower()
-        kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'sws')
+        kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'ews')
 
         for title, values_and_label in legend_configs.items():
             values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
@@ -859,7 +533,23 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
         return False
 
     def get(self, request, *args, **kwargs):
-        print("hello ****")
+        entity_type = self.request.query_params.get('entity_type__code')
+        if entity_type == LEGACY_MODEL:
+            school_view = DataLayerMapViewSet.as_view()
+            return school_view(request._request, *args, **kwargs)
+
+        # If entity_type__code is not provided, we will extract entity using data layer :
+        # NEED TO CONFIRM WITH FE ON THIS
+        # data_layer_instance = get_object_or_404(
+        #     accounts_models.DataLayer.objects.all(),
+        #     pk=self.kwargs.get('pk'),
+        #     status=accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
+        #
+        # )
+        # if data_layer_instance.entity_type.code == LEGACY_MODEL:
+        #     school_view = DataLayerMapViewSet.as_view()
+        #     return school_view(request._request, *args, **kwargs)
+
         use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
         request_path = remove_query_param(request.get_full_path(), 'cache')
         cache_key = self.get_cache_key()
@@ -873,8 +563,8 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
                 accounts_models.DataLayer.objects.all(),
                 pk=self.kwargs.get('pk'),
                 status=accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
-            )
 
+            )
             data_sources = data_layer_instance.data_sources.all()
 
             live_data_sources = ['UNKNOWN']
@@ -888,7 +578,6 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
 
             country_ids = data_layer_instance.applicable_countries
             parameter_col = data_sources.first().data_source_column
-            column_function_sql = self.get_column_function_sql(data_sources.first().data_source_column_function)
 
             parameter_column_name = str(parameter_col['name'])
             base_benchmark = str(parameter_col.get('base_benchmark', 1))
@@ -908,7 +597,6 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
                     'base_benchmark': base_benchmark,
                     'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                     'parameter_col': parameter_col,
-                    'parameter_col_function_sql': column_function_sql,
                     'layer_type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                     'legend_configs': legend_configs,
                     'entity_name': data_layer_instance.entity_name,
@@ -928,7 +616,7 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
                     cache_manager.set(cache_key, response, request_path=request_path,
                                       soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
             except Exception as ex:
-                logger.error('Exception occurred for school connectivity tiles endpoint: {}'.format(ex))
+                logger.error('Exception occurred for entity connectivity tiles endpoint: {}'.format(ex))
                 response = Response({'error': 'An error occurred while processing the request'}, status=500)
 
         return response
@@ -957,7 +645,6 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         )
 
     def get_info_query(self):
-        print("start0****")
         query = """
         SELECT {case_conditions}
             COUNT(DISTINCT CASE WHEN eds.{col_name} IS NOT NULL THEN eds.entity_id ELSE NULL END)
@@ -967,11 +654,11 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         FROM (
             SELECT "entities_entity"."id" AS entity_id,
                 "entities_entity"."last_weekly_status_id",
-                {col_function} AS "{col_name}"
+                AVG(t."{col_name}") AS "{col_name}"
             FROM "entities_entity"
             INNER JOIN "connection_statistics_entityrealtimeregistration"
                 ON ("entities_entity"."id" = "connection_statistics_entityrealtimeregistration"."entity_id")
-            {school_weekly_join}
+            {entity_weekly_join}
             LEFT OUTER JOIN "connection_statistics_entitydailystatus" t
                 ON (
                     "entities_entity"."id" = t."entity_id"
@@ -985,24 +672,24 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 AND "connection_statistics_entityrealtimeregistration"."deleted" IS NULL
                 {country_condition}
                 {admin1_condition}
-                {school_condition}
-                {school_weekly_condition}
+                {entity_condition}
+                {entity_weekly_condition}
                 AND "connection_statistics_entityrealtimeregistration"."rt_registered" = True
                 AND "connection_statistics_entityrealtimeregistration"."rt_registration_date"::date <= '{end_date}')
             GROUP BY "entities_entity"."id"
             ORDER BY "entities_entity"."id" ASC
         ) AS eds
-        {school_weekly_outer_join}
+        {entity_weekly_outer_join}
         """
 
         kwargs = copy.deepcopy(self.kwargs)
 
         kwargs['country_condition'] = ''
         kwargs['admin1_condition'] = ''
-        kwargs['school_condition'] = ''
-        kwargs['school_weekly_join'] = ''
-        kwargs['school_weekly_condition'] = ''
-        kwargs['school_weekly_outer_join'] = ''
+        kwargs['entity_condition'] = ''
+        kwargs['entity_weekly_join'] = ''
+        kwargs['entity_weekly_condition'] = ''
+        kwargs['entity_weekly_outer_join'] = ''
         kwargs['benchmark_value_sql'] = ''
 
         benchmark_value = kwargs['benchmark_value']
@@ -1010,6 +697,13 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(**kwargs) + ' AS benchmark_sql_value,'
 
         legend_configs = kwargs['legend_configs']
+        entity_type_obj = get_entity_type_config(kwargs['entity_name'])
+        kwargs['parameter_col'] = build_parameter_config(
+            entity_type_obj,
+            kwargs['col_name'],
+            kwargs['entity_name']
+        )
+        kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'entities_entity')
         if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
             label_cases = []
             for title, values_and_label in legend_configs.items():
@@ -1031,7 +725,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
             kwargs['case_conditions'] = ' '.join(label_cases)
 
-            kwargs['school_weekly_outer_join'] = """
+            kwargs['entity_weekly_outer_join'] = """
             INNER JOIN "connection_statistics_entityweeklystatus" ews ON eds."last_weekly_status_id" = ews."id"
             """
         else:
@@ -1061,28 +755,25 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
 
-        if len(kwargs['school_filters']) > 0:
-            kwargs['school_condition'] = ' AND ' + kwargs['school_filters']
+        if len(kwargs['entity_filters']) > 0:
+            kwargs['entity_condition'] = ' AND ' + kwargs['entity_filters']
 
-        if len(kwargs['school_static_filters']) > 0:
-            kwargs['school_weekly_join'] = """
+        if len(kwargs['entity_static_filters']) > 0:
+            kwargs['entity_weekly_join'] = """
             INNER JOIN "connection_statistics_entityweeklystatus"
                 ON "entities_entity"."last_weekly_status_id" = "connection_statistics_entityweeklystatus"."id"
             """
-            kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
-
-        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
+            kwargs['entity_weekly_condition'] = ' AND ' + kwargs['entity_static_filters']
 
         return query.format(**kwargs)
 
     def get_entity_view_info_query(self):
-        print("start****")
         query = """
         SELECT DISTINCT entities_entity."id",
             entities_entity."name",
             entities_entity."external_id",
             entities_entity."giga_id",
-            CASE WHEN srr."rt_registered" = True THEN true ELSE false END AS is_data_synced,
+            CASE WHEN err."rt_registered" = True THEN true ELSE false END AS is_data_synced,
             entities_entity."admin1_id",
             adm1_metadata."name" AS admin1_name,
             adm1_metadata."giga_id_admin" AS admin1_code,
@@ -1095,22 +786,20 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             c."name" AS country_name,
             ST_AsGeoJSON(ST_Transform(entities_entity."geopoint", 4326)) AS geopoint,
             entities_entity."environment",
-            -- schools_school."education_level",
             ROUND(eds."{col_name}"::numeric, 2) AS "live_avg",
             ews."download_speed_benchmark",
             CASE WHEN entities_entity.connectivity_status IN ('good', 'moderate') THEN 'connected'
                 WHEN entities_entity.connectivity_status = 'no' THEN 'not_connected'
                 ELSE 'unknown'
             END AS connectivity_status,
-            CASE WHEN err."rt_registered" = True AND srr."rt_registration_date"::date <= '{end_date}' THEN true
+            CASE WHEN err."rt_registered" = True AND err."rt_registration_date"::date <= '{end_date}' THEN true
             ELSE false END AS is_rt_connected,
             {benchmark_value_sql}
             {case_conditions}
         FROM "entities_entity" entities_entity
         INNER JOIN public.locations_country c ON c."id" = entities_entity."country_id"
-        -- INNER JOIN "connection_statistics_entityweeklystatus" ews ON entities_entity."last_weekly_status_id" =
-        --ews."id"
-        INNER JOIN "entities_{entity_name}_entity" ews ON entities_entity."last_weekly_status_id" = ews."id"
+        INNER JOIN "connection_statistics_entityweeklystatus" ews ON entities_entity."last_weekly_status_id" =
+        ews."id"
         LEFT JOIN public.locations_countryadminmetadata AS adm1_metadata
             ON adm1_metadata."id" = entities_entity.admin1_id
             AND adm1_metadata."layer_name" = 'adm1'
@@ -1124,7 +813,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             AND err."deleted" IS NULL
         LEFT JOIN (
             SELECT "entities_entity"."id" AS entity_id,
-                {col_function} AS "{col_name}"
+                AVG(t."{col_name}") AS "{col_name}"
             FROM "entities_entity"
             LEFT OUTER JOIN "connection_statistics_entitydailystatus" t
                 ON (
@@ -1161,6 +850,13 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 **kwargs) + ' AS benchmark_sql_value,'
 
         legend_configs = kwargs['legend_configs']
+        entity_type_obj = get_entity_type_config(kwargs['entity_name'])
+        kwargs['parameter_col'] = build_parameter_config(
+            entity_type_obj,
+            kwargs['col_name'],
+            kwargs['entity_name']
+        )
+        kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'entities_entity')
         if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
             label_cases = []
             for title, values_and_label in legend_configs.items():
@@ -1196,23 +892,27 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     ELSE 'unknown' END AS live_avg_connectivity
                 """.format(**kwargs)
 
-        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
-        print("end****")
         return query.format(**kwargs)
 
-    def get_entity_view_statistics_info_query(self):
+    def get_entity_view_statistics_info_query(self, layer_type):
+        if layer_type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+            join_condition = """
+            INNER JOIN connection_statistics_entityweeklystatus ews
+                ON "entities_entity"."last_weekly_status_id" = ews."id"
+            """
+        else:
+            join_condition = """
+            INNER JOIN entities_{entity_name}_entity ews
+                ON "entities_entity"."id" = ews."entity_id"
+            """.format(entity_name=self.kwargs['entity_name'])
+
         query = """
-        SELECT ews.*,
-        ehs.*
+        SELECT ews.*
         FROM "entities_entity"
-        INNER JOIN connection_statistics_schoolweeklystatus ews
-            ON "entities_entity"."last_weekly_status_id" = sws."id"
-        INNER JOIN entities_{entity_name}_entity ehs
-            ON "entities_entity"."last_weekly_status_id" = ehs."id"
+        {join_condition}
         WHERE "entities_entity"."deleted" IS NULL
             AND "entities_entity"."id" IN ({ids})
-            AND entities_entity.entity_type_id = (SELECT id FROM entities_entity_type WHERE code = '{entity_name}' AND deleted IS NULL)
-        """.format(ids=','.join(self.kwargs['entity_ids']), entity_name=self.kwargs['entity_name'])
+        """.format(ids=','.join(self.kwargs['entity_ids']), join_condition=join_condition)
 
         return query
 
@@ -1245,18 +945,18 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
     def get_avg_query(self, **kwargs):
         query = """
-        SELECT {school_selection}t."date" AS date,
-            {col_function} AS "field_avg"
+        SELECT {entity_selection}t."date" AS date,
+            AVG(t."{col_name}") AS "field_avg"
         FROM "entities_entity"
         INNER JOIN "connection_statistics_entityrealtimeregistration" ON
             "connection_statistics_entityrealtimeregistration"."entity_id" = "entities_entity"."id"
         INNER JOIN "connection_statistics_entitydailystatus" t ON "entities_entity"."id" = t."entity_id"
-        {school_weekly_join}
+        {entity_weekly_join}
         WHERE (
             {country_condition}
             {admin1_condition}
-            {school_condition}
-            {school_weekly_condition}
+            {entity_condition}
+            {entity_weekly_condition}
             "connection_statistics_entityrealtimeregistration"."deleted" IS NULL
             AND "connection_statistics_entityrealtimeregistration"."rt_registered" = True
             AND "connection_statistics_entityrealtimeregistration"."rt_registration_date"::date <= '{end_date}'
@@ -1265,22 +965,22 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             AND t."deleted" IS NULL
             AND t."{col_name}" IS NOT NULL
         )
-        GROUP BY t."date"{school_group_by}
+        GROUP BY t."date"{entity_group_by}
         ORDER BY t."date" ASC
         """
 
         kwargs['country_condition'] = ''
         kwargs['admin1_condition'] = ''
-        kwargs['school_condition'] = ''
-        kwargs['school_selection'] = ''
-        kwargs['school_group_by'] = ''
-        kwargs['school_weekly_join'] = ''
-        kwargs['school_weekly_condition'] = ''
+        kwargs['entity_condition'] = ''
+        kwargs['entity_selection'] = ''
+        kwargs['entity_group_by'] = ''
+        kwargs['entity_weekly_join'] = ''
+        kwargs['entity_weekly_condition'] = ''
 
         if len(kwargs.get('entity_ids', [])) > 0:
-            kwargs['school_condition'] = '"entities_entity"."id" IN ({0}) AND '.format(','.join(kwargs['entity_ids']))
-            kwargs['school_selection'] = '"entities_entity"."id", '
-            kwargs['school_group_by'] = ', "entities_entity"."id"'
+            kwargs['entity_condition'] = '"entities_entity"."id" IN ({0}) AND '.format(','.join(kwargs['entity_ids']))
+            kwargs['entity_selection'] = '"entities_entity"."id", '
+            kwargs['entity_group_by'] = ', "entities_entity"."id"'
         elif len(kwargs.get('admin1_ids', [])) > 0:
             kwargs['admin1_condition'] = '"entities_entity"."admin1_id" IN ({0}) AND'.format(
                 ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
@@ -1290,17 +990,15 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
 
-        if len(kwargs['school_filters']) > 0:
-            kwargs['school_condition'] += kwargs['school_filters'] + ' AND '
+        if len(kwargs['entity_filters']) > 0:
+            kwargs['entity_condition'] += kwargs['entity_filters'] + ' AND '
 
-        if len(kwargs['school_static_filters']) > 0:
-            kwargs['school_weekly_join'] = """
+        if len(kwargs['entity_static_filters']) > 0:
+            kwargs['entity_weekly_join'] = """
             INNER JOIN "connection_statistics_entityweeklystatus"
                 ON "entities_entity"."last_weekly_status_id" = "connection_statistics_entityweeklystatus"."id"
             """
-            kwargs['school_weekly_condition'] = kwargs['school_static_filters'] + ' AND '
-
-        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
+            kwargs['entity_weekly_condition'] = kwargs['entity_static_filters'] + ' AND '
 
         return query.format(**kwargs)
 
@@ -1369,29 +1067,29 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         return graph_data, all_positive_speeds
 
     def get_static_info_query(self, query_labels):
-        print("start1****")
         query = """
         SELECT {label_case_statements}
-            COUNT(DISTINCT CASE WHEN {table_name}."{col_name}" IS NOT NULL THEN "schools_school"."id" ELSE NULL END)
+            COUNT(DISTINCT CASE WHEN {table_name}."{col_name}" IS NOT NULL THEN "entities_entity"."id" ELSE NULL END)
             AS "total_entities"
         FROM "entities_entity"
-        INNER JOIN connection_statistics_entityweeklystatus sws ON "entities_entity"."last_weekly_status_id" = ews."id"
-        {school_weekly_join}
+        INNER JOIN entities_{entity_name}_entity ews ON "entities_entity"."id" = ews."entity_id"
+        {entity_weekly_join}
         WHERE "entities_entity"."deleted" IS NULL
-        AND entities_entity.entity_type_id = (SELECT id FROM entities_entity_type WHERE code = '{entity_name}' AND deleted IS NULL)
+        -- AND entities_entity.entity_type_id = (SELECT id FROM entities_entity_type WHERE code = '{entity_name}' AND
+        -- deleted IS NULL)
         {country_condition}
         {admin1_condition}
-        {school_condition}
-        {school_weekly_condition}
+        {entity_condition}
+        {entity_weekly_condition}
         """
 
         kwargs = copy.deepcopy(self.kwargs)
 
         kwargs['country_condition'] = ''
         kwargs['admin1_condition'] = ''
-        kwargs['school_condition'] = ''
-        kwargs['school_weekly_join'] = ''
-        kwargs['school_weekly_condition'] = ''
+        kwargs['entity_condition'] = ''
+        kwargs['entity_weekly_join'] = ''
+        kwargs['entity_weekly_condition'] = ''
 
         if len(kwargs.get('admin1_ids', [])) > 0:
             kwargs['admin1_condition'] = ' AND "entities_entity"."admin1_id" IN ({0})'.format(
@@ -1402,21 +1100,27 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
 
-        if len(kwargs['school_filters']) > 0:
-            kwargs['school_condition'] = ' AND ' + kwargs['school_filters']
+        if len(kwargs['entity_filters']) > 0:
+            kwargs['entity_condition'] = ' AND ' + kwargs['entity_filters']
 
-        if len(kwargs['school_static_filters']) > 0:
-            kwargs['school_weekly_join'] = """
-            INNER JOIN "connection_statistics_entityweeklystatus"
-                ON ews."id" = "connection_statistics_entityweeklystatus"."id"
+        if len(kwargs['entity_static_filters']) > 0:
+            kwargs['entity_weekly_join'] = """
+            INNER JOIN "entities_{entity_name}_entity"
+                ON ews."entity_id" = "entities_entity"."id"
             """
-            kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
+            kwargs['entity_weekly_condition'] = ' AND ' + kwargs['entity_static_filters']
 
         legend_configs = kwargs['legend_configs']
         label_cases = []
         values_l = []
+        entity_type_obj = get_entity_type_config(kwargs['entity_name'])
+        kwargs['parameter_col'] = build_parameter_config(
+            entity_type_obj,
+            kwargs['col_name'],
+            kwargs['entity_name']
+        )
         parameter_col_type = kwargs['parameter_col'].get('type', 'str').lower()
-        kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'sws')
+        kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'entities_entity')
         is_sql_value = False
 
         for title, values_and_label in legend_configs.items():
@@ -1488,11 +1192,9 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                             ))
 
         kwargs['label_case_statements'] = ' '.join(label_cases)
-        print("end1****")
         return query.format(**kwargs)
 
     def get_static_entity_view_info_query(self):
-        print("start2****")
         query = """
         SELECT entities_entity."id",
             entities_entity."name",
@@ -1518,7 +1220,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             END as connectivity_status
         FROM "entities_entity"
         INNER JOIN locations_country c ON c.id = entities_entity.country_id
-        INNER JOIN connection_statistics_entityweeklystatus ews ON entities_entity.last_weekly_status_id = ews.id
+        INNER JOIN entities_{entity_name}_entity ews ON entities_entity.id = ews.entity_id
         LEFT JOIN locations_countryadminmetadata AS adm1_metadata
             ON adm1_metadata."id" = entities_entity.admin1_id
             AND adm1_metadata."layer_name" = 'adm1'
@@ -1532,11 +1234,17 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         """
 
         kwargs = copy.deepcopy(self.kwargs)
-        kwargs['ids'] = ','.join(kwargs['school_ids'])
+        kwargs['ids'] = ','.join(kwargs['entity_ids'])
 
         legend_configs = kwargs['legend_configs']
         label_cases = []
         values_l = []
+        entity_type_obj = get_entity_type_config(kwargs['entity_name'])
+        kwargs['parameter_col'] = build_parameter_config(
+            entity_type_obj,
+            kwargs['col_name'],
+            kwargs['entity_name']
+        )
         parameter_col_type = kwargs['parameter_col'].get('type', 'str').lower()
         kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'sws')
 
@@ -1577,79 +1285,23 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
         return query.format(**kwargs)
 
-    def get_entity_ids_at_same_location(self, request, entity_id, country_id):
-        """Get school_ids at same location"""
-        response = {"count": 0, "school_ids": []}
-
-        count_query = """
-        SELECT
-            count(e.id)
-        FROM
-            entities_entity e
-        WHERE
-            e.deleted IS NULL
-            AND e.id != {entity_id}
-            AND e.geopoint = (SELECT geopoint FROM entities_entity WHERE id = {entity_id})
-        """.format(entity_id=entity_id)
-
-        entity_count = db_utilities.sql_to_response(count_query, label=self.__class__.__name__,
-                                               db_var=settings.READ_ONLY_DB_KEY)
-        total_count = entity_count[0].get('count', 0) if entity_count else 0
-        if total_count == 0:
-            return response
-
-        try:
-            limit = int(request.query_params.get("limit_same_location_schools", 300))
-            limit = limit if limit > 0 else 300
-        except ValueError:
-            limit = 300
-        try:
-            offset = int(request.query_params.get("offset_same_location_schools", 0))
-            offset = max(offset, 0)
-        except ValueError:
-            offset = 0
-
-        query = """
-        SELECT
-            e.id
-        FROM
-            entities_entity e
-        LEFT JOIN
-            connection_statistics_entityrealtimeregistration err ON e.id = err.school_id
-            AND err.deleted IS NULL
-            AND err.rt_registration_date <= '{end_date}'
-        WHERE
-            e.deleted IS NULL
-            AND e.entity_type_id = (SELECT id FROM entities_entity_type WHERE code = '{entity_name}' AND deleted IS NULL)
-            AND e.id != {entity_id}
-            AND e.country_id = {country_id}
-            AND e.geopoint = (SELECT geopoint FROM entities_entity WHERE id = {entity_id})
-        ORDER BY
-            CASE
-                WHEN err.rt_registered = true THEN 1
-                WHEN e.connectivity_status IN ('good', 'moderate') THEN 2
-                WHEN e.connectivity_status = 'no' THEN 3
-                ELSE 4
-            END ASC,
-            e.name_lower ASC
-        LIMIT {limit}
-        OFFSET {offset}
-        """.format(
-            entity_id=entity_id,
-            country_id=country_id,
-            limit=limit,
-            offset=offset,
-            end_date=self.kwargs.get('end_date', core_utilities.get_current_datetime_object().date()),
-            entity_name= self.kwargs.get('entity_name')
-        )
-
-        sql_response = db_utilities.sql_to_response(query, label=self.__class__.__name__, db_var=settings.READ_ONLY_DB_KEY)
-        if sql_response:
-            response['count'] = total_count
-            response['school_ids'] = [r.get('id') for r in sql_response]
-        return response
-
     def get(self, request, *args, **kwargs):
+        entity_type = self.request.query_params.get('entity_type__code')
+        if entity_type == LEGACY_MODEL:
+            school_view = DataLayerInfoViewSet.as_view()
+            return school_view(request._request, *args, **kwargs)
+
+        # If entity_type__code is not provided, we will extract entity using data layer :
+        # NEED TO CONFIRM WITH FE ON THIS
+        # data_layer_instance = get_object_or_404(
+        #     accounts_models.DataLayer.objects.all(),
+        #     pk=self.kwargs.get('pk'),
+        #     status=accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
+        # )
+        # if data_layer_instance.entity_type.code == LEGACY_MODEL:
+        #     school_view = DataLayerInfoViewSet.as_view()
+        #     return school_view(request._request, *args, **kwargs)
+
         use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
         request_path = remove_query_param(request.get_full_path(), 'cache')
         cache_key = self.get_cache_key()
@@ -1664,7 +1316,6 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 pk=self.kwargs.get('pk'),
                 status=accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
             )
-
             data_sources = data_layer_instance.data_sources.all()
 
             live_data_sources = ['UNKNOWN']
@@ -1678,8 +1329,6 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
             country_ids = data_layer_instance.applicable_countries
             parameter_col = data_sources.first().data_source_column
-            parameter_col_function = data_sources.first().data_source_column_function
-            column_function_sql = self.get_column_function_sql(parameter_col_function)
 
             parameter_column_name = str(parameter_col['name'])
             parameter_column_unit = str(parameter_col.get('unit', '')).lower()
@@ -1725,25 +1374,23 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     'base_benchmark': base_benchmark,
                     'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                     'parameter_col': parameter_col,
-                    'parameter_col_function_sql': column_function_sql,
                     'is_reverse': data_layer_instance.is_reverse,
                     'legend_configs': legend_configs,
                     'entity_name': data_layer_instance.entity_name,
                 })
 
                 if len(self.kwargs.get('entity_ids', [])) > 0:
-                    print("inside if ****")
                     info_panel_entity_list = db_utilities.sql_to_response(self.get_entity_view_info_query(),
                                                                           label=self.__class__.__name__,
                                                                           db_var=settings.READ_ONLY_DB_KEY)
-                    statistics = db_utilities.sql_to_response(self.get_entity_view_statistics_info_query(),
+                    statistics = db_utilities.sql_to_response(self.get_entity_view_statistics_info_query(data_layer_instance.type),
                                                               label=self.__class__.__name__,
                                                               db_var=settings.READ_ONLY_DB_KEY)
                     graph_data, positive_speeds = self.generate_graph_data()
                     sorted_info_panel_entity_list = []
 
                     if len(info_panel_entity_list) > 0:
-                        # Perform sorting based on the same order of school ids provided in the query param
+                        # Perform sorting based on the same order of entity ids provided in the query param
                         for entity_id in self.kwargs.get('entity_ids', []):
                             for entity_details in info_panel_entity_list:
                                 if str(entity_details['id']) == str(entity_id):
@@ -1754,14 +1401,11 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                             info_panel_entity['statistics'] = list(filter(
                                 lambda s: s['entity_id'] == info_panel_entity['id'], statistics))[-1]
 
-                            # live_avg = (round(sum(positive_speeds[str(info_panel_school['id'])]) / len(
-                            #     positive_speeds[str(info_panel_school['id'])]), 2) if len(
-                            #     positive_speeds[str(info_panel_school['id'])]) > 0 else 0)
+                            live_avg = (round(sum(positive_speeds[str(info_panel_entity['id'])]) / len(
+                                positive_speeds[str(info_panel_entity['id'])]), 2) if len(
+                                positive_speeds[str(info_panel_entity['id'])]) > 0 else 0)
 
-                            info_panel_entity['live_avg'] = self.get_live_avg(
-                                parameter_col_function.get('name', 'avg'),
-                                positive_speeds[str(info_panel_entity['id'])]
-                            )
+                            info_panel_entity['live_avg'] = live_avg
                             info_panel_entity['graph_data'] = graph_data[str(info_panel_entity['id'])]
 
                             benchmark_value_from_sql = info_panel_entity.get('benchmark_sql_value', None)
@@ -1784,12 +1428,6 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                                 'convert_unit': self.kwargs.get('convert_unit'),
                                 'display_unit': display_unit,
                             }
-                            if request.query_params.get('include_same_location_entities') == 'true':
-                                info_panel_entity['entity_at_same_location'] = self.get_entity_ids_at_same_location(
-                                    request,
-                                    info_panel_entity.get('id'),
-                                    info_panel_entity.get('country_id'),
-                                )
 
                     response = sorted_info_panel_entity_list
                 else:
@@ -1797,11 +1435,11 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                         entity__realtime_registration_status__rt_registered=True,
                     )
 
-                    if len(self.kwargs['school_filters']) > 0:
-                        is_data_synced_qs = is_data_synced_qs.extra(where=[self.kwargs['school_filters']])
+                    if len(self.kwargs['entity_filters']) > 0:
+                        is_data_synced_qs = is_data_synced_qs.extra(where=[self.kwargs['entity_filters']])
 
-                    if len(self.kwargs['school_static_filters']) > 0:
-                        is_data_synced_qs = is_data_synced_qs.extra(where=[self.kwargs['school_static_filters']])
+                    if len(self.kwargs['entity_static_filters']) > 0:
+                        is_data_synced_qs = is_data_synced_qs.extra(where=[self.kwargs['entity_static_filters']])
 
                     if len(self.kwargs.get('admin1_ids', [])) > 0:
                         is_data_synced_qs = is_data_synced_qs.filter(entity__admin1_id__in=self.kwargs['admin1_ids'])
@@ -1813,10 +1451,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                                                                   db_var=settings.READ_ONLY_DB_KEY)[-1]
 
                     graph_data, positive_speeds = self.generate_graph_data()
-                    live_avg = self.get_live_avg(
-                        parameter_col_function.get('name', 'avg'),
-                        positive_speeds
-                    )
+                    live_avg = round(sum(positive_speeds) / len(positive_speeds), 2) if len(positive_speeds) > 0 else 0
 
                     live_avg_connectivity = 'unknown'
 
@@ -1880,10 +1515,12 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 })
 
                 if len(self.kwargs.get('entity_ids', [])) > 0:
+                    print("inside static")
                     info_panel_entity_list = db_utilities.sql_to_response(self.get_static_entity_view_info_query(),
                                                                           label=self.__class__.__name__,
                                                                           db_var=settings.READ_ONLY_DB_KEY)
-                    statistics = db_utilities.sql_to_response(self.get_entity_view_statistics_info_query(),
+
+                    statistics = db_utilities.sql_to_response(self.get_entity_view_statistics_info_query(data_layer_instance.type),
                                                               label=self.__class__.__name__,
                                                               db_var=settings.READ_ONLY_DB_KEY)
 
@@ -1899,10 +1536,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                             info_panel_entity['geopoint'] = json.loads(info_panel_entity['geopoint'])
                             info_panel_entity['statistics'] = list(filter(
                                 lambda s: s['entity_id'] == info_panel_entity['id'], statistics))[-1]
-                            # if request.query_params.get('include_same_location_entities') == 'true':
-                            #     info_panel_entity['schools_at_same_location'] = self.get_entity_ids_at_same_location(
-                            #         request, info_panel_entity.get('id'), info_panel_entity.get('country_id')
-                            #     )
+
 
                     response = sorted_info_panel_entity_list
                 else:

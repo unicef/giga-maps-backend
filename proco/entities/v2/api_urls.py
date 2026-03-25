@@ -79,14 +79,17 @@ urlpatterns = [
     path('countries/', locations_entity_api.EntityCountryViewSet.as_view({'get': 'list'})),
     path('countries/<str:pk>/', locations_entity_api.EntityCountryViewSet.as_view({'get': 'retrieve'})),
 
-    # Entity list by country (Should be at last)
-    path('', include(country_entities.urls)),
-
     # Entity Global Stat
     path('global-stat/', stats_entity_api.EntityGlobalStatsAPIView.as_view(), name='global-stat-all-entities'),
     path('connectivity-stat/', stats_entity_api.EntityConnectivityAPIView.as_view(),
          name='global-connectivity-stat-entities'),
 
+    path('tiles/connectivity/', entities_api.EntityGlobalConnectivityTileRequestHandler.as_view(),
+         name='tiles-global-connectivity-view'),
+
     # Cognitive Search Index based searching for Entities
     path('gentity-search/', entities_api.AggregateSearchEntityViewSet.as_view(), name='global-search-filter'),
+
+    # Entity list by country (Should be at last)
+    path('', include(country_entities.urls)),
 ]
