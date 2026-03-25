@@ -84,6 +84,9 @@ urlpatterns = [
     path('connectivity-stat/', stats_entity_api.EntityConnectivityAPIView.as_view(),
          name='global-connectivity-stat-entities'),
 
+    path('tiles/connectivity/', entities_api.EntityGlobalConnectivityTileRequestHandler.as_view(),
+         name='tiles-global-connectivity-view'),
+
     # Cognitive Search Index based searching for Entities
     path('gentity-search/', entities_api.AggregateSearchEntityViewSet.as_view(), name='global-search-filter'),
 

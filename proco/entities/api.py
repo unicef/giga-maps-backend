@@ -1,5 +1,6 @@
 import logging
 from collections import OrderedDict
+from datetime import datetime, time
 
 from django.conf import settings
 from django.db import models
@@ -16,6 +17,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.utils.urls import remove_query_param
 
+from proco.utils import dates as date_utilities
+from proco.connection_statistics.models import SchoolWeeklyStatus
+from proco.connection_statistics.utils import get_benchmark_value_for_default_download_layer
 from proco.entities.constants import LEGACY_MODEL, ALL_ENTITIES
 from proco.locations.api import BaseSearchMixin
 from proco.locations.search_indexes import EntityIndex, SchoolIndex
@@ -463,3 +467,275 @@ class AggregateSearchEntityViewSet(BaseSearchMixin, ListAPIView):
         resp_data["results"] = results
 
         return Response(resp_data)
+
+
+class EntityConnectivityTileGenerator(BaseTileGenerator):
+    def __init__(self, table_config):
+        super().__init__()
+        self.table_config = table_config
+
+    def query_filters(self, request, table_configs):
+        table_configs['limit_condition'] = 'LIMIT ' + request.query_params.get('limit', '50000')
+
+        if (
+            'country_id' in request.query_params or
+            'country_id__in' in request.query_params or
+            'admin1_id' in request.query_params or
+            'admin1_id__in' in request.query_params or
+            'school_id' in request.query_params or
+            'school_id__in' in request.query_params
+        ):
+            if 'school_id' in request.query_params:
+                table_configs['school_condition'] = f" AND schools_school.id = {request.query_params['school_id']}"
+            elif 'school_id__in' in request.query_params:
+                school_ids = ','.join([c.strip() for c in request.query_params['school_id__in'].split(',')])
+                table_configs['school_condition'] = f" AND schools_school.id IN ({school_ids})"
+
+            elif 'admin1_id' in request.query_params:
+                table_configs[
+                    'admin1_condition'] = f" AND schools_school.admin1_id = {request.query_params['admin1_id']}"
+            elif 'admin1_id__in' in request.query_params:
+                admin1_ids = ','.join([c.strip() for c in request.query_params['admin1_id__in'].split(',')])
+                table_configs['admin1_condition'] = f" AND schools_school.admin1_id IN ({admin1_ids})"
+
+            elif 'country_id' in request.query_params:
+                table_configs[
+                    'country_condition'] = f" AND schools_school.country_id = {request.query_params['country_id']}"
+            elif 'country_id__in' in request.query_params:
+                country_ids = ','.join([c.strip() for c in request.query_params['country_id__in'].split(',')])
+                table_configs['country_condition'] = f" AND schools_school.country_id IN ({country_ids})"
+
+        else:
+            zoom_level = int(request.query_params.get('z', '0'))
+            if zoom_level == 0:
+                table_configs['limit_condition'] = 'LIMIT ' + '90000'
+            elif zoom_level == 1:
+                table_configs['limit_condition'] = 'LIMIT ' + '30000'
+
+            table_configs['random_order'] = 'ORDER BY schools_school.giga_id_school ASC'
+            table_configs['entity_random_order'] = 'ORDER BY entities_entity.giga_id ASC'
+
+        if 'is_weekly' in request.query_params:
+            is_weekly = request.query_params.get('is_weekly', 'true') == 'true'
+            start_date = date_utilities.to_date(request.query_params.get('start_date'),
+                                                default=datetime.combine(datetime.now(), time.min))
+
+            end_date = date_utilities.to_date(request.query_params.get('end_date'),
+                                              default=datetime.combine(datetime.now(), time.min))
+            table_configs['rt_date_condition'] = f" AND rt_status.rt_registration_date <= '{end_date}'"
+
+            month_number = date_utilities.get_month_from_date(start_date)
+            year_number = date_utilities.get_year_from_date(start_date)
+
+            if is_weekly:
+                # If is_weekly == True, then pick the week number based on start_date
+                week_number = date_utilities.get_week_from_date(start_date)
+            else:
+                # If is_weekly == False, then:
+                # 1. Collect dates on all sundays of the given month and year
+                # 2. Get the week numbers for all sundays and look into SchoolWeeklyStatus table for which
+                # last week number data was created in the given month of the year. And pick this week number
+                dates_on_all_sundays = date_utilities.all_days_of_a_month(year_number, month_number,
+                                                                          day_name='sunday').keys()
+                week_numbers_for_month = [date_utilities.get_week_from_date(date) for date in dates_on_all_sundays]
+                week_number = SchoolWeeklyStatus.objects.all().filter(
+                    year=year_number, week__in=week_numbers_for_month, ).order_by('-week').values_list(
+                    'week', flat=True).first()
+
+                if not week_number:
+                    # If for any week of the month data is not available then pick last week number
+                    week_number = week_numbers_for_month[-1]
+
+            table_configs['weekly_lookup_condition'] = (f'ON schools_school.id = c.school_id AND c.week={week_number} '
+                                                        f'AND c.year={year_number}')
+
+        table_configs['benchmark'], table_configs['benchmark_unit'] = get_benchmark_value_for_default_download_layer(
+            request.query_params.get('benchmark', 'global'),
+            request.query_params.get('country_id', None)
+        )
+
+    def envelope_to_sql(self, env, request):
+        tbl = self.table_config.copy()
+        tbl['env'] = self.envelope_to_bounds_sql(env)
+
+        tbl['limit_condition'] = ''
+        tbl['country_condition'] = ''
+        tbl['admin1_condition'] = ''
+        tbl['school_condition'] = ''
+        tbl['weekly_lookup_condition'] = 'ON schools_school.last_weekly_status_id = c.id'
+        tbl['random_order'] = ''
+        tbl['entity_random_order'] = ''
+        tbl['rt_date_condition'] = ''
+        tbl['entity_condition'] = ''
+        tbl['entity_weekly_lookup_condition'] = 'ON entities_entity.last_weekly_status_id = c.id'
+
+        self.query_filters(request, tbl)
+
+        """sql with join and connectivity_speed"""
+        sql_tmpl = """
+            WITH bounds AS (
+                SELECT {env} AS geom,
+                {env}::box2d AS b2d
+            ),
+            school_mvtgeom  AS (
+                SELECT ST_AsMVTGeom(ST_Transform(schools_school.geopoint, 3857), bounds.b2d) AS geom,
+                schools_school.id,
+                CASE WHEN c.id is NULL AND rt_status.rt_registered = True {rt_date_condition} THEN 'unknown'
+                    WHEN c.id is NULL THEN NULL
+                    WHEN c.connectivity_speed >  {benchmark} THEN 'good'
+                    WHEN c.connectivity_speed <= {benchmark} and c.connectivity_speed >= 1000000 THEN 'moderate'
+                    WHEN c.connectivity_speed < 1000000  THEN 'bad'
+                    ELSE 'unknown'
+                END AS connectivity,
+                CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                    WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
+                    ELSE 'unknown'
+                END AS connectivity_status,
+                CASE WHEN rt_status.rt_registered = True {rt_date_condition} THEN True
+                    ELSE False
+                END AS is_rt_connected
+                FROM schools_school
+                INNER JOIN bounds ON ST_Intersects(schools_school.geopoint, ST_Transform(bounds.geom, {srid}))
+                {school_weekly_join}
+                LEFT JOIN connection_statistics_schoolweeklystatus c {weekly_lookup_condition}
+                    AND c."deleted" IS NULL
+                LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status
+                    ON rt_status.school_id = schools_school.id AND rt_status."deleted" IS NULL
+                WHERE schools_school."deleted" IS NULL
+                    {country_condition}
+                    {admin1_condition}
+                    {school_condition}
+                    {school_weekly_condition}
+                {random_order}
+                {limit_condition}
+            ),
+            entity_mvtgeom  AS (
+                SELECT ST_AsMVTGeom(ST_Transform(entities_entity.geopoint, 3857), bounds.b2d) AS geom,
+                entities_entity.id,
+                CASE WHEN c.id is NULL AND rt_status.rt_registered = True {rt_date_condition} THEN 'unknown'
+                    WHEN c.id is NULL THEN NULL
+                    WHEN c.connectivity_speed >  {benchmark} THEN 'good'
+                    WHEN c.connectivity_speed <= {benchmark} and c.connectivity_speed >= 1000000 THEN 'moderate'
+                    WHEN c.connectivity_speed < 1000000  THEN 'bad'
+                    ELSE 'unknown'
+                END AS connectivity,
+                CASE WHEN entities_entity.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                    WHEN entities_entity.connectivity_status = 'no' THEN 'not_connected'
+                    ELSE 'unknown'
+                END AS connectivity_status,
+                CASE WHEN rt_status.rt_registered = True {rt_date_condition} THEN True
+                    ELSE False
+                END AS is_rt_connected
+                FROM entities_entity
+                INNER JOIN bounds ON ST_Intersects(entities_entity.geopoint, ST_Transform(bounds.geom, {srid}))
+                {school_weekly_join}
+                LEFT JOIN connection_statistics_entityweeklystatus c {entity_weekly_lookup_condition}
+                    AND c."deleted" IS NULL
+                LEFT JOIN connection_statistics_entityrealtimeregistration rt_status
+                    ON rt_status.entity_id = entities_entity.id AND rt_status."deleted" IS NULL
+                WHERE entities_entity."deleted" IS NULL
+                    {country_condition}
+                    {admin1_condition}
+                    {entity_condition}
+                    {entity_weekly_condition}
+                {entity_random_order}
+                {limit_condition}
+            )
+
+            SELECT
+                (
+                    SELECT ST_AsMVT(school_mvtgeom, 'schools')
+                    FROM school_mvtgeom
+                )
+                ||
+                (
+                    SELECT ST_AsMVT(entity_mvtgeom, 'entities')
+                    FROM entity_mvtgeom
+                );
+        """
+
+        tbl['school_weekly_join'] = ''
+        tbl['school_weekly_condition'] = ''
+        tbl['entity_weekly_join'] = ''
+        tbl['entity_weekly_condition'] = ''
+
+        school_filters = core_utilities.get_filter_sql(request, 'schools', 'schools_school')
+        entity_filters = core_utilities.get_filter_sql(request, 'entities', 'entities_entity')
+        if len(school_filters) > 0:
+            tbl['school_condition'] += ' AND ' + school_filters
+
+        if len(entity_filters) > 0:
+            tbl['entity_condition'] += ' AND ' + entity_filters
+
+        school_static_filters = core_utilities.get_filter_sql(request, 'school_static',
+                                                              'connection_statistics_schoolweeklystatus')
+        entity_static_filters = core_utilities.get_filter_sql(request, 'entity_static',
+                                                              'connection_statistics_entityweeklystatus')
+        if len(school_static_filters) > 0:
+            tbl['school_weekly_join'] = """
+            LEFT OUTER JOIN connection_statistics_schoolweeklystatus
+                ON schools_school."last_weekly_status_id" = connection_statistics_schoolweeklystatus."id"
+            """
+            tbl['school_weekly_condition'] = 'AND ' + school_static_filters
+
+        if len(entity_static_filters) > 0:
+            tbl['entity_weekly_join'] = """
+            LEFT OUTER JOIN connection_statistics_entityweeklystatus
+                ON entities_entity."last_weekly_status_id" = connection_statistics_entityweeklystatus."id"
+            """
+            tbl['entity_weekly_condition'] = 'AND ' + entity_static_filters
+
+        return sql_tmpl.format(**tbl)
+
+
+@method_decorator([
+    custom_cache_control(
+        public=True,
+        max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE,
+        cache_status_codes=[rest_status.HTTP_200_OK,],
+    )
+], name='dispatch')
+class EntityGlobalConnectivityTileRequestHandler(APIView):
+    CACHE_KEY = 'cache'
+    CACHE_KEY_PREFIX = 'CONNECTIVITY_GLOBAL_TILES_MAP'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        table_config = {
+            'table': 'schools_school',
+            'srid': '4326',
+            'geomColumn': 'geopoint',
+            'attrColumns': 'id',
+        }
+        self.tile_generator = EntityConnectivityTileGenerator(table_config)
+
+
+    def get_cache_key(self):
+        params = dict(self.request.query_params)
+        params.pop(self.CACHE_KEY, None)
+        return '{0}_{1}'.format(
+            self.CACHE_KEY_PREFIX,
+            '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))),
+        )
+
+    def get(self, request):
+        use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
+        request_path = remove_query_param(request.get_full_path(), 'cache')
+        cache_key = self.get_cache_key()
+
+        response = None
+        if use_cached_data:
+            response = cache_manager.get(cache_key)
+
+        if not response:
+            try:
+                response = self.tile_generator.generate_tile(request)
+
+                cache_manager.set(cache_key, response, request_path=request_path,
+                                  soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
+            except Exception as ex:
+                logger.error('Exception occurred for school connectivity tiles endpoint: {}'.format(ex))
+                response = Response({'error': 'An error occurred while processing the request'}, status=500)
+
+        return response
