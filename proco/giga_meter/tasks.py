@@ -3,7 +3,7 @@ import logging
 import os
 import uuid
 from datetime import timedelta, date, datetime
-from typing import List, Dict, Iterator
+from typing import List, Dict, Iterator, Optional
 
 import requests
 from celery import chain
@@ -499,7 +499,7 @@ def fetch_aggregated_ping_data_from_api(
 
             json_response = response.json()
             meta = json_response.get('meta', {})
-            
+
             if meta.get("aggregationSchedulerStatus") == "on_going":
                 logger.info("API indicated ongoing aggregation. Will retry.")
                 raise AggregationOngoingException("Aggregation is currently on_going.")
@@ -528,6 +528,8 @@ def fetch_aggregated_ping_data_from_api(
 
             page += 1
 
+        except AggregationOngoingException:
+            raise
         except Exception as e:
             logger.error(f"Error fetching page {page}: {e}")
             raise
@@ -586,7 +588,7 @@ def process_batch(rows):
             continue
 
         key = (school.id, row["timestamp_date__date"])
-        
+
         is_conn_true = int(row.get("is_connected_true") or 0)
         is_conn_all = int(row.get("is_connected_all") or 0)
         uptime = float(row.get("avg_uptime")) if row.get("avg_uptime") is not None else None
@@ -619,7 +621,7 @@ def process_batch(rows):
             final_uptime = float(sum(data["uptimes"], 0.0) / len(data["uptimes"]))
         else:
             final_uptime = None
-            
+
         final_latency = float(sum(data["latencies"], 0.0) / len(data["latencies"])) if data["latencies"] else None
 
         result_batch.append(
@@ -687,7 +689,7 @@ def bulk_upsert_school_status(batch: List[SchoolDailyStatus]) -> None:
         if to_create:
             SchoolDailyStatus.objects.bulk_create(to_create)
 
-    except (DataError, Exception)as e:
+    except (DataError, Exception) as e:
 
         logger.warning(f"Bulk operation failed ({e}), falling back to iterative update_or_create.")
 
@@ -732,8 +734,22 @@ def run_ping_aggregation(
     task_instance.info(f"Upserted {total_records} SchoolDailyStatus records")
 
 
-@app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)
-def fetch_and_aggregate_ping_data(date_str=None, force_tasks=False):
+MAX_RETRIES = 3
+
+
+@app.task(
+    soft_time_limit=4 * 60 * 60,
+    time_limit=4 * 60 * 60,
+)
+def fetch_and_aggregate_ping_data(
+    date_str: Optional[str] = None,
+    force_tasks: bool = False,
+    retry_attempt: int = 0,
+):
+    """
+    Fetch aggregated ping data from the API and store it.
+    """
+
     if not settings.GIGA_METER_ENABLE_AUTO_SYNC:
         logger.warning(
             'Giga Meter - Ping data sync is disabled from config. '
@@ -760,13 +776,19 @@ def fetch_and_aggregate_ping_data(date_str=None, force_tasks=False):
         logger.error(f'Found running job with key "{task_key}", skipping.')
         return
 
+    if date_str:
+        target_date = core_utilities.get_timezone_converted_value(
+            datetime.strptime(date_str, "%Y-%m-%d")
+        ).date()
+    else:
+        target_date = core_utilities.get_current_datetime_object().date()
+
     try:
-        if date_str:
-            target_date = core_utilities.get_timezone_converted_value(datetime.strptime(date_str, "%Y-%m-%d")).date()
-        else:
-            target_date = (
-                core_utilities.get_current_datetime_object().date()
-            )
+
+        logger.info(
+            f"Starting ping aggregation for {target_date} "
+            f"(attempt {retry_attempt}/{MAX_RETRIES})"
+        )
 
         run_ping_aggregation(
             start_date=target_date,
@@ -775,18 +797,34 @@ def fetch_and_aggregate_ping_data(date_str=None, force_tasks=False):
             logger=logger,
         )
 
+        task_instance.info("Ping aggregation completed successfully.")
+
     except AggregationOngoingException:
-        logger.info("Aggregation is ongoing. Scheduling a retry in 15 minutes.")
-        task_instance.info("Aggregation is ongoing on the API side. Will retry in 15 minutes.")
+        next_attempt = retry_attempt + 1
+        logger.info(
+            f"Aggregation still ongoing. Attempt {next_attempt}/{MAX_RETRIES}"
+        )
+        task_instance.info(
+            f"Aggregation ongoing on API side. Scheduling retry {next_attempt}/{MAX_RETRIES}"
+        )
+        if next_attempt > MAX_RETRIES:
+            logger.error("Maximum retry attempts reached. Stopping task.")
+            task_instance.info("Maximum retries reached. Task will not be rescheduled.")
+            return
+
         fetch_and_aggregate_ping_data.apply_async(
-            kwargs={'date_str': date_str, 'force_tasks': force_tasks},
-            countdown=15 * 60
+            kwargs={
+                "force_tasks": force_tasks,
+                "retry_attempt": next_attempt,
+            },
+            countdown=15 * 60,
         )
         return
 
     except Exception as exc:
         logger.exception("Error during GigaMeter ping aggregation")
-        task_instance.info(f"Error: {exc}")
+        task_instance.info(f"Error occurred: {exc}")
+        raise
 
     finally:
         background_task_utilities.task_on_complete(task_instance)
