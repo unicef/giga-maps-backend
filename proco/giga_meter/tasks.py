@@ -516,12 +516,14 @@ def fetch_aggregated_ping_data_from_api(
                     "giga_id_school": record.get("giga_id_school"),
                     "avg_uptime": record.get("uptime"),
                     "avg_latency": record.get("unloaded_latency_avg"),
+                    "is_connected_true": record.get("is_connected_true"),
+                    "is_connected_all": record.get("is_connected_all"),
                 }
 
             # Check pagination
             meta = json_response.get('meta', {})
             total = meta.get('total', 0)
-            if len(data) < page_size:
+            if (page * page_size) >= total:
                 break
 
             page += 1
@@ -579,27 +581,58 @@ def process_batch(rows):
     giga_ids = list(set(r["giga_id_school"] for r in rows if r.get("giga_id_school")))
     school_map = fetch_all_school_map(giga_ids)
 
-    result_batch = []
+    aggregated = {}
     for row in rows:
         school = school_map.get(row["giga_id_school"])
         if school is None:
             continue
 
-        uptime = row.get("avg_uptime")
-        if uptime is not None:
-            uptime = float(uptime)
+        key = (school.id, row["timestamp_date__date"])
 
-        avg_latency = row.get("avg_latency")
-        if avg_latency is not None:
-            avg_latency = float(avg_latency)
+        is_conn_true = int(row.get("is_connected_true") or 0)
+        is_conn_all = int(row.get("is_connected_all") or 0)
+        uptime = float(row.get("avg_uptime")) if row.get("avg_uptime") is not None else None
+        latency = float(row.get("avg_latency")) if row.get("avg_latency") is not None else None
+
+        if key not in aggregated:
+            aggregated[key] = {
+                "school": school,
+                "date": row["timestamp_date__date"],
+                "live_data_source": statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE,
+                "is_connected_true": is_conn_true,
+                "is_connected_all": is_conn_all,
+                "uptimes": [uptime] if uptime is not None else [],
+                "latencies": [latency] if latency is not None else [],
+            }
+        else:
+            aggregated[key]["is_connected_true"] += is_conn_true
+            aggregated[key]["is_connected_all"] += is_conn_all
+            if uptime is not None:
+                aggregated[key]["uptimes"].append(uptime)
+            if latency is not None:
+                aggregated[key]["latencies"].append(latency)
+
+    result_batch = []
+    for data in aggregated.values():
+        total_pings = data["is_connected_all"]
+        if total_pings > 0:
+            final_uptime = float((data["is_connected_true"] / total_pings) * 100)
+        elif data["uptimes"]:
+            final_uptime = float(sum(data["uptimes"], 0.0) / len(data["uptimes"]))
+        else:
+            final_uptime = None
+
+        final_latency = float(sum(data["latencies"], 0.0) / len(data["latencies"])) if data["latencies"] else None
 
         result_batch.append(
             SchoolDailyStatus(
-                school=school,
-                date=row["timestamp_date__date"],
-                live_data_source=statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE,
-                uptime=uptime,
-                connectivity_latency=avg_latency,
+                school=data["school"],
+                date=data["date"],
+                live_data_source=data["live_data_source"],
+                is_connected_true=data["is_connected_true"],
+                is_connected_all=data["is_connected_all"],
+                uptime=final_uptime,
+                connectivity_latency=final_latency,
             )
         )
     yield result_batch
@@ -641,6 +674,8 @@ def bulk_upsert_school_status(batch: List[SchoolDailyStatus]) -> None:
             existing.uptime = item.uptime
             existing.connectivity_latency = item.connectivity_latency
             existing.connectivity_speed = getattr(item, 'connectivity_speed', None)
+            existing.is_connected_true = getattr(item, 'is_connected_true', None)
+            existing.is_connected_all = getattr(item, 'is_connected_all', None)
             to_update.append(existing)
         else:
             to_create.append(item)
@@ -648,7 +683,7 @@ def bulk_upsert_school_status(batch: List[SchoolDailyStatus]) -> None:
         if to_update:
             SchoolDailyStatus.objects.bulk_update(
                 to_update,
-                fields=['uptime', 'connectivity_latency', 'connectivity_speed']
+                fields=['uptime', 'connectivity_latency', 'connectivity_speed', 'is_connected_true', 'is_connected_all']
             )
 
         if to_create:
@@ -667,6 +702,8 @@ def bulk_upsert_school_status(batch: List[SchoolDailyStatus]) -> None:
                     'uptime': item.uptime,
                     'connectivity_latency': item.connectivity_latency,
                     'connectivity_speed': getattr(item, 'connectivity_speed', None),
+                    'is_connected_true': getattr(item, 'is_connected_true', None),
+                    'is_connected_all': getattr(item, 'is_connected_all', None),
                 }
             )
 
