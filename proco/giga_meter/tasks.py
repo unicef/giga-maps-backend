@@ -588,9 +588,9 @@ def aggregate_ping_rows(rows, school_map):
         "school": <school_obj>,
         "date": <date>,
         "live_data_source": <str>,
-        "is_connected_true": <int>,   # summed across all devices
-        "is_connected_all": <int>,    # summed across all devices
-        "final_uptime": <float|None>, # (is_connected_true / is_connected_all) * 100
+        "is_connected_true": <int>,   # avg across all devices
+        "is_connected_all": <int>,    # avg across all devices
+        "final_uptime": <float|None>, # avg accross all devices
         "final_latency": <float|None> # mean of all device latencies
       }
     """
@@ -602,8 +602,8 @@ def aggregate_ping_rows(rows, school_map):
 
         key = (school.id, row["timestamp_date__date"])
 
-        is_conn_true = int(row.get("is_connected_true") or 0)
-        is_conn_all = int(row.get("is_connected_all") or 0)
+        is_conn_true = float(row.get("is_connected_true") or 0.0)
+        is_conn_all = float(row.get("is_connected_all") or 0.0)
         uptime = float(row.get("avg_uptime")) if row.get("avg_uptime") is not None else None
         latency = float(row.get("avg_latency")) if row.get("avg_latency") is not None else None
 
@@ -611,14 +611,14 @@ def aggregate_ping_rows(rows, school_map):
             aggregated[key] = {
                 "school": school,
                 "date": row["timestamp_date__date"],
-                "is_connected_true": is_conn_true,
-                "is_connected_all": is_conn_all,
+                "is_connected_true": [is_conn_true],
+                "is_connected_all": [is_conn_all],
                 "uptimes": [uptime] if uptime is not None else [],
                 "latencies": [latency] if latency is not None else [],
             }
         else:
-            aggregated[key]["is_connected_true"] += is_conn_true
-            aggregated[key]["is_connected_all"] += is_conn_all
+            aggregated[key]["is_connected_true"].append(is_conn_true)
+            aggregated[key]["is_connected_all"].append(is_conn_all)
             if uptime is not None:
                 aggregated[key]["uptimes"].append(uptime)
             if latency is not None:
@@ -626,23 +626,25 @@ def aggregate_ping_rows(rows, school_map):
 
     results = []
     for data in aggregated.values():
-        total_pings = data["is_connected_all"]
-        if total_pings > 0:
-            final_uptime = float((data["is_connected_true"] / total_pings) * 100)
-        elif data["uptimes"]:
-            final_uptime = float(sum(data["uptimes"], 0.0) / len(data["uptimes"]))
-        else:
-            final_uptime = None
+        conn_t = data["is_connected_true"]
+        avg_conn_true = sum(conn_t) / len(conn_t) if conn_t else None
 
-        final_latency = float(sum(data["latencies"], 0.0) / len(data["latencies"])) if data["latencies"] else None
+        conn_a = data["is_connected_all"]
+        avg_conn_all = sum(conn_a) / len(conn_a) if conn_a else None
+
+        uptimes = data["uptimes"]
+        avg_uptime = sum(uptimes) / len(uptimes) if uptimes else None
+
+        latencies = data["latencies"]
+        avg_latency = sum(latencies) / len(latencies) if latencies else None
 
         results.append({
             "school": data["school"],
             "date": data["date"],
-            "is_connected_true": data["is_connected_true"],
-            "is_connected_all": data["is_connected_all"],
-            "final_uptime": final_uptime,
-            "final_latency": final_latency,
+            "is_connected_true": avg_conn_true,
+            "is_connected_all": avg_conn_all,
+            "final_uptime": avg_uptime,
+            "final_latency": avg_latency,
         })
 
     return results
