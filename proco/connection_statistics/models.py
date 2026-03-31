@@ -50,8 +50,8 @@ class ConnectivityStatistics(models.Model):
     latency_max = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
     signal_mean = models.FloatField(help_text=_('dBM'), blank=True, null=True, default=None)
     signal_max = models.FloatField(help_text=_('dBM'), blank=True, null=True, default=None)
-    is_connected_all = models.PositiveIntegerField(blank=True, default=None, null=True)
-    is_connected_true = models.PositiveIntegerField(blank=True, default=None, null=True)
+    is_connected_all = models.FloatField(blank=True, default=None, null=True)
+    is_connected_true = models.FloatField(blank=True, default=None, null=True)
 
     live_data_source = models.CharField(
         max_length=50,
