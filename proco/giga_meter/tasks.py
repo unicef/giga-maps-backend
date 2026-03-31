@@ -713,7 +713,8 @@ def bulk_upsert_school_status(batch: List[SchoolDailyStatus]) -> None:
             existing = existing_records[key]
             existing.uptime = item.uptime
             existing.connectivity_latency = item.connectivity_latency
-            existing.connectivity_speed = item.connectivity_speed
+            if getattr(item, 'connectivity_speed', None) is not None:
+                existing.connectivity_speed = item.connectivity_speed
             existing.is_connected_true = item.is_connected_true
             existing.is_connected_all = item.is_connected_all
             logger.debug(
