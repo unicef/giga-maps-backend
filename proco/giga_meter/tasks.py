@@ -588,9 +588,9 @@ def aggregate_ping_rows(rows, school_map):
         "school": <school_obj>,
         "date": <date>,
         "live_data_source": <str>,
-        "is_connected_true": <int>,   # summed across all devices
-        "is_connected_all": <int>,    # summed across all devices
-        "final_uptime": <float|None>, # (is_connected_true / is_connected_all) * 100
+        "is_connected_true": <int>,   # avg across all devices
+        "is_connected_all": <int>,    # avg across all devices
+        "final_uptime": <float|None>, # avg accross all devices
         "final_latency": <float|None> # mean of all device latencies
       }
     """
