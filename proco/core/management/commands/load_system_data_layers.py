@@ -108,6 +108,14 @@ data_source_json = [
                     }
                 ]
             }, {
+                'name': 'uptime',
+                'type': 'float',
+                'unit': '%',
+                'is_parameter': True,
+                'alias': 'Uptime',
+                'base_benchmark': 99,
+                'display_unit': '%',
+            }, {
                 'name': 'connectivity_latency',
                 'type': 'int',
                 'unit': 'ms',
