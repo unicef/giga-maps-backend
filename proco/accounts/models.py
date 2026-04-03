@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 from django.db.models.constraints import UniqueConstraint
@@ -439,6 +440,7 @@ class DataLayerDataSourceRelationship(core_models.BaseModelMixin):
 
     # API Parameter:
     data_source_column = JSONField(null=True, default=dict)
+    data_source_column_function = JSONField(null=True, default=dict)
 
     class Meta:
         ordering = ['last_modified_at']
@@ -653,6 +655,86 @@ class AdvanceFilterCountryRelationship(core_models.BaseModelMixin):
     """
     advance_filter = models.ForeignKey(AdvanceFilter, related_name='active_countries', on_delete=models.DO_NOTHING)
     country = models.ForeignKey(Country, related_name='active_filters', on_delete=models.DO_NOTHING)
+
+    is_default = models.BooleanField(default=False)
+    default_filter_values = JSONField(null=True, default=dict)
+
+    def clean(self):
+        """Clean method to initiate validation for default_filter_values"""
+        super().clean()
+        return self.validate_default_filter_values()
+
+    def validate_default_filter_values(self):
+        """method to validate default_filter_values based on advance_filter config values"""
+
+        if self.is_default and not self.default_filter_values:
+            raise ValidationError({"default_filter_values": f"{self.advance_filter.code}: default_filter_values cannot be empty if is_default is True"})
+
+        if self.default_filter_values and not self.is_default:
+            raise ValidationError({"default_filter_values": f"{self.advance_filter.code}: default_filter_values should be an empty dict if is_default is False"})
+
+        if not isinstance(self.default_filter_values, dict):
+            raise ValidationError({"default_filter_values": f"{self.advance_filter.code}: default_filter_values must be a dict"})
+
+        if not (self.is_default and self.default_filter_values and self.advance_filter):
+            return
+
+        filter_type = self.advance_filter.type
+        filter_options = self.advance_filter.options or {}
+        filter_values = self.default_filter_values
+
+        # Dropdown / Multi-select
+        if filter_type in (AdvanceFilter.TYPE_DROPDOWN, AdvanceFilter.TYPE_DROPDOWN_MULTISELECT):
+            if filter_type == AdvanceFilter.TYPE_DROPDOWN_MULTISELECT:
+                for _, val in filter_values.items():
+                    if not isinstance(val, list):
+                        raise ValidationError({"default_filter_values": f"{self.advance_filter.code}: must be a list"})
+
+            if not filter_options.get("live_choices"):
+                try:
+                    valid_choices = [c["value"] for c in filter_options.get("choices", []) if isinstance(c, dict) and "value" in c]
+                except (TypeError, KeyError):
+                    valid_choices = []
+
+                if valid_choices:
+                    for _, val in filter_values.items():
+                        items = val if isinstance(val, list) else [val]
+                        for v in items:
+                            if v not in valid_choices:
+                                raise ValidationError({"default_filter_values": f'advance_filter_id({self.advance_filter.id}): invalid value "{v}"'})
+                else:
+                    raise ValidationError({"default_filter_values": f'advance_filter_id({self.advance_filter.id}): invalid value "{v}"'})
+        # Range
+        elif filter_type == AdvanceFilter.TYPE_RANGE:
+            for _, val in filter_values.items():
+                if not isinstance(val, dict):
+                    raise ValidationError({"default_filter_values": f"{self.advance_filter.code}: must be dict with min/max"})
+
+                # At least one of min or max should be present
+                if "min" not in val and "max" not in val:
+                    raise ValidationError({"default_filter_values": f"{self.advance_filter.code}: must have at least min or max"})
+
+                for k in ("min", "max"):
+                    if k in val and val[k] is not None and not isinstance(val[k], (int, float)):
+                        raise ValidationError({"default_filter_values": f"{self.advance_filter.code}: {k} must be number"})
+
+                # Validate min <= max if both present
+                if "min" in val and "max" in val and val["min"] is not None and val["max"] is not None:
+                    if val["min"] > val["max"]:
+                        raise ValidationError({"default_filter_values": f"{self.advance_filter.code}: min cannot be greater than max"})
+
+        # Input
+        elif filter_type == AdvanceFilter.TYPE_INPUT:
+            for key, val in filter_values.items():
+                if not isinstance(val, str):
+                    raise ValidationError({"default_filter_values": f"{self.advance_filter.code}: must be string"})
+
+        # Boolean
+        elif filter_type == AdvanceFilter.TYPE_BOOLEAN:
+            for key, val in filter_values.items():
+                if not isinstance(val, bool):
+                    raise ValidationError({"default_filter_values": f"{self.advance_filter.code}: must be true/false"})
+
 
     class Meta:
         ordering = ['last_modified_at']
