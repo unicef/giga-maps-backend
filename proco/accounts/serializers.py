@@ -1338,6 +1338,7 @@ class DataLayersListSerializer(FlexFieldsModelSerializer):
 
     data_sources_list = serializers.JSONField()
     data_source_column = serializers.JSONField()
+    data_source_column_function = serializers.JSONField()
 
     benchmark_metadata = serializers.SerializerMethodField()
 
@@ -1365,6 +1366,7 @@ class DataLayersListSerializer(FlexFieldsModelSerializer):
             'is_reverse',
             'data_sources_list',
             'data_source_column',
+            'data_source_column_function',
             'benchmark_metadata',
             'active_countries_list',
         )
@@ -1419,12 +1421,15 @@ class DataLayersListSerializer(FlexFieldsModelSerializer):
         active_countries_list = []
 
         data_source_columns = {}
+        data_source_column_functions = {}
 
         linked_data_sources = data_layer.data_sources.all()
         for relationship_instance in linked_data_sources:
             data_source_serializer = ExpandDataSourceSerializer(instance=relationship_instance.data_source)
             data_sources_list.append(data_source_serializer.data)
             data_source_columns[relationship_instance.data_source.id] = relationship_instance.data_source_column
+            if relationship_instance.data_source_column_function:
+                data_source_column_functions[relationship_instance.data_source.id] = relationship_instance.data_source_column_function
 
         linked_countries = data_layer.active_countries.all()
         for relationship_instance in linked_countries:
@@ -1436,12 +1441,14 @@ class DataLayersListSerializer(FlexFieldsModelSerializer):
 
         setattr(data_layer, 'data_sources_list', data_sources_list)
         setattr(data_layer, 'data_source_column', data_source_columns)
+        setattr(data_layer, 'data_source_column_function', list(data_source_column_functions.values())[-1] if data_source_column_functions else {})
         setattr(data_layer, 'active_countries_list', active_countries_list)
         return super().to_representation(data_layer)
 
 
 class DataLayerDataSourceRelationshipSerializer(serializers.ModelSerializer):
     data_source_column = serializers.JSONField()
+    data_source_column_function = serializers.JSONField(required=False)
 
     class Meta:
         model = accounts_models.DataLayerDataSourceRelationship
@@ -1456,6 +1463,7 @@ class DataLayerDataSourceRelationshipSerializer(serializers.ModelSerializer):
             'data_layer',
             'data_source',
             'data_source_column',
+            'data_source_column_function',
         )
 
         extra_kwargs = {
@@ -1583,14 +1591,18 @@ class BaseDataLayerCRUDSerializer(serializers.ModelSerializer):
     def to_representation(self, data_layer):
         data_sources_list = []
         data_source_columns = {}
+        data_source_column_functions = {}
         linked_data_sources = list(data_layer.data_sources.all())
         for relationship_instance in linked_data_sources:
             data_source_serializer = ExpandDataSourceSerializer(instance=relationship_instance.data_source)
             data_sources_list.append(data_source_serializer.data)
             data_source_columns[relationship_instance.data_source.id] = relationship_instance.data_source_column
+            if relationship_instance.data_source_column_function:
+                data_source_column_functions[relationship_instance.data_source.id] = relationship_instance.data_source_column_function
 
         setattr(data_layer, 'data_sources_list', data_sources_list)
         setattr(data_layer, 'data_source_column', data_source_columns)
+        setattr(data_layer, 'data_source_column_function', list(data_source_column_functions.values())[-1] if data_source_column_functions else {})
         return super().to_representation(data_layer)
 
 
@@ -1601,6 +1613,7 @@ class CreateDataLayersSerializer(BaseDataLayerCRUDSerializer):
 
     data_sources_list = serializers.JSONField()
     data_source_column = serializers.JSONField()
+    data_source_column_function = serializers.JSONField()
 
     class Meta:
         model = accounts_models.DataLayer
@@ -1626,6 +1639,7 @@ class CreateDataLayersSerializer(BaseDataLayerCRUDSerializer):
             'is_reverse',
             'data_sources_list',
             'data_source_column',
+            'data_source_column_function',
         )
 
         extra_kwargs = {
@@ -1659,6 +1673,7 @@ class CreateDataLayersSerializer(BaseDataLayerCRUDSerializer):
         """
         data_sources_list = validated_data.pop('data_sources_list', [])
         data_source_column = validated_data.pop('data_source_column', None)
+        data_source_column_function = validated_data.pop('data_source_column_function', {})
 
         request_user = core_utilities.get_current_user(context=self.context)
         # set created_by and last_modified_by value
@@ -1672,6 +1687,7 @@ class CreateDataLayersSerializer(BaseDataLayerCRUDSerializer):
                 'data_source': data_source.id,
                 'data_layer': data_layer_instance.id,
                 'data_source_column': data_source_column,
+                'data_source_column_function': data_source_column_function,
             }
 
             data_layer_source_relationships = DataLayerDataSourceRelationshipSerializer(
@@ -1699,6 +1715,7 @@ class CreateDataLayersSerializer(BaseDataLayerCRUDSerializer):
 class UpdateDataLayerSerializer(BaseDataLayerCRUDSerializer):
     data_sources_list = serializers.JSONField()
     data_source_column = serializers.JSONField()
+    data_source_column_function = serializers.JSONField(required=False)
 
     applicable_countries = serializers.JSONField(required=False)
     global_benchmark = serializers.JSONField(required=False)
@@ -1729,6 +1746,7 @@ class UpdateDataLayerSerializer(BaseDataLayerCRUDSerializer):
             'is_reverse',
             'data_sources_list',
             'data_source_column',
+            'data_source_column_function',
         )
 
         extra_kwargs = {
@@ -1788,6 +1806,7 @@ class UpdateDataLayerSerializer(BaseDataLayerCRUDSerializer):
 
         data_sources_list = validated_data.pop('data_sources_list', None)
         data_source_column = validated_data.pop('data_source_column', None)
+        data_source_column_function = validated_data.pop('data_source_column_function', {})
 
         with transaction.atomic():
             if data_sources_list is not None:
@@ -1798,6 +1817,7 @@ class UpdateDataLayerSerializer(BaseDataLayerCRUDSerializer):
                         'data_source': data_source.id,
                         'data_layer': instance.id,
                         'data_source_column': data_source_column,
+                        'data_source_column_function': data_source_column_function,
                     }
 
                     data_layer_source_relationships = DataLayerDataSourceRelationshipSerializer(
