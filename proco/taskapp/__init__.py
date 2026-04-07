@@ -108,4 +108,9 @@ def finalize_setup(sender, **kwargs):
             'schedule': crontab(hour=20, minute=30),
             'args': (),
         },
+        'proco.giga_meter.tasks.fetch_and_aggregate_ping_data': {
+            'task': 'proco.giga_meter.tasks.fetch_and_aggregate_ping_data',
+            'schedule': crontab(minute=15, hour='9,15,21,23'),
+            'args': (),
+        },
     })
