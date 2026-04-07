@@ -738,6 +738,11 @@ class DataLayerPreviewViewSet(APIView):
         core_permissions.CanPreviewDataLayer,
     )
 
+    def get_column_function_sql(self, parameter_col_function):
+        if isinstance(parameter_col_function, dict) and len(parameter_col_function) > 0:
+            return parameter_col_function.get('sql').format(col_name='t."{col_name}"')
+        return 'AVG(t."{col_name}")'
+
     def get_map_query(self, kwargs):
         query = """
         SELECT schools_school.id,
@@ -755,7 +760,7 @@ class DataLayerPreviewViewSet(APIView):
         INNER JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = schools_school.id
         LEFT JOIN (
             SELECT "schools_school"."id" AS school_id,
-                AVG(t."{col_name}") AS "{col_name}"
+                {col_function} AS "{col_name}"
             FROM "schools_school"
             INNER JOIN "connection_statistics_schooldailystatus" t ON "schools_school"."id" = t."school_id"
             WHERE (
@@ -821,6 +826,8 @@ class DataLayerPreviewViewSet(APIView):
         else:
             kwargs['country_condition'] = ''
             kwargs['country_condition_outer'] = ''
+
+        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
 
         return query.format(**kwargs)
 
@@ -897,6 +904,7 @@ class DataLayerPreviewViewSet(APIView):
 
         country_ids = data_layer_instance.applicable_countries
         parameter_col = data_sources.first().data_source_column
+        column_function_sql = self.get_column_function_sql(data_sources.first().data_source_column_function)
 
         parameter_column_name = str(parameter_col['name'])
         legend_configs = data_layer_instance.legend_configs
@@ -935,6 +943,7 @@ class DataLayerPreviewViewSet(APIView):
                 'end_date': end_date,
                 'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                 'parameter_col': parameter_col,
+                'parameter_col_function_sql': column_function_sql,
                 'is_reverse': data_layer_instance.is_reverse,
                 'legend_configs': legend_configs,
             }
@@ -1080,6 +1089,9 @@ class BaseDataLayerAPIViewSet(APIView):
         elif 'school_id__in' in query_param_keys:
             self.kwargs['school_ids'] = [s_id.strip() for s_id in query_params['school_id__in'].split(',')]
 
+        if 'exclude_schools_same_coords_except_id' in query_param_keys:
+            self.kwargs['exclude_schools_same_coords_except_id'] = str(query_params['exclude_schools_same_coords_except_id']).strip()
+
         self.kwargs['is_weekly'] = False if query_params.get('is_weekly', 'true') == 'false' else True
         self.kwargs['benchmark'] = 'national' if query_params.get('benchmark', 'global') == 'national' else 'global'
 
@@ -1133,6 +1145,11 @@ class BaseDataLayerAPIViewSet(APIView):
 
         return legend_configs
 
+    def get_column_function_sql(self, parameter_col_function):
+        if isinstance(parameter_col_function, dict) and len(parameter_col_function) > 0:
+            return parameter_col_function.get('sql').format(col_name='t."{col_name}"')
+        return 'AVG(t."{col_name}")'
+
 
 @method_decorator([
     custom_cache_control(
@@ -1165,7 +1182,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         FROM (
             SELECT "schools_school"."id" AS school_id,
                 "schools_school"."last_weekly_status_id",
-                AVG(t."{col_name}") AS "{col_name}"
+                {col_function} AS "{col_name}"
             FROM "schools_school"
             INNER JOIN "connection_statistics_schoolrealtimeregistration"
                 ON ("schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id")
@@ -1267,6 +1284,9 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
             """
             kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
+
+        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
+
         return query.format(**kwargs)
 
     def get_school_view_info_query(self):
@@ -1316,7 +1336,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             AND srr."rt_registration_date"::date <= '{end_date}'
         LEFT JOIN (
             SELECT "schools_school"."id" AS school_id,
-                AVG(t."{col_name}") AS "{col_name}"
+                {col_function} AS "{col_name}"
             FROM "schools_school"
             LEFT OUTER JOIN "connection_statistics_schooldailystatus" t
                 ON (
@@ -1386,6 +1406,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     ELSE 'unknown' END AS live_avg_connectivity
                 """.format(**kwargs)
 
+        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
+
         return query.format(**kwargs)
 
     def get_school_view_statistics_info_query(self):
@@ -1400,10 +1422,37 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
         return query
 
+    def get_live_avg(self, function_name, positive_speeds):
+        live_avg = 0
+
+        if len(positive_speeds) == 0:
+            return live_avg
+
+        if function_name == 'avg':
+            live_avg = round(sum(positive_speeds) / len(positive_speeds), 2)
+        elif function_name == 'min':
+            live_avg = round(min(positive_speeds), 2)
+        elif function_name == 'max':
+            live_avg = round(max(positive_speeds), 2)
+        elif function_name == 'sum':
+            live_avg = round(sum(positive_speeds), 2)
+        elif str(function_name).startswith('median'):
+            import numpy as np
+
+            positive_speeds = list(sorted(positive_speeds))
+
+            percentile_val = (str(function_name.split('|')[-1])).strip()
+            if percentile_val:
+                live_avg = round(np.percentile(positive_speeds, int(percentile_val)), 2)
+            else:
+                live_avg = np.median(positive_speeds)
+
+        return live_avg
+
     def get_avg_query(self, **kwargs):
         query = """
         SELECT {school_selection}t."date" AS date,
-            AVG(t."{col_name}") AS "field_avg"
+            {col_function} AS "field_avg"
         FROM "schools_school"
         INNER JOIN "connection_statistics_schoolrealtimeregistration" ON
             "connection_statistics_schoolrealtimeregistration"."school_id" = "schools_school"."id"
@@ -1456,6 +1505,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
             """
             kwargs['school_weekly_condition'] = kwargs['school_static_filters'] + ' AND '
+
+        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
 
         return query.format(**kwargs)
 
@@ -1730,6 +1781,75 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
         return query.format(**kwargs)
 
+    def get_school_ids_at_same_location(self, request, school_id, country_id):
+        """Get school_ids at same location"""
+        response = {"count": 0, "school_ids": []}
+
+        count_query = """
+        SELECT
+            count(s.id)
+        FROM
+            schools_school s
+        WHERE
+            s.deleted IS NULL
+            AND s.id != {school_id}
+            AND s.geopoint = (SELECT geopoint FROM schools_school WHERE id = {school_id})
+        """.format(school_id=school_id)
+
+        schools_count = db_utilities.sql_to_response(count_query, label=self.__class__.__name__, db_var=settings.READ_ONLY_DB_KEY)
+        total_count = schools_count[0].get('count', 0) if schools_count else 0
+        if total_count == 0:
+            return response
+
+        try:
+            limit = int(request.query_params.get("limit_same_location_schools", 300))
+            limit = limit if limit > 0 else 300
+        except ValueError:
+            limit = 300
+        try:
+            offset = int(request.query_params.get("offset_same_location_schools", 0))
+            offset = max(offset, 0)
+        except ValueError:
+            offset = 0
+
+        query = """
+        SELECT
+            s.id
+        FROM
+            schools_school s
+        LEFT JOIN
+            connection_statistics_schoolrealtimeregistration srr ON s.id = srr.school_id
+            AND srr.deleted IS NULL
+            AND srr.rt_registration_date <= '{end_date}'
+        WHERE
+            s.deleted IS NULL
+            AND s.id != {school_id}
+            AND s.country_id = {country_id}
+            AND s.geopoint = (SELECT geopoint FROM schools_school WHERE id = {school_id})
+        ORDER BY
+            CASE
+                WHEN srr.rt_registered = true THEN 1
+                WHEN s.connectivity_status IN ('good', 'moderate') THEN 2
+                WHEN s.connectivity_status = 'no' THEN 3
+                ELSE 4
+            END ASC,
+            s.name_lower ASC
+        LIMIT {limit}
+        OFFSET {offset}
+        """.format(
+            school_id=school_id,
+            country_id=country_id,
+            limit=limit,
+            offset=offset,
+            end_date=self.kwargs.get('end_date', core_utilities.get_current_datetime_object().date())
+        )
+
+        sql_response = db_utilities.sql_to_response(query, label=self.__class__.__name__, db_var=settings.READ_ONLY_DB_KEY)
+        if sql_response:
+            response['count'] = total_count
+            response['school_ids'] = [r.get('id') for r in sql_response]
+        return response
+
     def get(self, request, *args, **kwargs):
         use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
         request_path = remove_query_param(request.get_full_path(), 'cache')
@@ -1759,6 +1879,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
             country_ids = data_layer_instance.applicable_countries
             parameter_col = data_sources.first().data_source_column
+            parameter_col_function = data_sources.first().data_source_column_function
+            column_function_sql = self.get_column_function_sql(parameter_col_function)
 
             parameter_column_name = str(parameter_col['name'])
             parameter_column_unit = str(parameter_col.get('unit', '')).lower()
@@ -1805,6 +1927,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     'base_benchmark': base_benchmark,
                     'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                     'parameter_col': parameter_col,
+                    'parameter_col_function_sql': column_function_sql,
                     'is_reverse': data_layer_instance.is_reverse,
                     'legend_configs': legend_configs,
                 })
@@ -1817,18 +1940,28 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                                                               label=self.__class__.__name__,
                                                               db_var=settings.READ_ONLY_DB_KEY)
                     graph_data, positive_speeds = self.generate_graph_data()
+                    sorted_info_panel_school_list = []
 
                     if len(info_panel_school_list) > 0:
-                        for info_panel_school in info_panel_school_list:
+                        # Perform sorting based on the same order of school ids provided in the query param
+                        for school_id in self.kwargs.get('school_ids', []):
+                            for school_details in info_panel_school_list:
+                                if str(school_details['id']) == str(school_id):
+                                    sorted_info_panel_school_list.append(school_details)
+
+                        for info_panel_school in sorted_info_panel_school_list:
                             info_panel_school['geopoint'] = json.loads(info_panel_school['geopoint'])
                             info_panel_school['statistics'] = list(filter(
                                 lambda s: s['school_id'] == info_panel_school['id'], statistics))[-1]
 
-                            live_avg = (round(sum(positive_speeds[str(info_panel_school['id'])]) / len(
-                                positive_speeds[str(info_panel_school['id'])]), 2) if len(
-                                positive_speeds[str(info_panel_school['id'])]) > 0 else 0)
+                            # live_avg = (round(sum(positive_speeds[str(info_panel_school['id'])]) / len(
+                            #     positive_speeds[str(info_panel_school['id'])]), 2) if len(
+                            #     positive_speeds[str(info_panel_school['id'])]) > 0 else 0)
 
-                            info_panel_school['live_avg'] = live_avg
+                            info_panel_school['live_avg'] = self.get_live_avg(
+                                parameter_col_function.get('name', 'avg'),
+                                positive_speeds[str(info_panel_school['id'])]
+                            )
                             info_panel_school['graph_data'] = graph_data[str(info_panel_school['id'])]
 
                             benchmark_value_from_sql = info_panel_school.get('benchmark_sql_value', None)
@@ -1851,8 +1984,14 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                                 'convert_unit': self.kwargs.get('convert_unit'),
                                 'display_unit': display_unit,
                             }
+                            if request.query_params.get('include_same_location_schools') == 'true':
+                                info_panel_school['schools_at_same_location'] = self.get_school_ids_at_same_location(
+                                    request,
+                                    info_panel_school.get('id'),
+                                    info_panel_school.get('country_id'),
+                                )
 
-                    response = info_panel_school_list
+                    response = sorted_info_panel_school_list
                 else:
                     is_data_synced_qs = SchoolWeeklyStatus.objects.filter(
                         school__realtime_registration_status__rt_registered=True,
@@ -1874,7 +2013,10 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                                                                   db_var=settings.READ_ONLY_DB_KEY)[-1]
 
                     graph_data, positive_speeds = self.generate_graph_data()
-                    live_avg = round(sum(positive_speeds) / len(positive_speeds), 2) if len(positive_speeds) > 0 else 0
+                    live_avg = self.get_live_avg(
+                        parameter_col_function.get('name', 'avg'),
+                        positive_speeds
+                    )
 
                     live_avg_connectivity = 'unknown'
 
@@ -1944,13 +2086,25 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                                                               label=self.__class__.__name__,
                                                               db_var=settings.READ_ONLY_DB_KEY)
 
+                    sorted_info_panel_school_list = []
                     if len(info_panel_school_list) > 0:
-                        for info_panel_school in info_panel_school_list:
+                        # Perform sorting based on the same order of school ids provided in the query param
+                        for school_id in self.kwargs.get('school_ids', []):
+                            for school_details in info_panel_school_list:
+                                if str(school_details['id']) == str(school_id):
+                                    sorted_info_panel_school_list.append(school_details)
+
+                        for info_panel_school in sorted_info_panel_school_list:
                             info_panel_school['geopoint'] = json.loads(info_panel_school['geopoint'])
                             info_panel_school['statistics'] = list(filter(
                                 lambda s: s['school_id'] == info_panel_school['id'], statistics))[-1]
 
-                    response = info_panel_school_list
+                            if request.query_params.get('include_same_location_schools') == 'true':
+                                info_panel_school['schools_at_same_location'] = self.get_school_ids_at_same_location(
+                                    request, info_panel_school.get('id'), info_panel_school.get('country_id')
+                                )
+
+                    response = sorted_info_panel_school_list
                 else:
                     query_labels = []
                     query_response = db_utilities.sql_to_response(self.get_static_info_query(query_labels),
@@ -2006,13 +2160,15 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     True AS is_rt_connected,
                     sds.{col_name} AS field_avg,
                     {case_conditions}
-                    'connected' AS connectivity_status
+                    'connected' AS connectivity_status,
+                    (COUNT(*) OVER (PARTITION BY "schools_school".geopoint) > 1)
+                    AS has_multiple_school_on_same_lat_lng
                 FROM schools_school
                 INNER JOIN bounds ON ST_Intersects("schools_school".geopoint, ST_Transform(bounds.geom, 4326))
                 INNER JOIN (
                     SELECT "schools_school"."id" AS school_id,
                         "schools_school"."last_weekly_status_id",
-                        AVG(t."{col_name}") AS "{col_name}"
+                        {col_function} AS "{col_name}"
                     FROM "schools_school"
                     INNER JOIN connection_statistics_schoolrealtimeregistration rt_status ON
                         rt_status."school_id" = "schools_school".id
@@ -2029,6 +2185,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                         {country_condition}
                         {admin1_condition}
                         {school_condition}
+                        {same_school_coords_condition}
                         {school_weekly_condition}
                         AND rt_status."rt_registered" = True
                         AND rt_status."rt_registration_date"::date <= '{end_date}'
@@ -2058,6 +2215,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         kwargs['limit_condition'] = ''
         kwargs['random_order'] = ''
         kwargs['random_select_list'] = ''
+        kwargs['same_school_coords_condition'] = ''
 
         add_random_condition = True
 
@@ -2124,6 +2282,17 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
 
+        if kwargs.get('exclude_schools_same_coords_except_id'):
+            kwargs['same_school_coords_condition'] = f"""
+                                        AND (
+                                            schools_school.id = {kwargs['exclude_schools_same_coords_except_id']}
+                                            OR NOT ST_Equals(
+                                                schools_school.geopoint,
+                                                (SELECT geopoint FROM schools_school WHERE id = {kwargs['exclude_schools_same_coords_except_id']})
+                                            )
+                                        )
+                                    """
+
         if len(kwargs['school_filters']) > 0:
             kwargs['school_condition'] += ' AND ' + kwargs['school_filters']
 
@@ -2148,6 +2317,8 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             kwargs['limit_condition'] = 'LIMIT ' + str(limit)
             kwargs['random_select_list'] = 'random(),'
 
+        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
+
         return query.format(**kwargs)
 
     def envelope_to_sql(self, env, request):
@@ -2162,13 +2333,23 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             SELECT {env} AS geom,
                    {env}::box2d AS b2d
         ),
-        mvtgeom AS (
-            SELECT DISTINCT ST_AsMVTGeom(ST_Transform(schools_school.geopoint, 3857), bounds.b2d) AS geom,
-                {random_select_list}
+        prioritized_schools AS (
+            SELECT
                 schools_school.id,
+                schools_school.geopoint,
+                schools_school.connectivity_status,
                 {table_name}."{col_name}" AS field_value,
-                'connected' AS connectivity_status,
-                {label_case_statements}
+                ROW_NUMBER() OVER (
+                    PARTITION BY schools_school.geopoint
+                    ORDER BY
+                        CASE
+                            WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 1
+                            WHEN schools_school.connectivity_status = 'no' THEN 2
+                            ELSE 3
+                        END ASC,
+                        schools_school.id ASC
+                ) AS priority_rank,
+                (COUNT(*) OVER (PARTITION BY schools_school.geopoint) > 1) AS has_multiple_school_on_same_lat_lng
             FROM schools_school
             INNER JOIN bounds ON ST_Intersects(schools_school.geopoint, ST_Transform(bounds.geom, 4326))
             INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
@@ -2177,9 +2358,26 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             {country_condition}
             {admin1_condition}
             {school_condition}
+            {same_school_coords_condition}
             {school_weekly_condition}
+        ),
+        sampled_schools AS (
+            SELECT id, geopoint, field_value, has_multiple_school_on_same_lat_lng
+            FROM prioritized_schools
+            WHERE priority_rank = 1
             {random_order}
             {limit_condition}
+        ),
+        mvtgeom AS (
+            SELECT DISTINCT ST_AsMVTGeom(ST_Transform(sampled_schools.geopoint, 3857), bounds.b2d) AS geom,
+                {random_select_list}
+                sampled_schools.id,
+                sampled_schools.field_value,
+                sampled_schools.has_multiple_school_on_same_lat_lng,
+                'connected' AS connectivity_status,
+                {label_case_statements}
+            FROM sampled_schools
+            CROSS JOIN bounds
         )
         SELECT ST_AsMVT(DISTINCT mvtgeom.*) FROM mvtgeom;
         """
@@ -2198,6 +2396,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         kwargs['limit_condition'] = ''
         kwargs['random_order'] = ''
         kwargs['random_select_list'] = ''
+        kwargs['same_school_coords_condition'] = ''
 
         add_random_condition = True
 
@@ -2226,6 +2425,17 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             kwargs['country_condition'] = 'AND schools_school."country_id" IN ({0})'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
+
+        if kwargs.get('exclude_schools_same_coords_except_id'):
+            kwargs['same_school_coords_condition'] = f"""
+                                        AND (
+                                            schools_school.id = {kwargs['exclude_schools_same_coords_except_id']}
+                                            OR NOT ST_Equals(
+                                                schools_school.geopoint,
+                                                (SELECT geopoint FROM schools_school WHERE id = {kwargs['exclude_schools_same_coords_except_id']})
+                                            )
+                                        )
+                                    """
 
         if len(kwargs['school_filters']) > 0:
             kwargs['school_condition'] += ' AND ' + kwargs['school_filters']
@@ -2276,7 +2486,13 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             else:
                 label_cases.append("ELSE '{label}'".format(label=title))
 
-        kwargs['label_case_statements'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
+        # Replace table references with sampled_schools.field_value for use in mvtgeom CTE
+        label_case_statements_str = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
+        label_case_statements_str = label_case_statements_str.replace(
+            f'{kwargs["table_name"]}."{kwargs["col_name"]}"',
+            'sampled_schools.field_value'
+        )
+        kwargs['label_case_statements'] = label_case_statements_str
 
         if add_random_condition:
             if 'limit' in request.query_params:
@@ -2342,6 +2558,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
             country_ids = data_layer_instance.applicable_countries
             parameter_col = data_sources.first().data_source_column
+            column_function_sql = self.get_column_function_sql(data_sources.first().data_source_column_function)
 
             parameter_column_name = str(parameter_col['name'])
             base_benchmark = str(parameter_col.get('base_benchmark', 1))
@@ -2361,6 +2578,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     'base_benchmark': base_benchmark,
                     'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                     'parameter_col': parameter_col,
+                    'parameter_col_function_sql': column_function_sql,
                     'layer_type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                     'legend_configs': legend_configs,
                 })
@@ -2445,7 +2663,7 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
                         schools_school.geopoint,
                         EXTRACT(YEAR FROM CAST(t.date AS DATE)) AS year,
                         schools_school."last_weekly_status_id",
-                        AVG(t."{col_name}") AS "{col_name}"
+                        {col_function} AS "{col_name}"
                     FROM "schools_school"
                     INNER JOIN "connection_statistics_schooldailystatus" t ON schools_school."id" = t."school_id"
                     WHERE schools_school."deleted" IS NULL
@@ -2502,6 +2720,8 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
                         END AS field_status
                         """.format(**kwargs)
 
+        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
+
         return query.format(**kwargs)
 
     def envelope_to_sql(self, env, request):
@@ -2529,6 +2749,7 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
                 live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
 
         parameter_col = data_sources.first().data_source_column
+        column_function_sql = self.get_column_function_sql(data_sources.first().data_source_column_function)
 
         parameter_column_name = str(parameter_col['name'])
         base_benchmark = str(parameter_col.get('base_benchmark', 1))
@@ -2546,6 +2767,7 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
                 'base_benchmark': base_benchmark,
                 'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                 'parameter_col': parameter_col,
+                'parameter_col_function_sql': column_function_sql,
                 'layer_type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                 'start_year': request.query_params.get('start_year', date_utilities.get_current_year() - 4),
                 'is_reverse': data_layer_instance.is_reverse,
@@ -2642,6 +2864,79 @@ class AdvanceFiltersViewSet(BaseModelViewSet):
             )
 
         return super().apply_queryset_filters(queryset)
+
+    def perform_update(self, serializer):
+        """Handle filter updates and invalidate related default filter values if options are changed or filter type changed"""
+        instance = serializer.instance
+        old_options = copy.deepcopy(instance.options) or {}
+        old_type = instance.type
+
+        updated_instance = serializer.save()
+        new_options = updated_instance.options or {}
+
+        if old_type != updated_instance.type: # filter type changed invalidate the default filter without choices check
+            message="filter_type changed from {o} to {n}".format(o=old_type, n=updated_instance.type)
+            self._invalidate_default_values(updated_instance, {}, bypass_default_value_check=True, message=message)
+            return updated_instance
+
+        if (
+            updated_instance.type in [
+                accounts_models.AdvanceFilter.TYPE_DROPDOWN, accounts_models.AdvanceFilter.TYPE_DROPDOWN_MULTISELECT
+            ]
+        ):
+            old_live = bool(old_options.get("live_choices"))
+            new_live = bool(new_options.get("live_choices"))
+            if old_live != new_live:
+                # if choice type changed from static to live or live to static then invalidate without choices check
+                old_type = "Live Choices" if old_live else "Static Choices"
+                new_type = "Live Choices" if new_live else "Static Choices"
+                message = "choice type changed from {o} to {n}".format(o=old_type, n=new_type)
+                self._invalidate_default_values(updated_instance, {}, bypass_default_value_check=True, message=message)
+                return updated_instance
+            self._invalidate_incompatible_default_values(updated_instance, old_options, new_options)
+        return updated_instance
+
+    def _invalidate_incompatible_default_values(self, filter_instance, old_options, new_options):
+        """ Invalidate default filter values that are no longer in sync with the updated filter options """
+        try:
+            old_choices = {c.get("value") for c in old_options.get("choices", []) if isinstance(c, dict) and "value" in c}
+            new_choices = {c.get("value") for c in new_options.get("choices", []) if isinstance(c, dict) and "value" in c}
+
+            if old_choices != new_choices:
+                self._invalidate_default_values(filter_instance, new_choices)
+
+        except Exception as e:
+            logger.error(f"Error invalidating default values for filter {filter_instance.code}: {str(e)}")
+
+    def _invalidate_default_values(self, filter_instance, new_choices, bypass_default_value_check=False, message="filter options changes"):
+        """Remove default filter values when its options or filter type change."""
+        relationships = accounts_models.AdvanceFilterCountryRelationship.objects.filter(
+            advance_filter=filter_instance,
+            is_default=True,
+            deleted__isnull=True
+        )
+        for relationship in relationships:
+            if bypass_default_value_check or self._has_invalid_default_values(relationship, new_choices):
+                invalid_values = relationship.default_filter_values
+                relationship.default_filter_values = {}
+                relationship.is_default = False
+                relationship.save(update_fields=["default_filter_values", "is_default"])
+                logger.warning(
+                    f"Cleared default filter values {invalid_values} for filter '{filter_instance.code}' "
+                    f"for country '{relationship.country.name}' due to {message}."
+                )
+
+    def _has_invalid_default_values(self, relationship, valid_choices):
+        """ Check if relationship has default values that are no longer valid """
+        if not relationship.default_filter_values:
+            return True
+
+        for _, value in relationship.default_filter_values.items():
+            values = value if isinstance(value, list) else [value]
+            if any(v not in valid_choices for v in values):
+                return True
+
+        return False
 
     def perform_destroy(self, instance):
         """
@@ -2758,3 +3053,35 @@ class ColumnConfigurationChoicesViewSet(BaseModelViewSet):
         core_permissions.IsUserAuthenticated,
         core_permissions.CanPublishAdvanceFilter,
     )
+
+
+class AllPublishedAdvanceFiltersViewSet(BaseModelViewSet):
+    """
+    AllPublishedAdvanceFiltersViewSet
+    - returns list of all Published filters with their live_choices as options.
+    - required to created default filter logic: TECH-7454
+    """
+    model = accounts_models.AdvanceFilter
+    serializer_class = serializers.PublishedAdvanceFiltersListSerializer
+    permit_list_expands = ['column_configuration']
+
+    apply_query_pagination = True
+
+    permission_classes = (
+        core_permissions.IsUserAuthenticated,
+    )
+
+    def apply_queryset_filters(self, queryset):
+        """
+        Override if applying more complex filters to queryset.
+        """
+        queryset = queryset.filter(
+            status=accounts_models.AdvanceFilter.FILTER_STATUS_PUBLISHED,
+            active_countries__deleted__isnull=True,
+        ).distinct()
+
+        return super().apply_queryset_filters(queryset)
+
+    def update_serializer_context(self, context):
+        context['country_id'] = self.kwargs.get('country_id')
+        return context

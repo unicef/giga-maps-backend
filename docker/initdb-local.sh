@@ -6,9 +6,10 @@ set -e
 export PGUSER="$POSTGRES_USER"
 
 # Create gigameter database (proco is already created by POSTGRES_DB env var)
-echo "Creating gigameter database..."
+echo "Creating gigameter database if it does not exist..."
+
+psql -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'gigameter'" | grep -q 1 || \
 psql -d postgres -c "CREATE DATABASE gigameter;"
-echo "gigameter database created."
 
 # Restore proco database from proco.bz2
 PROCO_DUMP="/postgres_data/proco.bz2"
