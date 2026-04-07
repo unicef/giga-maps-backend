@@ -84,6 +84,9 @@ urlpatterns = [
     path('connectivity-stat/', stats_entity_api.EntityConnectivityAPIView.as_view(),
          name='global-connectivity-stat-entities'),
 
+    path('connectivityconfigs/', stats_entity_api.EntityConnectivityConfigurationsViewSet.as_view(),
+         name='entity-get-latest-week-and-month'),
+
     path('tiles/connectivity/', entities_api.EntityGlobalConnectivityTileRequestHandler.as_view(),
          name='tiles-global-connectivity-view'),
 
