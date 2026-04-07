@@ -1,6 +1,6 @@
 import logging
 from collections import OrderedDict
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 
 from django.conf import settings
 from django.db import models
@@ -13,16 +13,20 @@ from django.views.decorators.cache import cache_control
 from rest_framework.generics import ListAPIView
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import mixins, permissions, viewsets, status as rest_status
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.utils.urls import remove_query_param
 
+from proco.accounts.models import DataLayer, DataSource
+from proco.connection_statistics.api import ConnectivityConfigurationsViewSet
 from proco.utils import dates as date_utilities
-from proco.connection_statistics.models import SchoolWeeklyStatus
+from proco.connection_statistics.config import app_config as statistics_configs
+from proco.connection_statistics.models import SchoolWeeklyStatus, SchoolDailyStatus, EntityDailyStatus
 from proco.connection_statistics.utils import get_benchmark_value_for_default_download_layer
 from proco.entities.constants import LEGACY_MODEL, ALL_ENTITIES
 from proco.locations.api import BaseSearchMixin
-from proco.locations.search_indexes import EntityIndex, SchoolIndex
+from proco.locations.search_indexes import EntityIndex, SchoolIndex, UnifiedEntityIndex
 from proco.utils.cache import cache_manager, custom_cache_control
 
 from proco.entities.models import Entity, EntityType
@@ -364,6 +368,7 @@ class AggregateSearchEntityViewSet(BaseSearchMixin, ListAPIView):
 
     default_index_class = EntityIndex
     school_index_class = SchoolIndex
+    unified_index_class = UnifiedEntityIndex
 
     filterset_fields = {
         'id': ['exact', 'in', 'notexact'],
@@ -440,7 +445,8 @@ class AggregateSearchEntityViewSet(BaseSearchMixin, ListAPIView):
         total_count = 0
         original_params = request.query_params.copy()
         if entity_type == ALL_ENTITIES:
-            index_classes = [self.school_index_class, self.default_index_class]
+            # index_classes = [self.school_index_class, self.default_index_class]
+            index_classes = [self.unified_index_class]
         else:
             index_classes = [self.get_index_class()]
 
@@ -465,6 +471,14 @@ class AggregateSearchEntityViewSet(BaseSearchMixin, ListAPIView):
 
         resp_data["count"] = total_count
         resp_data["results"] = results
+        # results = sorted(
+        #     results,
+        #     key=lambda x: (
+        #         -x.get("row_score", 0),
+        #         x.get("country_name", ""),
+        #         x.get("name", "")
+        #     )
+        # )
 
         return Response(resp_data)
 
@@ -739,3 +753,4 @@ class EntityGlobalConnectivityTileRequestHandler(APIView):
                 response = Response({'error': 'An error occurred while processing the request'}, status=500)
 
         return response
+

@@ -9,6 +9,7 @@ from django.db.models import (
     Avg, Case, CharField, FilteredRelation, OuterRef, Q, Subquery, Value, When
 )
 from django.db.models import BooleanField, Count
+from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_control
 from django_filters.rest_framework import DjangoFilterBackend
@@ -17,10 +18,14 @@ from rest_framework.response import Response
 from rest_framework.utils.urls import remove_query_param
 from rest_framework.views import APIView
 
-from proco.connection_statistics.models import SchoolWeeklyStatus, EntityWeeklyStatus
+from proco.accounts.models import DataLayer, DataSource
+from proco.connection_statistics.api import ConnectivityConfigurationsViewSet
+from proco.connection_statistics.models import SchoolWeeklyStatus, EntityWeeklyStatus, EntityDailyStatus, \
+    SchoolDailyStatus
 from proco.connection_statistics.utils import get_benchmark_value_for_default_download_layer
 from proco.core import utils as core_utilities
 from proco.schools.models import School
+from proco.connection_statistics.config import app_config as statistics_configs
 from proco.utils import dates as date_utilities
 from proco.entities.constants import LEGACY_MODEL, LEGACY_MODEL_NAME
 from proco.entities.models import EntityType, Entity
@@ -754,5 +759,231 @@ class EntityConnectivityAPIView(APIView):
             )
 
         return data
+
+
+@method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
+class EntityConnectivityConfigurationsViewSet(APIView):
+    base_auth_permissions = (
+        AllowAny,
+    )
+    model = EntityDailyStatus
+    queryset = model.objects.filter(entity__deleted__isnull=True)
+
+    CACHE_KEY = 'cache'
+    CACHE_KEY_PREFIX = 'ENTITY_CONNECTIVITY_CONFIGURATIONS_STATS'
+
+    def get_cache_key(self):
+        params = dict(self.request.query_params)
+        params.pop(self.CACHE_KEY, None)
+        return '{0}_{1}'.format(self.CACHE_KEY_PREFIX,
+                                '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))), )
+
+    def get_school_configs(self, request, *args, **kwargs):
+        use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
+        cache_key = self.get_cache_key()
+
+        static_data = None
+        if use_cached_data:
+            static_data = cache_manager.get(cache_key)
+
+        if not static_data:
+            static_data = {}
+
+            country_id = self.request.query_params.get('country_id', None)
+            if country_id:
+                self.queryset = self.queryset.filter(school__country_id=country_id)
+
+            admin1_id = self.request.query_params.get('admin1_id', None)
+            if admin1_id:
+                self.queryset = self.queryset.filter(school__admin1_id=admin1_id)
+
+            school_id = self.request.query_params.get('school_id', None)
+            if school_id:
+                self.queryset = self.queryset.filter(school=school_id)
+
+            school_ids = self.request.query_params.get('school_ids', '')
+            if not core_utilities.is_blank_string(school_ids):
+                school_ids = [int(school_id.strip()) for school_id in school_ids.split(',')]
+                self.queryset = self.queryset.filter(school__in=school_ids)
+
+            layer_id = request.query_params.get('layer_id')
+
+            if layer_id:
+                data_layer_instance = get_object_or_404(
+                    DataLayer.objects.all(),
+                    pk=layer_id,
+                    status=DataLayer.LAYER_STATUS_PUBLISHED,
+                    type=DataLayer.LAYER_TYPE_LIVE,
+                )
+
+                data_sources = data_layer_instance.data_sources.all()
+
+                live_data_sources = ['UNKNOWN']
+
+                for d in data_sources:
+                    source_type = d.data_source.data_source_type
+                    if source_type == DataSource.DATA_SOURCE_TYPE_QOS:
+                        live_data_sources.append(statistics_configs.QOS_SOURCE)
+                    elif source_type == DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP:
+                        live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
+
+                parameter_col = data_sources.first().data_source_column
+                parameter_column_name = str(parameter_col['name'])
+
+                self.queryset = self.queryset.filter(
+                    live_data_source__in=live_data_sources,
+                ).filter(**{parameter_column_name + '__isnull': False})
+
+            monday_on_entry_date = None
+            sunday_on_entry_date = None
+
+            today_date = core_utilities.get_current_datetime_object().date()
+            monday_date = today_date - timedelta(days=today_date.weekday())
+
+            last_week_start = monday_date - timedelta(days=7)
+            last_week_end = monday_date - timedelta(days=1)
+
+            last_week_entry = self.queryset.filter(
+                date__range=(last_week_start, last_week_end)
+            ).values_list('date', flat=True).order_by('-date').first()
+
+            if last_week_entry:
+                # TECH-7453: 1. If last week's data is present use it as default.
+                monday_on_entry_date = last_week_start
+                sunday_on_entry_date = last_week_end
+            else:
+                # TECH-7453: 2. If last week data is not present then fallback to the latest available week including the current week as well.
+                latest_daily_entry = self.queryset.values_list('date', flat=True).order_by('-date').first()
+
+                if latest_daily_entry:
+                    monday_on_entry_date = latest_daily_entry - timedelta(days=latest_daily_entry.weekday())
+                    sunday_on_entry_date = monday_on_entry_date + timedelta(days=6)
+
+            if monday_on_entry_date:
+                static_data = {
+                    'week': {
+                        'start_date': date_utilities.format_date(monday_on_entry_date),
+                        'end_date': date_utilities.format_date(sunday_on_entry_date)
+                    },
+                    'month': {
+                        'start_date': date_utilities.format_date(date_utilities.get_first_date_of_month(
+                            monday_on_entry_date.year, monday_on_entry_date.month)),
+                        'end_date': date_utilities.format_date(date_utilities.get_last_date_of_month(
+                            monday_on_entry_date.year, monday_on_entry_date.month))
+                    },
+                    'years': list(self.queryset.values_list('date__year', flat=True).order_by('date__year').distinct()),
+                }
+
+            request_path = remove_query_param(request.get_full_path(), 'cache')
+            cache_manager.set(cache_key, static_data, request_path=request_path,
+                              soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
+
+        return Response(data=static_data)
+
+
+    def get(self, request, *args, **kwargs):
+        entity_type = self.request.query_params.get('entity_type__code')
+        if entity_type == LEGACY_MODEL:
+            self.queryset = SchoolDailyStatus.objects.filter(school__deleted__isnull=True)
+            return self.get_school_configs(request, *args, **kwargs)
+        use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
+        cache_key = self.get_cache_key()
+
+        static_data = None
+        if use_cached_data:
+            static_data = cache_manager.get(cache_key)
+
+        if not static_data:
+            static_data = {}
+
+            country_id = self.request.query_params.get('country_id', None)
+            if country_id:
+                self.queryset = self.queryset.filter(entity__country_id=country_id)
+
+            admin1_id = self.request.query_params.get('admin1_id', None)
+            if admin1_id:
+                self.queryset = self.queryset.filter(entity__admin1_id=admin1_id)
+
+            entity_id = self.request.query_params.get('entity_id', None)
+            if entity_id:
+                self.queryset = self.queryset.filter(school=entity_id)
+
+            entity_ids = self.request.query_params.get('entity_ids', '')
+            if not core_utilities.is_blank_string(entity_ids):
+                entity_ids = [int(entity_id.strip()) for school_id in entity_ids.split(',')]
+                self.queryset = self.queryset.filter(entity__in=entity_ids)
+
+            layer_id = request.query_params.get('layer_id')
+            if layer_id:
+                data_layer_instance = get_object_or_404(
+                    DataLayer.objects.all(),
+                    pk=layer_id,
+                    status=DataLayer.LAYER_STATUS_PUBLISHED,
+                    type=DataLayer.LAYER_TYPE_LIVE,
+                )
+
+                data_sources = data_layer_instance.data_sources.all()
+
+                live_data_sources = ['UNKNOWN']
+
+                for d in data_sources:
+                    source_type = d.data_source.data_source_type
+                    if source_type == DataSource.DATA_SOURCE_TYPE_QOS:
+                        live_data_sources.append(statistics_configs.QOS_SOURCE)
+                    elif source_type == DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP:
+                        live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
+
+                parameter_col = data_sources.first().data_source_column
+                parameter_column_name = str(parameter_col['name'])
+
+                self.queryset = self.queryset.filter(
+                    live_data_source__in=live_data_sources,
+                ).filter(**{parameter_column_name + '__isnull': False})
+
+            monday_on_entry_date = None
+            sunday_on_entry_date = None
+
+            today_date = core_utilities.get_current_datetime_object().date()
+            monday_date = today_date - timedelta(days=today_date.weekday())
+
+            last_week_start = monday_date - timedelta(days=7)
+            last_week_end = monday_date - timedelta(days=1)
+
+            last_week_entry = self.queryset.filter(
+                date__range=(last_week_start, last_week_end)
+            ).values_list('date', flat=True).order_by('-date').first()
+
+            if last_week_entry:
+                # TECH-7453: 1. If last week's data is present use it as default.
+                monday_on_entry_date = last_week_start
+                sunday_on_entry_date = last_week_end
+            else:
+                # TECH-7453: 2. If last week data is not present then fallback to the latest available week including the current week as well.
+                latest_daily_entry = self.queryset.values_list('date', flat=True).order_by('-date').first()
+
+                if latest_daily_entry:
+                    monday_on_entry_date = latest_daily_entry - timedelta(days=latest_daily_entry.weekday())
+                    sunday_on_entry_date = monday_on_entry_date + timedelta(days=6)
+
+            if monday_on_entry_date:
+                static_data = {
+                    'week': {
+                        'start_date': date_utilities.format_date(monday_on_entry_date),
+                        'end_date': date_utilities.format_date(sunday_on_entry_date)
+                    },
+                    'month': {
+                        'start_date': date_utilities.format_date(date_utilities.get_first_date_of_month(
+                            monday_on_entry_date.year, monday_on_entry_date.month)),
+                        'end_date': date_utilities.format_date(date_utilities.get_last_date_of_month(
+                            monday_on_entry_date.year, monday_on_entry_date.month))
+                    },
+                    'years': list(self.queryset.values_list('date__year', flat=True).order_by('date__year').distinct()),
+                }
+
+            request_path = remove_query_param(request.get_full_path(), 'cache')
+            cache_manager.set(cache_key, static_data, request_path=request_path,
+                              soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
+
+        return Response(data=static_data)
 
 
