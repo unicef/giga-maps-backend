@@ -115,6 +115,44 @@ data_source_json = [
                 'alias': 'Uptime',
                 'base_benchmark': 99,
                 'display_unit': '%',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': '',
+                        'sql': 'AVG({col_name})'
+                    },
+                    {
+                        'name': 'min',
+                        'verbose': 'Min',
+                        'description': 'Minimum of all values',
+                        'sql': 'MIN({col_name})'
+                    },
+                    {
+                        'name': 'max',
+                        'verbose': 'Max',
+                        'description': 'Maximum of all values',
+                        'sql': 'MAX({col_name})'
+                    },
+                    {
+                        'name': 'sum',
+                        'verbose': 'Sum',
+                        'description': 'Addition of all values',
+                        'sql': 'SUM({col_name})'
+                    },
+                    {
+                        'name': 'median|90',
+                        'verbose': '90th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY {col_name})'
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': '',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
+                    }
+                ]
             }, {
                 'name': 'connectivity_latency',
                 'type': 'int',
