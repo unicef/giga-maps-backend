@@ -348,18 +348,18 @@ class HealthEntity(core_models.BaseModelMixin):
     dhis2_id = models.CharField(blank=True, null=True, max_length=255, db_index=True)
     hims_id = models.CharField(blank=True, null=True, max_length=255, db_index=True)
     hfml_id = models.CharField(blank=True, null=True, max_length=255, db_index=True)
-    facility_id_govt = models.CharField(max_length=50, blank=True, db_index=True)
+    facility_id_govt = models.CharField(max_length=50, null=True, blank=True, db_index=True)
 
     # Basic Facility Information
     facility_type = models.CharField(blank=True, null=True, max_length=255)
     facility_ownership = models.CharField(blank=True, null=True, max_length=255)
-    facility_level = models.CharField(max_length=20, blank=True)  # Primary, Secondary, Tertiary
+    facility_level = models.CharField(max_length=20, null=True, blank=True)  # Primary, Secondary, Tertiary
     health_service_provider = models.CharField(blank=True, null=True, max_length=255)
 
     # Facility Status
     is_facility_open = models.BooleanField(null=True, blank=True, default=None)
-    licensing_status = models.CharField(max_length=50, blank=True)
-    facility_hours = models.CharField(max_length=50, blank=True)
+    licensing_status = models.CharField(max_length=50, null=True, blank=True)
+    facility_hours = models.CharField(max_length=50, null=True, blank=True)
     establishment_year = models.PositiveSmallIntegerField(blank=True, null=True)
 
     # Capacity Information

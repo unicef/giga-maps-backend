@@ -1421,6 +1421,7 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
                         giga_id=row.health_id_giga,
                         external_id=row.facility_id_govt,
                         name= row.facility_name,
+                        country=row.country,
                         defaults=entity_defaults
                     )
 

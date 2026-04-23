@@ -11,6 +11,9 @@ echo "Creating gigameter database if it does not exist..."
 psql -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'gigameter'" | grep -q 1 || \
 psql -d postgres -c "CREATE DATABASE gigameter;"
 
+psql -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'proco'" | grep -q 1 || \
+psql -d postgres -c "CREATE DATABASE proco;"
+
 # Restore proco database from proco.bz2
 PROCO_DUMP="/postgres_data/proco.bz2"
 if [ -f "$PROCO_DUMP" ]; then

@@ -916,6 +916,7 @@ def sync_health_data(loaded_data_df, cols_to_delete, country, deleted_entities):
                 inplace=True,
                 errors='ignore',
             )
+            row['country_id'] = country.id
             if change_type in ['insert', 'update_postimage']:
                 entity = Entity.objects.filter(
                     country=country,
