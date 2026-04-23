@@ -202,7 +202,7 @@ class Entity(core_models.BaseModelMixin):
         related_name='entities',
     )
 
-    external_id = models.CharField(max_length=50, blank=True, db_index=True)
+    external_id = models.CharField(max_length=50, null=True, blank=True, db_index=True)
     giga_id = models.CharField(max_length=50, db_index=True)
     name = models.CharField(max_length=1000, default='Name unknown')
     name_lower = models.CharField(max_length=1000, blank=True, editable=False, db_index=True)
