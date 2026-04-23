@@ -27,5 +27,10 @@ class AppConfig(object):
         {dashboard_url}
         """
 
+    @property
+    def health_master_update_email_subject_format(self):
+        """format for the email subject when an API Key is generated for a Public API."""
+        return '%s - Health Master Data Source has updated records'
+
 
 app_config = AppConfig()
