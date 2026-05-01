@@ -2193,7 +2193,11 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
                 country_range_json['max_place_holder'] = 'Max ({})'.format(country_range_json['max_value'])
             else:
                 internal_type = parameter_field_props.get_internal_type()
-                min_value, max_value = connection.ops.integer_field_range(internal_type)
+                # Handle FloatField separately as it's not in integer_field_ranges
+                if internal_type == 'FloatField':
+                    min_value, max_value = -1e10, 1e10  # Reasonable float range
+                else:
+                    min_value, max_value = connection.ops.integer_field_range(internal_type)
                 country_range_json = {
                     'min_place_holder': 'Min',
                     'max_place_holder': 'Max',

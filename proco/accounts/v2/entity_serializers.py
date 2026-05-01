@@ -1341,7 +1341,7 @@ class EntityDataLayersListSerializer(FlexFieldsModelSerializer):
 
     data_sources_list = serializers.JSONField()
     data_source_column = serializers.JSONField()
-    # data_source_column_function = serializers.JSONField()
+    data_source_column_function = serializers.JSONField()
 
     benchmark_metadata = serializers.SerializerMethodField()
 
@@ -1372,7 +1372,7 @@ class EntityDataLayersListSerializer(FlexFieldsModelSerializer):
             'is_reverse',
             'data_sources_list',
             'data_source_column',
-            # 'data_source_column_function',
+            'data_source_column_function',
             'benchmark_metadata',
             'active_countries_list',
         )
@@ -1427,15 +1427,15 @@ class EntityDataLayersListSerializer(FlexFieldsModelSerializer):
         active_countries_list = []
 
         data_source_columns = {}
-        # data_source_column_functions = {}
+        data_source_column_functions = {}
 
         linked_data_sources = data_layer.data_sources.all()
         for relationship_instance in linked_data_sources:
             data_source_serializer = ExpandDataSourceSerializer(instance=relationship_instance.data_source)
             data_sources_list.append(data_source_serializer.data)
             data_source_columns[relationship_instance.data_source.id] = relationship_instance.data_source_column
-            # if relationship_instance.data_source_column_function:
-            #     data_source_column_functions[relationship_instance.data_source.id] = relationship_instance.data_source_column_function
+            if relationship_instance.data_source_column_function:
+                data_source_column_functions[relationship_instance.data_source.id] = relationship_instance.data_source_column_function
 
         linked_countries = data_layer.active_countries.all()
         for relationship_instance in linked_countries:
@@ -1447,7 +1447,7 @@ class EntityDataLayersListSerializer(FlexFieldsModelSerializer):
 
         setattr(data_layer, 'data_sources_list', data_sources_list)
         setattr(data_layer, 'data_source_column', data_source_columns)
-        # setattr(data_layer, 'data_source_column_function', list(data_source_column_functions.values())[-1] if data_source_column_functions else {})
+        setattr(data_layer, 'data_source_column_function', list(data_source_column_functions.values())[-1] if data_source_column_functions else {})
         setattr(data_layer, 'active_countries_list', active_countries_list)
         return super().to_representation(data_layer)
 

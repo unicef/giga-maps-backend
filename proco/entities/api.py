@@ -313,7 +313,7 @@ class EntityConnectivityStatusTileRequestHandler(EntityConnectivityTileRequestHa
             "entity": entity_type.code,
             "table": extra_config.get("main_table"),
             "srid": extra_config.get("srid"),
-            "master_data_table": entity_type.detail_related_name
+            "master_data_table": entity_type.get_master_data_model_class()._meta.db_table
         }
 
         if entity_type.code == LEGACY_MODEL:
