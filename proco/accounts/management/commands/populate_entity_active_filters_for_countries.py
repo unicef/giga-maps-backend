@@ -107,8 +107,30 @@ class Command(BaseCommand):
                                 country_qs = country_qs.select_related('last_weekly_status').annotate(**{
                                     parameter_table + '_' + parameter_field: F(last_weekly_status_field)
                                 })
+                            elif parameter_table not in ['entities', 'entity_static']:
+                                # Handle entity-specific detail tables (e.g., health, library)
+                                if entity_type and entity_type.detail_related_name:
+                                    # Get the actual database table name for the detail model
+                                    from django.apps import apps
+                                    app_label, model_name = entity_type.detail_model.split('.')
+                                    try:
+                                        detail_model_class = apps.get_model(app_label, model_name)
+                                        detail_table_name = detail_model_class._meta.db_table
+                                    except LookupError:
+                                        detail_table_name = f"{app_label}_{model_name.lower()}"
+
+                                    # Update the SQL filter to use the correct table name
+                                    # Replace bare field references with qualified table.field references
+                                    active_countries_sql_filter = active_countries_sql_filter.replace(
+                                        parameter_field, f'"{detail_table_name}"."{parameter_field}"'
+                                    )
+
+                                    # Add explicit JOIN condition
+                                    join_where = f'"entities_entity"."id" = "{detail_table_name}"."entity_id"'
+                                    active_countries_sql_filter = f'{join_where} AND ({active_countries_sql_filter})'
 
                         all_country_ids_has_filter_data = list(country_qs.extra(
+                            tables=[detail_table_name] if parameter_table not in ['entities', 'entity_static'] and entity_type and entity_type.detail_related_name else [],
                             where=[active_countries_sql_filter],
                         ).order_by('country_id').values_list('country_id', flat=True).distinct('country_id'))
                     else:

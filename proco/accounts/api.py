@@ -24,6 +24,7 @@ from proco.accounts import exceptions as accounts_exceptions
 from proco.accounts import models as accounts_models
 from proco.accounts import serializers
 from proco.accounts import utils as account_utilities
+from proco.accounts.v2 import entity_filter_serializers
 from proco.accounts.config import app_config as account_config
 from proco.connection_statistics import models as statistics_models
 from proco.connection_statistics.config import app_config as statistics_configs
@@ -3062,7 +3063,7 @@ class AllPublishedAdvanceFiltersViewSet(BaseModelViewSet):
     - required to created default filter logic: TECH-7454
     """
     model = accounts_models.AdvanceFilter
-    serializer_class = serializers.PublishedAdvanceFiltersListSerializer
+    serializer_class = entity_filter_serializers.PublishedEntityAdvanceFiltersListSerializer
     permit_list_expands = ['column_configuration']
 
     apply_query_pagination = True

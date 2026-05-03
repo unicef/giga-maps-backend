@@ -48,6 +48,7 @@ class PublishedEntityAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
     class Meta:
         model = accounts_models.AdvanceFilter
         read_only_fields = fields = (
+            'id',
             'name',
             'type',
             'description',
@@ -60,42 +61,76 @@ class PublishedEntityAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
             'column_configuration': (ExpandColumnConfigurationSerializer, {'source': 'column_configuration'}),
         }
 
-    def include_none_filter(self, parameter_table, parameter_field):
-        select_qs = Entity.objects.filter(country_id=self.context['country_id'])
-        none_check_sql = f'"entities_entity"."{parameter_field}" IS NULL'
-        if parameter_table == 'entity_static':
-            last_weekly_status_field = 'last_weekly_status__{}'.format(parameter_field)
-            select_qs = select_qs.select_related('last_weekly_status').annotate(**{
-                parameter_table + '_' + parameter_field: F(last_weekly_status_field)
-            })
+    def include_none_filter(self, parameter_table, parameter_field, column_config=None):
+        from proco.schools.models import School
+        from proco.connection_statistics.models import SchoolWeeklyStatus
 
-            none_check_sql = f'"connection_statistics_entityweeklystatus"."{parameter_field}" IS NULL'
+        # Determine if legacy school or entity
+        use_legacy_schools = column_config is None or column_config.entity_type is None or column_config.entity_type.is_legacy
+
+        if use_legacy_schools:
+            select_qs = School.objects.filter(country_id=self.context['country_id'])
+            none_check_sql = f'"schools_school"."{parameter_field}" IS NULL'
+            if parameter_table == 'school_static':
+                last_weekly_status_field = 'last_weekly_status__{}'.format(parameter_field)
+                select_qs = select_qs.select_related('last_weekly_status').annotate(**{
+                    parameter_table + '_' + parameter_field: F(last_weekly_status_field)
+                })
+                none_check_sql = f'"connection_statistics_schoolweeklystatus"."{parameter_field}" IS NULL'
+        else:
+            select_qs = Entity.objects.filter(country_id=self.context['country_id'])
+            none_check_sql = f'"entities_entity"."{parameter_field}" IS NULL'
+            if parameter_table == 'entity_static':
+                last_weekly_status_field = 'last_weekly_status__{}'.format(parameter_field)
+                select_qs = select_qs.select_related('last_weekly_status').annotate(**{
+                    parameter_table + '_' + parameter_field: F(last_weekly_status_field)
+                })
+                none_check_sql = f'"connection_statistics_entityweeklystatus"."{parameter_field}" IS NULL'
+
         return select_qs.extra(where=[none_check_sql]).exists()
 
-    def update_range_filter_options(self, options, parameter_table, parameter_field, parameter_options):
-        last_weekly_status_field = 'last_weekly_status__{}'.format(parameter_field)
+    def update_range_filter_options(self, options, parameter_table, parameter_field, parameter_options, column_config=None):
+        from proco.schools.models import School
+        from proco.connection_statistics.models import SchoolWeeklyStatus
 
-        options['include_none_filter'] = self.include_none_filter(parameter_table, parameter_field)
+        last_weekly_status_field = 'last_weekly_status__{}'.format(parameter_field)
+        use_legacy_schools = column_config is None or column_config.entity_type is None or column_config.entity_type.is_legacy
+
+        options['include_none_filter'] = self.include_none_filter(parameter_table, parameter_field, column_config)
 
         if options.get('range_auto_compute', False):
-            select_qs = Entity.objects.filter(country_id=self.context['country_id'])
-            if parameter_table == 'entity_static':
-                parameter_field_props = EntityWeeklyStatus._meta.get_field(parameter_field)
-
-                select_qs = select_qs.select_related('last_weekly_status').values('country_id').annotate(
-                    min_value=Min(F(last_weekly_status_field)),
-                    max_value=Max(F(last_weekly_status_field)),
-                )
+            if use_legacy_schools:
+                select_qs = School.objects.filter(country_id=self.context['country_id'])
+                if parameter_table == 'school_static':
+                    parameter_field_props = SchoolWeeklyStatus._meta.get_field(parameter_field)
+                    select_qs = select_qs.select_related('last_weekly_status').values('country_id').annotate(
+                        min_value=Min(F(last_weekly_status_field)),
+                        max_value=Max(F(last_weekly_status_field)),
+                    )
+                else:
+                    parameter_field_props = School._meta.get_field(parameter_field)
+                    select_qs = select_qs.values('country_id').annotate(
+                        min_value=Min(parameter_field),
+                        max_value=Max(parameter_field),
+                    )
             else:
-                parameter_field_props = Entity._meta.get_field(parameter_field)
+                select_qs = Entity.objects.filter(country_id=self.context['country_id'])
+                if parameter_table == 'entity_static':
+                    parameter_field_props = EntityWeeklyStatus._meta.get_field(parameter_field)
+                    select_qs = select_qs.select_related('last_weekly_status').values('country_id').annotate(
+                        min_value=Min(F(last_weekly_status_field)),
+                        max_value=Max(F(last_weekly_status_field)),
+                    )
+                else:
+                    parameter_field_props = Entity._meta.get_field(parameter_field)
+                    select_qs = select_qs.values('country_id').annotate(
+                        min_value=Min(parameter_field),
+                        max_value=Max(parameter_field),
+                    )
 
-                select_qs = select_qs.values('country_id').annotate(
-                    min_value=Min(parameter_field),
-                    max_value=Max(parameter_field),
-                )
-
-            country_range_json = list(
-                select_qs.values('country_id', 'min_value', 'max_value').order_by('country_id').distinct())[-1]
+            select_qs_result = list(
+                select_qs.values('country_id', 'min_value', 'max_value').order_by('country_id').distinct())
+            country_range_json = select_qs_result[-1] if len(select_qs_result) > 0 else None
 
             if country_range_json and country_range_json['min_value'] is not None and country_range_json['max_value'] is not None:
                 del country_range_json['country_id']
@@ -114,7 +149,11 @@ class PublishedEntityAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
                 country_range_json['max_place_holder'] = 'Max ({})'.format(country_range_json['max_value'])
             else:
                 internal_type = parameter_field_props.get_internal_type()
-                min_value, max_value = connection.ops.integer_field_range(internal_type)
+                # Handle FloatField separately as it's not in integer_field_ranges
+                if internal_type == 'FloatField':
+                    min_value, max_value = -1e10, 1e10
+                else:
+                    min_value, max_value = connection.ops.integer_field_range(internal_type)
                 country_range_json = {
                     'min_place_holder': 'Min',
                     'max_place_holder': 'Max',
@@ -124,24 +163,52 @@ class PublishedEntityAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
 
             options['active_range'] = country_range_json
 
-    def update_boolean_filter_options(self, options, parameter_table, parameter_field):
+    def update_boolean_filter_options(self, options, parameter_table, parameter_field, column_config=None):
         join_condition = ''
         filter_condition = ''
+        use_legacy_schools = column_config is None or column_config.entity_type is None or column_config.entity_type.is_legacy
 
-        select_qry = """
-        SELECT DISTINCT {col} AS {col_name}
-        FROM entities_entity AS entities
-        {join_condition}
-        WHERE entities.deleted IS NULL
-            AND entities.country_id = {c_id}
-            {filter_condition}
-        ORDER BY {col_name} DESC NULLS LAST
-        """
-
-        if parameter_table == 'entity_static':
-            join_condition = ('INNER JOIN connection_statistics_entityweeklystatus AS entity_static '
-                              'ON entities.last_weekly_status_id = entity_static.id')
-            filter_condition = 'AND entity_static.deleted IS NULL'
+        if use_legacy_schools:
+            select_qry = """
+            SELECT DISTINCT {col} AS {col_name}
+            FROM schools_school AS schools
+            {join_condition}
+            WHERE schools.deleted IS NULL
+                AND schools.country_id = {c_id}
+                {filter_condition}
+            ORDER BY {col_name} DESC NULLS LAST
+            """
+            if parameter_table == 'school_static':
+                join_condition = ('INNER JOIN connection_statistics_schoolweeklystatus AS school_static '
+                                  'ON schools.last_weekly_status_id = school_static.id')
+                filter_condition = 'AND school_static.deleted IS NULL'
+        else:
+            select_qry = """
+            SELECT DISTINCT {col} AS {col_name}
+            FROM entities_entity AS entities
+            {join_condition}
+            WHERE entities.deleted IS NULL
+                AND entities.country_id = {c_id}
+                {filter_condition}
+            ORDER BY {col_name} DESC NULLS LAST
+            """
+            if parameter_table == 'entity_static':
+                join_condition = ('INNER JOIN connection_statistics_entityweeklystatus AS entity_static '
+                                  'ON entities.last_weekly_status_id = entity_static.id')
+                filter_condition = 'AND entity_static.deleted IS NULL'
+            elif parameter_table not in ['entities', 'entity_static']:
+                # Handle entity-specific detail tables
+                if column_config and column_config.entity_type and column_config.entity_type.detail_model:
+                    from django.apps import apps
+                    app_label, model_name = column_config.entity_type.detail_model.split('.')
+                    try:
+                        detail_model_class = apps.get_model(app_label, model_name)
+                        detail_table_name = detail_model_class._meta.db_table
+                    except LookupError:
+                        detail_table_name = f"{app_label}_{model_name.lower()}"
+                    join_condition = (f'INNER JOIN {detail_table_name} AS {parameter_table} '
+                                      f'ON entities.id = {parameter_table}.entity_id')
+                    filter_condition = f'AND {parameter_table}.deleted IS NULL'
 
         sql_qry = select_qry.format(
             col_name=parameter_field,
@@ -151,6 +218,8 @@ class PublishedEntityAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
             filter_condition=filter_condition)
         choices = []
         data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__)
+        if data is None:
+            data = []
         for value in data:
             field_value = value[parameter_field]
 
@@ -179,21 +248,49 @@ class PublishedEntityAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
             if options.get('live_choices', False):
                 join_condition = ''
                 filter_condition = ''
+                use_legacy_schools = parameter_details.entity_type is None or parameter_details.entity_type.is_legacy
 
-                select_qry = """
-                SELECT DISTINCT {col} AS {col_name}
-                FROM entities_entity AS entities
-                {join_condition}
-                WHERE entities.deleted IS NULL
-                    AND entities.country_id = {c_id}
-                    {filter_condition}
-                ORDER BY {col_name} ASC NULLS LAST
-                """
-
-                if parameter_table == 'entity_static':
-                    join_condition = ('INNER JOIN connection_statistics_entityweeklystatus AS entity_static '
-                                      'ON entities.last_weekly_status_id = entity_static.id')
-                    filter_condition = 'AND entity_static.deleted IS NULL'
+                if use_legacy_schools:
+                    select_qry = """
+                    SELECT DISTINCT {col} AS {col_name}
+                    FROM schools_school AS schools
+                    {join_condition}
+                    WHERE schools.deleted IS NULL
+                        AND schools.country_id = {c_id}
+                        {filter_condition}
+                    ORDER BY {col_name} ASC NULLS LAST
+                    """
+                    if parameter_table == 'school_static':
+                        join_condition = ('INNER JOIN connection_statistics_schoolweeklystatus AS school_static '
+                                          'ON schools.last_weekly_status_id = school_static.id')
+                        filter_condition = 'AND school_static.deleted IS NULL'
+                else:
+                    select_qry = """
+                    SELECT DISTINCT {col} AS {col_name}
+                    FROM entities_entity AS entities
+                    {join_condition}
+                    WHERE entities.deleted IS NULL
+                        AND entities.country_id = {c_id}
+                        {filter_condition}
+                    ORDER BY {col_name} ASC NULLS LAST
+                    """
+                    if parameter_table == 'entity_static':
+                        join_condition = ('INNER JOIN connection_statistics_entityweeklystatus AS entity_static '
+                                          'ON entities.last_weekly_status_id = entity_static.id')
+                        filter_condition = 'AND entity_static.deleted IS NULL'
+                    elif parameter_table not in ['entities', 'entity_static']:
+                        # Handle entity-specific detail tables
+                        if parameter_details.entity_type and parameter_details.entity_type.detail_model:
+                            from django.apps import apps
+                            app_label, model_name = parameter_details.entity_type.detail_model.split('.')
+                            try:
+                                detail_model_class = apps.get_model(app_label, model_name)
+                                detail_table_name = detail_model_class._meta.db_table
+                            except LookupError:
+                                detail_table_name = f"{app_label}_{model_name.lower()}"
+                            join_condition = (f'INNER JOIN {detail_table_name} AS {parameter_table} '
+                                              f'ON entities.id = {parameter_table}.entity_id')
+                            filter_condition = f'AND {parameter_table}.deleted IS NULL'
 
                 sql_qry = select_qry.format(
                     col_name=parameter_field,
@@ -203,6 +300,8 @@ class PublishedEntityAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
                     filter_condition=filter_condition)
                 choices = []
                 data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__)
+                if data is None:
+                    data = []
                 for value in data:
                     field_value = value[parameter_field]
                     if core_utilities.is_blank_string(field_value):
@@ -219,9 +318,9 @@ class PublishedEntityAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
                 options['choices'] = choices
 
             if instance.type == accounts_models.AdvanceFilter.TYPE_RANGE:
-                self.update_range_filter_options(options, parameter_table, parameter_field, parameter_options)
+                self.update_range_filter_options(options, parameter_table, parameter_field, parameter_options, parameter_details)
             elif instance.type == accounts_models.AdvanceFilter.TYPE_BOOLEAN:
-                self.update_boolean_filter_options(options, parameter_table, parameter_field)
+                self.update_boolean_filter_options(options, parameter_table, parameter_field, parameter_details)
 
         return options
 
