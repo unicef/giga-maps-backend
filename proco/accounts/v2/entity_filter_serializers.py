@@ -138,6 +138,28 @@ class PublishedEntityAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
                         min_value=Min(F(last_weekly_status_field)),
                         max_value=Max(F(last_weekly_status_field)),
                     )
+                elif parameter_table not in ['entities', 'entity_static']:
+                    # Handle entity-specific detail tables
+                    if column_config and column_config.entity_type and column_config.entity_type.detail_model:
+                        from django.apps import apps
+                        app_label, model_name = column_config.entity_type.detail_model.split('.')
+                        detail_model_class = apps.get_model(app_label, model_name)
+                        parameter_field_props = detail_model_class._meta.get_field(parameter_field)
+
+                        # Filter by entity type and use the related field path
+                        select_qs = select_qs.filter(entity_type=column_config.entity_type)
+                        detail_field_path = f'{column_config.entity_type.detail_related_name}__{parameter_field}'
+                        select_qs = select_qs.select_related(column_config.entity_type.detail_related_name).values('country_id').annotate(
+                            min_value=Min(F(detail_field_path)),
+                            max_value=Max(F(detail_field_path)),
+                        )
+                    else:
+                        # Fallback to Entity model
+                        parameter_field_props = Entity._meta.get_field(parameter_field)
+                        select_qs = select_qs.values('country_id').annotate(
+                            min_value=Min(parameter_field),
+                            max_value=Max(parameter_field),
+                        )
                 else:
                     parameter_field_props = Entity._meta.get_field(parameter_field)
                     select_qs = select_qs.values('country_id').annotate(
