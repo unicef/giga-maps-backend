@@ -146,10 +146,15 @@ class PublishedEntityAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
                         detail_model_class = apps.get_model(app_label, model_name)
                         parameter_field_props = detail_model_class._meta.get_field(parameter_field)
 
+                        # Get the actual related name from the detail model's entity field
+                        # This is more reliable than using detail_related_name from EntityType
+                        entity_field = detail_model_class._meta.get_field('entity')
+                        actual_related_name = entity_field.remote_field.related_name
+
                         # Filter by entity type and use the related field path
                         select_qs = select_qs.filter(entity_type=column_config.entity_type)
-                        detail_field_path = f'{column_config.entity_type.detail_related_name}__{parameter_field}'
-                        select_qs = select_qs.select_related(column_config.entity_type.detail_related_name).values('country_id').annotate(
+                        detail_field_path = f'{actual_related_name}__{parameter_field}'
+                        select_qs = select_qs.select_related(actual_related_name).values('country_id').annotate(
                             min_value=Min(F(detail_field_path)),
                             max_value=Max(F(detail_field_path)),
                         )
