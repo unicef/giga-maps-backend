@@ -86,6 +86,23 @@ class PublishedEntityAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
                     parameter_table + '_' + parameter_field: F(last_weekly_status_field)
                 })
                 none_check_sql = f'"connection_statistics_entityweeklystatus"."{parameter_field}" IS NULL'
+            elif parameter_table not in ['entities', 'entity_static']:
+                # Handle entity-specific detail tables (e.g., health, library)
+                if column_config and column_config.entity_type and column_config.entity_type.detail_model:
+                    from django.apps import apps
+                    app_label, model_name = column_config.entity_type.detail_model.split('.')
+                    try:
+                        detail_model_class = apps.get_model(app_label, model_name)
+                        detail_table_name = detail_model_class._meta.db_table
+                    except LookupError:
+                        detail_table_name = f"{app_label}_{model_name.lower()}"
+
+                    # Filter by entity type and add JOIN condition
+                    select_qs = select_qs.filter(entity_type=column_config.entity_type)
+                    join_where = f'"entities_entity"."id" = "{detail_table_name}"."entity_id"'
+                    none_check_sql = f'{join_where} AND "{detail_table_name}"."{parameter_field}" IS NULL'
+                    # Add the detail table to the query
+                    select_qs = select_qs.extra(tables=[detail_table_name])
 
         return select_qs.extra(where=[none_check_sql]).exists()
 
