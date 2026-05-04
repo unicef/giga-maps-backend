@@ -2,6 +2,7 @@ import logging
 import re
 from collections import OrderedDict
 
+from django.db.models import Count
 from django.db.models.functions.text import Lower
 from rest_flex_fields.serializers import FlexFieldsModelSerializer
 from rest_framework import serializers
@@ -389,25 +390,31 @@ class ListCountrySerializer(BaseCountrySerializer):
             return instance.last_weekly_status.coverage_availability
 
     def get_entity_counts(self, instance):
-        entity_counts = {}
         active_entity_types = EntityType.objects.filter(
-            deleted__isnull=True,
             is_active=True
         ).order_by('display_order', 'code')
 
-        for entity_type in active_entity_types:
-            if entity_type.is_legacy:
-                count = School.objects.filter(
-                    country=instance,
-                    deleted__isnull=True
-                ).count()
-            else:
-                count = Entity.objects.filter(
-                    country=instance,
-                    entity_type=entity_type,
-                    deleted__isnull=True
-                ).count()
-            entity_counts[entity_type.code] = count
+        legacy_codes = {et.code for et in active_entity_types if et.is_legacy}
+        non_legacy_codes = {et.code for et in active_entity_types if not et.is_legacy}
+
+        entity_counts = {}
+
+        if non_legacy_codes:
+            rows = (
+                Entity.objects
+                .filter(country=instance, entity_type__code__in=non_legacy_codes)
+                .values('entity_type__code')
+                .annotate(count=Count('id'))
+                .order_by()
+            )
+            entity_counts.update({row['entity_type__code']: row['count'] for row in rows})
+            for code in non_legacy_codes - set(entity_counts.keys()):
+                entity_counts[code] = 0
+
+        if legacy_codes:
+            school_count = School.objects.filter(country=instance).count()
+            for code in legacy_codes:
+                entity_counts[code] = school_count
 
         return entity_counts
 
@@ -459,14 +466,16 @@ class DetailCountrySerializer(BaseCountrySerializer):
 
     def get_active_layers_list(self, instance):
         active_layers_list = []
-        linked_layers = instance.active_layers.all()
+        linked_layers = instance.active_layers.select_related('data_layer__entity_type').all()
         for relationship_instance in linked_layers:
+            entity_type = relationship_instance.data_layer.entity_type
             active_layers_list.append({
                 'data_layer_id': relationship_instance.data_layer_id,
                 'is_default': relationship_instance.is_default,
                 'data_sources': relationship_instance.data_sources,
                 'is_applicable': relationship_instance.is_applicable,
                 'legend_configs': relationship_instance.legend_configs,
+                'entity_type': entity_type.code if entity_type else None,
             })
 
         return active_layers_list
@@ -484,25 +493,31 @@ class DetailCountrySerializer(BaseCountrySerializer):
         return active_filters_list
 
     def get_entity_counts(self, instance):
-        entity_counts = {}
         active_entity_types = EntityType.objects.filter(
-            deleted__isnull=True,
             is_active=True
         ).order_by('display_order', 'code')
 
-        for entity_type in active_entity_types:
-            if entity_type.is_legacy:
-                count = School.objects.filter(
-                    country=instance,
-                    deleted__isnull=True
-                ).count()
-            else:
-                count = Entity.objects.filter(
-                    country=instance,
-                    entity_type=entity_type,
-                    deleted__isnull=True
-                ).count()
-            entity_counts[entity_type.code] = count
+        legacy_codes = {et.code for et in active_entity_types if et.is_legacy}
+        non_legacy_codes = {et.code for et in active_entity_types if not et.is_legacy}
+
+        entity_counts = {}
+
+        if non_legacy_codes:
+            rows = (
+                Entity.objects
+                .filter(country=instance, entity_type__code__in=non_legacy_codes)
+                .values('entity_type__code')
+                .annotate(count=Count('id'))
+                .order_by()
+            )
+            entity_counts.update({row['entity_type__code']: row['count'] for row in rows})
+            for code in non_legacy_codes - set(entity_counts.keys()):
+                entity_counts[code] = 0
+
+        if legacy_codes:
+            school_count = School.objects.filter(country=instance).count()
+            for code in legacy_codes:
+                entity_counts[code] = school_count
 
         return entity_counts
 

@@ -320,7 +320,9 @@ def get_giga_filter_fields(request):
 
     if not filter_field_data:
         filter_field_data = {}
-        filters_data = AdvanceFilter.objects.filter(status=AdvanceFilter.FILTER_STATUS_PUBLISHED)
+        filters_data = AdvanceFilter.objects.filter(
+            status=AdvanceFilter.FILTER_STATUS_PUBLISHED
+        ).select_related('column_configuration')
         for data in filters_data:
             parameter = data.column_configuration
             table_filters = filter_field_data.get(parameter.table_alias, [])
