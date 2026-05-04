@@ -482,12 +482,16 @@ class DetailCountrySerializer(BaseCountrySerializer):
 
     def get_active_filters_list(self, instance):
         active_filters_list = []
-        linked_filters = instance.active_filters.all().filter(advance_filter__status=AdvanceFilter.FILTER_STATUS_PUBLISHED)
+        linked_filters = instance.active_filters.select_related('advance_filter__entity_type').filter(
+            advance_filter__status=AdvanceFilter.FILTER_STATUS_PUBLISHED
+        )
         for relationship_instance in linked_filters:
+            entity_type = relationship_instance.advance_filter.entity_type
             active_filters_list.append({
                 'advance_filter_id': relationship_instance.advance_filter_id,
                 'is_default': relationship_instance.is_default,
-                'default_filter_values': relationship_instance.default_filter_values
+                'default_filter_values': relationship_instance.default_filter_values,
+                'entity_type': entity_type.code if entity_type else None,
             })
 
         return active_filters_list
