@@ -1,14 +1,13 @@
 from datetime import timedelta, datetime, time
 
-from django.db.models import (
-        Count, Case, When, Value, IntegerField, F
-    )
-
 from django.conf import settings
 from django.db.models import (
-    Avg, Case, CharField, FilteredRelation, OuterRef, Q, Subquery, Value, When
+    Avg, Case, FilteredRelation, Q, Value, When
 )
-from django.db.models import BooleanField, Count
+from django.db.models import Count
+from django.db.models import (
+    IntegerField
+)
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_control
@@ -18,17 +17,16 @@ from rest_framework.response import Response
 from rest_framework.utils.urls import remove_query_param
 from rest_framework.views import APIView
 
-from proco.accounts.models import DataLayer, DataSource
-from proco.connection_statistics.api import ConnectivityConfigurationsViewSet
+from proco.accounts.models import DataLayer, DataSource, AdvanceFilter
+from proco.connection_statistics.config import app_config as statistics_configs
 from proco.connection_statistics.models import SchoolWeeklyStatus, EntityWeeklyStatus, EntityDailyStatus, \
     SchoolDailyStatus
 from proco.connection_statistics.utils import get_benchmark_value_for_default_download_layer
 from proco.core import utils as core_utilities
-from proco.schools.models import School
-from proco.connection_statistics.config import app_config as statistics_configs
-from proco.utils import dates as date_utilities
 from proco.entities.constants import LEGACY_MODEL, LEGACY_MODEL_NAME
 from proco.entities.models import EntityType, Entity
+from proco.schools.models import School
+from proco.utils import dates as date_utilities
 from proco.utils.cache import cache_manager
 
 
@@ -777,6 +775,48 @@ class EntityConnectivityConfigurationsViewSet(APIView):
         params.pop(self.CACHE_KEY, None)
         return '{0}_{1}'.format(self.CACHE_KEY_PREFIX,
                                 '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))), )
+    @staticmethod
+    def build_layers_and_filters_list(request):
+        """
+        Helper method to build layers_list and filters_list based on layer_id and filter_id.
+        Returns a tuple (layers_list, filters_list).
+        """
+        layers_list = []
+        filters_list = []
+
+        layer_id = request.query_params.get('layer_id')
+        if layer_id:
+            try:
+                data_layer = DataLayer.objects.select_related('entity_type').get(
+                    pk=layer_id,
+                    status=DataLayer.LAYER_STATUS_PUBLISHED,
+                )
+                entity_type = data_layer.entity_type
+                layers_list.append({
+                    'data_layer_id': data_layer.id,
+                    'name': data_layer.name,
+                    'entity_type': entity_type.code if entity_type else None,
+                })
+            except DataLayer.DoesNotExist:
+                pass
+
+        filter_id = request.query_params.get('filter_id')
+        if filter_id:
+            try:
+                advance_filter = AdvanceFilter.objects.select_related('entity_type').get(
+                    pk=filter_id,
+                    status=AdvanceFilter.FILTER_STATUS_PUBLISHED,
+                )
+                entity_type = advance_filter.entity_type
+                filters_list.append({
+                    'advance_filter_id': advance_filter.id,
+                    'name': advance_filter.name,
+                    'entity_type': entity_type.code if entity_type else None,
+                })
+            except AdvanceFilter.DoesNotExist:
+                pass
+
+        return layers_list, filters_list
 
     def get_school_configs(self, request, *args, **kwargs):
         use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
@@ -859,6 +899,8 @@ class EntityConnectivityConfigurationsViewSet(APIView):
                     monday_on_entry_date = latest_daily_entry - timedelta(days=latest_daily_entry.weekday())
                     sunday_on_entry_date = monday_on_entry_date + timedelta(days=6)
 
+            layers_list, filters_list = self.build_layers_and_filters_list(request)
+
             if monday_on_entry_date:
                 static_data = {
                     'week': {
@@ -872,6 +914,8 @@ class EntityConnectivityConfigurationsViewSet(APIView):
                             monday_on_entry_date.year, monday_on_entry_date.month))
                     },
                     'years': list(self.queryset.values_list('date__year', flat=True).order_by('date__year').distinct()),
+                    'layers_list': layers_list,
+                    'filters_list': filters_list,
                 }
 
             request_path = remove_query_param(request.get_full_path(), 'cache')
@@ -965,6 +1009,8 @@ class EntityConnectivityConfigurationsViewSet(APIView):
                     monday_on_entry_date = latest_daily_entry - timedelta(days=latest_daily_entry.weekday())
                     sunday_on_entry_date = monday_on_entry_date + timedelta(days=6)
 
+            layers_list, filters_list = self.build_layers_and_filters_list(request)
+
             if monday_on_entry_date:
                 static_data = {
                     'week': {
@@ -978,6 +1024,8 @@ class EntityConnectivityConfigurationsViewSet(APIView):
                             monday_on_entry_date.year, monday_on_entry_date.month))
                     },
                     'years': list(self.queryset.values_list('date__year', flat=True).order_by('date__year').distinct()),
+                    'layers_list': layers_list,
+                    'filters_list': filters_list,
                 }
 
             request_path = remove_query_param(request.get_full_path(), 'cache')
