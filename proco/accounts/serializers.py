@@ -1,7 +1,6 @@
 import copy
 import re
 from datetime import timedelta
-from math import floor, ceil
 
 from django.apps import apps
 from django.conf import settings
@@ -9,9 +8,7 @@ from django.contrib.admin.models import LogEntry
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.validators import validate_email
-from django.db import connection
 from django.db import transaction
-from django.db.models import F, Min, Max
 from django.db.models import Q
 from django.db.models.functions.text import Lower
 from rest_flex_fields.serializers import FlexFieldsModelSerializer
@@ -21,14 +18,15 @@ from proco.accounts import exceptions as accounts_exceptions
 from proco.accounts import models as accounts_models
 from proco.accounts import utils as account_utilities
 from proco.accounts.config import app_config as account_config
-from proco.connection_statistics.models import SchoolWeeklyStatus
-from proco.core import db_utils as db_utilities
+from proco.accounts.v2.entity_filter_serializers import (
+    PublishedEntityAdvanceFiltersListSerializer,
+    EntityColumnConfigurationChoicesSerializer,
+)
 from proco.core import utils as core_utilities
 from proco.custom_auth import models as auth_models
 from proco.custom_auth.serializers import ExpandUserSerializer
 from proco.custom_auth.utils import get_user_emails_for_permissions
 from proco.locations import models as locations_models
-from proco.schools.models import School
 from proco.utils import dates as date_utilities
 
 
@@ -2119,11 +2117,13 @@ class ExpandColumnConfigurationSerializer(FlexFieldsModelSerializer):
         return options
 
 
-class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
-    options = serializers.SerializerMethodField()
+class PublishedAdvanceFiltersListSerializer(PublishedEntityAdvanceFiltersListSerializer):
+    """
+    Thin wrapper that reuses PublishedEntityAdvanceFiltersListSerializer.
+    Handles legacy (school) and all entity types (health, library, etc.) correctly.
+    """
 
-    class Meta:
-        model = accounts_models.AdvanceFilter
+    class Meta(PublishedEntityAdvanceFiltersListSerializer.Meta):
         read_only_fields = fields = (
             'id',
             'name',
@@ -2133,180 +2133,6 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
             'options',
             'query_param_filter'
         )
-
-        expandable_fields = {
-            'column_configuration': (ExpandColumnConfigurationSerializer, {'source': 'column_configuration'}),
-        }
-
-    def include_none_filter(self, parameter_table, parameter_field):
-        select_qs = School.objects.filter(country_id=self.context['country_id'])
-        none_check_sql = f'"schools_school"."{parameter_field}" IS NULL'
-        if parameter_table == 'school_static':
-            last_weekly_status_field = 'last_weekly_status__{}'.format(parameter_field)
-            select_qs = select_qs.select_related('last_weekly_status').annotate(**{
-                parameter_table + '_' + parameter_field: F(last_weekly_status_field)
-            })
-
-            none_check_sql = f'"connection_statistics_schoolweeklystatus"."{parameter_field}" IS NULL'
-        return select_qs.extra(where=[none_check_sql]).exists()
-
-    def update_range_filter_options(self, options, parameter_table, parameter_field, parameter_options):
-        last_weekly_status_field = 'last_weekly_status__{}'.format(parameter_field)
-
-        options['include_none_filter'] = self.include_none_filter(parameter_table, parameter_field)
-
-        if options.get('range_auto_compute', False):
-            select_qs = School.objects.filter(country_id=self.context['country_id'])
-            if parameter_table == 'school_static':
-                parameter_field_props = SchoolWeeklyStatus._meta.get_field(parameter_field)
-
-                select_qs = select_qs.select_related('last_weekly_status').values('country_id').annotate(
-                    min_value=Min(F(last_weekly_status_field)),
-                    max_value=Max(F(last_weekly_status_field)),
-                )
-            else:
-                parameter_field_props = School._meta.get_field(parameter_field)
-
-                select_qs = select_qs.values('country_id').annotate(
-                    min_value=Min(parameter_field),
-                    max_value=Max(parameter_field),
-                )
-
-            select_qs_result = list(
-                select_qs.values('country_id', 'min_value', 'max_value').order_by('country_id').distinct())
-            country_range_json = select_qs_result[-1] if len(select_qs_result) > 0 else None
-
-            if country_range_json and country_range_json['min_value'] is not None and country_range_json['max_value'] is not None:
-                del country_range_json['country_id']
-
-                country_range_json['min_value'] = floor(country_range_json['min_value'])
-                country_range_json['max_value'] = ceil(country_range_json['max_value'])
-
-                if 'downcast_aggr_str' in parameter_options:
-                    downcast_eval = parameter_options['downcast_aggr_str']
-                    country_range_json['min_value'] = floor(
-                        eval(downcast_eval.format(val=country_range_json['min_value'])))
-                    country_range_json['max_value'] = ceil(
-                        eval(downcast_eval.format(val=country_range_json['max_value'])))
-
-                country_range_json['min_place_holder'] = 'Min ({})'.format(country_range_json['min_value'])
-                country_range_json['max_place_holder'] = 'Max ({})'.format(country_range_json['max_value'])
-            else:
-                internal_type = parameter_field_props.get_internal_type()
-                # Handle FloatField separately as it's not in integer_field_ranges
-                if internal_type == 'FloatField':
-                    min_value, max_value = -1e10, 1e10  # Reasonable float range
-                else:
-                    min_value, max_value = connection.ops.integer_field_range(internal_type)
-                country_range_json = {
-                    'min_place_holder': 'Min',
-                    'max_place_holder': 'Max',
-                    'min_value': min_value,
-                    'max_value': max_value
-                }
-
-            options['active_range'] = country_range_json
-
-    def update_boolean_filter_options(self, options, parameter_table, parameter_field):
-        join_condition = ''
-        filter_condition = ''
-
-        select_qry = """
-        SELECT DISTINCT {col} AS {col_name}
-        FROM schools_school AS schools
-        {join_condition}
-        WHERE schools.deleted IS NULL
-            AND schools.country_id = {c_id}
-            {filter_condition}
-        ORDER BY {col_name} DESC NULLS LAST
-        """
-
-        if parameter_table == 'school_static':
-            join_condition = ('INNER JOIN connection_statistics_schoolweeklystatus AS school_static '
-                              'ON schools.last_weekly_status_id = school_static.id')
-            filter_condition = 'AND school_static.deleted IS NULL'
-
-        sql_qry = select_qry.format(
-            col_name=parameter_field,
-            col=parameter_table + '.' + parameter_field,
-            c_id=self.context['country_id'],
-            join_condition=join_condition,
-            filter_condition=filter_condition)
-        choices = []
-        data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__)
-        for value in data:
-            field_value = value[parameter_field]
-
-            if core_utilities.is_blank_string(field_value):
-                choices.append({
-                    'label': 'Unknown',
-                    'value': 'none'
-                })
-            else:
-                choices.append({
-                    'label': 'Yes' if field_value else 'No',
-                    'value': 'true' if field_value else 'false',
-                })
-        options['choices'] = choices
-
-    def get_options(self, instance):
-        options = instance.options
-        if isinstance(options, dict):
-            parameter_details = instance.column_configuration
-            parameter_field = parameter_details.name
-            field_type = parameter_details.type
-            parameter_table = parameter_details.table_alias
-
-            parameter_options = parameter_details.options
-
-            if options.get('live_choices', False):
-                join_condition = ''
-                filter_condition = ''
-
-                select_qry = """
-                SELECT DISTINCT {col} AS {col_name}
-                FROM schools_school AS schools
-                {join_condition}
-                WHERE schools.deleted IS NULL
-                    AND schools.country_id = {c_id}
-                    {filter_condition}
-                ORDER BY {col_name} ASC NULLS LAST
-                """
-
-                if parameter_table == 'school_static':
-                    join_condition = ('INNER JOIN connection_statistics_schoolweeklystatus AS school_static '
-                                      'ON schools.last_weekly_status_id = school_static.id')
-                    filter_condition = 'AND school_static.deleted IS NULL'
-
-                sql_qry = select_qry.format(
-                    col_name=parameter_field,
-                    col=f"LOWER(NULLIF({parameter_table + '.' + parameter_field}, ''))" if field_type == 'str' else parameter_table + '.' + parameter_field,
-                    c_id=self.context['country_id'],
-                    join_condition=join_condition,
-                    filter_condition=filter_condition)
-                choices = []
-                data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__)
-                for value in data:
-                    field_value = value[parameter_field]
-                    if core_utilities.is_blank_string(field_value):
-                        choices.append({
-                            'label': 'Unknown',
-                            'value': 'none'
-                        })
-                    else:
-                        choices.append({
-                            'label': field_value.title()
-                            if field_type == accounts_models.ColumnConfiguration.TYPE_STR else field_value,
-                            'value': field_value
-                        })
-                options['choices'] = choices
-
-            if instance.type == accounts_models.AdvanceFilter.TYPE_RANGE:
-                self.update_range_filter_options(options, parameter_table, parameter_field, parameter_options)
-            elif instance.type == accounts_models.AdvanceFilter.TYPE_BOOLEAN:
-                self.update_boolean_filter_options(options, parameter_table, parameter_field)
-
-        return options
 
 
 class AdvanceFiltersListSerializer(FlexFieldsModelSerializer):
@@ -2519,63 +2345,11 @@ class PublishAdvanceFilterSerializer(serializers.ModelSerializer):
         return instance
 
 
-class ColumnConfigurationChoicesSerializer(FlexFieldsModelSerializer):
-    values = serializers.SerializerMethodField()
+class ColumnConfigurationChoicesSerializer(EntityColumnConfigurationChoicesSerializer):
+    """
+    Thin wrapper that reuses EntityColumnConfigurationChoicesSerializer.
+    Handles legacy (school) and all entity types (health, library, etc.) correctly.
+    """
 
-    class Meta:
-        model = accounts_models.ColumnConfiguration
-        read_only_fields = fields = (
-            'name',
-            'label',
-            'type',
-            'description',
-            'values',
-        )
-
-    def get_values(self, instance):
-        choices = []
-
-        parameter_field = instance.name
-        field_type = instance.type
-        parameter_table = instance.table_alias
-
-        join_condition = ''
-        filter_condition = ''
-
-        select_qry = """
-        SELECT DISTINCT {col} AS {col_name}
-        FROM schools_school AS schools
-        {join_condition}
-        WHERE schools.deleted IS NULL
-            {filter_condition}
-        ORDER BY {col_name} ASC NULLS LAST
-        """
-
-        if parameter_table == 'school_static':
-            join_condition = ('INNER JOIN connection_statistics_schoolweeklystatus AS school_static '
-                              'ON schools.last_weekly_status_id = school_static.id')
-            filter_condition = 'AND school_static.deleted IS NULL'
-
-        sql_qry = select_qry.format(
-            col_name=parameter_field,
-            col=f"LOWER(NULLIF({parameter_table + '.' + parameter_field}, ''))"
-            if field_type == 'str' else parameter_table + '.' + parameter_field,
-            join_condition=join_condition,
-            filter_condition=filter_condition)
-
-        data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__)
-        for value in data:
-            field_value = value[parameter_field]
-            if core_utilities.is_blank_string(field_value):
-                choices.append({
-                    'label': 'Unknown',
-                    'value': 'none'
-                })
-            else:
-                choices.append({
-                    'label': field_value.title()
-                    if field_type == accounts_models.ColumnConfiguration.TYPE_STR else field_value,
-                    'value': field_value
-                })
-
-        return choices
+    class Meta(EntityColumnConfigurationChoicesSerializer.Meta):
+        pass

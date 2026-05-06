@@ -1,7 +1,6 @@
 import re
 from math import floor, ceil
 
-from django.conf import settings
 from django.core.management import call_command
 from django.db import connection
 from django.db.models import F, Min, Max
@@ -63,8 +62,6 @@ class PublishedEntityAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
 
     def include_none_filter(self, parameter_table, parameter_field, column_config=None):
         from proco.schools.models import School
-        from proco.connection_statistics.models import SchoolWeeklyStatus
-
         # Determine if legacy school or entity
         use_legacy_schools = column_config is None or column_config.entity_type is None or column_config.entity_type.is_legacy
 

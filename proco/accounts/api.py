@@ -1,10 +1,10 @@
 import copy
 import json
 import logging
+import uuid
 from datetime import timedelta
 
 import requests
-import uuid
 from django.conf import settings
 from django.contrib.admin.models import LogEntry
 from django.db.models import Case, IntegerField, Value, When
@@ -24,8 +24,8 @@ from proco.accounts import exceptions as accounts_exceptions
 from proco.accounts import models as accounts_models
 from proco.accounts import serializers
 from proco.accounts import utils as account_utilities
-from proco.accounts.v2 import entity_filter_serializers
 from proco.accounts.config import app_config as account_config
+from proco.accounts.v2 import entity_filter_serializers
 from proco.connection_statistics import models as statistics_models
 from proco.connection_statistics.config import app_config as statistics_configs
 from proco.connection_statistics.models import SchoolWeeklyStatus
@@ -41,7 +41,6 @@ from proco.utils.cache import cache_manager, custom_cache_control, no_expiry_cac
 from proco.utils.filters import NullsAlwaysLastOrderingFilter
 from proco.utils.mixins import CachedListMixin
 from proco.utils.tasks import update_all_cached_values
-
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -3026,7 +3025,7 @@ class PublishedAdvanceFiltersViewSet(CachedListMixin, BaseModelViewSet):
         country_id = self.kwargs.get('country_id')
         status = self.kwargs.get('status', 'PUBLISHED')
 
-        queryset = queryset.filter(
+        queryset = queryset.select_related('entity_type', 'column_configuration').filter(
             status=status,
             active_countries__country=country_id,
             active_countries__deleted__isnull=True,
