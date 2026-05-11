@@ -16,7 +16,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.utils.urls import remove_query_param
 from rest_framework.views import APIView
-
+from rest_framework.exceptions import ValidationError
 from proco.accounts.models import DataLayer, DataSource, AdvanceFilter
 from proco.connection_statistics.config import app_config as statistics_configs
 from proco.connection_statistics.models import SchoolWeeklyStatus, EntityWeeklyStatus, EntityDailyStatus, \
@@ -925,11 +925,58 @@ class EntityConnectivityConfigurationsViewSet(APIView):
         return Response(data=static_data)
 
 
+    def _resolve_entity_type(self, request):
+        """
+        Determine the canonical entity type code from the request.
+
+        Priority: layer_id's entity_type > explicit entity_type__code param > default (school).
+
+        This makes the endpoint future-proof: any new entity type added to EntityType
+        and linked to a DataLayer will automatically route correctly without code changes.
+        """
+        layer_id = request.query_params.get('layer_id')
+        explicit_entity_type = request.query_params.get('entity_type__code')
+
+        if layer_id:
+            try:
+                data_layer = DataLayer.objects.select_related('entity_type').get(
+                    pk=layer_id,
+                    status=DataLayer.LAYER_STATUS_PUBLISHED,
+                )
+                if data_layer.entity_type:
+                    layer_entity_type = LEGACY_MODEL if data_layer.entity_type.is_legacy else data_layer.entity_type.code
+                    
+                    if explicit_entity_type and explicit_entity_type != layer_entity_type:
+                        raise ValidationError({"error": "Requested entity_type__code does not match the layer's entity type."})
+                        
+                    return layer_entity_type
+            except DataLayer.DoesNotExist:
+                pass
+
+        if explicit_entity_type:
+            return explicit_entity_type
+
+        return LEGACY_MODEL
+
     def get(self, request, *args, **kwargs):
-        entity_type = self.request.query_params.get('entity_type__code')
-        if entity_type == LEGACY_MODEL:
+        resolved_entity_type = self._resolve_entity_type(request)
+
+        if resolved_entity_type == LEGACY_MODEL:
             self.queryset = SchoolDailyStatus.objects.filter(school__deleted__isnull=True)
             return self.get_school_configs(request, *args, **kwargs)
+
+        # For non-legacy entity types, filter EntityDailyStatus by entity type
+        self.queryset = EntityDailyStatus.objects.filter(
+            entity__deleted__isnull=True,
+            entity__entity_type__code=resolved_entity_type,
+        )
+        return self.get_entity_configs(request, resolved_entity_type, *args, **kwargs)
+
+    def get_entity_configs(self, request, entity_type_code, *args, **kwargs):
+        """
+        Build connectivity configuration response for non-legacy (non-school) entity types.
+        Mirrors get_school_configs() but operates on EntityDailyStatus.
+        """
         use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
         cache_key = self.get_cache_key()
 
@@ -950,11 +997,11 @@ class EntityConnectivityConfigurationsViewSet(APIView):
 
             entity_id = self.request.query_params.get('entity_id', None)
             if entity_id:
-                self.queryset = self.queryset.filter(school=entity_id)
+                self.queryset = self.queryset.filter(entity=entity_id)
 
             entity_ids = self.request.query_params.get('entity_ids', '')
             if not core_utilities.is_blank_string(entity_ids):
-                entity_ids = [int(entity_id.strip()) for school_id in entity_ids.split(',')]
+                entity_ids = [int(eid.strip()) for eid in entity_ids.split(',')]
                 self.queryset = self.queryset.filter(entity__in=entity_ids)
 
             layer_id = request.query_params.get('layer_id')
@@ -1033,5 +1080,3 @@ class EntityConnectivityConfigurationsViewSet(APIView):
                               soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
 
         return Response(data=static_data)
-
-
