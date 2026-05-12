@@ -113,4 +113,10 @@ def finalize_setup(sender, **kwargs):
             'schedule': crontab(minute=15, hour='9,15,21,23'),
             'args': (),
         },
+        'proco.giga_meter.tasks.scheduler_for_backup_giga_meter_connectivity_ping_data': {
+            'task': 'proco.giga_meter.tasks.scheduler_for_backup_giga_meter_connectivity_ping_data',
+            # Executes once in a day at 9:30 PM
+            'schedule': crontab(hour=21, minute=30),
+            'args': (),
+        },
     })
