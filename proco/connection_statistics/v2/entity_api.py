@@ -898,6 +898,10 @@ class EntityConnectivityConfigurationsViewSet(APIView):
                 if latest_daily_entry:
                     monday_on_entry_date = latest_daily_entry - timedelta(days=latest_daily_entry.weekday())
                     sunday_on_entry_date = monday_on_entry_date + timedelta(days=6)
+                else:
+                    # Fallback to current week if there is no data at all
+                    monday_on_entry_date = monday_date
+                    sunday_on_entry_date = monday_date + timedelta(days=6)
 
             layers_list, filters_list = self.build_layers_and_filters_list(request)
 
@@ -1055,6 +1059,10 @@ class EntityConnectivityConfigurationsViewSet(APIView):
                 if latest_daily_entry:
                     monday_on_entry_date = latest_daily_entry - timedelta(days=latest_daily_entry.weekday())
                     sunday_on_entry_date = monday_on_entry_date + timedelta(days=6)
+                else:
+                    # Fallback to current week if there is no data at all
+                    monday_on_entry_date = monday_date
+                    sunday_on_entry_date = monday_date + timedelta(days=6)
 
             layers_list, filters_list = self.build_layers_and_filters_list(request)
 
