@@ -1202,7 +1202,7 @@ def validate_schema_and_sync_schema_table_data(profile_file, schema_name, share_
                 except Exception as ex:
                     logger.error('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
                     errors.append('{0} : {1} - {2}'.format(schema_table.name, type(ex).__name__, str(ex)))
-                return changes_for_countries, deleted_entities, errors
+            return changes_for_countries, deleted_entities, errors
         else:
             logger.error('Health Master schema ({0}) does not exist to use for share ({1}).'.format(schema_name,
                                                                                                     share_name))
@@ -1408,35 +1408,45 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
                         for f in row._meta.fields
                     }
                     entity_field_names = {f.name for f in Entity._meta.fields}
+                    # Exclude lookup fields and their FK IDs from defaults to avoid conflicts
+                    lookup_fields = {
+                        'giga_id', 'country', 'entity_type',
+                        'country_id', 'entity_type_id', 'id',
+                        'admin1', 'admin2', 'admin1_id', 'admin2_id',
+                        'geopoint', 'external_id', 'name'
+                    }
                     entity_defaults = {
                         k: v for k, v in row_data.items()
-                        if k in entity_field_names
+                        if k in entity_field_names and k not in lookup_fields
                     }
-                    entity_defaults['entity_type'] = entity_type
                     entity_defaults['geopoint'] = Point(row.longitude, row.latitude)
                     entity_defaults['admin1']  = admin1_instance
                     entity_defaults['admin2'] = admin2_instance
+                    entity_defaults['external_id'] = row.facility_id_govt
+                    entity_defaults['name'] = row.facility_name
 
                     entity, created = Entity.objects.update_or_create(
                         giga_id=row.health_id_giga,
-                        external_id=row.facility_id_govt,
-                        name= row.facility_name,
                         country=row.country,
+                        entity_type=entity_type,
+                        deleted__isnull=True,  # Match the unique constraint condition
                         defaults=entity_defaults
                     )
 
+
                     # To update HealthEntity
                     detail_entity_field_names = {f.name for f in detail_model._meta.fields}
+                    # Exclude lookup fields from defaults
+                    detail_lookup_fields = {'entity', 'entity_id', 'id', 'deleted'}
                     detail_entity_defaults = {
                         k: v for k, v in row_data.items()
-                        if k in detail_entity_field_names
+                        if k in detail_entity_field_names and k not in detail_lookup_fields
                     }
-                    # detail_entity_defaults['entity'] = entity
-                    detail_entity_defaults.pop('entity', None)
 
                     if detail_model:
                         detail_model.objects.update_or_create(
                             entity=entity,
+                            deleted__isnull=True,  # Match the unique constraint condition
                             defaults=detail_entity_defaults,
                         )
 

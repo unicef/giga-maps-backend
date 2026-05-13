@@ -891,7 +891,7 @@ def sort_and_modify_dataframe(loaded_data_df, health_master_fields, changes_for_
     logger.debug('Total count of rows in the data after duplicate cleanup: {0}'.format(len(loaded_data_df)))
 
     df_columns = list(loaded_data_df.columns.tolist())
-    cols_to_delete = list(set(df_columns) - set(health_master_fields)) + ['id', 'created', 'modified', 'health_id',
+    cols_to_delete = list(set(df_columns) - set(health_master_fields)) + ['id', 'created', 'modified',
                                                                         'country_id', 'status',
                                                                         'modified_by', 'published_by',
                                                                         'published_at', 'is_read', ]
@@ -924,7 +924,7 @@ def sync_health_data(loaded_data_df, cols_to_delete, country, deleted_entities):
                 ).first()
                 # Publish entities directly
                 if entity:
-                    row['health_id'] = entity.id
+                    row['entity_id'] = entity.id
                     row['status'] = sources_models.HealthEntityMasterIntermediateData.ROW_STATUS_PUBLISHED
                     row['published_at'] = core_utilities.get_current_datetime_object()
                 row_as_dict = parse_row(row)
@@ -949,15 +949,15 @@ def sync_health_data(loaded_data_df, cols_to_delete, country, deleted_entities):
                     row_as_dict = parse_row_safe(row)
                     remove_entries.append(sources_models.HealthEntityMasterIntermediateData(**row_as_dict))
                 if len(remove_entries) == 5000:
-                    logger.info('Loading the data to "HeathEntityMasterData" table as it has reached 5000 benchmark.')
+                    logger.info('Loading the data to "HealthEntityMasterIntermediateData" table as it has reached 5000 benchmark.')
                     sources_models.HealthEntityMasterIntermediateData.objects.bulk_create(remove_entries)
                     remove_entries = []
                     logger.debug('#' * 10)
                     logger.debug('\n\n')
-        logger.info('Loading the remaining ({0}) data to "HeathEntityMasterData" table.'.format(len(insert_entries)))
+        logger.info('Loading the remaining ({0}) data to "HealthEntityMasterIntermediateData" table.'.format(len(insert_entries)))
         if len(insert_entries) > 0:
             sources_models.HealthEntityMasterIntermediateData.objects.bulk_create(insert_entries)
-        logger.info('Removing ({0}) records from "HeathEntityMasterData" table.'.format(len(remove_entries)))
+        logger.info('Removing ({0}) records from "HealthEntityMasterIntermediateData" table.'.format(len(remove_entries)))
         if len(remove_entries) > 0:
             sources_models.HealthEntityMasterIntermediateData.objects.bulk_create(remove_entries)
             deleted_entities.extend(

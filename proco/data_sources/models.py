@@ -160,7 +160,7 @@ class HealthEntityMasterIntermediateData(TimeStampedModel, core_models.MasterDat
     facility_accessibility = models.CharField(blank=True, null=True, max_length=10)  # Yes/No/Null/Unknown
     distance_to_closest_settlement = models.PositiveIntegerField(blank=True, null=True)
     distance_to_country_boundary = models.PositiveIntegerField(blank=True, default=None, null=True)
-    facility_level = models.CharField(max_length=20)  # Community|Primary|Secondary|Tertiary|Quaternary
+    facility_level = models.CharField(max_length=20, null=True, blank=True)  # Community|Primary|Secondary|Tertiary|Quaternary
     num_healthworkers = models.PositiveIntegerField(blank=True, default=None, null=True)  # min=0, max=6000
     num_beds_tot = models.PositiveIntegerField(blank=True, default=None, null=True)  # min = 0; max = 10000
     num_beds_icu = models.PositiveIntegerField(blank=True, default=None, null=True)  # min = 0; max = 5000
@@ -169,7 +169,7 @@ class HealthEntityMasterIntermediateData(TimeStampedModel, core_models.MasterDat
     power_backup_system = models.CharField(blank=True, null=True, max_length=10)  # yes|no
     num_outpatients = models.PositiveIntegerField(blank=True, default=None, null=True)  # <20000
     num_inpatients = models.PositiveIntegerField(blank=True, default=None, null=True)  # <20000
-    licensing_status = models.CharField(max_length=50)  # licensed|provisional|expired|suspended|not_applicable
+    licensing_status = models.CharField(max_length=50, null=True, blank=True)  # licensed|provisional|expired|suspended|not_applicable
     facility_hours = models.CharField(
         max_length=50)  # 24_7 | weekdays_daytime | weekdays_extended | seasonal | unknown | other
     emergency_services_available = models.CharField(blank=True, null=True, max_length=10)  # yes|no
@@ -181,7 +181,7 @@ class HealthEntityMasterIntermediateData(TimeStampedModel, core_models.MasterDat
     cold_chain_available = models.CharField(blank=True, null=True, max_length=10)  # yes|no
     waste_management_system = models.CharField(blank=True, null=True,
                                                max_length=50)  # incinerator|pit|contracted_service|none|other
-    hmis_system = models.CharField(max_length=10)  # yes|no
+    hmis_system = models.CharField(max_length=10, null=True, blank=True)  # yes|no
     catchment_population = models.PositiveIntegerField(blank=True, default=None, null=True)
     services_offered = models.CharField(blank=True, null=True,
                                         max_length=100)  # outpatient|inpatient|maternity|surgery|laboratory|pharmacy|radiology|dialysis|mental_health|immunization|HIV|TB|NCD_clinic|pediatrics|geriatrics|physiotherapy|dental
