@@ -5,6 +5,7 @@ import logging
 from django.core.management.base import BaseCommand
 
 from django.core.exceptions import FieldDoesNotExist
+from django.db import transaction
 
 from proco.accounts import models as accounts_models
 from proco.connection_statistics.config import app_config as statistics_configs
@@ -158,8 +159,17 @@ class Command(BaseCommand):
                             table_name=parameter_table_name,
                             col_name=parameter_column_name,
                         )
-                    all_country_ids_has_layer_data = db_utilities.sql_to_response(sql,
-                                                                                  label='DataLayerCountryRelationship')
+
+                    try:
+                        with transaction.atomic():
+                            all_country_ids_has_layer_data = db_utilities.sql_to_response(sql,
+                                                                                        label='DataLayerCountryRelationship')
+                            # Handle None response from sql_to_response
+                            if all_country_ids_has_layer_data is None:
+                                all_country_ids_has_layer_data = []
+                    except Exception as e:
+                        logger.error(f'Error executing SQL query for layer {data_layer_instance.id}: {e}')
+                        all_country_ids_has_layer_data = []
 
                     for country_id_has_layer_data in all_country_ids_has_layer_data:
                         country_id = country_id_has_layer_data['country_id']
@@ -250,8 +260,17 @@ class Command(BaseCommand):
                             col_name=parameter_column_name,
                             unknown_condition=unknown_condition,
                         )
-                    all_country_ids_has_layer_data = db_utilities.sql_to_response(sql,
-                                                                                  label='DataLayerCountryRelationship')
+
+                    try:
+                        with transaction.atomic():
+                            all_country_ids_has_layer_data = db_utilities.sql_to_response(sql,
+                                                                                        label='DataLayerCountryRelationship')
+                            # Handle None response from sql_to_response
+                            if all_country_ids_has_layer_data is None:
+                                all_country_ids_has_layer_data = []
+                    except Exception as e:
+                        logger.error(f'Error executing SQL query for layer {data_layer_instance.id}: {e}')
+                        all_country_ids_has_layer_data = []
 
                     for country_id_has_layer_data in all_country_ids_has_layer_data:
                         country_id = country_id_has_layer_data['country_id']
