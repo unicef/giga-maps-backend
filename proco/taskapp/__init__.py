@@ -37,7 +37,7 @@ def finalize_setup(sender, **kwargs):
         # New
         'proco.schools.tasks.update_school_records': {
             'task': 'proco.schools.tasks.update_school_records',
-            'schedule': crontab(hour='1,13', minute=0),
+            'schedule': crontab(hour=1, minute=0),
             'args': (),
         },
         'proco.data_sources.tasks.cleanup_school_master_rows': {
