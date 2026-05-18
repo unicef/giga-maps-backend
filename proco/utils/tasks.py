@@ -32,7 +32,7 @@ def update_cached_value(*args, url='', query_params=None, **kwargs):
         client.get(url, {'cache': False}, format='json')
 
 
-@app.task(soft_time_limit=15 * 60, time_limit=15 * 60)
+@app.task(soft_time_limit=60 * 60, time_limit=65 * 60)
 def update_all_cached_values(*args, clean_cache=False):
     from proco.accounts.models import DataLayerCountryRelationship, DataLayer
     from proco.locations.models import Country
