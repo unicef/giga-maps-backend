@@ -45,7 +45,6 @@ from proco.utils.filters import NullsAlwaysLastOrderingFilter
 from proco.utils.mixins import CachedListMixin
 from proco.utils.tasks import update_all_cached_values
 
-
 logger = logging.getLogger('gigamaps.' + __name__)
 
 
@@ -105,7 +104,84 @@ class BaseEntityDataLayerAPIViewSet(APIView):
         self.kwargs['school_static_filters'] = core_utilities.get_filter_sql(
             self.request, 'school_static', 'connection_statistics_schoolweeklystatus')
 
-        # entity_type = query_params['entity_type__code'].strip().lower()
+        if layer_instance.entity_type is None:
+            raise ValueError(
+                f"DataLayer (id={layer_instance.pk}) has no entity_type configured."
+            )
+        entity_type = layer_instance.entity_type.code
+        entity_static_table = f"entities_{entity_type}_entity"
+
+        self.kwargs['entity_filters'] = core_utilities.get_filter_sql(
+            self.request, 'entity', 'entities_entity')
+        self.kwargs['entity_static_filters'] = core_utilities.get_filter_sql(
+            self.request, 'entity_static', entity_static_table)
+        self.kwargs['entity_real_time_filters'] = core_utilities.get_filter_sql(
+            self.request, 'entity_real_time', 'connection_statistics_entityweeklystatus')
+
+    @staticmethod
+    def _parse_date(value, param_name):
+        """Parse a date string using DATE_FORMAT; raise ValueError on failure."""
+        parsed = date_utilities.to_date(value)
+        if parsed is None:
+            from django.conf import settings
+            raise ValueError(
+                f"Invalid date format for '{param_name}': '{value}'. Expected format: {settings.DATE_FORMAT}"
+            )
+        return parsed.date()
+
+    def update_kwargs_from_dict(self, country_ids, layer_instance, query_params):
+        """Update kwargs from a query_params dict instead of request.query_params."""
+        query_param_keys = query_params.keys()
+
+        if 'start_date' in query_param_keys:
+            self.kwargs['start_date'] = self._parse_date(query_params['start_date'], 'start_date')
+        elif layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+            date = core_utilities.get_current_datetime_object() - timedelta(days=7)
+            self.kwargs['start_date'] = (date - timedelta(days=date.weekday())).date()
+
+        if 'end_date' in query_param_keys:
+            self.kwargs['end_date'] = self._parse_date(query_params['end_date'], 'end_date')
+        elif layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+            date = core_utilities.get_current_datetime_object() - timedelta(days=7)
+            self.kwargs['end_date'] = ((date - timedelta(days=date.weekday())) + timedelta(days=6)).date()
+
+        if 'country_id' in query_param_keys:
+            self.kwargs['country_ids'] = [query_params['country_id']]
+        elif 'country_id__in' in query_param_keys:
+            self.kwargs['country_ids'] = [c_id.strip() for c_id in query_params['country_id__in'].split(',')]
+        elif len(country_ids) > 0:
+            self.kwargs['country_ids'] = country_ids
+
+        if 'admin1_id' in query_param_keys:
+            self.kwargs['admin1_ids'] = [query_params['admin1_id']]
+        elif 'admin1_id__in' in query_param_keys:
+            self.kwargs['admin1_ids'] = [a_id.strip() for a_id in query_params['admin1_id__in'].split(',')]
+
+        if 'school_id' in query_param_keys:
+            self.kwargs['school_ids'] = [str(query_params['school_id']).strip()]
+        elif 'school_id__in' in query_param_keys:
+            self.kwargs['school_ids'] = [s_id.strip() for s_id in query_params['school_id__in'].split(',')]
+
+        if 'entity_id' in query_param_keys:
+            self.kwargs['entity_ids'] = [str(query_params['entity_id']).strip()]
+        elif 'entity_id__in' in query_param_keys:
+            self.kwargs['entity_ids'] = [s_id.strip() for s_id in query_params['entity_id__in'].split(',')]
+
+        self.kwargs['is_weekly'] = False if query_params.get('is_weekly', 'true') == 'false' else True
+        self.kwargs['benchmark'] = 'national' if query_params.get('benchmark', 'global') == 'national' else 'global'
+
+        self.kwargs['convert_unit'] = layer_instance.global_benchmark.get('convert_unit', 'mbps')
+        self.kwargs['is_reverse'] = layer_instance.is_reverse
+
+        self.kwargs['school_filters'] = core_utilities.get_filter_sql(
+            self.request, 'schools', 'schools_school')
+        self.kwargs['school_static_filters'] = core_utilities.get_filter_sql(
+            self.request, 'school_static', 'connection_statistics_schoolweeklystatus')
+
+        if layer_instance.entity_type is None:
+            raise ValueError(
+                f"DataLayer (id={layer_instance.pk}) has no entity_type configured."
+            )
         entity_type = layer_instance.entity_type.code
         entity_static_table = f"entities_{entity_type}_entity"
 
@@ -163,7 +239,7 @@ class BaseEntityDataLayerAPIViewSet(APIView):
     custom_cache_control(
         public=True,
         max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE,
-        cache_status_codes=[rest_status.HTTP_200_OK,],
+        cache_status_codes=[rest_status.HTTP_200_OK, ],
     )
 ], name='dispatch')
 class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities.BaseTileGenerator):
@@ -343,7 +419,7 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
         #         ON "entities_entity"."last_master_status_id" = "entities_{entity_name}_entity"."id"
         #     """.format(entity_name=kwargs['entity_name'])
 
-            # kwargs['entity_master_table_condition'] = ' AND ' + kwargs['entity_static_filters']
+        # kwargs['entity_master_table_condition'] = ' AND ' + kwargs['entity_static_filters']
 
         if add_random_condition:
             if 'limit' in request.query_params:
@@ -526,7 +602,8 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
             ):
                 return False
 
-        date = core_utilities.get_current_datetime_object().date() - timedelta(weeks=settings.LIVE_LAYER_CACHE_FOR_WEEKS)
+        date = core_utilities.get_current_datetime_object().date() - timedelta(
+            weeks=settings.LIVE_LAYER_CACHE_FOR_WEEKS)
         if self.kwargs['start_date'] >= date:
             return True
 
@@ -626,7 +703,7 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
     custom_cache_control(
         public=True,
         max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE,
-        cache_status_codes=[rest_status.HTTP_200_OK,],
+        cache_status_codes=[rest_status.HTTP_200_OK, ],
     )
 ], name='dispatch')
 class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
@@ -634,13 +711,20 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
     CACHE_KEY_PREFIX = 'ENTITY_DATA_LAYER_INFO'
 
     def get_cache_key(self):
-        pk = self.kwargs.get('pk')
-        # entity = self.kwargs.get('entity')
         params = dict(self.request.query_params)
         params.pop(self.CACHE_KEY, None)
+        # Build cache key from entity layer IDs since pk is no longer in URL
+        entity_params = self.extract_entity_params(self.request)
+        entity_keys = []
+        for entity_code, entity_config in sorted(entity_params.items()):
+            if 'layer_id' in entity_config:
+                entity_keys.append(f"{entity_code}_{entity_config['layer_id']}")
+
+        entity_part = '_'.join(entity_keys) if entity_keys else 'no_entities'
+
         return '{0}_{1}_{2}'.format(
             self.CACHE_KEY_PREFIX,
-            pk,
+            entity_part,
             '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))),
         )
 
@@ -693,8 +777,9 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         kwargs['benchmark_value_sql'] = ''
 
         benchmark_value = kwargs['benchmark_value']
-        if benchmark_value and 'SQL:' in benchmark_value:
-            kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(**kwargs) + ' AS benchmark_sql_value,'
+        if benchmark_value and 'SQL:' in str(benchmark_value):
+            kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(
+                **kwargs) + ' AS benchmark_sql_value,'
 
         legend_configs = kwargs['legend_configs']
         entity_type_obj = get_entity_type_config(kwargs['entity_name'])
@@ -721,7 +806,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     label_cases.append(
                         'COUNT(DISTINCT CASE WHEN eds.{col_name} IS NULL '
                         'THEN eds.entity_id ELSE NULL END) AS "{label}",'.format(
-                            col_name=kwargs['col_name'],label=title))
+                            col_name=kwargs['col_name'], label=title))
 
             kwargs['case_conditions'] = ' '.join(label_cases)
 
@@ -845,7 +930,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
         kwargs['benchmark_value_sql'] = ''
         benchmark_value = kwargs['benchmark_value']
-        if benchmark_value and 'SQL:' in benchmark_value:
+        if benchmark_value and 'SQL:' in str(benchmark_value):
             kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(
                 **kwargs) + ' AS benchmark_sql_value,'
 
@@ -1006,7 +1091,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         kwargs = copy.deepcopy(self.kwargs)
 
         # Get the daily connectivity_speed for the given country from SchoolDailyStatus model
-        data = db_utilities.sql_to_response(self.get_avg_query(**kwargs), label=self.__class__.__name__, db_var=settings.READ_ONLY_DB_KEY)
+        data = db_utilities.sql_to_response(self.get_avg_query(**kwargs), label=self.__class__.__name__,
+                                            db_var=settings.READ_ONLY_DB_KEY)
 
         # Generate the graph data in the desired format
         graph_data = []
@@ -1285,217 +1371,179 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
         return query.format(**kwargs)
 
-    def get(self, request, *args, **kwargs):
-        entity_type = self.request.query_params.get('entity_type__code')
-        if entity_type == LEGACY_MODEL:
-            school_view = DataLayerInfoViewSet.as_view()
-            return school_view(request._request, *args, **kwargs)
+    @staticmethod
+    def extract_entity_params(request):
+        """
+        Extract entity-specific parameters from query params.
+        Looks for patterns like: {entity_code}_{param_name}
+        e.g., school_layer_id, health_start_date, school_benchmark
 
-        # If entity_type__code is not provided, we will extract entity using data layer :
-        # NEED TO CONFIRM WITH FE ON THIS
-        # data_layer_instance = get_object_or_404(
-        #     accounts_models.DataLayer.objects.all(),
-        #     pk=self.kwargs.get('pk'),
-        #     status=accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
-        # )
-        # if data_layer_instance.entity_type.code == LEGACY_MODEL:
-        #     school_view = DataLayerInfoViewSet.as_view()
-        #     return school_view(request._request, *args, **kwargs)
+        Returns dict: {entity_code: {param_name: value, ...}}
+        """
+        entity_params = {}
+        param_suffixes = ['layer_id', 'start_date', 'end_date', 'is_weekly', 'benchmark',
+                          'include_same_location', 'country_id', 'admin1_id']
 
-        use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
-        request_path = remove_query_param(request.get_full_path(), 'cache')
-        cache_key = self.get_cache_key()
+        for param_name, param_value in request.query_params.items():
+            if param_value:
+                for suffix in param_suffixes:
+                    if param_name.endswith(f'_{suffix}'):
+                        entity_code = param_name.replace(f'_{suffix}', '')
+                        if entity_code not in entity_params:
+                            entity_params[entity_code] = {}
+                        entity_params[entity_code][suffix] = param_value
+                        break
 
-        response = None
-        if use_cached_data:
-            response = cache_manager.get(cache_key)
+        return entity_params
 
-        if not response:
-            data_layer_instance = get_object_or_404(
-                accounts_models.DataLayer.objects.all(),
-                pk=self.kwargs.get('pk'),
+    def _process_entity_layer(self, request, entity_code, params):
+        """
+        Process a single entity layer and return its info data.
+        """
+        layer_id = params.get('layer_id')
+        if not layer_id:
+            return None
+
+        try:
+            data_layer_instance = accounts_models.DataLayer.objects.get(
+                pk=layer_id,
                 status=accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
             )
-            data_sources = data_layer_instance.data_sources.all()
+        except accounts_models.DataLayer.DoesNotExist:
+            return {'error': f'No published DataLayer found with id={layer_id}.'}
 
-            live_data_sources = ['UNKNOWN']
+        data_sources = data_layer_instance.data_sources.all()
+        live_data_sources = ['UNKNOWN']
 
-            for d in data_sources:
-                source_type = d.data_source.data_source_type
-                if source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_QOS:
-                    live_data_sources.append(statistics_configs.QOS_SOURCE)
-                elif source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP:
-                    live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
+        for d in data_sources:
+            source_type = d.data_source.data_source_type
+            if source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_QOS:
+                live_data_sources.append(statistics_configs.QOS_SOURCE)
+            elif source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP:
+                live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
 
-            country_ids = data_layer_instance.applicable_countries
-            parameter_col = data_sources.first().data_source_column
+        country_ids = data_layer_instance.applicable_countries
+        parameter_col = data_sources.first().data_source_column
 
-            parameter_column_name = str(parameter_col['name'])
-            parameter_column_unit = str(parameter_col.get('unit', '')).lower()
-            base_benchmark = str(parameter_col.get('base_benchmark', 1))
-            display_unit = parameter_col.get('display_unit', '')
+        parameter_column_name = str(parameter_col['name'])
+        parameter_column_unit = str(parameter_col.get('unit', '')).lower()
+        base_benchmark = str(parameter_col.get('base_benchmark', 1))
+        display_unit = parameter_col.get('display_unit', '')
 
-            self.update_kwargs(country_ids, data_layer_instance)
-            benchmark_value, benchmark_unit = self.get_benchmark_value(data_layer_instance)
-            global_benchmark = data_layer_instance.global_benchmark.get('value')
+        # Build entity-specific query params dict (don't modify request)
+        entity_query_params = request.query_params.copy()
 
-            legend_configs = self.get_legend_configs(data_layer_instance)
+        # Override with entity-specific params if provided
+        if 'start_date' in params:
+            entity_query_params['start_date'] = params['start_date']
+        if 'end_date' in params:
+            entity_query_params['end_date'] = params['end_date']
+        if 'is_weekly' in params:
+            entity_query_params['is_weekly'] = params['is_weekly']
+        if 'benchmark' in params:
+            entity_query_params['benchmark'] = params['benchmark']
+        if 'include_same_location' in params:
+            entity_query_params['include_same_location'] = params['include_same_location']
 
-            unit_agg_str = '{val}'
+        # Handle country_id from base or entity-specific
+        country_id = params.get('country_id', entity_query_params.get('country_id'))
+        if country_id:
+            entity_query_params['country_id'] = country_id
 
-            if (
-                self.kwargs['convert_unit'] and
-                not core_utilities.is_blank_string(parameter_column_unit) and
-                self.kwargs['convert_unit'].lower() != parameter_column_unit
-            ):
-                convert_unit = self.kwargs['convert_unit'].lower()
+        # Handle admin1_id from base or entity-specific
+        admin1_id = params.get('admin1_id', entity_query_params.get('admin1_id'))
+        if admin1_id:
+            entity_query_params['admin1_id'] = admin1_id
 
-                if convert_unit == 'mbps' and parameter_column_unit == 'bps':
-                    unit_agg_str = '{val} / (1000 * 1000)'
-                elif convert_unit == 'mbps' and parameter_column_unit == 'kbps':
-                    unit_agg_str = '{val} / 1000'
-                elif convert_unit == 'kbps' and parameter_column_unit == 'bps':
-                    unit_agg_str = '{val} / 1000'
-                elif convert_unit == 'kbps' and parameter_column_unit == 'mbps':
-                    unit_agg_str = '{val} * 1000'
-                elif convert_unit == 'bps' and parameter_column_unit == 'kbps':
-                    unit_agg_str = '{val} * 1000'
-                elif convert_unit == 'bps' and parameter_column_unit == 'mbps':
-                    unit_agg_str = '{val} * 1000 * 1000'
+        try:
+            self.update_kwargs_from_dict(country_ids, data_layer_instance, entity_query_params)
+        except ValueError as e:
+            return {'error': str(e)}
 
-            self.kwargs['round_unit_value'] = unit_agg_str
+        benchmark_value, benchmark_unit = self.get_benchmark_value(data_layer_instance)
+        global_benchmark = data_layer_instance.global_benchmark.get('value')
+        legend_configs = self.get_legend_configs(data_layer_instance)
 
-            if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
-                self.kwargs.update({
-                    'col_name': parameter_column_name,
-                    'benchmark_value': benchmark_value,
-                    'global_benchmark': global_benchmark,
-                    'national_benchmark': benchmark_value,
-                    'base_benchmark': base_benchmark,
-                    'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
-                    'parameter_col': parameter_col,
-                    'is_reverse': data_layer_instance.is_reverse,
-                    'legend_configs': legend_configs,
-                    'entity_name': data_layer_instance.entity_name,
-                })
+        unit_agg_str = '{val}'
 
-                if len(self.kwargs.get('entity_ids', [])) > 0:
-                    info_panel_entity_list = db_utilities.sql_to_response(self.get_entity_view_info_query(),
-                                                                          label=self.__class__.__name__,
-                                                                          db_var=settings.READ_ONLY_DB_KEY)
-                    statistics = db_utilities.sql_to_response(self.get_entity_view_statistics_info_query(data_layer_instance.type),
-                                                              label=self.__class__.__name__,
-                                                              db_var=settings.READ_ONLY_DB_KEY)
-                    graph_data, positive_speeds = self.generate_graph_data()
-                    sorted_info_panel_entity_list = []
+        if (
+            self.kwargs['convert_unit'] and
+            not core_utilities.is_blank_string(parameter_column_unit) and
+            self.kwargs['convert_unit'].lower() != parameter_column_unit
+        ):
+            convert_unit = self.kwargs['convert_unit'].lower()
 
-                    if len(info_panel_entity_list) > 0:
-                        # Perform sorting based on the same order of entity ids provided in the query param
-                        for entity_id in self.kwargs.get('entity_ids', []):
-                            for entity_details in info_panel_entity_list:
-                                if str(entity_details['id']) == str(entity_id):
-                                    sorted_info_panel_entity_list.append(entity_details)
+            if convert_unit == 'mbps' and parameter_column_unit == 'bps':
+                unit_agg_str = '{val} / (1000 * 1000)'
+            elif convert_unit == 'mbps' and parameter_column_unit == 'kbps':
+                unit_agg_str = '{val} / 1000'
+            elif convert_unit == 'kbps' and parameter_column_unit == 'bps':
+                unit_agg_str = '{val} / 1000'
+            elif convert_unit == 'kbps' and parameter_column_unit == 'mbps':
+                unit_agg_str = '{val} * 1000'
+            elif convert_unit == 'bps' and parameter_column_unit == 'kbps':
+                unit_agg_str = '{val} * 1000'
+            elif convert_unit == 'bps' and parameter_column_unit == 'mbps':
+                unit_agg_str = '{val} * 1000 * 1000'
 
-                        for info_panel_entity in sorted_info_panel_entity_list:
-                            info_panel_entity['geopoint'] = json.loads(info_panel_entity['geopoint'])
-                            info_panel_entity['statistics'] = list(filter(
-                                lambda s: s['entity_id'] == info_panel_entity['id'], statistics))[-1]
+        self.kwargs['round_unit_value'] = unit_agg_str
 
-                            live_avg = (round(sum(positive_speeds[str(info_panel_entity['id'])]) / len(
-                                positive_speeds[str(info_panel_entity['id'])]), 2) if len(
-                                positive_speeds[str(info_panel_entity['id'])]) > 0 else 0)
+        response_data = None
 
-                            info_panel_entity['live_avg'] = live_avg
-                            info_panel_entity['graph_data'] = graph_data[str(info_panel_entity['id'])]
+        if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+            self.kwargs.update({
+                'col_name': parameter_column_name,
+                'benchmark_value': benchmark_value,
+                'global_benchmark': global_benchmark,
+                'national_benchmark': benchmark_value,
+                'base_benchmark': base_benchmark,
+                'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
+                'parameter_col': parameter_col,
+                'is_reverse': data_layer_instance.is_reverse,
+                'legend_configs': legend_configs,
+                'entity_name': data_layer_instance.entity_name,
+            })
 
-                            benchmark_value_from_sql = info_panel_entity.get('benchmark_sql_value', None)
-                            if benchmark_value_from_sql:
-                                rounded_benchmark_value_int = round(
-                                    eval(unit_agg_str.format(
-                                        val=core_utilities.convert_to_int(benchmark_value_from_sql))), 2)
-                                benchmark_value = str(benchmark_value_from_sql)
-                            else:
-                                rounded_benchmark_value_int = round(
-                                    eval(unit_agg_str.format(val=core_utilities.convert_to_int(benchmark_value))), 2)
+            if len(self.kwargs.get('entity_ids', [])) > 0:
+                info_panel_entity_list = db_utilities.sql_to_response(self.get_entity_view_info_query(),
+                                                                      label=self.__class__.__name__,
+                                                                      db_var=settings.READ_ONLY_DB_KEY) or []
+                statistics = db_utilities.sql_to_response(
+                    self.get_entity_view_statistics_info_query(data_layer_instance.type),
+                    label=self.__class__.__name__,
+                    db_var=settings.READ_ONLY_DB_KEY) or []
+                graph_data, positive_speeds = self.generate_graph_data()
+                sorted_info_panel_entity_list = []
 
-                            info_panel_entity['benchmark_metadata'] = {
-                                'benchmark_value': benchmark_value,
-                                'rounded_benchmark_value': rounded_benchmark_value_int,
-                                'benchmark_unit': benchmark_unit,
-                                'base_benchmark': base_benchmark,
-                                'parameter_column_unit': parameter_column_unit,
-                                'round_unit_value': unit_agg_str,
-                                'convert_unit': self.kwargs.get('convert_unit'),
-                                'display_unit': display_unit,
-                            }
+                if len(info_panel_entity_list) > 0:
+                    for entity_id in self.kwargs.get('entity_ids', []):
+                        for entity_details in info_panel_entity_list:
+                            if str(entity_details['id']) == str(entity_id):
+                                sorted_info_panel_entity_list.append(entity_details)
 
-                    response = sorted_info_panel_entity_list
-                else:
-                    is_data_synced_qs = EntityWeeklyStatus.objects.filter(
-                        entity__realtime_registration_status__rt_registered=True,
-                    )
+                    for info_panel_entity in sorted_info_panel_entity_list:
+                        info_panel_entity['geopoint'] = json.loads(info_panel_entity['geopoint'])
+                        info_panel_entity['statistics'] = list(filter(
+                            lambda s: s['entity_id'] == info_panel_entity['id'], statistics))[-1]
 
-                    if len(self.kwargs['entity_filters']) > 0:
-                        is_data_synced_qs = is_data_synced_qs.extra(where=[self.kwargs['entity_filters']])
+                        live_avg = (round(sum(positive_speeds[str(info_panel_entity['id'])]) / len(
+                            positive_speeds[str(info_panel_entity['id'])]), 2) if len(
+                            positive_speeds[str(info_panel_entity['id'])]) > 0 else 0)
 
-                    if len(self.kwargs['entity_static_filters']) > 0:
-                        is_data_synced_qs = is_data_synced_qs.extra(where=[self.kwargs['entity_static_filters']])
+                        info_panel_entity['live_avg'] = live_avg
+                        info_panel_entity['graph_data'] = graph_data[str(info_panel_entity['id'])]
 
-                    if len(self.kwargs.get('admin1_ids', [])) > 0:
-                        is_data_synced_qs = is_data_synced_qs.filter(entity__admin1_id__in=self.kwargs['admin1_ids'])
-                    elif len(self.kwargs.get('country_ids', [])) > 0:
-                        is_data_synced_qs = is_data_synced_qs.filter(entity__country_id__in=self.kwargs['country_ids'])
+                        benchmark_value_from_sql = info_panel_entity.get('benchmark_sql_value', None)
+                        if benchmark_value_from_sql:
+                            rounded_benchmark_value_int = round(
+                                eval(unit_agg_str.format(
+                                    val=core_utilities.convert_to_int(benchmark_value_from_sql))), 2)
+                            benchmark_value = str(benchmark_value_from_sql)
+                        else:
+                            rounded_benchmark_value_int = round(
+                                eval(unit_agg_str.format(val=core_utilities.convert_to_int(benchmark_value))), 2)
 
-                    query_response = db_utilities.sql_to_response(self.get_info_query(),
-                                                                  label=self.__class__.__name__,
-                                                                  db_var=settings.READ_ONLY_DB_KEY)[-1]
-
-                    graph_data, positive_speeds = self.generate_graph_data()
-                    live_avg = round(sum(positive_speeds) / len(positive_speeds), 2) if len(positive_speeds) > 0 else 0
-
-                    live_avg_connectivity = 'unknown'
-
-                    benchmark_value_from_sql = query_response.get('benchmark_sql_value', None)
-                    if benchmark_value_from_sql:
-                        rounded_benchmark_value_int = round(
-                                eval(unit_agg_str.format(val=core_utilities.convert_to_int(benchmark_value_from_sql))), 2)
-                        benchmark_value = str(benchmark_value_from_sql)
-                    else:
-                        rounded_benchmark_value_int = round(
-                            eval(unit_agg_str.format(val=core_utilities.convert_to_int(benchmark_value))), 2)
-
-                    rounded_base_benchmark_int = round(
-                        eval(unit_agg_str.format(val=core_utilities.convert_to_int(base_benchmark))), 2)
-
-                    if data_layer_instance.is_reverse:
-                        if live_avg < rounded_benchmark_value_int:
-                            live_avg_connectivity = 'good'
-                        elif rounded_benchmark_value_int <= live_avg <= rounded_base_benchmark_int:
-                            live_avg_connectivity = 'moderate'
-                        elif live_avg > rounded_base_benchmark_int:
-                            live_avg_connectivity = 'bad'
-                    else:
-                        if live_avg > rounded_benchmark_value_int:
-                            live_avg_connectivity = 'good'
-                        elif rounded_base_benchmark_int <= live_avg <= rounded_benchmark_value_int:
-                            live_avg_connectivity = 'moderate'
-                        elif live_avg < rounded_base_benchmark_int:
-                            live_avg_connectivity = 'bad'
-
-                    response = {
-                        'no_of_entities_measure': query_response['no_of_entities_measure'],
-                        'entity_with_realtime_data': query_response['entity_with_realtime_data'],
-                        'real_time_connected_entities': {
-                            'good': query_response['good'],
-                            'moderate': query_response['moderate'],
-                            'no_internet': query_response['bad'],
-                            'unknown': query_response['unknown'],
-                        },
-                        'is_data_synced': is_data_synced_qs.exists(),
-                        'live_avg': live_avg,
-                        'live_avg_connectivity': live_avg_connectivity,
-                        'graph_data': graph_data,
-                        'benchmark_metadata': {
+                        info_panel_entity['benchmark_metadata'] = {
                             'benchmark_value': benchmark_value,
                             'rounded_benchmark_value': rounded_benchmark_value_int,
                             'benchmark_unit': benchmark_unit,
@@ -1504,55 +1552,193 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                             'round_unit_value': unit_agg_str,
                             'convert_unit': self.kwargs.get('convert_unit'),
                             'display_unit': display_unit,
-                        },
-                    }
+                        }
+
+                response_data = sorted_info_panel_entity_list
             else:
-                self.kwargs.update({
-                    'col_name': parameter_column_name,
-                    'legend_configs': legend_configs,
-                    'parameter_col': parameter_col,
-                    'entity_name': data_layer_instance.entity_name,
-                })
+                is_data_synced_qs = EntityWeeklyStatus.objects.filter(
+                    entity__realtime_registration_status__rt_registered=True,
+                )
 
-                if len(self.kwargs.get('entity_ids', [])) > 0:
-                    print("inside static")
-                    info_panel_entity_list = db_utilities.sql_to_response(self.get_static_entity_view_info_query(),
-                                                                          label=self.__class__.__name__,
-                                                                          db_var=settings.READ_ONLY_DB_KEY)
+                if len(self.kwargs['entity_filters']) > 0:
+                    is_data_synced_qs = is_data_synced_qs.extra(where=[self.kwargs['entity_filters']])
 
-                    statistics = db_utilities.sql_to_response(self.get_entity_view_statistics_info_query(data_layer_instance.type),
-                                                              label=self.__class__.__name__,
-                                                              db_var=settings.READ_ONLY_DB_KEY)
+                if len(self.kwargs['entity_static_filters']) > 0:
+                    is_data_synced_qs = is_data_synced_qs.extra(where=[self.kwargs['entity_static_filters']])
 
-                    sorted_info_panel_entity_list = []
-                    if len(info_panel_entity_list) > 0:
-                        # Perform sorting based on the same order of school ids provided in the query param
-                        for entity_id in self.kwargs.get('entity_ids', []):
-                            for entity_details in info_panel_entity_list:
-                                if str(entity_details['id']) == str(entity_id):
-                                    sorted_info_panel_entity_list.append(entity_details)
+                if len(self.kwargs.get('admin1_ids', [])) > 0:
+                    is_data_synced_qs = is_data_synced_qs.filter(entity__admin1_id__in=self.kwargs['admin1_ids'])
+                elif len(self.kwargs.get('country_ids', [])) > 0:
+                    is_data_synced_qs = is_data_synced_qs.filter(entity__country_id__in=self.kwargs['country_ids'])
 
-                        for info_panel_entity in sorted_info_panel_entity_list:
-                            info_panel_entity['geopoint'] = json.loads(info_panel_entity['geopoint'])
-                            info_panel_entity['statistics'] = list(filter(
-                                lambda s: s['entity_id'] == info_panel_entity['id'], statistics))[-1]
-
-
-                    response = sorted_info_panel_entity_list
-                else:
-                    query_labels = []
-                    query_response = db_utilities.sql_to_response(self.get_static_info_query(query_labels),
-                                                                  label=self.__class__.__name__,
-                                                                  db_var=settings.READ_ONLY_DB_KEY)[-1]
-                    response = {
-                        'total_entities': query_response['total_entities'],
-                        'connected_entities': {label: query_response[label] for label in query_labels},
-                        'legend_configs': legend_configs,
-                        'benchmark_metadata': {
-                            'parameter_column_unit': parameter_column_unit,
-                            'display_unit': display_unit,
-                        },
+                query_result = db_utilities.sql_to_response(self.get_info_query(),
+                                                            label=self.__class__.__name__,
+                                                            db_var=settings.READ_ONLY_DB_KEY)
+                if not query_result:
+                    return {
+                        'error': f'Failed to fetch data for {entity_code} layer. The configured column may not exist.'
                     }
+                query_response = query_result[-1]
+
+                graph_data, positive_speeds = self.generate_graph_data()
+                live_avg = round(sum(positive_speeds) / len(positive_speeds), 2) if len(positive_speeds) > 0 else 0
+
+                live_avg_connectivity = 'unknown'
+
+                benchmark_value_from_sql = query_response.get('benchmark_sql_value', None)
+                if benchmark_value_from_sql:
+                    rounded_benchmark_value_int = round(
+                        eval(unit_agg_str.format(val=core_utilities.convert_to_int(benchmark_value_from_sql))), 2)
+                    benchmark_value = str(benchmark_value_from_sql)
+                else:
+                    rounded_benchmark_value_int = round(
+                        eval(unit_agg_str.format(val=core_utilities.convert_to_int(benchmark_value))), 2)
+
+                rounded_base_benchmark_int = round(
+                    eval(unit_agg_str.format(val=core_utilities.convert_to_int(base_benchmark))), 2)
+
+                if data_layer_instance.is_reverse:
+                    if live_avg < rounded_benchmark_value_int:
+                        live_avg_connectivity = 'good'
+                    elif rounded_benchmark_value_int <= live_avg <= rounded_base_benchmark_int:
+                        live_avg_connectivity = 'moderate'
+                    elif live_avg > rounded_base_benchmark_int:
+                        live_avg_connectivity = 'bad'
+                else:
+                    if live_avg > rounded_benchmark_value_int:
+                        live_avg_connectivity = 'good'
+                    elif rounded_base_benchmark_int <= live_avg <= rounded_benchmark_value_int:
+                        live_avg_connectivity = 'moderate'
+                    elif live_avg < rounded_base_benchmark_int:
+                        live_avg_connectivity = 'bad'
+
+                response_data = {
+                    'no_of_entities_measure': query_response['no_of_entities_measure'],
+                    'entity_with_realtime_data': query_response['entity_with_realtime_data'],
+                    'real_time_connected_entities': {
+                        'good': query_response['good'],
+                        'moderate': query_response['moderate'],
+                        'no_internet': query_response['bad'],
+                        'unknown': query_response['unknown'],
+                    },
+                    'is_data_synced': is_data_synced_qs.exists(),
+                    'live_avg': live_avg,
+                    'live_avg_connectivity': live_avg_connectivity,
+                    'graph_data': graph_data,
+                    'benchmark_metadata': {
+                        'benchmark_value': benchmark_value,
+                        'rounded_benchmark_value': rounded_benchmark_value_int,
+                        'benchmark_unit': benchmark_unit,
+                        'base_benchmark': base_benchmark,
+                        'parameter_column_unit': parameter_column_unit,
+                        'round_unit_value': unit_agg_str,
+                        'convert_unit': self.kwargs.get('convert_unit'),
+                        'display_unit': display_unit,
+                    },
+                }
+        else:
+            self.kwargs.update({
+                'col_name': parameter_column_name,
+                'legend_configs': legend_configs,
+                'parameter_col': parameter_col,
+                'entity_name': data_layer_instance.entity_name,
+            })
+
+            if len(self.kwargs.get('entity_ids', [])) > 0:
+                info_panel_entity_list = db_utilities.sql_to_response(self.get_static_entity_view_info_query(),
+                                                                      label=self.__class__.__name__,
+                                                                      db_var=settings.READ_ONLY_DB_KEY) or []
+
+                statistics = db_utilities.sql_to_response(
+                    self.get_entity_view_statistics_info_query(data_layer_instance.type),
+                    label=self.__class__.__name__,
+                    db_var=settings.READ_ONLY_DB_KEY) or []
+
+                sorted_info_panel_entity_list = []
+                if len(info_panel_entity_list) > 0:
+                    for entity_id in self.kwargs.get('entity_ids', []):
+                        for entity_details in info_panel_entity_list:
+                            if str(entity_details['id']) == str(entity_id):
+                                sorted_info_panel_entity_list.append(entity_details)
+
+                    for info_panel_entity in sorted_info_panel_entity_list:
+                        info_panel_entity['geopoint'] = json.loads(info_panel_entity['geopoint'])
+                        info_panel_entity['statistics'] = list(filter(
+                            lambda s: s['entity_id'] == info_panel_entity['id'], statistics))[-1]
+
+                response_data = sorted_info_panel_entity_list
+            else:
+                query_labels = []
+                query_response = db_utilities.sql_to_response(self.get_static_info_query(query_labels),
+                                                              label=self.__class__.__name__,
+                                                              db_var=settings.READ_ONLY_DB_KEY)[-1]
+                response_data = {
+                    'total_entities': query_response['total_entities'],
+                    'connected_entities': {label: query_response[label] for label in query_labels},
+                    'legend_configs': legend_configs,
+                    'benchmark_metadata': {
+                        'parameter_column_unit': parameter_column_unit,
+                        'display_unit': display_unit,
+                    },
+                }
+
+        return response_data
+
+    def get(self, request, *args, **kwargs):
+        """
+        Get layer info for multiple entity types.
+
+        API endpoint:
+            /api/v2/entities/layers/info/
+
+        Query Parameters (all prefixed with entity_code):
+            school_layer_id=30&health_layer_id=40
+            school_start_date=11-05-2026&health_start_date=11-05-2026
+            school_end_date=17-05-2026&health_end_date=17-05-2026
+            school_is_weekly=true&health_is_weekly=true
+            school_benchmark=global&health_benchmark=global
+            school_include_same_location=false&health_include_same_location=false
+            country_id=144
+
+        Returns:
+            {"school": {...}, "health": {...}}
+        """
+        # Check for legacy entity_type__code (backward compatibility)
+        entity_type = request.query_params.get('entity_type__code')
+        if entity_type == LEGACY_MODEL:
+            school_view = DataLayerInfoViewSet.as_view()
+            return school_view(request._request, *args, **kwargs)
+
+        use_cached_data = request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
+        request_path = remove_query_param(request.get_full_path(), 'cache')
+        cache_key = self.get_cache_key()
+
+        response = None
+        if use_cached_data:
+            response = cache_manager.get(cache_key)
+
+        if not response:
+            # Initialize kwargs for this request
+            self.kwargs = {}
+
+            # Extract all entity-specific parameters from query params
+            entity_params = self.extract_entity_params(request)
+
+            # If no entity-specific params found, return error
+            if not entity_params:
+                return Response(
+                    {'error': 'No entity parameters found. Please provide at least one entity_layer_id parameter.'},
+                    status=400
+                )
+
+            response = {}
+
+            # Process each entity type
+            for entity_code, params in entity_params.items():
+                if 'layer_id' in params:
+                    entity_response = self._process_entity_layer(request, entity_code, params)
+                    if entity_response is not None:
+                        response[entity_code] = entity_response
 
             cache_manager.set(cache_key, response, request_path=request_path,
                               soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
@@ -1756,7 +1942,6 @@ class EntityDataLayerPreviewViewSet(APIView):
 
         return query.format(**kwargs)
 
-
     def get_static_map_query(self, kwargs):
         query = """
             SELECT
@@ -1821,7 +2006,6 @@ class EntityDataLayerPreviewViewSet(APIView):
         kwargs['label_case_statements'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
 
         return query.format(**kwargs)
-
 
     def get(self, request, *args, **kwargs):
         data_layer_instance = get_object_or_404(accounts_models.DataLayer.objects.all(), pk=self.kwargs.get('pk'))

@@ -40,7 +40,7 @@ urlpatterns = [
     path('layers/<int:pk>/metadata/', entity_api.EntityDataLayerMetadataViewSet.as_view({
         'get': 'retrieve',
     }), name='metadata-data-layer-entities'),
-    path('layers/<int:pk>/info/', entity_api.EntityDataLayerInfoViewSet.as_view(),
+    path('layers/info/', entity_api.EntityDataLayerInfoViewSet.as_view(),
          name='entity-info-data-layer'),
     path('layers/<int:pk>/map/', entity_api.EntityDataLayerMapViewSet.as_view(),
          name='entity-map-data-layer'),
