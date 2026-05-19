@@ -736,6 +736,9 @@ class ConnectivityConfigurationsViewSet(APIView):
         return '{0}_{1}'.format(self.CACHE_KEY_PREFIX,
                                 '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))), )
 
+    def can_use_country_daily_status(self, country_id, admin1_id, school_id, school_ids):
+        return country_id and not admin1_id and not school_id and not school_ids
+
     def get(self, request, *args, **kwargs):
         use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
         cache_key = self.get_cache_key()
@@ -746,6 +749,8 @@ class ConnectivityConfigurationsViewSet(APIView):
 
         if not static_data:
             static_data = {}
+            live_data_sources = None
+            parameter_column_name = None
 
             country_id = self.request.query_params.get('country_id', None)
             if country_id:
@@ -763,6 +768,8 @@ class ConnectivityConfigurationsViewSet(APIView):
             if not core_utilities.is_blank_string(school_ids):
                 school_ids = [int(school_id.strip()) for school_id in school_ids.split(',')]
                 self.queryset = self.queryset.filter(school__in=school_ids)
+            else:
+                school_ids = None
 
             layer_id = request.query_params.get('layer_id')
             if layer_id:
@@ -791,6 +798,15 @@ class ConnectivityConfigurationsViewSet(APIView):
                     live_data_source__in=live_data_sources,
                 ).filter(**{parameter_column_name + '__isnull': False})
 
+            date_queryset = self.queryset
+            if self.can_use_country_daily_status(country_id, admin1_id, school_id, school_ids):
+                # TECH - 9945, Using CountryDailyStatus to optimize the query.
+                date_queryset = CountryDailyStatus.objects.filter(country_id=country_id)
+                if live_data_sources:
+                    date_queryset = date_queryset.filter(live_data_source__in=live_data_sources)
+                if parameter_column_name:
+                    date_queryset = date_queryset.filter(**{parameter_column_name + '__isnull': False})
+
             monday_on_entry_date = None
             sunday_on_entry_date = None
 
@@ -800,7 +816,7 @@ class ConnectivityConfigurationsViewSet(APIView):
             last_week_start = monday_date - timedelta(days=7)
             last_week_end = monday_date - timedelta(days=1)
 
-            last_week_entry = self.queryset.filter(
+            last_week_entry = date_queryset.filter(
                 date__range=(last_week_start, last_week_end)
             ).values_list('date', flat=True).order_by('-date').first()
 
@@ -810,12 +826,19 @@ class ConnectivityConfigurationsViewSet(APIView):
                 sunday_on_entry_date = last_week_end
             else:
                 # TECH-7453: 2. If last week data is not present then fallback to the latest available week including the current week as well.
-                latest_daily_entry = self.queryset.values_list('date', flat=True).order_by('-date').first()
+                latest_daily_entry = date_queryset.values_list('date', flat=True).order_by('-date').first()
 
                 if latest_daily_entry:
                     monday_on_entry_date = latest_daily_entry - timedelta(days=latest_daily_entry.weekday())
                     sunday_on_entry_date = monday_on_entry_date + timedelta(days=6)
 
+            # years = list(self.queryset.values_list('date__year', flat=True).order_by('date__year').distinct())
+            # Optimizing year extraction Query, TECH - 9945
+            first_date_queryset = date_queryset.order_by('date').values_list('date', flat=True)
+            last_date_queryset = date_queryset.order_by('-date').values_list('date', flat=True)
+            first_date = first_date_queryset.first()
+            last_date = last_date_queryset.first()
+            years = list(range(first_date.year, last_date.year + 1)) if first_date and last_date else []
             if monday_on_entry_date:
                 static_data = {
                     'week': {
@@ -828,7 +851,7 @@ class ConnectivityConfigurationsViewSet(APIView):
                         'end_date': date_utilities.format_date(date_utilities.get_last_date_of_month(
                             monday_on_entry_date.year, monday_on_entry_date.month))
                     },
-                    'years': list(self.queryset.values_list('date__year', flat=True).order_by('date__year').distinct()),
+                    'years': years,
                 }
 
             request_path = remove_query_param(request.get_full_path(), 'cache')
