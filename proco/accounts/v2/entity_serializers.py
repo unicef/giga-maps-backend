@@ -1453,7 +1453,7 @@ class EntityDataLayersListSerializer(FlexFieldsModelSerializer):
 
 class DataLayerDataSourceRelationshipSerializer(serializers.ModelSerializer):
     data_source_column = serializers.JSONField()
-    data_source_column_function = serializers.JSONField(required=False)
+    data_source_column_function = serializers.JSONField(required=False, allow_null=True, default=dict)
 
     class Meta:
         model = accounts_models.DataLayerDataSourceRelationship
@@ -1496,7 +1496,7 @@ class CreateEntityDataLayersSerializer(BaseDataLayerCRUDSerializer):
 
     data_sources_list = serializers.JSONField()
     data_source_column = serializers.JSONField()
-    data_source_column_function = serializers.JSONField(required=False)
+    data_source_column_function = serializers.JSONField(required=False, allow_null=True, default=dict)
 
     class Meta:
         model = accounts_models.DataLayer
@@ -1600,7 +1600,7 @@ class CreateEntityDataLayersSerializer(BaseDataLayerCRUDSerializer):
 class UpdateEntityDataLayerSerializer(BaseDataLayerCRUDSerializer):
     data_sources_list = serializers.JSONField()
     data_source_column = serializers.JSONField()
-    data_source_column_function = serializers.JSONField(required=False)
+    data_source_column_function = serializers.JSONField(required=False, allow_null=True, default=dict)
 
     applicable_countries = serializers.JSONField(required=False)
     global_benchmark = serializers.JSONField(required=False)

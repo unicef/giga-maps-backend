@@ -131,6 +131,19 @@ class BaseEntityDataLayerAPIViewSet(APIView):
 
     def update_kwargs_from_dict(self, country_ids, layer_instance, query_params):
         """Update kwargs from a query_params dict instead of request.query_params."""
+        self.kwargs.setdefault('country_ids', [])
+        self.kwargs.setdefault('admin1_ids', [])
+        self.kwargs.setdefault('entity_ids', [])
+        self.kwargs.setdefault('school_ids', [])
+        self.kwargs.setdefault('entity_filters', '')
+        self.kwargs.setdefault('entity_static_filters', '')
+        self.kwargs.setdefault('entity_real_time_filters', '')
+        self.kwargs.setdefault('school_filters', '')
+        self.kwargs.setdefault('school_static_filters', '')
+        self.kwargs.setdefault('convert_unit', 'mbps')
+        self.kwargs.setdefault('is_weekly', True)
+        self.kwargs.setdefault('benchmark', 'global')
+
         query_param_keys = query_params.keys()
 
         if 'start_date' in query_param_keys:
@@ -1206,10 +1219,6 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             kwargs['entity_condition'] = ' AND ' + kwargs['entity_filters']
 
         if len(kwargs['entity_static_filters']) > 0:
-            kwargs['entity_weekly_join'] = """
-            INNER JOIN "entities_{entity_name}_entity"
-                ON ews."entity_id" = "entities_entity"."id"
-            """
             kwargs['entity_weekly_condition'] = ' AND ' + kwargs['entity_static_filters']
 
         legend_configs = kwargs['legend_configs']
@@ -1456,7 +1465,9 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         first_source = data_sources.first()
         if first_source is None:
             return {'error': f'DataLayer (id={layer_id}) has no data sources configured.'}
-        parameter_col = first_source.data_source_column
+        parameter_col = first_source.data_source_column or {}
+        if not parameter_col.get('name'):
+            return {'error': f'DataLayer (id={layer_id}) has no data source column name configured.'}
 
         parameter_column_name = str(parameter_col['name'])
         parameter_column_unit = str(parameter_col.get('unit', '')).lower()
@@ -1560,12 +1571,11 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                             lambda s: s['entity_id'] == info_panel_entity['id'], statistics))
                         info_panel_entity['statistics'] = matched[-1] if matched else {}
 
-                        live_avg = (round(sum(positive_speeds[str(info_panel_entity['id'])]) / len(
-                            positive_speeds[str(info_panel_entity['id'])]), 2) if len(
-                            positive_speeds[str(info_panel_entity['id'])]) > 0 else 0)
+                        _speeds = positive_speeds.get(str(info_panel_entity['id']), [])
+                        live_avg = round(sum(_speeds) / len(_speeds), 2) if _speeds else 0
 
                         info_panel_entity['live_avg'] = live_avg
-                        info_panel_entity['graph_data'] = graph_data[str(info_panel_entity['id'])]
+                        info_panel_entity['graph_data'] = graph_data.get(str(info_panel_entity['id']), [])
 
                         benchmark_value_from_sql = info_panel_entity.get('benchmark_sql_value', None)
                         if benchmark_value_from_sql:
@@ -1658,8 +1668,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     }
 
                 response_data = {
-                    'no_of_entities_measure': query_response['no_of_entities_measure'],
-                    'entity_with_realtime_data': query_response['entity_with_realtime_data'],
+                    'no_of_entities_measure': query_response.get('no_of_entities_measure', 0),
+                    'entity_with_realtime_data': query_response.get('entity_with_realtime_data', 0),
                     'real_time_connected_entities': connected_entities,
                     'is_data_synced': is_data_synced_qs.exists(),
                     'live_avg': live_avg,
