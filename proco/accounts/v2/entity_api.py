@@ -728,7 +728,9 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))),
         )
 
-    def get_info_query(self):
+    def get_info_query(self, query_labels=None):
+        if query_labels is None:
+            query_labels = []
         query = """
         SELECT {case_conditions}
             COUNT(DISTINCT CASE WHEN eds.{col_name} IS NOT NULL THEN eds.entity_id ELSE NULL END)
@@ -783,15 +785,23 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
         legend_configs = kwargs['legend_configs']
         entity_type_obj = get_entity_type_config(kwargs['entity_name'])
-        kwargs['parameter_col'] = build_parameter_config(
-            entity_type_obj,
-            kwargs['col_name'],
-            kwargs['entity_name']
-        )
+        try:
+            kwargs['parameter_col'] = build_parameter_config(
+                entity_type_obj,
+                kwargs['col_name'],
+                kwargs['entity_name']
+            )
+        except Exception as e:
+            raise ValueError(
+                f"Column '{kwargs['col_name']}' not found in any model for entity '{kwargs['entity_name']}'. "
+                f"Check the DataLayer's data source column configuration."
+            ) from e
         kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'entities_entity')
         if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
             label_cases = []
             for title, values_and_label in legend_configs.items():
+                label = values_and_label.get('labels', title).strip()
+                query_labels.append(label)
                 values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
                                      values_and_label.get('values', [])))
 
@@ -801,12 +811,12 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                         sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
                         label_cases.append(
                             'COUNT(DISTINCT CASE WHEN {sql} THEN eds.entity_id ELSE NULL END) AS "{label}",'.format(
-                                sql=sql_statement, label=title))
+                                sql=sql_statement, label=label))
                 else:
                     label_cases.append(
                         'COUNT(DISTINCT CASE WHEN eds.{col_name} IS NULL '
                         'THEN eds.entity_id ELSE NULL END) AS "{label}",'.format(
-                            col_name=kwargs['col_name'], label=title))
+                            col_name=kwargs['col_name'], label=label))
 
             kwargs['case_conditions'] = ' '.join(label_cases)
 
@@ -936,11 +946,17 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
         legend_configs = kwargs['legend_configs']
         entity_type_obj = get_entity_type_config(kwargs['entity_name'])
-        kwargs['parameter_col'] = build_parameter_config(
-            entity_type_obj,
-            kwargs['col_name'],
-            kwargs['entity_name']
-        )
+        try:
+            kwargs['parameter_col'] = build_parameter_config(
+                entity_type_obj,
+                kwargs['col_name'],
+                kwargs['entity_name']
+            )
+        except Exception as e:
+            raise ValueError(
+                f"Column '{kwargs['col_name']}' not found in any model for entity '{kwargs['entity_name']}'. "
+                f"Check the DataLayer's data source column configuration."
+            ) from e
         kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'entities_entity')
         if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
             label_cases = []
@@ -1200,11 +1216,17 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         label_cases = []
         values_l = []
         entity_type_obj = get_entity_type_config(kwargs['entity_name'])
-        kwargs['parameter_col'] = build_parameter_config(
-            entity_type_obj,
-            kwargs['col_name'],
-            kwargs['entity_name']
-        )
+        try:
+            kwargs['parameter_col'] = build_parameter_config(
+                entity_type_obj,
+                kwargs['col_name'],
+                kwargs['entity_name']
+            )
+        except Exception as e:
+            raise ValueError(
+                f"Column '{kwargs['col_name']}' not found in any model for entity '{kwargs['entity_name']}'. "
+                f"Check the DataLayer's data source column configuration."
+            ) from e
         parameter_col_type = kwargs['parameter_col'].get('type', 'str').lower()
         kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'entities_entity')
         is_sql_value = False
@@ -1583,7 +1605,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 elif len(self.kwargs.get('country_ids', [])) > 0:
                     is_data_synced_qs = is_data_synced_qs.filter(entity__country_id__in=self.kwargs['country_ids'])
 
-                query_result = db_utilities.sql_to_response(self.get_info_query(),
+                query_labels = []
+                query_result = db_utilities.sql_to_response(self.get_info_query(query_labels),
                                                             label=self.__class__.__name__,
                                                             db_var=settings.READ_ONLY_DB_KEY)
                 if not query_result:
@@ -1624,15 +1647,20 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     elif live_avg < rounded_base_benchmark_int:
                         live_avg_connectivity = 'bad'
 
+                if query_labels:
+                    connected_entities = {label: query_response.get(label, 0) for label in query_labels}
+                else:
+                    connected_entities = {
+                        'good': query_response.get('good', 0),
+                        'moderate': query_response.get('moderate', 0),
+                        'no_internet': query_response.get('bad', 0),
+                        'unknown': query_response.get('unknown', 0),
+                    }
+
                 response_data = {
                     'no_of_entities_measure': query_response['no_of_entities_measure'],
                     'entity_with_realtime_data': query_response['entity_with_realtime_data'],
-                    'real_time_connected_entities': {
-                        'good': query_response['good'],
-                        'moderate': query_response['moderate'],
-                        'no_internet': query_response['bad'],
-                        'unknown': query_response['unknown'],
-                    },
+                    'real_time_connected_entities': connected_entities,
                     'is_data_synced': is_data_synced_qs.exists(),
                     'live_avg': live_avg,
                     'live_avg_connectivity': live_avg_connectivity,
