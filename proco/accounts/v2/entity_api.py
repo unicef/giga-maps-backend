@@ -1258,7 +1258,15 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                         ))
                 else:
                     values = set(values_l)
-                    if parameter_col_type == 'str':
+                    if not values:
+                        label_cases.append(
+                            'COUNT(DISTINCT CASE WHEN {table_name}."{col_name}" IS NOT NULL '
+                            'THEN entities_entity."id" ELSE NULL END) AS "{label}",'.format(
+                                table_name=kwargs['table_name'],
+                                col_name=kwargs['col_name'],
+                                label=label,
+                            ))
+                    elif parameter_col_type == 'str':
                         label_cases.append(
                             'COUNT(DISTINCT CASE WHEN LOWER({table_name}."{col_name}") NOT IN ({value}) '
                             'THEN entities_entity."id" ELSE NULL END) AS "{label}",'.format(
@@ -1423,7 +1431,10 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
 
         country_ids = data_layer_instance.applicable_countries
-        parameter_col = data_sources.first().data_source_column
+        first_source = data_sources.first()
+        if first_source is None:
+            return {'error': f'DataLayer (id={layer_id}) has no data sources configured.'}
+        parameter_col = first_source.data_source_column
 
         parameter_column_name = str(parameter_col['name'])
         parameter_column_unit = str(parameter_col.get('unit', '')).lower()
@@ -1523,8 +1534,9 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
                     for info_panel_entity in sorted_info_panel_entity_list:
                         info_panel_entity['geopoint'] = json.loads(info_panel_entity['geopoint'])
-                        info_panel_entity['statistics'] = list(filter(
-                            lambda s: s['entity_id'] == info_panel_entity['id'], statistics))[-1]
+                        matched = list(filter(
+                            lambda s: s['entity_id'] == info_panel_entity['id'], statistics))
+                        info_panel_entity['statistics'] = matched[-1] if matched else {}
 
                         live_avg = (round(sum(positive_speeds[str(info_panel_entity['id'])]) / len(
                             positive_speeds[str(info_panel_entity['id'])]), 2) if len(
@@ -1663,15 +1675,21 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
                     for info_panel_entity in sorted_info_panel_entity_list:
                         info_panel_entity['geopoint'] = json.loads(info_panel_entity['geopoint'])
-                        info_panel_entity['statistics'] = list(filter(
-                            lambda s: s['entity_id'] == info_panel_entity['id'], statistics))[-1]
+                        matched = list(filter(
+                            lambda s: s['entity_id'] == info_panel_entity['id'], statistics))
+                        info_panel_entity['statistics'] = matched[-1] if matched else {}
 
                 response_data = sorted_info_panel_entity_list
             else:
                 query_labels = []
-                query_response = db_utilities.sql_to_response(self.get_static_info_query(query_labels),
-                                                              label=self.__class__.__name__,
-                                                              db_var=settings.READ_ONLY_DB_KEY)[-1]
+                query_result = db_utilities.sql_to_response(self.get_static_info_query(query_labels),
+                                                            label=self.__class__.__name__,
+                                                            db_var=settings.READ_ONLY_DB_KEY)
+                if not query_result:
+                    return {
+                        'error': f'Failed to fetch static data for {entity_code} layer. The configured column may not exist.'
+                    }
+                query_response = query_result[-1]
                 response_data = {
                     'total_entities': query_response['total_entities'],
                     'connected_entities': {label: query_response[label] for label in query_labels},
@@ -1736,7 +1754,10 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             # Process each entity type
             for entity_code, params in entity_params.items():
                 if 'layer_id' in params:
-                    entity_response = self._process_entity_layer(request, entity_code, params)
+                    try:
+                        entity_response = self._process_entity_layer(request, entity_code, params)
+                    except Exception as exc:
+                        entity_response = {'error': str(exc)}
                     if entity_response is not None:
                         response[entity_code] = entity_response
 

@@ -104,11 +104,23 @@ def build_parameter_config(entity_type_obj, field_name, entity_code):
         try:
             field = model._meta.get_field(field_name)
 
+            internal_type = field.get_internal_type()
+            int_types = {'IntegerField', 'BigIntegerField', 'SmallIntegerField',
+                         'PositiveIntegerField', 'PositiveSmallIntegerField', 'FloatField', 'DecimalField'}
+            float_types = {'FloatField', 'DecimalField'}
+            if internal_type in float_types:
+                simple_type = 'float'
+            elif internal_type in int_types:
+                simple_type = 'int'
+            else:
+                simple_type = 'str'
+
             config = {
                 "col_name": field.column,
                 "table_name": table_alias,
                 "db_table": model._meta.db_table,
-                "field_type": field.get_internal_type(),
+                "field_type": internal_type,
+                "type": simple_type,
             }
 
             _PARAMETER_FIELD_CACHE[cache_key] = config
