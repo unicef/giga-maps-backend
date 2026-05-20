@@ -932,7 +932,7 @@ class EntityConnectivityConfigurationsViewSet(APIView):
             filter_id: Optional explicit filter ID (overrides request.query_params.get('filter_id'))
         """
         use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
-        cache_key = self.get_cache_key()
+        cache_key = self.get_cache_key() + '_school'
 
         static_data = None
         if use_cached_data:
@@ -974,10 +974,10 @@ class EntityConnectivityConfigurationsViewSet(APIView):
                 live_data_sources = ['UNKNOWN']
 
                 for d in data_sources:
-                    source_type = d.data_source.data_source_type
-                    if source_type == DataSource.DATA_SOURCE_TYPE_QOS:
+                    source_type = (d.data_source.data_source_type or '').upper()
+                    if source_type == DataSource.DATA_SOURCE_TYPE_QOS.upper():
                         live_data_sources.append(statistics_configs.QOS_SOURCE)
-                    elif source_type == DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP:
+                    elif source_type == DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP.upper():
                         live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
 
                 parameter_col = data_sources.first().data_source_column
@@ -993,10 +993,21 @@ class EntityConnectivityConfigurationsViewSet(APIView):
             last_week_start = monday_date - timedelta(days=7)
             last_week_end = monday_date - timedelta(days=1)
 
-            table_name = self.queryset.model._meta.db_table
-            monday_on_entry_date, sunday_on_entry_date = self.find_most_recent_week(
-                table_name, last_week_start, last_week_end, monday_date, max_weeks=9
-            )
+            monday_on_entry_date = None
+            sunday_on_entry_date = None
+
+            last_week_entry = self.queryset.filter(
+                date__range=(last_week_start, last_week_end)
+            ).values_list('date', flat=True).order_by('-date').first()
+
+            if last_week_entry:
+                monday_on_entry_date = last_week_start
+                sunday_on_entry_date = last_week_end
+            else:
+                latest_daily_entry = self.queryset.values_list('date', flat=True).order_by('-date').first()
+                if latest_daily_entry:
+                    monday_on_entry_date = latest_daily_entry - timedelta(days=latest_daily_entry.weekday())
+                    sunday_on_entry_date = monday_on_entry_date + timedelta(days=6)
 
             # Use explicit filter_id if provided
             effective_filter_id = filter_id or request.query_params.get('filter_id')
@@ -1005,8 +1016,9 @@ class EntityConnectivityConfigurationsViewSet(APIView):
             )
 
             if monday_on_entry_date:
-                years = self.get_available_years(table_name, today_date.year)
-
+                years = list(
+                    self.queryset.values_list('date__year', flat=True).order_by('date__year').distinct()
+                )
                 static_data = {
                     'week': {
                         'start_date': date_utilities.format_date(monday_on_entry_date),
@@ -1019,6 +1031,11 @@ class EntityConnectivityConfigurationsViewSet(APIView):
                             monday_on_entry_date.year, monday_on_entry_date.month))
                     },
                     'years': years,
+                    'layers_list': layers_list,
+                    'filters_list': filters_list,
+                }
+            else:
+                static_data = {
                     'layers_list': layers_list,
                     'filters_list': filters_list,
                 }
@@ -1152,7 +1169,7 @@ class EntityConnectivityConfigurationsViewSet(APIView):
             filter_id: Optional explicit filter ID
         """
         use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
-        cache_key = self.get_cache_key()
+        cache_key = self.get_cache_key() + f'_{entity_type_code}'
 
         static_data = None
         if use_cached_data:
@@ -1193,10 +1210,10 @@ class EntityConnectivityConfigurationsViewSet(APIView):
                 live_data_sources = ['UNKNOWN']
 
                 for d in data_sources:
-                    source_type = d.data_source.data_source_type
-                    if source_type == DataSource.DATA_SOURCE_TYPE_QOS:
+                    source_type = (d.data_source.data_source_type or '').upper()
+                    if source_type == DataSource.DATA_SOURCE_TYPE_QOS.upper():
                         live_data_sources.append(statistics_configs.QOS_SOURCE)
-                    elif source_type == DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP:
+                    elif source_type == DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP.upper():
                         live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
 
                 parameter_col = data_sources.first().data_source_column
@@ -1212,10 +1229,21 @@ class EntityConnectivityConfigurationsViewSet(APIView):
             last_week_start = monday_date - timedelta(days=7)
             last_week_end = monday_date - timedelta(days=1)
 
-            table_name = self.queryset.model._meta.db_table
-            monday_on_entry_date, sunday_on_entry_date = self.find_most_recent_week(
-                table_name, last_week_start, last_week_end, monday_date, max_weeks=9
-            )
+            monday_on_entry_date = None
+            sunday_on_entry_date = None
+
+            last_week_entry = self.queryset.filter(
+                date__range=(last_week_start, last_week_end)
+            ).values_list('date', flat=True).order_by('-date').first()
+
+            if last_week_entry:
+                monday_on_entry_date = last_week_start
+                sunday_on_entry_date = last_week_end
+            else:
+                latest_daily_entry = self.queryset.values_list('date', flat=True).order_by('-date').first()
+                if latest_daily_entry:
+                    monday_on_entry_date = latest_daily_entry - timedelta(days=latest_daily_entry.weekday())
+                    sunday_on_entry_date = monday_on_entry_date + timedelta(days=6)
 
             # Use explicit filter_id if provided
             effective_filter_id = filter_id or request.query_params.get('filter_id')
@@ -1224,8 +1252,9 @@ class EntityConnectivityConfigurationsViewSet(APIView):
             )
 
             if monday_on_entry_date:
-                years = self.get_available_years(table_name, today_date.year)
-
+                years = list(
+                    self.queryset.values_list('date__year', flat=True).order_by('date__year').distinct()
+                )
                 static_data = {
                     'week': {
                         'start_date': date_utilities.format_date(monday_on_entry_date),
@@ -1238,6 +1267,11 @@ class EntityConnectivityConfigurationsViewSet(APIView):
                             monday_on_entry_date.year, monday_on_entry_date.month))
                     },
                     'years': years,
+                    'layers_list': layers_list,
+                    'filters_list': filters_list,
+                }
+            else:
+                static_data = {
                     'layers_list': layers_list,
                     'filters_list': filters_list,
                 }

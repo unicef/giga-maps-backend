@@ -55,6 +55,11 @@ class BaseEntityDataLayerAPIViewSet(APIView):
         permissions.AllowAny,
     )
 
+    def get_column_function_sql(self, parameter_col_function):
+        if isinstance(parameter_col_function, dict) and len(parameter_col_function) > 0:
+            return parameter_col_function.get('sql').format(col_name='t."{col_name}"')
+        return 'AVG(t."{col_name}")'
+
     def update_kwargs(self, country_ids, layer_instance):
         query_params = self.request.query_params.dict()
         query_param_keys = query_params.keys()
@@ -104,19 +109,20 @@ class BaseEntityDataLayerAPIViewSet(APIView):
         self.kwargs['school_static_filters'] = core_utilities.get_filter_sql(
             self.request, 'school_static', 'connection_statistics_schoolweeklystatus')
 
-        if layer_instance.entity_type is None:
-            raise ValueError(
-                f"DataLayer (id={layer_instance.pk}) has no entity_type configured."
-            )
-        entity_type = layer_instance.entity_type.code
-        entity_static_table = f"entities_{entity_type}_entity"
+        if layer_instance.entity_type is not None and not layer_instance.entity_type.is_legacy:
+            entity_type = layer_instance.entity_type.code
+            entity_static_table = f"entities_{entity_type}_entity"
 
-        self.kwargs['entity_filters'] = core_utilities.get_filter_sql(
-            self.request, 'entity', 'entities_entity')
-        self.kwargs['entity_static_filters'] = core_utilities.get_filter_sql(
-            self.request, 'entity_static', entity_static_table)
-        self.kwargs['entity_real_time_filters'] = core_utilities.get_filter_sql(
-            self.request, 'entity_real_time', 'connection_statistics_entityweeklystatus')
+            self.kwargs['entity_filters'] = core_utilities.get_filter_sql(
+                self.request, 'entity', 'entities_entity')
+            self.kwargs['entity_static_filters'] = core_utilities.get_filter_sql(
+                self.request, 'entity_static', entity_static_table)
+            self.kwargs['entity_real_time_filters'] = core_utilities.get_filter_sql(
+                self.request, 'entity_real_time', 'connection_statistics_entityweeklystatus')
+        else:
+            self.kwargs['entity_filters'] = ''
+            self.kwargs['entity_static_filters'] = ''
+            self.kwargs['entity_real_time_filters'] = ''
 
     @staticmethod
     def _parse_date(value, param_name):
@@ -191,19 +197,16 @@ class BaseEntityDataLayerAPIViewSet(APIView):
         self.kwargs['school_static_filters'] = core_utilities.get_filter_sql(
             self.request, 'school_static', 'connection_statistics_schoolweeklystatus')
 
-        if layer_instance.entity_type is None:
-            raise ValueError(
-                f"DataLayer (id={layer_instance.pk}) has no entity_type configured."
-            )
-        entity_type = layer_instance.entity_type.code
-        entity_static_table = f"entities_{entity_type}_entity"
+        if layer_instance.entity_type is not None and not layer_instance.entity_type.is_legacy:
+            entity_type = layer_instance.entity_type.code
+            entity_static_table = f"entities_{entity_type}_entity"
 
-        self.kwargs['entity_filters'] = core_utilities.get_filter_sql(
-            self.request, 'entity', 'entities_entity')
-        self.kwargs['entity_static_filters'] = core_utilities.get_filter_sql(
-            self.request, 'entity_static', entity_static_table)
-        self.kwargs['entity_real_time_filters'] = core_utilities.get_filter_sql(
-            self.request, 'entity_real_time', 'connection_statistics_entityweeklystatus')
+            self.kwargs['entity_filters'] = core_utilities.get_filter_sql(
+                self.request, 'entity', 'entities_entity')
+            self.kwargs['entity_static_filters'] = core_utilities.get_filter_sql(
+                self.request, 'entity_static', entity_static_table)
+            self.kwargs['entity_real_time_filters'] = core_utilities.get_filter_sql(
+                self.request, 'entity_real_time', 'connection_statistics_entityweeklystatus')
 
     def get_benchmark_value(self, data_layer_instance):
         benchmark_val = data_layer_instance.global_benchmark.get('value')
@@ -1116,6 +1119,48 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
         return query.format(**kwargs)
 
+    def _generate_school_graph_data(self, school_viewset_cls):
+        """
+        Generate graph data using the legacy school daily status tables.
+        Delegates avg query generation to school_viewset_cls.get_avg_query.
+        """
+        kwargs = copy.deepcopy(self.kwargs)
+
+        data = db_utilities.sql_to_response(
+            school_viewset_cls.get_avg_query(self, **kwargs),
+            label=self.__class__.__name__,
+            db_var=settings.READ_ONLY_DB_KEY,
+        )
+
+        graph_data = []
+        current_date = kwargs['start_date']
+        while current_date <= kwargs['end_date']:
+            graph_data.append({
+                'group': 'Speed',
+                'key': date_utilities.format_date(current_date),
+                'value': None,
+            })
+            current_date += timedelta(days=1)
+
+        round_unit_value = kwargs['round_unit_value']
+        all_positive_speeds = []
+
+        for daily_avg_data in (data or []):
+            formatted_date = date_utilities.format_date(daily_avg_data['date'])
+            for entry in graph_data:
+                if entry['key'] == formatted_date:
+                    try:
+                        rounded_speed = 0
+                        if daily_avg_data['field_avg'] is not None:
+                            rounded_speed = round(
+                                eval(round_unit_value.format(val=daily_avg_data['field_avg'])), 2)
+                        entry['value'] = rounded_speed
+                        all_positive_speeds.append(rounded_speed)
+                    except (KeyError, TypeError):
+                        pass
+
+        return graph_data, all_positive_speeds
+
     def generate_graph_data(self):
         kwargs = copy.deepcopy(self.kwargs)
 
@@ -1534,7 +1579,12 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
         response_data = None
 
+        is_legacy = (data_layer_instance.entity_type is None) or data_layer_instance.entity_type.is_legacy
+
         if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+            parameter_col_function = first_source.data_source_column_function or {}
+            column_function_sql = self.get_column_function_sql(parameter_col_function)
+
             self.kwargs.update({
                 'col_name': parameter_column_name,
                 'benchmark_value': benchmark_value,
@@ -1543,12 +1593,16 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 'base_benchmark': base_benchmark,
                 'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                 'parameter_col': parameter_col,
+                'parameter_col_function_sql': column_function_sql,
                 'is_reverse': data_layer_instance.is_reverse,
                 'legend_configs': legend_configs,
                 'entity_name': data_layer_instance.entity_name,
+                'school_filters': self.kwargs.get('entity_filters', ''),
+                'school_static_filters': self.kwargs.get('entity_static_filters', ''),
+                'school_ids': self.kwargs.get('entity_ids', []),
             })
 
-            if len(self.kwargs.get('entity_ids', [])) > 0:
+            if len(self.kwargs.get('entity_ids', [])) > 0 and not is_legacy:
                 info_panel_entity_list = db_utilities.sql_to_response(self.get_entity_view_info_query(),
                                                                       label=self.__class__.__name__,
                                                                       db_var=settings.READ_ONLY_DB_KEY) or []
@@ -1599,6 +1653,91 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                         }
 
                 response_data = sorted_info_panel_entity_list
+            elif is_legacy:
+                from proco.connection_statistics.models import SchoolWeeklyStatus
+                from proco.accounts.api import DataLayerInfoViewSet
+
+                is_data_synced_qs = SchoolWeeklyStatus.objects.filter(
+                    school__realtime_registration_status__rt_registered=True,
+                )
+                if len(self.kwargs.get('school_filters', '')) > 0:
+                    is_data_synced_qs = is_data_synced_qs.extra(where=[self.kwargs['school_filters']])
+                if len(self.kwargs.get('school_static_filters', '')) > 0:
+                    is_data_synced_qs = is_data_synced_qs.extra(where=[self.kwargs['school_static_filters']])
+                if len(self.kwargs.get('admin1_ids', [])) > 0:
+                    is_data_synced_qs = is_data_synced_qs.filter(school__admin1_id__in=self.kwargs['admin1_ids'])
+                elif len(self.kwargs.get('country_ids', [])) > 0:
+                    is_data_synced_qs = is_data_synced_qs.filter(school__country_id__in=self.kwargs['country_ids'])
+
+                query_result = db_utilities.sql_to_response(
+                    DataLayerInfoViewSet.get_info_query(self),
+                    label=self.__class__.__name__,
+                    db_var=settings.READ_ONLY_DB_KEY)
+                if not query_result:
+                    return {
+                        'error': f'Failed to fetch data for {entity_code} layer. The configured column may not exist.'
+                    }
+                query_response = query_result[-1]
+
+                graph_data, positive_speeds = self._generate_school_graph_data(
+                    DataLayerInfoViewSet
+                )
+                live_avg = self.get_live_avg(
+                    parameter_col_function.get('name', 'avg'), positive_speeds
+                )
+                live_avg_connectivity = 'unknown'
+
+                benchmark_value_from_sql = query_response.get('benchmark_sql_value', None)
+                if benchmark_value_from_sql:
+                    rounded_benchmark_value_int = round(
+                        eval(unit_agg_str.format(val=core_utilities.convert_to_int(benchmark_value_from_sql))), 2)
+                    benchmark_value = str(benchmark_value_from_sql)
+                else:
+                    rounded_benchmark_value_int = round(
+                        eval(unit_agg_str.format(val=core_utilities.convert_to_int(benchmark_value))), 2)
+
+                rounded_base_benchmark_int = round(
+                    eval(unit_agg_str.format(val=core_utilities.convert_to_int(base_benchmark))), 2)
+
+                if data_layer_instance.is_reverse:
+                    if live_avg < rounded_benchmark_value_int:
+                        live_avg_connectivity = 'good'
+                    elif rounded_benchmark_value_int <= live_avg <= rounded_base_benchmark_int:
+                        live_avg_connectivity = 'moderate'
+                    elif live_avg > rounded_base_benchmark_int:
+                        live_avg_connectivity = 'bad'
+                else:
+                    if live_avg > rounded_benchmark_value_int:
+                        live_avg_connectivity = 'good'
+                    elif rounded_base_benchmark_int <= live_avg <= rounded_benchmark_value_int:
+                        live_avg_connectivity = 'moderate'
+                    elif live_avg < rounded_base_benchmark_int:
+                        live_avg_connectivity = 'bad'
+
+                response_data = {
+                    'no_of_entities_measure': query_response.get('no_of_schools_measure', 0),
+                    'entity_with_realtime_data': query_response.get('school_with_realtime_data', 0),
+                    'real_time_connected_entities': {
+                        'good': query_response.get('good', 0),
+                        'moderate': query_response.get('moderate', 0),
+                        'no_internet': query_response.get('bad', 0),
+                        'unknown': query_response.get('unknown', 0),
+                    },
+                    'is_data_synced': is_data_synced_qs.exists(),
+                    'live_avg': live_avg,
+                    'live_avg_connectivity': live_avg_connectivity,
+                    'graph_data': graph_data,
+                    'benchmark_metadata': {
+                        'benchmark_value': benchmark_value,
+                        'rounded_benchmark_value': rounded_benchmark_value_int,
+                        'benchmark_unit': benchmark_unit,
+                        'base_benchmark': base_benchmark,
+                        'parameter_column_unit': parameter_column_unit,
+                        'round_unit_value': unit_agg_str,
+                        'convert_unit': self.kwargs.get('convert_unit'),
+                        'display_unit': display_unit,
+                    },
+                }
             else:
                 is_data_synced_qs = EntityWeeklyStatus.objects.filter(
                     entity__realtime_registration_status__rt_registered=True,
