@@ -1831,9 +1831,33 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 'legend_configs': legend_configs,
                 'parameter_col': parameter_col,
                 'entity_name': data_layer_instance.entity_name,
+                'school_filters': self.kwargs.get('entity_filters', ''),
+                'school_static_filters': self.kwargs.get('entity_static_filters', ''),
             })
 
-            if len(self.kwargs.get('entity_ids', [])) > 0:
+            if is_legacy and len(self.kwargs.get('entity_ids', [])) == 0:
+                from proco.accounts.api import DataLayerInfoViewSet as _SchoolViewSet
+
+                query_labels = []
+                query_result = db_utilities.sql_to_response(
+                    _SchoolViewSet.get_static_info_query(self, query_labels),
+                    label=self.__class__.__name__,
+                    db_var=settings.READ_ONLY_DB_KEY)
+                if not query_result:
+                    return {
+                        'error': f'Failed to fetch static data for {entity_code} layer. The configured column may not exist.'
+                    }
+                query_response = query_result[-1]
+                response_data = {
+                    'total_entities': query_response.get('total_schools', 0),
+                    'connected_entities': {label: query_response.get(label, 0) for label in query_labels},
+                    'legend_configs': legend_configs,
+                    'benchmark_metadata': {
+                        'parameter_column_unit': parameter_column_unit,
+                        'display_unit': display_unit,
+                    },
+                }
+            elif len(self.kwargs.get('entity_ids', [])) > 0:
                 info_panel_entity_list = db_utilities.sql_to_response(self.get_static_entity_view_info_query(),
                                                                       label=self.__class__.__name__,
                                                                       db_var=settings.READ_ONLY_DB_KEY) or []
