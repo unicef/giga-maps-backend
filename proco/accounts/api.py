@@ -2131,7 +2131,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                         {same_school_coords_condition}
                         {school_weekly_condition}
                         AND rt_status."rt_registered" = True
-                        AND rt_status."rt_registration_date"::date <= '{end_date}'
+                        AND rt_status."rt_registration_date" < ('{end_date}'::date + INTERVAL '1 day')
                     )
                     GROUP BY "schools_school"."id"
                 ) AS sds ON sds.school_id = "schools_school".id
@@ -2140,7 +2140,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     {random_order}
                     {limit_condition}
             )
-            SELECT ST_AsMVT(DISTINCT mvtgeom.*) FROM mvtgeom;
+            SELECT ST_AsMVT(mvtgeom.*) FROM mvtgeom;
         """
 
         kwargs = copy.deepcopy(self.kwargs)

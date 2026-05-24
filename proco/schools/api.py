@@ -618,7 +618,7 @@ class SchoolStatusConnectivityTileGenerator(BaseTileGenerator):
                 FROM sampled_schools
                 CROSS JOIN bounds
             )
-            SELECT ST_AsMVT(DISTINCT mvtgeom.*) FROM mvtgeom;
+            SELECT ST_AsMVT(mvtgeom.*) FROM mvtgeom;
         """
 
         tbl['school_weekly_join'] = ''
