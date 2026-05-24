@@ -1161,10 +1161,10 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
     def get_info_query(self):
         query = """
         SELECT {case_conditions}
-            COUNT(DISTINCT CASE WHEN sds.{col_name} IS NOT NULL THEN sds.school_id ELSE NULL END)
+            COUNT(sds.school_id) FILTER (WHERE sds.{col_name} IS NOT NULL)
                 AS "school_with_realtime_data",
             {benchmark_value_sql}
-            COUNT(DISTINCT sds.school_id) AS "no_of_schools_measure"
+            COUNT(sds.school_id) AS "no_of_schools_measure"
         FROM (
             SELECT "schools_school"."id" AS school_id,
                 "schools_school"."last_weekly_status_id",
@@ -1188,9 +1188,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 {school_condition}
                 {school_weekly_condition}
                 AND "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
-                AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date"::date <= '{end_date}')
+                AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date" < ('{end_date}'::date + INTERVAL '1 day'))
             GROUP BY "schools_school"."id"
-            ORDER BY "schools_school"."id" ASC
         ) AS sds
         {school_weekly_outer_join}
         """
@@ -1221,12 +1220,11 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     if is_sql_value:
                         sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
                         label_cases.append(
-                            'COUNT(DISTINCT CASE WHEN {sql} THEN sds.school_id ELSE NULL END) AS "{label}",'.format(
+                            'COUNT(sds.school_id) FILTER (WHERE {sql}) AS "{label}",'.format(
                                 sql=sql_statement, label=title))
                 else:
                     label_cases.append(
-                        'COUNT(DISTINCT CASE WHEN sds.{col_name} IS NULL '
-                        'THEN sds.school_id ELSE NULL END) AS "{label}",'.format(
+                        'COUNT(sds.school_id) FILTER (WHERE sds.{col_name} IS NULL) AS "{label}",'.format(
                             col_name=kwargs['col_name'],label=title))
 
             kwargs['case_conditions'] = ' '.join(label_cases)
@@ -1236,20 +1234,22 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             """
         else:
             kwargs['case_conditions'] = """
-            COUNT(DISTINCT CASE WHEN sds.{col_name} > {benchmark_value} THEN sds.school_id ELSE NULL END) AS "good",
-            COUNT(DISTINCT CASE WHEN (sds.{col_name} >= {base_benchmark} AND sds.{col_name} <= {benchmark_value})
-                THEN sds.school_id ELSE NULL END) AS "moderate",
-            COUNT(DISTINCT CASE WHEN sds.{col_name} < {base_benchmark} THEN sds.school_id ELSE NULL END) AS "bad",
-            COUNT(DISTINCT CASE WHEN sds.{col_name} IS NULL THEN sds.school_id ELSE NULL END) AS "unknown",
+            COUNT(sds.school_id) FILTER (WHERE sds.{col_name} > {benchmark_value}) AS "good",
+            COUNT(sds.school_id) FILTER (
+                WHERE sds.{col_name} >= {base_benchmark} AND sds.{col_name} <= {benchmark_value}
+            ) AS "moderate",
+            COUNT(sds.school_id) FILTER (WHERE sds.{col_name} < {base_benchmark}) AS "bad",
+            COUNT(sds.school_id) FILTER (WHERE sds.{col_name} IS NULL) AS "unknown",
             """.format(**kwargs)
 
             if kwargs['is_reverse'] is True:
                 kwargs['case_conditions'] = """
-                COUNT(DISTINCT CASE WHEN sds.{col_name} < {benchmark_value} THEN sds.school_id ELSE NULL END) AS "good",
-                COUNT(DISTINCT CASE WHEN (sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark})
-                    THEN sds.school_id ELSE NULL END) AS "moderate",
-                COUNT(DISTINCT CASE WHEN sds.{col_name} > {base_benchmark} THEN sds.school_id ELSE NULL END) AS "bad",
-                COUNT(DISTINCT CASE WHEN sds.{col_name} IS NULL THEN sds.school_id ELSE NULL END) AS "unknown",
+                COUNT(sds.school_id) FILTER (WHERE sds.{col_name} < {benchmark_value}) AS "good",
+                COUNT(sds.school_id) FILTER (
+                    WHERE sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark}
+                ) AS "moderate",
+                COUNT(sds.school_id) FILTER (WHERE sds.{col_name} > {base_benchmark}) AS "bad",
+                COUNT(sds.school_id) FILTER (WHERE sds.{col_name} IS NULL) AS "unknown",
                 """.format(**kwargs)
 
         if len(kwargs.get('admin1_ids', [])) > 0:
@@ -1298,7 +1298,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
                 ELSE 'unknown'
             END AS connectivity_status,
-            CASE WHEN srr."rt_registered" = True AND srr."rt_registration_date"::date <= '{end_date}' THEN true
+            CASE WHEN srr."rt_registered" = True
+                AND srr."rt_registration_date" < ('{end_date}'::date + INTERVAL '1 day') THEN true
             ELSE false END AS is_rt_connected,
             {benchmark_value_sql}
             {case_conditions}
@@ -1316,7 +1317,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         LEFT JOIN "connection_statistics_schoolrealtimeregistration" AS srr
             ON schools_school."id" = srr."school_id"
             AND srr."deleted" IS NULL
-            AND srr."rt_registration_date"::date <= '{end_date}'
+            AND srr."rt_registration_date" < ('{end_date}'::date + INTERVAL '1 day')
         LEFT JOIN (
             SELECT "schools_school"."id" AS school_id,
                 AVG(t."{col_name}") AS "{col_name}"
@@ -1331,7 +1332,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             WHERE ("schools_school"."id" IN ({ids})
                 AND "schools_school"."deleted" IS NULL)
             GROUP BY "schools_school"."id"
-            ORDER BY "schools_school"."id" ASC
         ) AS sds ON sds.school_id = schools_school.id
         WHERE "schools_school"."id" IN ({ids})
             AND c."deleted" IS NULL
@@ -1419,7 +1419,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             {school_weekly_condition}
             "connection_statistics_schoolrealtimeregistration"."deleted" IS NULL
             AND "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
-            AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date"::date <= '{end_date}'
+            AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date" < ('{end_date}'::date + INTERVAL '1 day')
             AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
             AND t."live_data_source" IN ({live_source_types})
             AND t."deleted" IS NULL
@@ -1772,7 +1772,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         LEFT JOIN
             connection_statistics_schoolrealtimeregistration srr ON s.id = srr.school_id
             AND srr.deleted IS NULL
-            AND srr.rt_registration_date <= '{end_date}'
+            AND srr.rt_registration_date < ('{end_date}'::date + INTERVAL '1 day')
         WHERE
             s.deleted IS NULL
             AND s.id != {school_id}
