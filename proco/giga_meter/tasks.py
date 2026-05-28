@@ -893,7 +893,7 @@ def scheduler_for_backup_giga_meter_connectivity_ping_data(*args, start_date=Non
         till_date = format_date(core_utilities.get_current_datetime_object(timestamp=n_days_old))
     else:
         till_date = end_date
-    task_key = f'scheduler_for_backup_giga_meter_connectivity_ping_data_for_country_at_{till_date}'
+    task_key = f'scheduler_for_backup_giga_meter_connectivity_ping_data_for_country_on_and_before_{till_date}'
     task_id = current_task.request.id or str(uuid.uuid4())
     task_instance = background_task_utilities.task_on_start(
         task_id,
