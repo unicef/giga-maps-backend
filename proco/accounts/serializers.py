@@ -31,13 +31,6 @@ from proco.locations import models as locations_models
 from proco.schools.models import School
 from proco.utils import dates as date_utilities
 
-DEFAULT_DATA_SOURCE_COLUMN_FUNCTION = {
-    'description': '',
-    'name': 'avg',
-    'sql': 'AVG({col_name})',
-    'verbose': 'Avg',
-}
-
 
 class ExpandAPISerializer(FlexFieldsModelSerializer):
     """
@@ -1446,13 +1439,9 @@ class DataLayersListSerializer(FlexFieldsModelSerializer):
                 'data_sources': relationship_instance.data_sources,
             })
 
-        data_source_column_function = (
-            list(data_source_column_functions.values())[-1]
-            if data_source_column_functions else copy.deepcopy(DEFAULT_DATA_SOURCE_COLUMN_FUNCTION)
-        )
         setattr(data_layer, 'data_sources_list', data_sources_list)
         setattr(data_layer, 'data_source_column', data_source_columns)
-        setattr(data_layer, 'data_source_column_function', data_source_column_function)
+        setattr(data_layer, 'data_source_column_function', list(data_source_column_functions.values())[-1] if data_source_column_functions else {})
         setattr(data_layer, 'active_countries_list', active_countries_list)
         return super().to_representation(data_layer)
 
@@ -1611,13 +1600,9 @@ class BaseDataLayerCRUDSerializer(serializers.ModelSerializer):
             if relationship_instance.data_source_column_function:
                 data_source_column_functions[relationship_instance.data_source.id] = relationship_instance.data_source_column_function
 
-        data_source_column_function = (
-            list(data_source_column_functions.values())[-1]
-            if data_source_column_functions else copy.deepcopy(DEFAULT_DATA_SOURCE_COLUMN_FUNCTION)
-        )
         setattr(data_layer, 'data_sources_list', data_sources_list)
         setattr(data_layer, 'data_source_column', data_source_columns)
-        setattr(data_layer, 'data_source_column_function', data_source_column_function)
+        setattr(data_layer, 'data_source_column_function', list(data_source_column_functions.values())[-1] if data_source_column_functions else {})
         return super().to_representation(data_layer)
 
 
