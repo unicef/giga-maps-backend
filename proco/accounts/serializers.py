@@ -31,6 +31,13 @@ from proco.locations import models as locations_models
 from proco.schools.models import School
 from proco.utils import dates as date_utilities
 
+DEFAULT_DATA_SOURCE_COLUMN_FUNCTION = {
+    'description': '',
+    'name': 'avg',
+    'sql': 'AVG({col_name})',
+    'verbose': 'Avg',
+}
+
 
 class ExpandAPISerializer(FlexFieldsModelSerializer):
     """
@@ -1338,7 +1345,7 @@ class DataLayersListSerializer(FlexFieldsModelSerializer):
 
     data_sources_list = serializers.JSONField()
     data_source_column = serializers.JSONField()
-    data_source_column_function = serializers.JSONField()
+    data_source_column_function = serializers.JSONField(required=False, allow_null=True)
 
     benchmark_metadata = serializers.SerializerMethodField()
 
@@ -1439,16 +1446,20 @@ class DataLayersListSerializer(FlexFieldsModelSerializer):
                 'data_sources': relationship_instance.data_sources,
             })
 
+        data_source_column_function = (
+            list(data_source_column_functions.values())[-1]
+            if data_source_column_functions else copy.deepcopy(DEFAULT_DATA_SOURCE_COLUMN_FUNCTION)
+        )
         setattr(data_layer, 'data_sources_list', data_sources_list)
         setattr(data_layer, 'data_source_column', data_source_columns)
-        setattr(data_layer, 'data_source_column_function', list(data_source_column_functions.values())[-1] if data_source_column_functions else {})
+        setattr(data_layer, 'data_source_column_function', data_source_column_function)
         setattr(data_layer, 'active_countries_list', active_countries_list)
         return super().to_representation(data_layer)
 
 
 class DataLayerDataSourceRelationshipSerializer(serializers.ModelSerializer):
     data_source_column = serializers.JSONField()
-    data_source_column_function = serializers.JSONField(required=False)
+    data_source_column_function = serializers.JSONField(required=False, allow_null=True)
 
     class Meta:
         model = accounts_models.DataLayerDataSourceRelationship
@@ -1600,9 +1611,13 @@ class BaseDataLayerCRUDSerializer(serializers.ModelSerializer):
             if relationship_instance.data_source_column_function:
                 data_source_column_functions[relationship_instance.data_source.id] = relationship_instance.data_source_column_function
 
+        data_source_column_function = (
+            list(data_source_column_functions.values())[-1]
+            if data_source_column_functions else copy.deepcopy(DEFAULT_DATA_SOURCE_COLUMN_FUNCTION)
+        )
         setattr(data_layer, 'data_sources_list', data_sources_list)
         setattr(data_layer, 'data_source_column', data_source_columns)
-        setattr(data_layer, 'data_source_column_function', list(data_source_column_functions.values())[-1] if data_source_column_functions else {})
+        setattr(data_layer, 'data_source_column_function', data_source_column_function)
         return super().to_representation(data_layer)
 
 
@@ -1613,7 +1628,7 @@ class CreateDataLayersSerializer(BaseDataLayerCRUDSerializer):
 
     data_sources_list = serializers.JSONField()
     data_source_column = serializers.JSONField()
-    data_source_column_function = serializers.JSONField()
+    data_source_column_function = serializers.JSONField(required=False, allow_null=True)
 
     class Meta:
         model = accounts_models.DataLayer
@@ -1715,7 +1730,7 @@ class CreateDataLayersSerializer(BaseDataLayerCRUDSerializer):
 class UpdateDataLayerSerializer(BaseDataLayerCRUDSerializer):
     data_sources_list = serializers.JSONField()
     data_source_column = serializers.JSONField()
-    data_source_column_function = serializers.JSONField(required=False)
+    data_source_column_function = serializers.JSONField(required=False, allow_null=True)
 
     applicable_countries = serializers.JSONField(required=False)
     global_benchmark = serializers.JSONField(required=False)
@@ -2193,7 +2208,9 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
                 country_range_json['max_place_holder'] = 'Max ({})'.format(country_range_json['max_value'])
             else:
                 internal_type = parameter_field_props.get_internal_type()
-                min_value, max_value = connection.ops.integer_field_range(internal_type)
+                min_value, max_value = None, None
+                if internal_type != 'FloatField':
+                    min_value, max_value = connection.ops.integer_field_range(internal_type)
                 country_range_json = {
                     'min_place_holder': 'Min',
                     'max_place_holder': 'Max',
@@ -2229,7 +2246,7 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
             join_condition=join_condition,
             filter_condition=filter_condition)
         choices = []
-        data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__)
+        data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__) or []
         for value in data:
             field_value = value[parameter_field]
 
@@ -2281,7 +2298,7 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
                     join_condition=join_condition,
                     filter_condition=filter_condition)
                 choices = []
-                data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__)
+                data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__) or []
                 for value in data:
                     field_value = value[parameter_field]
                     if core_utilities.is_blank_string(field_value):
@@ -2559,7 +2576,7 @@ class ColumnConfigurationChoicesSerializer(FlexFieldsModelSerializer):
             join_condition=join_condition,
             filter_condition=filter_condition)
 
-        data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__)
+        data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__) or []
         for value in data:
             field_value = value[parameter_field]
             if core_utilities.is_blank_string(field_value):
