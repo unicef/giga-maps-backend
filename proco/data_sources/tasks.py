@@ -1425,6 +1425,16 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
                     entity_defaults['external_id'] = row.facility_id_govt
                     entity_defaults['name'] = row.facility_name
 
+                    # Map connectivity/connectivity_govt to connectivity_status for Entity
+                    connectivity_govt = str(getattr(row, 'connectivity_govt', '') or '').lower().strip()
+                    connectivity = str(getattr(row, 'connectivity', '') or '').lower().strip()
+                    if connectivity_govt in ['yes', 'true', 'good', 'moderate'] or connectivity in ['yes', 'true', 'good', 'moderate']:
+                        entity_defaults['connectivity_status'] = 'good'
+                    elif connectivity_govt in ['no', 'false'] or connectivity in ['no', 'false']:
+                        entity_defaults['connectivity_status'] = 'no'
+                    else:
+                        entity_defaults['connectivity_status'] = 'unknown'
+
                     entity, created = Entity.objects.update_or_create(
                         giga_id=row.health_id_giga,
                         country=row.country,
