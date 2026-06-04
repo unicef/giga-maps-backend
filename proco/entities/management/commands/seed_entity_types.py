@@ -34,7 +34,7 @@ ENTITY_TYPES_DATA = [
         'display_order': 2,
         'is_legacy': False,
         'detail_model': 'entities.HealthEntity',
-        'detail_related_name': 'entities_health_entity',
+        'detail_related_name': 'health_entity',
         'master_data_model': 'data_sources.HealthEntityMasterIntermediateData',
         'extra_config': {
             'tile_cache_prefix': 'HEALTH_STATUS_CONNECTIVITY_TILES_MAP',

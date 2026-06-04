@@ -43,6 +43,7 @@ class ExpandColumnConfigurationSerializer(FlexFieldsModelSerializer):
 
 class PublishedEntityAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
     options = serializers.SerializerMethodField()
+    entity_type = serializers.SerializerMethodField()
 
     class Meta:
         model = accounts_models.AdvanceFilter
@@ -53,12 +54,18 @@ class PublishedEntityAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
             'description',
             'column_configuration',
             'options',
-            'query_param_filter'
+            'query_param_filter',
+            'entity_type',
         )
 
         expandable_fields = {
             'column_configuration': (ExpandColumnConfigurationSerializer, {'source': 'column_configuration'}),
         }
+
+    def get_entity_type(self, instance):
+        if instance.entity_type:
+            return instance.entity_type.code
+        return None
 
     def include_none_filter(self, parameter_table, parameter_field, column_config=None):
         from proco.schools.models import School
