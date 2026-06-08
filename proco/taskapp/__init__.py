@@ -29,13 +29,13 @@ def finalize_setup(sender, **kwargs):
             'args': (),
             'kwargs': {'clean_cache': True},
         },
-        'proco.utils.tasks.rebuild_school_index': {
-            'task': 'proco.utils.tasks.rebuild_school_index',
-            'schedule': crontab(hour=2, minute=0),
-            'args': (),
-        },
-        'proco.utils.tasks.rebuild_entities_index': {
-            'task': 'proco.utils.tasks.rebuild_entities_index',
+        # 'proco.utils.tasks.rebuild_school_index': {
+        #     'task': 'proco.utils.tasks.rebuild_school_index',
+        #     'schedule': crontab(hour=2, minute=0),
+        #     'args': (),
+        # },
+        'proco.utils.tasks.rebuild_unified_index': {
+            'task': 'proco.utils.tasks.rebuild_unified_index',
             'schedule': crontab(hour=2, minute=0),
             'args': (),
         },

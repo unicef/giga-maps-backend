@@ -302,16 +302,16 @@ def populate_school_new_fields_task(start_school_id, end_school_id, country_id, 
 
 
 @app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)
-def rebuild_entities_index():
+def rebuild_unified_index():
     """
-    rebuild_entities_index
+    rebuild_unified_index
         Task which runs to rebuild the Cognitive Search Index for Entities from scratch.
 
         Frequency: Once in a day
         Limit: 15 minutes
     """
-    logger.info('Rebuilding the entities indexes.')
-    task_key = 'rebuild_entities_index_status_{current_time}'.format(
+    logger.info('Rebuilding the unified entities indexes.')
+    task_key = 'rebuild_unified_index_status_{current_time}'.format(
         current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
 
     task_id = current_task.request.id or str(uuid.uuid4())
@@ -321,7 +321,7 @@ def rebuild_entities_index():
     if task_instance:
         logger.debug('Not found running job: {}'.format(task_key))
         cmd_args = ['--delete_index', '--create_index', '--clean_index', '--update_index']
-        call_command('index_rebuild_entities', *cmd_args)
+        call_command('rebuild_unified_index', *cmd_args)
         background_task_utilities.task_on_complete(task_instance)
     else:
         logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))

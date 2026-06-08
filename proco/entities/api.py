@@ -26,7 +26,7 @@ from proco.connection_statistics.models import SchoolWeeklyStatus, SchoolDailySt
 from proco.connection_statistics.utils import get_benchmark_value_for_default_download_layer
 from proco.entities.constants import LEGACY_MODEL, ALL_ENTITIES
 from proco.locations.api import BaseSearchMixin
-from proco.locations.search_indexes import EntityIndex, SchoolIndex, UnifiedEntityIndex
+from proco.locations.search_indexes import UnifiedEntityIndex
 from proco.utils.cache import cache_manager, custom_cache_control
 
 from proco.entities.models import Entity, EntityType
@@ -366,9 +366,7 @@ class AggregateSearchEntityViewSet(BaseSearchMixin, ListAPIView):
         permissions.AllowAny,
     )
 
-    default_index_class = EntityIndex
-    school_index_class = SchoolIndex
-    unified_index_class = UnifiedEntityIndex
+    index_class = UnifiedEntityIndex
 
     filterset_fields = {
         'id': ['exact', 'in', 'notexact'],
@@ -377,7 +375,7 @@ class AggregateSearchEntityViewSet(BaseSearchMixin, ListAPIView):
         'admin2_id': ['exact', 'in', 'notexact'],
         'admin1_name': ['exact', 'in', 'notexact'],
         'admin2_name': ['exact', 'in', 'notexact'],
-        'entity_type_code':['exact', 'in']
+        'entity_type_code': ['exact', 'in'],
     }
 
     filter_field_type = {
@@ -388,98 +386,40 @@ class AggregateSearchEntityViewSet(BaseSearchMixin, ListAPIView):
         'entity_type_code': SearchFieldDataType.String,
     }
 
-    def get_index_class(self):
-        entity_type = self.request.query_params.get("entity_type__code")
-
-        if entity_type == LEGACY_MODEL:
-            return self.school_index_class
-
-        return self.default_index_class
-
-    def sanitize_fields(self, request):
-        """
-        Remove fields not supported by selected index
-        """
-        fields = request.query_params.get("fields")
-
-        if not fields:
+    def normalize_entity_type_filter(self, request):
+        entity_type = request.query_params.get('entity_type__code')
+        if not entity_type or entity_type == ALL_ENTITIES:
             return
 
-        fields_list = fields.split(",")
-
-        # If SchoolIndex → remove entity_type_code
-        if self.index_class == self.school_index_class:
-            fields_list = [
-                f for f in fields_list
-                if f != "entity_type_code"
-            ]
-
         mutable_querydict = request.query_params.copy()
-        mutable_querydict["fields"] = ",".join(fields_list)
+        mutable_querydict['entity_type_code__exact'] = entity_type
+        mutable_querydict.pop('entity_type__code', None)
         request._request.GET = mutable_querydict
 
-    def sanitize_search_fields(self, request):
-        search_fields = request.query_params.get("search_fields")
+    @property
+    def get_select(self):
+        fields = self.params.get('fields')
+        if fields:
+            selected_fields = [core_utilities.sanitize_str(field_name) for field_name in fields[-1].split(',')]
+            if 'entity_type_code' not in selected_fields:
+                selected_fields.append('entity_type_code')
+            return ','.join(selected_fields)
 
-        if not search_fields:
-            return
-
-        fields_list = search_fields.split(",")
-
-        if self.index_class == self.school_index_class:
-            fields_list = [
-                "giga_id_school" if f == "giga_id" else f
-                for f in fields_list
-            ]
-
-        mutable_querydict = request.query_params.copy()
-        mutable_querydict["search_fields"] = ",".join(fields_list)
-        request._request.GET = mutable_querydict
+        index_fields = [
+            attr
+            for attr in dir(self.index_class)
+            if not callable(getattr(self.index_class, attr)) and not attr.startswith('__')
+        ]
+        return ','.join(index_fields)
 
     def list(self, request, *args, **kwargs):
         resp_data = OrderedDict()
 
-        entity_type = request.query_params.get("entity_type__code")
+        self.normalize_entity_type_filter(request)
+        data = self.index_search(request, *args, **kwargs)
 
-        results = []
-        total_count = 0
-        original_params = request.query_params.copy()
-        if entity_type == ALL_ENTITIES:
-            # index_classes = [self.school_index_class, self.default_index_class]
-            index_classes = [self.unified_index_class]
-        else:
-            index_classes = [self.get_index_class()]
-
-        for index in index_classes:
-            request._request.GET = original_params.copy()
-
-            self.index_class = index
-
-            self.sanitize_fields(request)
-            self.sanitize_search_fields(request)
-
-            data = self.index_search(request, *args, **kwargs)
-
-            result_list = list(data)
-
-            if index == self.school_index_class:
-                for r in result_list:
-                    r["entity_type_code"] = LEGACY_MODEL
-
-            results.extend(result_list)
-            total_count += data.get_count()
-
-        resp_data["count"] = total_count
-        resp_data["results"] = results
-        # results = sorted(
-        #     results,
-        #     key=lambda x: (
-        #         -x.get("row_score", 0),
-        #         x.get("country_name", ""),
-        #         x.get("name", "")
-        #     )
-        # )
-
+        resp_data["count"] = data.get_count()
+        resp_data["results"] = list(data)
         return Response(resp_data)
 
 
@@ -753,4 +693,3 @@ class EntityGlobalConnectivityTileRequestHandler(APIView):
                 response = Response({'error': 'An error occurred while processing the request'}, status=500)
 
         return response
-
