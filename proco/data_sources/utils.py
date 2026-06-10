@@ -12,18 +12,19 @@ import requests
 from delta_sharing.protocol import Schema, Share
 from delta_sharing.reader import DeltaSharingReader
 from django.conf import settings
-from django.db.models import Q
+from django.core.cache import cache
+from django.db.models import Avg, Q
 from django.db.models.functions import Lower
 from rest_framework import status
 
 from proco.accounts.models import APIKey
 from proco.connection_statistics.config import app_config as statistics_configs
-from proco.connection_statistics.models import RealTimeConnectivity, SchoolRealTimeRegistration
+from proco.connection_statistics.models import RealTimeConnectivity, SchoolRealTimeRegistration, EntityRealTimeConnectivity, EntityDailyStatus
 from proco.core import utils as core_utilities
 from proco.core.config import app_config as core_configs
 from proco.custom_auth.models import ApplicationUser
 from proco.data_sources import models as sources_models
-from proco.entities.models import Entity
+from proco.entities.models import Entity, EntityType
 from proco.locations.models import Country
 from proco.schools.models import School
 from proco.utils.dates import format_date
@@ -382,7 +383,7 @@ def sync_school_master_data(profile_file, share_name, schema_name, table_name, c
         logger.info('No data to update in current table: {0}.'.format(table_name))
 
 
-def get_request_headers(request_configs):
+def get_request_headers(request_configs, api_code=None):
     source_request_headers = request_configs.get('headers', {})
     auth_required = request_configs.get('auth_token_required', False)
 
@@ -391,17 +392,23 @@ def get_request_headers(request_configs):
             Q(is_active=True) & (Q(is_superuser=True) | Q(is_staff=True))
         ).values_list('id', flat=True).order_by('id').distinct('id'))
 
+        # Resolve the API code: use the passed-in api_code, or fall back to the request config,
+        # or default to DAILY_CHECK_APP.
+        resolved_api_code = api_code
+        if not resolved_api_code:
+            resolved_api_code = ds_settings.get('DAILY_CHECK_APP', {}).get('API_CODE', 'DAILY_CHECK_APP')
+
         # API Key for is_staff = True user which never expires
-        daily_check_app_api_keys = list(APIKey.objects.annotate(api_code_lower=Lower('api__code')).filter(
-            api_code_lower=ds_settings.get('DAILY_CHECK_APP').get('API_CODE').lower(),
+        api_keys = list(APIKey.objects.annotate(api_code_lower=Lower('api__code')).filter(
+            api_code_lower=resolved_api_code.lower(),
             status=APIKey.APPROVED,
             valid_to__gte=core_utilities.get_current_datetime_object().date(),
             user__in=internal_users,
             has_write_access=True,
         ).values_list('api_key', flat=True))
 
-        if len(daily_check_app_api_keys) > 0:
-            token = daily_check_app_api_keys[-1]
+        if len(api_keys) > 0:
+            token = api_keys[-1]
         else:
             token = 'dummy_value_to_raise_401_response_error_as_valid_key_not_available'
 
@@ -911,52 +918,56 @@ def sort_and_modify_dataframe(loaded_data_df, health_master_fields, changes_for_
 def sync_health_data(loaded_data_df, cols_to_delete, country, deleted_entities):
     insert_entries = []
     remove_entries = []
-    for _, row in loaded_data_df.iterrows():
-        change_type = row[DeltaSharingReader._change_type_col_name()]
-        row.drop(
-            labels=cols_to_delete,
-            inplace=True,
-            errors='ignore',
-        )
-        row['country_id'] = country.id
-        if change_type in ['insert', 'update_postimage']:
-            entity = Entity.objects.filter(
-                country=country,
-                giga_id=row['health_id_giga'],
-            ).first()
-            # Publish entities directly
-            if entity:
-                row['entity_id'] = entity.id
-                row['status'] = sources_models.HealthEntityMasterIntermediateData.ROW_STATUS_PUBLISHED
-                row['published_at'] = core_utilities.get_current_datetime_object()
-            row_as_dict = parse_row(row)
-            insert_entries.append(sources_models.HealthEntityMasterIntermediateData(**row_as_dict))
-            if len(insert_entries) == 5000:
-                logger.debug('Loading the data to "HealthMasterData" table as it has reached 5000 benchmark.')
-                sources_models.HealthEntityMasterIntermediateData.objects.bulk_create(insert_entries)
-                insert_entries = []
-                logger.debug('#' * 10)
-                logger.debug('\n\n')
-        elif change_type in ['remove', 'delete']:
-            entity = Entity.objects.filter(
-                country=country,
-                giga_id=row['health_id_giga'],
-            ).first()
-            # Entity can be deleted only if its already present in Giga DB
-            if entity:
-                row['entity_id'] = entity.id
-                row['status'] = sources_models.HealthEntityMasterIntermediateData.ROW_STATUS_DELETED_PUBLISHED
-                row['modified'] = core_utilities.get_current_datetime_object()
+    
+    chunk_size = 5000
+    for start in range(0, len(loaded_data_df), chunk_size):
+        chunk_df = loaded_data_df.iloc[start:start + chunk_size]
+        giga_ids = chunk_df['health_id_giga'].dropna().unique().tolist()
+        
+        entities = Entity.objects.filter(country=country, giga_id__in=giga_ids)
+        entity_map = {e.giga_id: e for e in entities}
+        
+        for _, row in chunk_df.iterrows():
+            change_type = row[DeltaSharingReader._change_type_col_name()]
+            row.drop(
+                labels=cols_to_delete,
+                inplace=True,
+                errors='ignore',
+            )
+            row['country_id'] = country.id
+            entity = entity_map.get(row.get('health_id_giga'))
 
-                row_as_dict = parse_row_safe(row)
-                remove_entries.append(sources_models.HealthEntityMasterIntermediateData(**row_as_dict))
-            if len(remove_entries) == 5000:
-                logger.info(
-                    'Loading the data to "HealthEntityMasterIntermediateData" table as it has reached 5000 benchmark.')
-                sources_models.HealthEntityMasterIntermediateData.objects.bulk_create(remove_entries)
-                remove_entries = []
-                logger.debug('#' * 10)
-                logger.debug('\n\n')
+            if change_type in ['insert', 'update_postimage']:
+                # Publish entities directly
+                if entity:
+                    row['entity_id'] = entity.id
+                    row['status'] = sources_models.HealthEntityMasterIntermediateData.ROW_STATUS_PUBLISHED
+                    row['published_at'] = core_utilities.get_current_datetime_object()
+                row_as_dict = parse_row(row)
+                insert_entries.append(sources_models.HealthEntityMasterIntermediateData(**row_as_dict))
+                if len(insert_entries) >= 5000:
+                    logger.debug('Loading the data to "HealthMasterData" table as it has reached 5000 benchmark.')
+                    sources_models.HealthEntityMasterIntermediateData.objects.bulk_create(insert_entries)
+                    insert_entries = []
+                    logger.debug('#' * 10)
+                    logger.debug('\n\n')
+            elif change_type in ['remove', 'delete']:
+                # Entity can be deleted only if its already present in Giga DB
+                if entity:
+                    row['entity_id'] = entity.id
+                    row['status'] = sources_models.HealthEntityMasterIntermediateData.ROW_STATUS_DELETED_PUBLISHED
+                    row['modified'] = core_utilities.get_current_datetime_object()
+
+                    row_as_dict = parse_row_safe(row)
+                    remove_entries.append(sources_models.HealthEntityMasterIntermediateData(**row_as_dict))
+                if len(remove_entries) >= 5000:
+                    logger.info(
+                        'Loading the data to "HealthEntityMasterIntermediateData" table as it has reached 5000 benchmark.')
+                    sources_models.HealthEntityMasterIntermediateData.objects.bulk_create(remove_entries)
+                    remove_entries = []
+                    logger.debug('#' * 10)
+                    logger.debug('\n\n')
+
     logger.info(
         'Loading the remaining ({0}) data to "HealthEntityMasterIntermediateData" table.'.format(len(insert_entries)))
     if len(insert_entries) > 0:
@@ -1017,3 +1028,301 @@ def vaildate_master_version_and_sync_health_master_data(profile_file, share_name
         sync_health_data(loaded_data_df, cols_to_delete, country, deleted_entities)
     else:
         logger.info('No data to update in current table: {0}.'.format(table_name))
+
+
+# ############################# Entity QoS Utilities #############################
+
+def load_entity_qos_data_source_response_to_model(entity_type_code='health'):
+    """
+    Load entity QoS data from Delta Sharing source into the EntityQoSData staging model.
+
+    Mirrors load_qos_data_source_response_to_model() but operates on entities.
+    Looks up Entity by giga_id instead of School by giga_id_school.
+
+    Args:
+        entity_type_code: The entity type code to filter entities by (e.g. 'health').
+    """
+    entity_qos_settings = ds_settings.get('QOS')
+    if not entity_qos_settings:
+        logger.warning('QOS config not found in DATA_SOURCE_CONFIG. Skipping entity QoS data load.')
+        return
+
+    share_name = entity_qos_settings['SHARE_NAME']
+    schema_name = entity_qos_settings['ENTITY_SCHEMA_NAME']
+    country_codes_for_exclusion = entity_qos_settings.get('COUNTRY_EXCLUSION_LIST', [])
+
+    profile_json = {
+        'shareCredentialsVersion': entity_qos_settings.get('SHARE_CREDENTIALS_VERSION', 1),
+        'endpoint': entity_qos_settings.get('ENDPOINT'),
+        'bearerToken': entity_qos_settings.get('BEARER_TOKEN'),
+        'expirationTime': entity_qos_settings.get('EXPIRATION_TIME'),
+    }
+
+    if not profile_json.get('endpoint') or not profile_json.get('bearerToken'):
+        logger.warning('Entity QoS Delta Sharing endpoint or bearer token not configured. Skipping.')
+        return
+
+    profile_file = os.path.join(
+        settings.BASE_DIR,
+        'entity_qos_profile_{dt}.share'.format(
+            dt=format_date(core_utilities.get_current_datetime_object())
+        )
+    )
+    open(profile_file, 'w').write(json.dumps(profile_json))
+
+    try:
+        entity_type = EntityType.objects.filter(code=entity_type_code, deleted__isnull=True).first()
+        if not entity_type:
+            logger.error('EntityType with code "%s" not found. Skipping entity QoS data load.', entity_type_code)
+            return
+
+        client = ProcoSharingClient(profile_file)
+        qos_share = client.get_share(share_name)
+
+        if not qos_share:
+            logger.error('Entity QoS share (%s) does not exist.', share_name)
+            return
+
+        qos_schema = client.get_schema(qos_share, schema_name)
+        if not qos_schema:
+            logger.error('Entity QoS schema (%s) does not exist for share (%s).', schema_name, share_name)
+            return
+
+        schema_tables = client.list_tables(qos_schema)
+        logger.debug('Entity QoS - All tables ready to access: %s', schema_tables)
+
+        for schema_table in schema_tables:
+            table_name = schema_table.name
+
+            try:
+                country = Country.objects.filter(iso3_format=table_name).first()
+                if not country:
+                    logger.error(
+                        'Country with ISO3 Format (%s) not found in DB. Skipping entity QoS load.', table_name
+                    )
+                    continue
+
+                if country_codes_for_exclusion and table_name in country_codes_for_exclusion:
+                    logger.warning(
+                        'Country (%s) excluded from entity QoS data pull. Skipping.', table_name
+                    )
+                    continue
+
+                # Use a cache key specific to entity QoS
+                cache_key = 'entity_qos_data_last_version_{}'.format(table_name)
+                table_last_data_version = cache.get(cache_key)
+
+                if not table_last_data_version:
+                    # Try to find from existing EntityRealTimeConnectivity records
+                    table_last_data_version = None
+
+                table_url = profile_file + "#{share_name}.{schema_name}.{table_name}".format(
+                    share_name=share_name,
+                    schema_name=schema_name,
+                    table_name=table_name,
+                )
+
+                table_current_version = delta_sharing.get_table_version(table_url)
+                logger.debug('Entity QoS - Table version from API: %s', table_current_version)
+
+                if table_last_data_version == table_current_version:
+                    logger.info(
+                        'Entity QoS data version unchanged for country (%s). Skipping.', country
+                    )
+                    continue
+
+                if not table_last_data_version:
+                    table_last_data_version = int(max(-1, table_current_version - 10))
+
+                version_list = list(range(table_last_data_version + 1, table_current_version + 1))
+                for version in version_list:
+                    loaded_data_df = delta_sharing.load_table_changes_as_pandas(
+                        table_url, version, version, None, None,
+                    )
+                    logger.debug(
+                        'Entity QoS - %s version data row count: %d', version, len(loaded_data_df)
+                    )
+
+                    pull_datetime = core_utilities.get_current_datetime_object()
+                    loaded_data_df = loaded_data_df[
+                        loaded_data_df[DeltaSharingReader._change_type_col_name()].isin(
+                            ['insert', 'update_postimage']
+                        )
+                    ]
+
+                    if len(loaded_data_df) == 0:
+                        logger.info('Entity QoS - No data to update for table: %s.', table_name)
+                        continue
+
+                    insert_entries = []
+
+                    for _, row in loaded_data_df.iterrows():
+                        # Look up entity by giga_id instead of school by giga_id_school
+                        giga_id = (
+                            row.get('giga_id')
+                            or row.get('entity_id_giga')
+                            or row.get('giga_id_health')
+                            or row.get('health_id_giga')
+                            or row.get('giga_id_school')
+                            or row.get('school_id')
+                        )
+                        if not giga_id:
+                            logger.warning('Entity QoS - Row missing giga_id. Skipping.')
+                            continue
+
+                        entity = Entity.objects.filter(
+                            country=country,
+                            giga_id=giga_id,
+                            entity_type__code=entity_type_code,
+                            deleted__isnull=True,
+                        ).first()
+
+                        if not entity:
+                            logger.warning(
+                                'Entity with giga_id (%s) not found in DB. Skipping.', giga_id
+                            )
+                            continue
+
+                        row_dict = row.replace({np.nan: None, pd.NaT: None}).to_dict()
+
+                        speed_download = row_dict.get('speed_download')
+                        speed_upload = row_dict.get('speed_upload')
+                        latency = row_dict.get('latency')
+                        timestamp = row_dict.get('timestamp', pull_datetime)
+
+                        # Convert Mbps to bps if present
+                        if speed_download is not None:
+                            speed_download = speed_download * 1000 * 1000
+                        if speed_upload is not None:
+                            speed_upload = speed_upload * 1000 * 1000
+
+                        insert_entries.append({
+                            'entity': entity,
+                            'timestamp': timestamp,
+                            'speed_download': speed_download,
+                            'speed_upload': speed_upload,
+                            'latency': latency,
+                            'roundtrip_time': row_dict.get('roundtrip_time'),
+                            'jitter_download': row_dict.get('jitter_download'),
+                            'jitter_upload': row_dict.get('jitter_upload'),
+                            'rtt_packet_loss_pct': row_dict.get('rtt_packet_loss_pct'),
+                            'version': version,
+                            'country': country,
+                            'pulled_at': pull_datetime,
+                        })
+
+                        if len(insert_entries) == 5000:
+                            logger.info(
+                                'Entity QoS - Loading batch of 5000 to EntityRealTimeConnectivity.'
+                            )
+                            bulk_create_entity_realtime_connectivity(insert_entries)
+                            insert_entries = []
+
+                    if insert_entries:
+                        logger.info(
+                            'Entity QoS - Loading remaining %d records.', len(insert_entries)
+                        )
+                        bulk_create_entity_realtime_connectivity(insert_entries)
+
+                # Cache the latest version
+                cache.set(cache_key, table_current_version)
+
+            except Exception as ex:
+                logger.error('Entity QoS - Exception for "%s": %s', schema_table.name, str(ex))
+
+    finally:
+        try:
+            os.remove(profile_file)
+        except OSError:
+            pass
+
+
+def bulk_create_entity_realtime_connectivity(entries):
+    """
+    Bulk create EntityRealTimeConnectivity records from a list of dicts.
+    """
+    records = []
+    for entry in entries:
+        records.append(EntityRealTimeConnectivity(
+            created=entry.get('timestamp'),
+            connectivity_speed=entry.get('speed_download'),
+            connectivity_upload_speed=entry.get('speed_upload'),
+            connectivity_latency=entry.get('latency'),
+            roundtrip_time=entry.get('roundtrip_time'),
+            jitter_download=entry.get('jitter_download'),
+            jitter_upload=entry.get('jitter_upload'),
+            rtt_packet_loss_pct=entry.get('rtt_packet_loss_pct'),
+            entity=entry['entity'],
+            live_data_source=statistics_configs.QOS_SOURCE,
+        ))
+
+    if records:
+        EntityRealTimeConnectivity.objects.bulk_create(records)
+
+
+def sync_entity_qos_realtime_data(country_id, entity_type_code='health'):
+    """
+    Sync entity QoS real-time data from EntityRealTimeConnectivity to EntityDailyStatus.
+
+    Mirrors sync_qos_realtime_data() but operates on entities.
+
+    Args:
+        country_id: The country ID to sync data for.
+        entity_type_code: The entity type code to filter by.
+    """
+    current_datetime = core_utilities.get_current_datetime_object()
+
+    last_entry_date = EntityDailyStatus.objects.filter(
+        live_data_source=statistics_configs.QOS_SOURCE,
+        entity__country_id=country_id,
+        entity__entity_type__code=entity_type_code,
+        entity__deleted__isnull=True,
+    ).order_by('-date').values_list('date', flat=True).first()
+
+    if not last_entry_date:
+        last_entry_date = (current_datetime - timedelta(days=1)).date()
+
+    # Get realtime records for this country and entity type since last aggregation
+    realtime_records = EntityRealTimeConnectivity.objects.filter(
+        live_data_source=statistics_configs.QOS_SOURCE,
+        entity__country_id=country_id,
+        entity__entity_type__code=entity_type_code,
+        entity__deleted__isnull=True,
+        created__date__gt=last_entry_date,
+        created__date__lte=current_datetime.date(),
+    ).values(
+        'created__date', 'entity_id',
+    ).annotate(
+        connectivity_speed_avg=Avg('connectivity_speed'),
+        connectivity_upload_speed_avg=Avg('connectivity_upload_speed'),
+        connectivity_latency_avg=Avg('connectivity_latency'),
+        roundtrip_time_avg=Avg('roundtrip_time'),
+        jitter_download_avg=Avg('jitter_download'),
+        jitter_upload_avg=Avg('jitter_upload'),
+        rtt_packet_loss_pct_avg=Avg('rtt_packet_loss_pct'),
+    ).order_by('created__date')
+
+    daily_records = []
+    for record in realtime_records:
+        daily_records.append(EntityDailyStatus(
+            entity_id=record['entity_id'],
+            date=record['created__date'],
+            connectivity_speed=record.get('connectivity_speed_avg'),
+            connectivity_upload_speed=record.get('connectivity_upload_speed_avg'),
+            connectivity_latency=record.get('connectivity_latency_avg'),
+            roundtrip_time=record.get('roundtrip_time_avg'),
+            jitter_download=record.get('jitter_download_avg'),
+            jitter_upload=record.get('jitter_upload_avg'),
+            rtt_packet_loss_pct=record.get('rtt_packet_loss_pct_avg'),
+            live_data_source=statistics_configs.QOS_SOURCE,
+        ))
+
+        if len(daily_records) == 5000:
+            logger.info('Entity QoS - Bulk creating 5000 EntityDailyStatus records.')
+            EntityDailyStatus.objects.bulk_create(daily_records, ignore_conflicts=True)
+            daily_records = []
+
+    if daily_records:
+        logger.info('Entity QoS - Bulk creating remaining %d EntityDailyStatus records.', len(daily_records))
+        EntityDailyStatus.objects.bulk_create(daily_records, ignore_conflicts=True)
+

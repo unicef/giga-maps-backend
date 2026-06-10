@@ -130,4 +130,19 @@ def finalize_setup(sender, **kwargs):
             'schedule': crontab(minute=15, hour='9,15,21,23'),
             'args': (),
         },
+        # Entity Live Data Tasks
+        'proco.data_sources.tasks.update_entity_live_data_from_giga_meter': {
+            'task': 'proco.data_sources.tasks.update_entity_live_data_from_giga_meter',
+            # Executes 3 times a day at 10:30 AM, 4:30 PM, 10:30 PM
+            'schedule': crontab(minute=30, hour='10,16,22'),
+            'args': (),
+        },
+        'proco.data_sources.tasks.update_entity_qos_data': {
+            'task': 'proco.data_sources.tasks.update_entity_qos_data',
+            # Executes once a day at 5:00 AM
+            'schedule': crontab(hour=5, minute=0),
+            'args': (),
+            'kwargs': {'today': False},
+        },
     })
+

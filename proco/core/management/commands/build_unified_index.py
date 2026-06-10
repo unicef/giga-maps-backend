@@ -253,7 +253,6 @@ def upload_docs(search_client, headers, data_chunk, failed_data_chunks, count, r
                 "Upload of new document failed for count '{0}' in retry no: '{1}': {2}".format(count, retry_no, ex))
             time.sleep(1.0)
             retry_no += 1
-            uploaded = upload_docs(search_client, headers, data_chunk, failed_data_chunks, count, retry_no=retry_no)
     return uploaded
 
 

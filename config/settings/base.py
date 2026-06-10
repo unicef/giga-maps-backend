@@ -444,6 +444,7 @@ DATA_SOURCE_CONFIG = {
     'QOS': {
         'SHARE_NAME': env('QOS_SHARE_NAME', default='gold'),
         'SCHEMA_NAME': env('QOS_SCHEMA_NAME', default='qos'),
+        'ENTITY_SCHEMA_NAME': env('QOS_ENTITY_SCHEMA_NAME', default='health-master'),
         'SHARE_CREDENTIALS_VERSION': env('QOS_SHARE_CREDENTIALS_VERSION', default=1),
         'ENDPOINT': env('QOS_ENDPOINT', default=None),
         'BEARER_TOKEN': env('QOS_BEARER_TOKEN', default=None),
@@ -453,6 +454,8 @@ DATA_SOURCE_CONFIG = {
     'DAILY_CHECK_APP': {
         'BASE_URL': env('DAILY_CHECK_APP_BASE_URL', default=None),
         'API_CODE': env('DAILY_CHECK_APP_API_CODE', default='DAILY_CHECK_APP'),
+        'MEASUREMENT_PATH': env('ENTITY_GIGA_METER_MEASUREMENT_PATH', default='/measurements/v2/sandbox'),
+        'PAGE_SIZE': env.int('ENTITY_GIGA_METER_PAGE_SIZE', default=50),
     },
 }
 
@@ -507,7 +510,6 @@ LOGGING = {
     },
 }
 
-
 COUNTRY_MAP_API_SAMPLING_LIMIT = env('COUNTRY_MAP_API_SAMPLING_LIMIT', default=None)
 ADMIN_MAP_API_SAMPLING_LIMIT = env('ADMIN_MAP_API_SAMPLING_LIMIT', default=None)
 
@@ -538,6 +540,7 @@ AI_TRANSLATION_SUPPORTED_TARGETS = env.list('AI_TRANSLATION_SUPPORTED_TARGETS', 
 AI_TRANSLATION_CACHE_KEY_LIMIT = env('AI_TRANSLATION_CACHE_KEY_LIMIT', default=2000)
 
 GIGA_METER_ENABLE_AUTO_SYNC = env.bool('GIGA_METER_ENABLE_AUTO_SYNC', default=True)
+ENTITY_LIVE_DATA_ENABLE_AUTO_SYNC = env.bool('ENTITY_LIVE_DATA_ENABLE_AUTO_SYNC', default=False)
 
 UNDER_TEST = (len(sys.argv) > 1 and sys.argv[1] == 'test')
 
@@ -556,12 +559,12 @@ GIGA_NEWS_LETTER_URL = env(
     default='https://gigaconnect.us1.list-manage.com/subscribe?u=ad5a5d41f9573f4114f531faa&id=64ba229224',
 )
 
-
 AZURE_DELTALAKE_CONFIG = {
     'GIGA_METER_PING_BACKUP': {
         'AZURE_SAS_TOKEN': env('GIGA_METER_PING_BACKUP_AZURE_BLOB_SAS_TOKEN', default=None),
         'AZURE_STORAGE_ACCOUNT_NAME': env('GIGA_METER_PING_BACKUP_AZURE_STORAGE_ACCOUNT_NAME', default='saunigiga'),
-        'AZURE_BLOB_CONTAINER_NAME': env('GIGA_METER_PING_BACKUP_AZURE_BLOB_CONTAINER_NAME', default='giga-dataops-dev'),
+        'AZURE_BLOB_CONTAINER_NAME': env('GIGA_METER_PING_BACKUP_AZURE_BLOB_CONTAINER_NAME',
+                                         default='giga-dataops-dev'),
         'DELTA_LAKE_PATH': env('GIGA_METER_PING_BACKUP_AZURE_LAKEHOUSE_PATH', default='giga_meter/ping_checks'),
         'DATA_RETENTION_DAYS': env('GIGA_METER_PING_BACKUP_RAW_DATA_RETENTION_DAYS', default=180),
         'HARD_DELETE_GRACE_PERIOD_DAYS': env('GIGA_METER_PING_BACKUP_HARD_DELETE_GRACE_PERIOD_DAYS', default=30),

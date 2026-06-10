@@ -3,22 +3,26 @@ import logging
 import os
 import uuid
 from collections import defaultdict
-from datetime import timedelta
+from datetime import timedelta, datetime
 
+import requests
 from celery import chain, chord, group, current_task
 from celery.exceptions import SoftTimeLimitExceeded
-from django.conf import settings
 from django.apps import apps
+from django.conf import settings
 from django.contrib.gis.geos import Point
-from django.core.management import call_command
 from django.core.exceptions import ImproperlyConfigured
+from django.core.management import call_command
+from django.db import transaction
 from django.db.models import Count
 from django.db.utils import DataError
 from requests.exceptions import HTTPError
+from rest_framework import status
 
 from proco.accounts import utils as account_utilities
 from proco.background import utils as background_task_utilities
 from proco.connection_statistics import models as statistics_models
+from proco.connection_statistics.config import app_config as statistics_configs
 from proco.connection_statistics.utils import (
     aggregate_real_time_data_to_school_daily_status,
     aggregate_school_daily_status_to_school_weekly_status,
@@ -29,7 +33,7 @@ from proco.core import utils as core_utilities
 from proco.core.config import app_config as core_configs
 from proco.custom_auth import models as auth_models
 from proco.custom_auth.utils import get_user_emails_for_permissions
-from proco.data_sources import models as sources_models, constants
+from proco.data_sources import models as sources_models
 from proco.data_sources import utils as source_utilities
 from proco.data_sources.config import app_config as sources_config
 from proco.data_sources.constants import SOFT_TIME_LIMIT, TIME_LIMIT
@@ -39,11 +43,11 @@ from proco.locations.models import Country, CountryAdminMetadata
 from proco.schools.models import School
 from proco.taskapp import app
 from proco.utils.dates import format_date
-from proco.utils.tasks import populate_school_new_fields_task
+from proco.utils.slack_notification_service import SlackNotificationService
 from proco.utils.slack_notification_utils import (
     calculate_school_master_delta_changes, compare_target_model_changes, format_changes_for_slack
 )
-from proco.utils.slack_notification_service import SlackNotificationService
+from proco.utils.tasks import populate_school_new_fields_task
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -370,7 +374,7 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                         school_weekly.num_computers = row.num_computers
 
                         if (core_utilities.is_blank_string(row.connectivity_govt) or
-                            str(row.connectivity_govt).lower()  == 'unknown'):
+                            str(row.connectivity_govt).lower() == 'unknown'):
                             school_weekly.connectivity = None
                         else:
                             school_weekly.connectivity = str(row.connectivity_govt).lower() in core_configs.true_choices
@@ -789,12 +793,22 @@ def cleanup_school_master_rows():
                      'UPDATED_IN_DRAFT/ROW_STATUS_DRAFT_LOCKED/ROW_STATUS_UPDATED_IN_DRAFT_LOCKED/ROW_STATUS_DELETED '
                      'for same School GIGA ID: {0}'.format(rows_with_more_than_1_record_in_draft.query))
 
-        for row in rows_with_more_than_1_record_in_draft:
-            for row_to_delete in sources_models.SchoolMasterData.objects.filter(
+        ids_to_delete = []
+        for row in rows_with_more_than_1_record_in_draft.iterator(chunk_size=1000):
+            queryset_to_delete = sources_models.SchoolMasterData.objects.filter(
                 school_id_giga=row['school_id_giga'],
                 country_id=row['country_id'],
-            ).order_by('-created')[1:]:
-                row_to_delete.delete()
+            ).order_by('-created')[1:]
+            
+            ids_to_delete.extend(queryset_to_delete.values_list('id', flat=True))
+            
+            if len(ids_to_delete) >= 5000:
+                sources_models.SchoolMasterData.objects.filter(id__in=ids_to_delete).delete()
+                ids_to_delete = []
+                
+        if ids_to_delete:
+            sources_models.SchoolMasterData.objects.filter(id__in=ids_to_delete).delete()
+            
         task_instance.info('Deleted rows where more than 1 record are in DRAFT/'
                            'UPDATED_IN_DRAFT/ROW_STATUS_DRAFT_LOCKED/ROW_STATUS_UPDATED_IN_DRAFT_LOCKED/ROW_STATUS_DELETED '
                            'for same School GIGA ID')
@@ -809,12 +823,22 @@ def cleanup_school_master_rows():
         logger.debug('Queryset to get all the old records to delete where more than 1 record are in PUBLISHED '
                      'for same School GIGA ID: {0}'.format(rows_with_more_than_1_record_in_published.query))
 
-        for row in rows_with_more_than_1_record_in_published:
-            for row_to_delete in sources_models.SchoolMasterData.objects.filter(
+        ids_to_delete = []
+        for row in rows_with_more_than_1_record_in_published.iterator(chunk_size=1000):
+            queryset_to_delete = sources_models.SchoolMasterData.objects.filter(
                 school_id_giga=row['school_id_giga'],
                 country_id=row['country_id'],
-            ).order_by('-published_at')[1:]:
-                row_to_delete.delete()
+            ).order_by('-published_at')[1:]
+            
+            ids_to_delete.extend(queryset_to_delete.values_list('id', flat=True))
+            
+            if len(ids_to_delete) >= 5000:
+                sources_models.SchoolMasterData.objects.filter(id__in=ids_to_delete).delete()
+                ids_to_delete = []
+                
+        if ids_to_delete:
+            sources_models.SchoolMasterData.objects.filter(id__in=ids_to_delete).delete()
+            
         task_instance.info('Deleted rows where more than 1 record are in PUBLISHED for same School GIGA ID')
 
         # Delete all the old records where more than 1 record are in is_read=True
@@ -829,13 +853,24 @@ def cleanup_school_master_rows():
                      ' by keeping at least 1 PUBLISHED row for same School GIGA ID: {0}'.format(
             rows_with_more_than_1_record_in_read.query))
 
-        for row in rows_with_more_than_1_record_in_read:
-            for row_to_delete in sources_models.SchoolMasterData.objects.filter(
+        ids_to_delete = []
+        for row in rows_with_more_than_1_record_in_read.iterator(chunk_size=1000):
+            queryset_to_delete = sources_models.SchoolMasterData.objects.filter(
                 school_id_giga=row['school_id_giga'],
                 country_id=row['country_id'],
-            ).order_by('-published_at')[1:]:
-                if row_to_delete.status != sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED:
-                    row_to_delete.delete()
+            ).exclude(
+                status=sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED
+            ).order_by('-published_at')[1:]
+            
+            ids_to_delete.extend(queryset_to_delete.values_list('id', flat=True))
+            
+            if len(ids_to_delete) >= 5000:
+                sources_models.SchoolMasterData.objects.filter(id__in=ids_to_delete).delete()
+                ids_to_delete = []
+                
+        if ids_to_delete:
+            sources_models.SchoolMasterData.objects.filter(id__in=ids_to_delete).delete()
+            
         task_instance.info('Deleted rows where more than 1 record are in is_read=True '
                            'by keeping at least 1 PUBLISHED row for same School GIGA ID')
 
@@ -955,7 +990,7 @@ def update_qos_data(*args, today=True):
     if task_instance:
         logger.debug('Not found running job: {}'.format(task_key))
         countries_ids = list(QoSData.objects.all().order_by('country_id').values_list(
-                'country_id', flat=True).distinct('country_id'))
+            'country_id', flat=True).distinct('country_id'))
 
         if today:
             aggr_date = core_utilities.get_current_datetime_object().date()
@@ -1129,7 +1164,8 @@ def scheduler_for_data_loss_recovery_for_school_master_version(
         code=country_iso3_format,
     )
     task_id = current_task.request.id or str(uuid.uuid4())
-    task_instance = background_task_utilities.task_on_start(task_id, task_key, 'Data loss recovery for School Master versions')
+    task_instance = background_task_utilities.task_on_start(task_id, task_key,
+                                                            'Data loss recovery for School Master versions')
 
     if task_instance:
         logger.debug('Not found running job for school master data loss utility handler: {0}'.format(task_key))
@@ -1170,7 +1206,8 @@ def validate_config(config: dict, parent: str, *children: str):
     return parent_config
 
 
-def validate_schema_and_sync_schema_table_data(profile_file, schema_name, share_name, country_iso3_format, country_codes_for_exclusion, errors):
+def validate_schema_and_sync_schema_table_data(profile_file, schema_name, share_name, country_iso3_format,
+                                               country_codes_for_exclusion, errors):
     # Create a SharingClient.
     client = source_utilities.ProcoSharingClient(profile_file)
     health_master_share = client.get_share(share_name)
@@ -1182,7 +1219,8 @@ def validate_schema_and_sync_schema_table_data(profile_file, schema_name, share_
             schema_tables = client.list_tables(health_master_schema)
             logger.debug('All tables ready to access: {0}'.format(schema_tables))
 
-            health_master_fields = [f.name for f in sources_models.HealthEntityMasterIntermediateData._meta.get_fields()]
+            health_master_fields = [f.name for f in
+                                    sources_models.HealthEntityMasterIntermediateData._meta.get_fields()]
             for schema_table in schema_tables:
                 logger.debug('#' * 10)
                 logger.debug('Table: %s', schema_table)
@@ -1190,7 +1228,7 @@ def validate_schema_and_sync_schema_table_data(profile_file, schema_name, share_
                     continue
                 if len(country_codes_for_exclusion) > 0 and schema_table.name in country_codes_for_exclusion:
                     logger.warning('Country with ISO3 Format ({0}) configured to exclude from Health Master data pull. '
-                                'Hence skipping the load for this country code.'.format(schema_table.name))
+                                   'Hence skipping the load for this country code.'.format(schema_table.name))
                     continue
                 try:
                     source_utilities.vaildate_master_version_and_sync_health_master_data(
@@ -1219,9 +1257,10 @@ def load_entity_data_from_health_master_apis(country_iso3_format=None):
 
     errors = []
     ds_settings = validate_config(settings.DATA_SOURCE_CONFIG,
-        "HEALTH_MASTER", "SHARE_NAME", "SCHEMA_NAME", "DASHBOARD_URL", "COUNTRY_EXCLUSION_LIST",
-        "SHARE_CREDENTIALS_VERSION", "ENDPOINT", "BEARER_TOKEN", "EXPIRATION_TIME"
-    )
+                                  "HEALTH_MASTER", "SHARE_NAME", "SCHEMA_NAME", "DASHBOARD_URL",
+                                  "COUNTRY_EXCLUSION_LIST",
+                                  "SHARE_CREDENTIALS_VERSION", "ENDPOINT", "BEARER_TOKEN", "EXPIRATION_TIME"
+                                  )
     share_name = ds_settings['SHARE_NAME']
     schema_name = ds_settings['SCHEMA_NAME']
     dashboard_url = ds_settings['DASHBOARD_URL']
@@ -1240,13 +1279,17 @@ def load_entity_data_from_health_master_apis(country_iso3_format=None):
     )
     open(profile_file, 'w').write(json.dumps(profile_json))
 
-    changes_for_countries, deleted_entities, errors = validate_schema_and_sync_schema_table_data(profile_file, schema_name, share_name, country_iso3_format, country_codes_for_exclusion, errors)
+    changes_for_countries, deleted_entities, errors = validate_schema_and_sync_schema_table_data(profile_file,
+                                                                                                 schema_name,
+                                                                                                 share_name,
+                                                                                                 country_iso3_format,
+                                                                                                 country_codes_for_exclusion,
+                                                                                                 errors)
 
     try:
         os.remove(profile_file)
     except OSError:
         pass
-
 
     has_data_changes = len(list(filter(lambda val: val, list(changes_for_countries.values())))) > 0
 
@@ -1385,23 +1428,39 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
         task_instance.info('Total published records to update: {}'.format(new_published_records.count()))
 
         for data_chunk in core_utilities.queryset_iterator(new_published_records, chunk_size=100, print_msg=False):
+            # Pre-fetch Admin1 and Admin2 metadata to prevent N+1 queries
+            admin1_giga_ids = [row.admin1_id_giga for row in data_chunk if not core_utilities.is_blank_string(row.admin1_id_giga)]
+            admin2_giga_ids = [row.admin2_id_giga for row in data_chunk if not core_utilities.is_blank_string(row.admin2_id_giga)]
+            country_ids = list(set([row.country_id for row in data_chunk]))
+            
+            admin1_map = {}
+            if admin1_giga_ids:
+                admin1_qs = CountryAdminMetadata.objects.filter(
+                    country_id__in=country_ids,
+                    giga_id_admin__in=admin1_giga_ids,
+                    layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN1,
+                )
+                admin1_map = {(a.country_id, a.giga_id_admin): a for a in admin1_qs}
+                
+            admin2_map = {}
+            if admin2_giga_ids:
+                admin2_qs = CountryAdminMetadata.objects.filter(
+                    country_id__in=country_ids,
+                    giga_id_admin__in=admin2_giga_ids,
+                    layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN2,
+                )
+                admin2_map = {(a.country_id, a.giga_id_admin): a for a in admin2_qs}
+
+            rows_to_update = []
             for row in data_chunk:
                 try:
                     admin1_instance = None
                     if not core_utilities.is_blank_string(row.admin1_id_giga):
-                        admin1_instance = CountryAdminMetadata.objects.filter(
-                            country=row.country,
-                            giga_id_admin=row.admin1_id_giga,
-                            layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN1,
-                        ).first()
+                        admin1_instance = admin1_map.get((row.country_id, row.admin1_id_giga))
 
                     admin2_instance = None
                     if not core_utilities.is_blank_string(row.admin2_id_giga):
-                        admin2_instance = CountryAdminMetadata.objects.filter(
-                            country=row.country,
-                            giga_id_admin=row.admin2_id_giga,
-                            layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN2,
-                        ).first()
+                        admin2_instance = admin2_map.get((row.country_id, row.admin2_id_giga))
 
                     row_data = {
                         f.name: getattr(row, f.name)
@@ -1420,7 +1479,7 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
                         if k in entity_field_names and k not in lookup_fields
                     }
                     entity_defaults['geopoint'] = Point(row.longitude, row.latitude)
-                    entity_defaults['admin1']  = admin1_instance
+                    entity_defaults['admin1'] = admin1_instance
                     entity_defaults['admin2'] = admin2_instance
                     entity_defaults['external_id'] = row.facility_id_govt
                     entity_defaults['name'] = row.facility_name
@@ -1428,7 +1487,8 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
                     # Map connectivity/connectivity_govt to connectivity_status for Entity
                     connectivity_govt = str(getattr(row, 'connectivity_govt', '') or '').lower().strip()
                     connectivity = str(getattr(row, 'connectivity', '') or '').lower().strip()
-                    if connectivity_govt in ['yes', 'true', 'good', 'moderate'] or connectivity in ['yes', 'true', 'good', 'moderate']:
+                    if connectivity_govt in ['yes', 'true', 'good', 'moderate'] or connectivity in ['yes', 'true',
+                                                                                                    'good', 'moderate']:
                         entity_defaults['connectivity_status'] = 'good'
                     elif connectivity_govt in ['no', 'false'] or connectivity in ['no', 'false']:
                         entity_defaults['connectivity_status'] = 'no'
@@ -1442,7 +1502,6 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
                         deleted__isnull=True,  # Match the unique constraint condition
                         defaults=entity_defaults
                     )
-
 
                     # To update HealthEntity
                     detail_entity_field_names = {f.name for f in detail_model._meta.fields}
@@ -1464,7 +1523,7 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
 
                     row.is_read = True
                     row.entity = entity
-                    row.save()
+                    rows_to_update.append(row)
 
                     # updated_entity_ids.append(entity.id)
                     # if created:
@@ -1473,6 +1532,9 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
                     logger.debug('Error reported on publishing: {0}'.format(ex))
                     logger.debug('Record: {0}'.format(row.__dict__))
                     task_instance.info('Error reported for ID ({0}) on publishing: {1}'.format(row.id, ex))
+
+            if rows_to_update:
+                master_model.objects.bulk_update(rows_to_update, fields=['is_read', 'entity'])
 
         # Need to update the below tasks once ready
         # if len(updated_entity_ids) > 0:
@@ -1501,7 +1563,8 @@ def send_school_master_data_change_slack_notification(country_iso3_format):
         current_time=format_date(current_datetime, frmt='%d%m%Y_%H%M%S'),
     )
     task_id = current_task.request.id or str(uuid.uuid4())
-    task_instance = background_task_utilities.task_on_start(task_id, task_key, 'Send School Master Data Changes Slack Notification')
+    task_instance = background_task_utilities.task_on_start(task_id, task_key,
+                                                            'Send School Master Data Changes Slack Notification')
 
     if task_instance:
         try:
@@ -1528,9 +1591,9 @@ def send_school_master_data_change_slack_notification(country_iso3_format):
                 slack_service.send_school_master_update_notification(change_summary, publish_source='pre_review')
 
                 task_instance.info(f'Slack notification sent for {change_summary["country"]} - '
-                                 f'New: {change_summary["new_rows_count"]}, '
-                                 f'Updated: {change_summary["updated_rows_count"]}, '
-                                 f'Deleted: {change_summary["deleted_rows_count"]}')
+                                   f'New: {change_summary["new_rows_count"]}, '
+                                   f'Updated: {change_summary["updated_rows_count"]}, '
+                                   f'Deleted: {change_summary["deleted_rows_count"]}')
             else:
                 task_instance.info(f'No changes found for {country_iso3_format}')
 
@@ -1553,3 +1616,624 @@ def send_slack_notifications(change_summary, publish_source='auto_publish'):
         summary = format_changes_for_slack(country, summary)
         slack_service = SlackNotificationService()
         slack_service.send_school_master_update_notification(summary, publish_source=publish_source)
+
+
+# ############################# Entity Live Data Tasks #############################
+
+class EntityAggregationOngoingException(Exception):
+    """Raised when the Giga Meter entity API reports aggregation is still in progress."""
+    pass
+
+
+ENTITY_GIGA_METER_MAX_RETRIES = 3
+
+
+def fetch_entity_giga_meter_ping_data(entity_type_code, start_date, end_date, country_iso3, logger):
+    """
+    Fetch live measurement data from the entity Giga Meter API for a specific country.
+    Iterates through pages and yields records.
+
+    Endpoint format:
+        {BASE_URL}/api/v1/measurements/v2/sandbox
+            ?entity_type={entity_type_code}
+            &country_iso3_code={country_iso3}
+            &filterBy=timestamp&filterCondition=gt&filterValue={start_date}T00:00:00Z
+            &orderBy=-timestamp
+            &size={page_size}
+            &page={page}
+
+    This mirrors sync_dailycheckapp_realtime_data() query parameter pattern from
+    data_sources/utils.py but adapted for the entity endpoint.
+
+    Args:
+        entity_type_code: The entity type code (e.g. 'health').
+        start_date: Start date for the data range.
+        end_date: End date for the data range.
+        country_iso3: ISO3 country code (e.g. 'KEN').
+        logger: Logger instance.
+
+    Yields:
+        dict: Record dicts with entity giga_id and connectivity metrics.
+    """
+    entity_gm_settings = settings.DATA_SOURCE_CONFIG.get('DAILY_CHECK_APP')
+    if not entity_gm_settings:
+        logger.warning('DAILY_CHECK_APP config not found in DATA_SOURCE_CONFIG. Skipping.')
+        return
+
+    base_url = entity_gm_settings.get('BASE_URL')
+    if not base_url:
+        logger.warning('DAILY_CHECK_APP BASE_URL not configured. Skipping.')
+        return
+
+    measurement_path = entity_gm_settings.get('MEASUREMENT_PATH', '/api/v1/measurements/v2/sandbox')
+    api_code = entity_gm_settings.get('API_CODE', 'DAILY_CHECK_APP')
+    page_size = entity_gm_settings.get('PAGE_SIZE', 50)
+
+    # Build the full endpoint URL
+    api_endpoint = '{base_url}{path}'.format(
+        base_url=base_url.rstrip('/'),
+        path=measurement_path,
+    )
+
+    # Build auth headers using reusable utility with entity-specific API code
+    request_config = {
+        'url': api_endpoint,
+        'method': 'GET',
+        'auth_token_required': True,
+        'headers': {
+            'Content-Type': 'application/json',
+        },
+    }
+    headers = source_utilities.get_request_headers(request_config, api_code=api_code)
+
+    # Filter value: start of the date range in ISO 8601 format
+    filter_value = '{date}T00:00:00Z'.format(date=start_date.strftime('%Y-%m-%d'))
+
+    page = 0
+
+    while True:
+        params = {
+            'entity_type': entity_type_code,
+            'country_iso3_code': country_iso3,
+            'filterBy': 'timestamp',
+            'filterCondition': 'gt',
+            'filterValue': filter_value,
+            'orderBy': '-timestamp',
+            'size': page_size,
+            'page': page,
+        }
+
+        try:
+            logger.info(
+                'Entity Giga Meter - Fetching page %d for country %s from %s',
+                page, country_iso3, api_endpoint,
+            )
+            response = requests.get(api_endpoint, params=params, headers=headers)
+
+            if response.status_code != status.HTTP_200_OK:
+                logger.error(
+                    'Entity Giga Meter - Failed to fetch data: %s - %s',
+                    response.status_code, response.text,
+                )
+                raise HTTPError('API returned {0}'.format(response.status_code))
+
+            response_data = response.json()
+
+            # The response may be a list (like the school endpoint) or a dict with 'data' key
+            if isinstance(response_data, dict):
+                meta = response_data.get('meta', {})
+                if meta.get('aggregationSchedulerStatus') == 'on_going':
+                    logger.info('Entity Giga Meter - API indicated ongoing aggregation. Will retry.')
+                    raise EntityAggregationOngoingException('Aggregation is currently on_going.')
+                data = response_data.get('data', [])
+            else:
+                # Response is a flat list of records
+                data = response_data
+
+            if not data:
+                logger.info('Entity Giga Meter - No more data for country %s.', country_iso3)
+                break
+
+            for record in data:
+                giga_id = (
+                    record.get('giga_id')
+                    or record.get('entity_id_giga')
+                    or record.get('giga_id_health')
+                    or record.get('giga_id_school')
+                    or record.get('school_id')
+                )
+                if not giga_id:
+                    continue
+
+                # Parse timestamp to date
+                timestamp_raw = record.get('timestamp') or record.get('created_at')
+                if timestamp_raw:
+                    try:
+                        record_date = datetime.fromisoformat(
+                            timestamp_raw.replace('Z', '+00:00')
+                        ).date()
+                    except (ValueError, AttributeError):
+                        record_date = start_date
+                else:
+                    record_date = start_date
+
+                # Respect the end_date bound (the API filterCondition=gt only bounds the start)
+                if record_date > end_date:
+                    continue
+
+                yield {
+                    'timestamp_date__date': record_date,
+                    'giga_id': giga_id,
+                    'download_speed': record.get('download'),
+                    'upload_speed': record.get('upload'),
+                    'avg_latency': record.get('latency'),
+                    'country_code': record.get('country_code', country_iso3),
+                }
+
+            # If we received fewer records than page_size, there's no more data
+            if len(data) < page_size:
+                break
+
+            page += 1
+
+        except EntityAggregationOngoingException:
+            raise
+        except Exception as e:
+            logger.error('Entity Giga Meter - Error fetching page %d for country %s: %s', page, country_iso3, e)
+            raise
+
+
+def fetch_entity_map(giga_ids, entity_type_code='health'):
+    """
+    Fetch Entity objects for the given list of giga_ids.
+
+    Args:
+        giga_ids: List of entity giga IDs.
+        entity_type_code: Entity type code to filter by.
+
+    Returns:
+        Dict mapping giga_id -> Entity instance.
+    """
+    entity_map = {}
+    if not giga_ids:
+        return entity_map
+
+    chunk_size = 5000
+    for i in range(0, len(giga_ids), chunk_size):
+        chunk_ids = giga_ids[i:i + chunk_size]
+        for entity in (
+            Entity.objects
+                .filter(
+                giga_id__in=chunk_ids,
+                entity_type__code=entity_type_code,
+                deleted__isnull=True,
+            )
+                .only('id', 'giga_id')
+                .iterator(chunk_size=1000)
+        ):
+            entity_map[entity.giga_id] = entity
+
+    return entity_map
+
+
+def aggregate_entity_ping_rows(rows, entity_map):
+    """
+    Aggregate raw entity measurement API rows by (entity_id, date).
+
+    Groups records by entity and date, computing averages for download speed,
+    upload speed, and latency. This mirrors aggregate_ping_rows() in
+    giga_meter/tasks.py but adapted for entity measurement data.
+
+    Args:
+        rows: List of row dicts from the API.
+        entity_map: Dict mapping giga_id -> Entity.
+
+    Returns:
+        List of aggregated result dicts.
+    """
+    aggregated = {}
+    for row in rows:
+        entity = entity_map.get(row.get('giga_id'))
+        if entity is None:
+            continue
+
+        key = (entity.id, row['timestamp_date__date'])
+
+        download = float(row.get('download_speed')) if row.get('download_speed') is not None else None
+        upload = float(row.get('upload_speed')) if row.get('upload_speed') is not None else None
+        latency = float(row.get('avg_latency')) if row.get('avg_latency') is not None else None
+
+        if key not in aggregated:
+            aggregated[key] = {
+                'entity': entity,
+                'date': row['timestamp_date__date'],
+                'downloads': [download] if download is not None else [],
+                'uploads': [upload] if upload is not None else [],
+                'latencies': [latency] if latency is not None else [],
+            }
+        else:
+            if download is not None:
+                aggregated[key]['downloads'].append(download)
+            if upload is not None:
+                aggregated[key]['uploads'].append(upload)
+            if latency is not None:
+                aggregated[key]['latencies'].append(latency)
+
+    results = []
+    for data in aggregated.values():
+        downloads = data['downloads']
+        avg_download = sum(downloads) / len(downloads) if downloads else None
+
+        uploads = data['uploads']
+        avg_upload = sum(uploads) / len(uploads) if uploads else None
+
+        latencies = data['latencies']
+        avg_latency = sum(latencies) / len(latencies) if latencies else None
+
+        # Determine connectivity: entity is connected if we have at least one measurement
+        is_connected = 1.0 if downloads or uploads or latencies else 0.0
+
+        results.append({
+            'entity': data['entity'],
+            'date': data['date'],
+            'connectivity_speed': int(avg_download) if avg_download is not None else None,
+            'connectivity_upload_speed': int(avg_upload) if avg_upload is not None else None,
+            'connectivity_latency': avg_latency,
+            'is_connected': is_connected,
+        })
+
+    return results
+
+
+def bulk_upsert_entity_daily_status(batch):
+    """
+    Bulk upsert EntityDailyStatus records.
+
+    Mirrors bulk_upsert_school_status() in giga_meter/tasks.py but for entities.
+
+    Args:
+        batch: List of EntityDailyStatus instances.
+    """
+    if not batch:
+        return
+
+    deduplicated_batch = {}
+    for item in batch:
+        key = (item.entity_id, item.date, item.live_data_source)
+        deduplicated_batch[key] = item
+
+    unique_batch = list(deduplicated_batch.values())
+
+    existing_qs = statistics_models.EntityDailyStatus.objects.filter(
+        entity_id__in=[s.entity_id for s in unique_batch],
+        date__in=list(set(s.date for s in unique_batch)),
+        live_data_source__in=list(set(s.live_data_source for s in unique_batch)),
+    )
+
+    existing_records = {}
+    for record in existing_qs:
+        key = (record.entity_id, record.date, record.live_data_source)
+        existing_records[key] = record
+
+    to_create = []
+    to_update = []
+
+    update_fields = [
+        'connectivity_speed', 'connectivity_upload_speed', 'connectivity_latency',
+        'is_connected_true', 'is_connected_all',
+    ]
+
+    for item in unique_batch:
+        key = (item.entity_id, item.date, item.live_data_source)
+        if key in existing_records:
+            existing = existing_records[key]
+            existing.connectivity_speed = item.connectivity_speed
+            existing.connectivity_upload_speed = item.connectivity_upload_speed
+            existing.connectivity_latency = item.connectivity_latency
+            existing.is_connected_true = item.is_connected_true
+            existing.is_connected_all = item.is_connected_all
+            to_update.append(existing)
+        else:
+            to_create.append(item)
+
+    try:
+        with transaction.atomic():
+            if to_update:
+                statistics_models.EntityDailyStatus.objects.bulk_update(
+                    to_update,
+                    fields=update_fields,
+                )
+            if to_create:
+                statistics_models.EntityDailyStatus.objects.bulk_create(to_create)
+    except (DataError, Exception) as e:
+        logger.warning('Entity Giga Meter - Bulk operation failed (%s), falling back to iterative update_or_create.', e)
+        for item in unique_batch:
+            statistics_models.EntityDailyStatus.objects.update_or_create(
+                entity_id=item.entity_id,
+                date=item.date,
+                live_data_source=item.live_data_source,
+                defaults={
+                    'connectivity_speed': item.connectivity_speed,
+                    'connectivity_upload_speed': item.connectivity_upload_speed,
+                    'connectivity_latency': item.connectivity_latency,
+                    'is_connected_true': item.is_connected_true,
+                    'is_connected_all': item.is_connected_all,
+                }
+            )
+
+
+def run_entity_ping_aggregation(entity_type_code, start_date, end_date, task_instance, logger):
+    """
+    Run entity ping aggregation: fetch measurements per-country from the Giga Meter API,
+    aggregate by (entity, date), and upsert into EntityDailyStatus.
+
+    The API requires a country_iso3_code parameter, so we iterate over all countries
+    that have entities of the given type.
+
+    Args:
+        entity_type_code: Entity type code (e.g. 'health').
+        start_date: Start date.
+        end_date: End date.
+        task_instance: Background task instance for logging.
+        logger: Logger instance.
+    """
+    logger.info('Entity Giga Meter - Aggregating measurement data from %s to %s', start_date, end_date)
+    task_instance.info('Entity Giga Meter - Aggregating {0} data from {1} to {2}'.format(
+        entity_type_code, start_date, end_date,
+    ))
+
+    # Get all countries that have entities of this type
+    country_iso3_list = list(
+        Country.objects.filter(
+            entities__entity_type__code=entity_type_code,
+            entities__deleted__isnull=True,
+        ).distinct().values_list('iso3_format', flat=True)
+    )
+
+    if not country_iso3_list:
+        logger.info('Entity Giga Meter - No countries found with %s entities.', entity_type_code)
+        task_instance.info('Entity Giga Meter - No countries found with {0} entities.'.format(entity_type_code))
+        return
+
+    logger.info('Entity Giga Meter - Processing %d countries: %s', len(country_iso3_list), country_iso3_list)
+    task_instance.info('Entity Giga Meter - Processing {0} countries'.format(len(country_iso3_list)))
+
+    total_upserted = 0
+
+    for country_iso3 in country_iso3_list:
+        try:
+            raw_rows = list(fetch_entity_giga_meter_ping_data(
+                entity_type_code, start_date, end_date, country_iso3, logger,
+            ))
+
+            if not raw_rows:
+                logger.info('Entity Giga Meter - No records for country %s.', country_iso3)
+                continue
+
+            # Build entity map from the fetched giga_ids
+            giga_ids = list(set(r.get('giga_id') for r in raw_rows if r.get('giga_id')))
+            entity_map = fetch_entity_map(giga_ids, entity_type_code)
+
+            logger.info(
+                'Entity Giga Meter - Country %s: fetched %d rows, mapped %d entities',
+                country_iso3, len(raw_rows), len(entity_map),
+            )
+
+            # Aggregate
+            aggregated_records = aggregate_entity_ping_rows(raw_rows, entity_map)
+
+            # Convert to EntityDailyStatus instances
+            batch = []
+            for data in aggregated_records:
+                batch.append(statistics_models.EntityDailyStatus(
+                    entity=data['entity'],
+                    date=data['date'],
+                    live_data_source=statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE,
+                    connectivity_speed=data['connectivity_speed'],
+                    connectivity_upload_speed=data['connectivity_upload_speed'],
+                    connectivity_latency=data['connectivity_latency'],
+                    is_connected_true=data['is_connected'],
+                    is_connected_all=data['is_connected'],
+                ))
+
+            # Upsert
+            bulk_upsert_entity_daily_status(batch)
+            total_upserted += len(batch)
+
+            logger.info('Entity Giga Meter - Country %s: upserted %d records', country_iso3, len(batch))
+
+        except EntityAggregationOngoingException:
+            # Re-raise to let the task retry
+            raise
+        except Exception as ex:
+            logger.error('Entity Giga Meter - Error processing country %s: %s', country_iso3, ex)
+            task_instance.info('Entity Giga Meter - Error for country {0}: {1}'.format(country_iso3, ex))
+
+    logger.info('Entity Giga Meter - Total upserted: %d EntityDailyStatus records', total_upserted)
+    task_instance.info('Entity Giga Meter - Total upserted: {0} records'.format(total_upserted))
+
+
+@app.task(
+    soft_time_limit=4 * 60 * 60,
+    time_limit=4 * 60 * 60,
+)
+def update_entity_live_data_from_giga_meter(
+    entity_type_code='health',
+    date_str=None,
+    force_tasks=False,
+    retry_attempt=0,
+):
+    """
+    Celery task: Fetch aggregated ping data for entities from the Giga Meter API and store it.
+
+    This is the entity equivalent of fetch_and_aggregate_ping_data in giga_meter/tasks.py.
+    It is entity-type generic — pass any entity_type_code (default: 'health').
+
+    Args:
+        entity_type_code: The entity type code (e.g. 'health', 'library'). Default: 'health'.
+        date_str: Optional date string in YYYY-MM-DD format. Defaults to today.
+        force_tasks: If True, generates a unique task key to bypass deduplication.
+        retry_attempt: Current retry attempt count (for internal retry logic).
+
+    Execution Frequency: 3 times a day (configured in taskapp/__init__.py)
+    """
+    if not settings.ENTITY_LIVE_DATA_ENABLE_AUTO_SYNC:
+        logger.warning(
+            'Entity live data sync is disabled. '
+            'To enable, update "ENTITY_LIVE_DATA_ENABLE_AUTO_SYNC" to True.'
+        )
+        return
+
+    timestamp = core_utilities.get_current_datetime_object()
+    timestamp_str = format_date(
+        timestamp,
+        frmt='%d%m%Y_%H%M%S' if force_tasks else '%d%m%Y_%H%M',
+    )
+
+    task_key = f'update_entity_live_data_giga_meter_{entity_type_code}_{timestamp_str}'
+    task_id = current_task.request.id or str(uuid.uuid4())
+
+    task_instance = background_task_utilities.task_on_start(
+        task_id,
+        task_key,
+        f'Entity Giga Meter - Fetch and aggregate {entity_type_code} ping data',
+    )
+
+    if not task_instance:
+        logger.error(f'Found running job with key "{task_key}", skipping.')
+        return
+
+    if date_str:
+        target_date = core_utilities.get_timezone_converted_value(
+            datetime.strptime(date_str, '%Y-%m-%d')
+        ).date()
+    else:
+        target_date = core_utilities.get_current_datetime_object().date()
+
+    try:
+        logger.info(
+            f"Entity Giga Meter - Starting {entity_type_code} ping aggregation for {target_date} "
+            f"(attempt {retry_attempt}/{ENTITY_GIGA_METER_MAX_RETRIES})"
+        )
+
+        run_entity_ping_aggregation(
+            entity_type_code=entity_type_code,
+            start_date=target_date,
+            end_date=target_date,
+            task_instance=task_instance,
+            logger=logger,
+        )
+
+        task_instance.info("Entity Giga Meter - Ping aggregation completed successfully.")
+
+    except EntityAggregationOngoingException:
+        next_attempt = retry_attempt + 1
+        logger.info(
+            f"Entity Giga Meter - Aggregation still ongoing. Attempt {next_attempt}/{ENTITY_GIGA_METER_MAX_RETRIES}"
+        )
+        task_instance.info(
+            f"Entity Giga Meter - Aggregation ongoing. Scheduling retry {next_attempt}/{ENTITY_GIGA_METER_MAX_RETRIES}"
+        )
+        if next_attempt > ENTITY_GIGA_METER_MAX_RETRIES:
+            logger.error("Entity Giga Meter - Maximum retry attempts reached. Stopping.")
+            task_instance.info("Entity Giga Meter - Maximum retries reached. Task will not be rescheduled.")
+            return
+
+        update_entity_live_data_from_giga_meter.apply_async(
+            kwargs={
+                'entity_type_code': entity_type_code,
+                'force_tasks': force_tasks,
+                'retry_attempt': next_attempt,
+            },
+            countdown=15 * 60,
+        )
+        return
+
+    except Exception as exc:
+        logger.exception("Entity Giga Meter - Error during ping aggregation")
+        task_instance.info(f"Entity Giga Meter - Error occurred: {exc}")
+        raise
+
+    finally:
+        background_task_utilities.task_on_complete(task_instance)
+
+
+@app.task(soft_time_limit=2 * 60 * 60, time_limit=2 * 60 * 60)
+def update_entity_qos_data(entity_type_code='health', today=True):
+    """
+    Celery task: Fetch QoS data for entities from Delta Sharing and aggregate to EntityDailyStatus.
+
+    This is the entity equivalent of update_qos_data in data_sources/tasks.py.
+    It is entity-type generic — pass any entity_type_code (default: 'health').
+
+    Args:
+        entity_type_code: The entity type code (e.g. 'health', 'library'). Default: 'health'.
+        today: If True, aggregate for today. If False, aggregate for yesterday.
+
+    Execution Frequency: Once a day (configured in taskapp/__init__.py)
+    """
+    if not settings.ENTITY_LIVE_DATA_ENABLE_AUTO_SYNC:
+        logger.warning(
+            'Entity live data sync is disabled. '
+            'To enable, update "ENTITY_LIVE_DATA_ENABLE_AUTO_SYNC" to True.'
+        )
+        return
+
+    task_key = 'update_entity_qos_data_{type}_{current_time}_{today}'.format(
+        type=entity_type_code,
+        current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'),
+        today=today,
+    )
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(
+        task_id, task_key,
+        f'Sync Entity QoS Realtime Data ({entity_type_code})',
+    )
+
+    if task_instance:
+        logger.debug('Entity QoS - Not found running job: %s', task_key)
+
+        try:
+            # Step 1: Load entity QoS data from Delta Sharing
+            logger.info('Entity QoS - Loading %s QoS data from Delta Sharing...', entity_type_code)
+            task_instance.info(f'Entity QoS - Loading {entity_type_code} QoS data from Delta Sharing...')
+            source_utilities.load_entity_qos_data_source_response_to_model(entity_type_code=entity_type_code)
+            task_instance.info(f'Entity QoS - Completed loading {entity_type_code} QoS data.')
+
+            # Step 2: Get country IDs that have entity realtime data
+            countries_ids = list(
+                statistics_models.EntityRealTimeConnectivity.objects.filter(
+                    live_data_source=statistics_configs.QOS_SOURCE,
+                    entity__entity_type__code=entity_type_code,
+                    entity__deleted__isnull=True,
+                ).order_by('entity__country_id').values_list(
+                    'entity__country_id', flat=True
+                ).distinct('entity__country_id')
+            )
+
+            logger.info('Entity QoS - Found %d countries with %s QoS data.', len(countries_ids), entity_type_code)
+            task_instance.info(f'Entity QoS - Found {len(countries_ids)} countries with {entity_type_code} QoS data.')
+
+            # Step 3: Sync realtime data to daily status for each country
+            for country_id in countries_ids:
+                try:
+                    source_utilities.sync_entity_qos_realtime_data(country_id, entity_type_code=entity_type_code)
+                except Exception as ex:
+                    logger.error(
+                        'Entity QoS - Error syncing realtime data for country %s: %s', country_id, str(ex)
+                    )
+                    task_instance.info(
+                        f'Entity QoS - Error for country {country_id}: {ex}'
+                    )
+
+            task_instance.info(f'Entity QoS - Completed {entity_type_code} QoS sync.')
+
+        except Exception as exc:
+            logger.exception('Entity QoS - Error during QoS data sync')
+            task_instance.info(f'Entity QoS - Error occurred: {exc}')
+            raise
+
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
+    else:
+        logger.error('Found running Job with "%s" name so skipping current iteration', task_key)
