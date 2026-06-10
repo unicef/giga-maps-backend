@@ -1260,7 +1260,7 @@ def bulk_create_entity_realtime_connectivity(entries):
         EntityRealTimeConnectivity.objects.bulk_create(records)
 
 
-def sync_entity_qos_realtime_data(country_id, entity_type_code='health'):
+def sync_entity_qos_realtime_data(country_id, entity_type_code='health', start_date=None, end_date=None):
     """
     Sync entity QoS real-time data from EntityRealTimeConnectivity to EntityDailyStatus.
 
@@ -1269,18 +1269,31 @@ def sync_entity_qos_realtime_data(country_id, entity_type_code='health'):
     Args:
         country_id: The country ID to sync data for.
         entity_type_code: The entity type code to filter by.
+        start_date: Optional start date for aggregation.
+        end_date: Optional end date for aggregation.
     """
     current_datetime = core_utilities.get_current_datetime_object()
 
-    last_entry_date = EntityDailyStatus.objects.filter(
-        live_data_source=statistics_configs.QOS_SOURCE,
-        entity__country_id=country_id,
-        entity__entity_type__code=entity_type_code,
-        entity__deleted__isnull=True,
-    ).order_by('-date').values_list('date', flat=True).first()
+    if start_date and end_date:
+        filter_kwargs = {
+            'created__date__gte': start_date,
+            'created__date__lte': end_date,
+        }
+    else:
+        last_entry_date = EntityDailyStatus.objects.filter(
+            live_data_source=statistics_configs.QOS_SOURCE,
+            entity__country_id=country_id,
+            entity__entity_type__code=entity_type_code,
+            entity__deleted__isnull=True,
+        ).order_by('-date').values_list('date', flat=True).first()
 
-    if not last_entry_date:
-        last_entry_date = (current_datetime - timedelta(days=1)).date()
+        if not last_entry_date:
+            last_entry_date = (current_datetime - timedelta(days=1)).date()
+
+        filter_kwargs = {
+            'created__date__gt': last_entry_date,
+            'created__date__lte': current_datetime.date(),
+        }
 
     # Get realtime records for this country and entity type since last aggregation
     realtime_records = EntityRealTimeConnectivity.objects.filter(
@@ -1288,8 +1301,7 @@ def sync_entity_qos_realtime_data(country_id, entity_type_code='health'):
         entity__country_id=country_id,
         entity__entity_type__code=entity_type_code,
         entity__deleted__isnull=True,
-        created__date__gt=last_entry_date,
-        created__date__lte=current_datetime.date(),
+        **filter_kwargs
     ).values(
         'created__date', 'entity_id',
     ).annotate(

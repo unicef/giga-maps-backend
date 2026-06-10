@@ -1,0 +1,83 @@
+import logging
+from datetime import timedelta
+
+from django.core.management.base import BaseCommand
+from proco.core.utils import get_current_datetime_object
+from proco.data_sources.utils import (
+    load_entity_qos_data_source_response_to_model,
+    sync_entity_qos_realtime_data
+)
+from proco.connection_statistics.models import EntityRealTimeConnectivity
+from proco.connection_statistics.config import app_config as statistics_configs
+from proco.utils import dates as date_utilities
+
+logger = logging.getLogger('gigamaps.' + __name__)
+
+class Command(BaseCommand):
+    help = 'Run QoS Delta Sharing data sync for entities.'
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '-start_date', dest='start_date', type=str,
+            default=date_utilities.format_date(get_current_datetime_object().date() - timedelta(days=1)),
+            help='Start date in YYYY-MM-DD format. Default is yesterday.'
+        )
+        parser.add_argument(
+            '-end_date', dest='end_date', type=str,
+            default=date_utilities.format_date(get_current_datetime_object().date()),
+            help='End date in YYYY-MM-DD format. Default is today.'
+        )
+        parser.add_argument(
+            '-entity_type', dest='entity_type', type=str,
+            default='health',
+            help='Entity type code to process (e.g. health).'
+        )
+
+    def handle(self, **options):
+        logger.info('Executing QoS Delta Sharing sync for entities...')
+        start_date = date_utilities.to_date(options.get('start_date'))
+        end_date = date_utilities.to_date(options.get('end_date'))
+        entity_type_code = options.get('entity_type')
+        
+        if start_date > end_date:
+            logger.error('Start date value can not be greater than end_date.')
+            return
+
+        # Delta sharing loads all changes since last processed version natively.
+        logger.info(f"Loading latest {entity_type_code} QoS data from Delta Sharing...")
+        try:
+            load_entity_qos_data_source_response_to_model(entity_type_code=entity_type_code)
+            logger.info("Delta Sharing fetch completed.")
+        except Exception as e:
+            logger.error(f"Error loading data from Delta Sharing: {e}")
+            return
+
+        date_list = sorted([(start_date + timedelta(days=x)).date() for x in range((end_date - start_date).days)] + [end_date.date()])
+        
+        # Get country IDs that have entity realtime data
+        countries_ids = list(
+            EntityRealTimeConnectivity.objects.filter(
+                live_data_source=statistics_configs.QOS_SOURCE,
+                entity__entity_type__code=entity_type_code,
+                entity__deleted__isnull=True,
+            ).order_by('entity__country_id').values_list(
+                'entity__country_id', flat=True
+            ).distinct('entity__country_id')
+        )
+
+        logger.info(f"Aggregating entity QoS data for {len(countries_ids)} countries...")
+        
+        for dt in date_list:
+            logger.info(f"Syncing daily aggregation for {dt}...")
+            for country_id in countries_ids:
+                try:
+                    sync_entity_qos_realtime_data(
+                        country_id,
+                        entity_type_code=entity_type_code,
+                        start_date=dt,
+                        end_date=dt
+                    )
+                except Exception as ex:
+                    logger.error(f"Error syncing realtime data for country ID {country_id} on {dt}: {ex}")
+
+        logger.info("Completed QoS Delta Sharing sync command successfully.")
