@@ -1,5 +1,5 @@
 import logging
-from datetime import timedelta
+from datetime import timedelta, datetime
 
 from django.core.management.base import BaseCommand
 from proco.core.utils import get_current_datetime_object
@@ -35,8 +35,12 @@ class Command(BaseCommand):
 
     def handle(self, **options):
         logger.info('Executing QoS Delta Sharing sync for entities...')
-        start_date = date_utilities.to_date(options.get('start_date'))
-        end_date = date_utilities.to_date(options.get('end_date'))
+        try:
+            start_date = datetime.strptime(options.get('start_date'), '%Y-%m-%d').date() if isinstance(options.get('start_date'), str) else options.get('start_date')
+            end_date = datetime.strptime(options.get('end_date'), '%Y-%m-%d').date() if isinstance(options.get('end_date'), str) else options.get('end_date')
+        except ValueError:
+            logger.error('Invalid date format. Please use YYYY-MM-DD.')
+            return
         entity_type_code = options.get('entity_type')
         
         if start_date > end_date:
@@ -52,17 +56,16 @@ class Command(BaseCommand):
             logger.error(f"Error loading data from Delta Sharing: {e}")
             return
 
-        date_list = sorted([(start_date + timedelta(days=x)).date() for x in range((end_date - start_date).days)] + [end_date.date()])
+        date_list = sorted([(start_date + timedelta(days=x)) for x in range((end_date - start_date).days)] + [end_date])
         
-        # Get country IDs that have entity realtime data
         countries_ids = list(
             EntityRealTimeConnectivity.objects.filter(
                 live_data_source=statistics_configs.QOS_SOURCE,
                 entity__entity_type__code=entity_type_code,
                 entity__deleted__isnull=True,
-            ).order_by('entity__country_id').values_list(
+            ).values_list(
                 'entity__country_id', flat=True
-            ).distinct('entity__country_id')
+            ).distinct()
         )
 
         logger.info(f"Aggregating entity QoS data for {len(countries_ids)} countries...")

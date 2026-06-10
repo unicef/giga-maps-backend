@@ -1,5 +1,5 @@
 import logging
-from datetime import timedelta
+from datetime import timedelta, datetime
 
 from django.core.management.base import BaseCommand
 from proco.core.utils import get_current_datetime_object
@@ -35,8 +35,12 @@ class Command(BaseCommand):
 
     def handle(self, **options):
         logger.info('Executing Giga Meter sync for entities...')
-        start_date = date_utilities.to_date(options.get('start_date'))
-        end_date = date_utilities.to_date(options.get('end_date'))
+        try:
+            start_date = datetime.strptime(options.get('start_date'), '%Y-%m-%d').date() if isinstance(options.get('start_date'), str) else options.get('start_date')
+            end_date = datetime.strptime(options.get('end_date'), '%Y-%m-%d').date() if isinstance(options.get('end_date'), str) else options.get('end_date')
+        except ValueError:
+            logger.error('Invalid date format. Please use YYYY-MM-DD.')
+            return
         entity_type_code = options.get('entity_type')
         
         if start_date > end_date:
