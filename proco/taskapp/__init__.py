@@ -50,6 +50,11 @@ def finalize_setup(sender, **kwargs):
             'schedule': crontab(hour='1,15', minute=40),
             'args': (),
         },
+        'proco.data_sources.tasks.cleanup_health_entity_master_rows': {
+            'task': 'proco.data_sources.tasks.cleanup_health_entity_master_rows',
+            'schedule': crontab(hour='1,15', minute=45),
+            'args': (),
+        },
         'proco.data_sources.tasks.update_static_data': {
             'task': 'proco.data_sources.tasks.update_static_data',
             # Executes at 4:00 AM every day

@@ -532,6 +532,12 @@ class Command(BaseCommand):
         )
 
         parser.add_argument(
+            '--cleanup_health_entity_master_rows', action='store_true', dest='cleanup_health_entity_master_rows',
+            default=False,
+            help='If provided, run the Health Entity Master data cleanup task manually in real time.'
+        )
+
+        parser.add_argument(
             '--handle_published_school_master_data_row', action='store_true',
             dest='handle_published_school_master_data_row', default=False,
             help='If provided, run the School Master data publish task manually in real time.'
@@ -698,6 +704,11 @@ class Command(BaseCommand):
             logger.info('Performing school master data source duplicate record cleanup.')
             sources_tasks.cleanup_school_master_rows()
             logger.info('Completed school master data source duplicate record cleanup.\n\n')
+
+        if options.get('cleanup_health_entity_master_rows'):
+            logger.info('Performing health entity master data source duplicate record cleanup.')
+            sources_tasks.cleanup_health_entity_master_rows()
+            logger.info('Completed health entity master data source duplicate record cleanup.\n\n')
 
         if options.get('clean_duplicate_schools'):
             logger.info('Performing school duplicate record cleanup.')

@@ -13,14 +13,15 @@ from django.conf import settings
 from django.contrib.gis.geos import Point
 from django.core.exceptions import ImproperlyConfigured
 from django.core.management import call_command
-from django.db import transaction
-from django.db.models import Count
+from django.db import connection, transaction
+from django.db.models import Count, Q
 from django.db.utils import DataError
 from requests.exceptions import HTTPError
 from rest_framework import status
 
 from proco.accounts import utils as account_utilities
 from proco.background import utils as background_task_utilities
+from proco.background.models import BackgroundTask
 from proco.connection_statistics import models as statistics_models
 from proco.connection_statistics.config import app_config as statistics_configs
 from proco.connection_statistics.utils import (
@@ -777,102 +778,129 @@ def cleanup_school_master_rows():
         logger.debug('Not found running job for school master cleanup task: {}'.format(task_key))
         # Delete all the old records where more than 1 record are in DRAFT/UPDATED_IN_DRAFT or
         # ROW_STATUS_DRAFT_LOCKED/ROW_STATUS_UPDATED_IN_DRAFT_LOCKED/ROW_STATUS_DELETED for same School GIGA ID
-        rows_with_more_than_1_record_in_draft = sources_models.SchoolMasterData.objects.filter(
-            status__in=[
-                sources_models.SchoolMasterData.ROW_STATUS_DRAFT,
-                sources_models.SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT,
-                sources_models.SchoolMasterData.ROW_STATUS_DRAFT_LOCKED,
-                sources_models.SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT_LOCKED,
-                sources_models.SchoolMasterData.ROW_STATUS_DELETED,
-            ]
-        ).values('school_id_giga', 'country_id').annotate(
-            total_records=Count('school_id_giga', distinct=False),
-        ).order_by('-total_records', 'school_id_giga', 'country_id').filter(total_records__gt=1)
-
-        logger.debug('Queryset to get all the old records to delete where more than 1 record are in DRAFT/'
-                     'UPDATED_IN_DRAFT/ROW_STATUS_DRAFT_LOCKED/ROW_STATUS_UPDATED_IN_DRAFT_LOCKED/ROW_STATUS_DELETED '
-                     'for same School GIGA ID: {0}'.format(rows_with_more_than_1_record_in_draft.query))
-
-        ids_to_delete = []
-        for row in rows_with_more_than_1_record_in_draft.iterator(chunk_size=1000):
-            queryset_to_delete = sources_models.SchoolMasterData.objects.filter(
-                school_id_giga=row['school_id_giga'],
-                country_id=row['country_id'],
-            ).order_by('-created')[1:]
-            
-            ids_to_delete.extend(queryset_to_delete.values_list('id', flat=True))
-            
-            if len(ids_to_delete) >= 5000:
-                sources_models.SchoolMasterData.objects.filter(id__in=ids_to_delete).delete()
-                ids_to_delete = []
-                
-        if ids_to_delete:
-            sources_models.SchoolMasterData.objects.filter(id__in=ids_to_delete).delete()
-            
-        task_instance.info('Deleted rows where more than 1 record are in DRAFT/'
-                           'UPDATED_IN_DRAFT/ROW_STATUS_DRAFT_LOCKED/ROW_STATUS_UPDATED_IN_DRAFT_LOCKED/ROW_STATUS_DELETED '
-                           'for same School GIGA ID')
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                DELETE FROM data_sources_schoolmasterdata
+                WHERE id IN (
+                    SELECT id FROM (
+                        SELECT id, ROW_NUMBER() OVER (
+                            PARTITION BY school_id_giga, country_id 
+                            ORDER BY created DESC
+                        ) as rn
+                        FROM data_sources_schoolmasterdata
+                        WHERE status IN ('DRAFT', 'UPDATED_IN_DRAFT', 'DRAFT_LOCKED', 'UPDATED_IN_DRAFT_LOCKED', 'DELETED', 'DELETED_PUBLISHED', 'DISCARDED')
+                    ) t
+                    WHERE t.rn > 1
+                )
+            """)
+        task_instance.info('Deleted duplicate non-published rows for same School GIGA ID')
 
         # At least keep 1 PUBLISHED row for each school in the school master table
-        rows_with_more_than_1_record_in_published = sources_models.SchoolMasterData.objects.filter(
-            status=sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED,
-        ).values('school_id_giga', 'country_id').annotate(
-            total_records=Count('school_id_giga', distinct=False),
-        ).order_by('-total_records').filter(total_records__gt=1)
-
-        logger.debug('Queryset to get all the old records to delete where more than 1 record are in PUBLISHED '
-                     'for same School GIGA ID: {0}'.format(rows_with_more_than_1_record_in_published.query))
-
-        ids_to_delete = []
-        for row in rows_with_more_than_1_record_in_published.iterator(chunk_size=1000):
-            queryset_to_delete = sources_models.SchoolMasterData.objects.filter(
-                school_id_giga=row['school_id_giga'],
-                country_id=row['country_id'],
-            ).order_by('-published_at')[1:]
-            
-            ids_to_delete.extend(queryset_to_delete.values_list('id', flat=True))
-            
-            if len(ids_to_delete) >= 5000:
-                sources_models.SchoolMasterData.objects.filter(id__in=ids_to_delete).delete()
-                ids_to_delete = []
-                
-        if ids_to_delete:
-            sources_models.SchoolMasterData.objects.filter(id__in=ids_to_delete).delete()
-            
-        task_instance.info('Deleted rows where more than 1 record are in PUBLISHED for same School GIGA ID')
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                DELETE FROM data_sources_schoolmasterdata
+                WHERE id IN (
+                    SELECT id FROM (
+                        SELECT id, ROW_NUMBER() OVER (
+                            PARTITION BY school_id_giga, country_id 
+                            ORDER BY published_at DESC
+                        ) as rn
+                        FROM data_sources_schoolmasterdata
+                        WHERE status = 'PUBLISHED'
+                    ) t
+                    WHERE t.rn > 1
+                )
+            """)
+        task_instance.info('Deleted duplicate PUBLISHED rows for same School GIGA ID')
 
         # Delete all the old records where more than 1 record are in is_read=True
         # by keeping at least 1 PUBLISHED row for same School GIGA ID
-        rows_with_more_than_1_record_in_read = sources_models.SchoolMasterData.objects.filter(
-            is_read=True,
-        ).values('school_id_giga', 'country_id').annotate(
-            total_records=Count('school_id_giga', distinct=False),
-        ).order_by('-total_records').filter(total_records__gt=1)
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                DELETE FROM data_sources_schoolmasterdata
+                WHERE id IN (
+                    SELECT id FROM (
+                        SELECT id, ROW_NUMBER() OVER (
+                            PARTITION BY school_id_giga, country_id 
+                            ORDER BY created DESC
+                        ) as rn
+                        FROM data_sources_schoolmasterdata
+                        WHERE is_read = True AND status != 'PUBLISHED'
+                    ) t
+                    WHERE t.rn > 1
+                )
+            """)
+        task_instance.info('Deleted duplicate is_read=True rows by keeping at least 1 PUBLISHED row for same School GIGA ID')
 
-        logger.debug('Queryset to get all the old records to delete where more than 1 record are in is_read=True'
-                     ' by keeping at least 1 PUBLISHED row for same School GIGA ID: {0}'.format(
-            rows_with_more_than_1_record_in_read.query))
+        background_task_utilities.task_on_complete(task_instance)
+    else:
+        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
-        ids_to_delete = []
-        for row in rows_with_more_than_1_record_in_read.iterator(chunk_size=1000):
-            queryset_to_delete = sources_models.SchoolMasterData.objects.filter(
-                school_id_giga=row['school_id_giga'],
-                country_id=row['country_id'],
-            ).exclude(
-                status=sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED
-            ).order_by('-published_at')[1:]
-            
-            ids_to_delete.extend(queryset_to_delete.values_list('id', flat=True))
-            
-            if len(ids_to_delete) >= 5000:
-                sources_models.SchoolMasterData.objects.filter(id__in=ids_to_delete).delete()
-                ids_to_delete = []
-                
-        if ids_to_delete:
-            sources_models.SchoolMasterData.objects.filter(id__in=ids_to_delete).delete()
-            
-        task_instance.info('Deleted rows where more than 1 record are in is_read=True '
-                           'by keeping at least 1 PUBLISHED row for same School GIGA ID')
+
+@app.task(soft_time_limit=2 * 60 * 60, time_limit=2 * 60 * 60)
+def cleanup_health_entity_master_rows():
+    task_key = 'cleanup_health_entity_master_rows_status_{current_time}'.format(
+        current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(task_id, task_key, 'Cleanup health master rows')
+
+    if task_instance:
+        logger.debug('Not found running job for health master cleanup task: {}'.format(task_key))
+        # Delete all the old records where more than 1 record are in DRAFT/UPDATED_IN_DRAFT or
+        # ROW_STATUS_DRAFT_LOCKED/ROW_STATUS_UPDATED_IN_DRAFT_LOCKED/ROW_STATUS_DELETED for same Health GIGA ID
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                DELETE FROM data_sources_healthentitymasterintermediatedata
+                WHERE id IN (
+                    SELECT id FROM (
+                        SELECT id, ROW_NUMBER() OVER (
+                            PARTITION BY health_id_giga, country_id 
+                            ORDER BY created DESC
+                        ) as rn
+                        FROM data_sources_healthentitymasterintermediatedata
+                        WHERE status IN ('DRAFT', 'UPDATED_IN_DRAFT', 'DRAFT_LOCKED', 'UPDATED_IN_DRAFT_LOCKED', 'DELETED', 'DELETED_PUBLISHED', 'DISCARDED')
+                    ) t
+                    WHERE t.rn > 1
+                )
+            """)
+        task_instance.info('Deleted duplicate non-published rows for same Health GIGA ID')
+
+        # At least keep 1 PUBLISHED row for each health entity in the master table
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                DELETE FROM data_sources_healthentitymasterintermediatedata
+                WHERE id IN (
+                    SELECT id FROM (
+                        SELECT id, ROW_NUMBER() OVER (
+                            PARTITION BY health_id_giga, country_id 
+                            ORDER BY published_at DESC
+                        ) as rn
+                        FROM data_sources_healthentitymasterintermediatedata
+                        WHERE status = 'PUBLISHED'
+                    ) t
+                    WHERE t.rn > 1
+                )
+            """)
+        task_instance.info('Deleted duplicate PUBLISHED rows for same Health GIGA ID')
+
+        # Delete all the old records where more than 1 record are in is_read=True
+        # by keeping at least 1 PUBLISHED row for same Health GIGA ID
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                DELETE FROM data_sources_healthentitymasterintermediatedata
+                WHERE id IN (
+                    SELECT id FROM (
+                        SELECT id, ROW_NUMBER() OVER (
+                            PARTITION BY health_id_giga, country_id 
+                            ORDER BY created DESC
+                        ) as rn
+                        FROM data_sources_healthentitymasterintermediatedata
+                        WHERE is_read = True AND status != 'PUBLISHED'
+                    ) t
+                    WHERE t.rn > 1
+                )
+            """)
+        task_instance.info('Deleted duplicate is_read=True rows by keeping at least 1 PUBLISHED row for same Health GIGA ID')
 
         background_task_utilities.task_on_complete(task_instance)
     else:
@@ -898,7 +926,7 @@ def update_static_data(*args, country_iso3_format=None):
         logger.debug('Not found running job for static data pull handler: {}'.format(task_key))
         load_data_from_school_master_apis(country_iso3_format=country_iso3_format)
         task_instance.info('Completed the load data from School Master API call')
-        cleanup_school_master_rows.s()
+        cleanup_school_master_rows.delay()
         task_instance.info('Scheduled cleanup school master rows')
         background_task_utilities.task_on_complete(task_instance)
     else:
@@ -1040,9 +1068,23 @@ def clean_old_live_data():
         task_instance.info('"DailyCheckAppMeasurementData" data table completed')
 
         logger.debug('Deleting all the rows from "QoSData" Data Table which is older than: {0}'.format(older_then_date))
-        # Delete all entries from QoS Data Table which is older than 7 days
+        # Delete all entries from QoS Data Table which is older than 30 days
         sources_models.QoSData.objects.filter(timestamp__lt=older_then_date).delete()
         task_instance.info('"QoSData" data table completed')
+
+        logger.debug('Deleting all the rows from "EntityRealTimeConnectivity" Data Table which is older than: '
+                     '{0}'.format(older_then_date))
+        # Delete all entries from Entity RealTime Connectivity Table which is older than 30 days
+        statistics_models.EntityRealTimeConnectivity.objects.filter(created__lt=older_then_date).delete()
+        task_instance.info('"EntityRealTimeConnectivity" data table completed')
+
+        logger.debug('Deleting all the rows from "BackgroundTask" Data Table which is older than: '
+                     '{0}'.format(older_then_date))
+        # Delete all entries from BackgroundTask Table which are older than 30 days
+        # We use ._raw_delete to bypass loading objects into memory for faster execution
+        background_tasks_qs = BackgroundTask.objects.filter(created_at__lt=older_then_date)
+        background_tasks_qs._raw_delete(background_tasks_qs.db)
+        task_instance.info('"BackgroundTask" data table completed')
 
         background_task_utilities.task_on_complete(task_instance)
     else:
@@ -1104,6 +1146,13 @@ def clean_historic_data():
 
         call_command('data_source_additional_steps', *cmd_args)
         task_instance.info('Completed school master historical record cleanup.')
+
+        cmd_args = [
+            '--clean_health_entity_master_historical_rows',
+        ]
+
+        call_command('data_source_additional_steps', *cmd_args)
+        task_instance.info('Completed health entity master historical record cleanup.')
 
         background_task_utilities.task_on_complete(task_instance)
     else:
@@ -1357,8 +1406,8 @@ def update_entity_static_data(*args, country_iso3_format=None):
         logger.debug('Not found running job for static data pull handler: {}'.format(task_key))
         load_entity_data_from_health_master_apis(country_iso3_format=country_iso3_format)
         task_instance.info('Completed the load data from Health Master API call')
-        cleanup_school_master_rows.s()
-        task_instance.info('Scheduled cleanup school master rows')
+        cleanup_health_entity_master_rows.delay()
+        task_instance.info('Scheduled cleanup health master rows')
         background_task_utilities.task_on_complete(task_instance)
     else:
         logger.error('Found Job with "{0}" name so skipping current iteration'.format(task_key))
