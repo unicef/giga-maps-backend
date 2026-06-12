@@ -134,11 +134,16 @@ class Command(BaseCommand):
                             sql = """
                             SELECT DISTINCT e."country_id"
                             FROM "entities_entity" AS e
+                            INNER JOIN "connection_statistics_entitydailystatus" AS eds
+                                ON (eds."entity_id" = e."id")
                             WHERE e."deleted" IS NULL
+                              AND eds."deleted" IS NULL
+                              AND eds."live_data_source" IN ({live_source_types})
                               AND e."country_id" IN ({country_ids})
-                              AND e."{col_name}" IS NOT NULL
+                              AND eds."{col_name}" IS NOT NULL
                             ORDER BY e."country_id" ASC
                             """.format(
+                                live_source_types=','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                                 country_ids=','.join([str(cid) for cid in all_country_ids]),
                                 col_name=parameter_column_name,
                             )
