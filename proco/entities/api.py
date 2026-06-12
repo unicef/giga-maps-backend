@@ -579,7 +579,8 @@ class EntityConnectivityTileGenerator(BaseTileGenerator):
                 END AS connectivity_status,
                 CASE WHEN rt_status.rt_registered = True {rt_date_condition} THEN True
                     ELSE False
-                END AS is_rt_connected
+                END AS is_rt_connected,
+                (SELECT code FROM entities_entity_type WHERE id = entities_entity.entity_type_id) AS entity_type
                 FROM entities_entity
                 INNER JOIN bounds ON ST_Intersects(entities_entity.geopoint, ST_Transform(bounds.geom, {srid}))
                 {school_weekly_join}

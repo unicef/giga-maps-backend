@@ -5,6 +5,7 @@ from django.db import transaction
 
 from proco.accounts import models as accounts_models
 from proco.core.utils import get_current_datetime_object, normalize_str
+from proco.entities.models import EntityType
 
 
 data_source_json = [
@@ -758,7 +759,97 @@ download_and_coverage_data_layer_json = [
         'category': 'CONNECTIVITY',
         'applicable_countries': [],
         'global_benchmark': {'value': '20000000', 'unit': 'bps', 'convert_unit': 'mbps'},
-        'legend_configs': [],
+        'legend_configs': {
+            'good': {
+                'color': '#12c45e',
+                'values': ['SQL:{table_name}."{col_name}">=20000000'],
+                'benchmark_value': 20000000
+            },
+            'moderate': {
+                'color': '#ffb939',
+                'values': [
+                    'SQL:{table_name}."{col_name}">=1000000',
+                    'SQL:{table_name}."{col_name}"<20000000'
+                ]
+            },
+            'bad': {
+                'color': '#ff4d4f',
+                'values': [
+                    'SQL:{table_name}."{col_name}"<1000000',
+                    'SQL:{table_name}."{col_name}">0'
+                ]
+            },
+            'unknown': {
+                'color': '#c4c4c4',
+                'values': ['SQL:{table_name}."{col_name}" IS NULL']
+            }
+        },
+        'is_reverse': False,
+        'status': 'PUBLISHED',
+        'data_sources': [
+            {
+                'name': 'Daily Check APP and MLab',
+                'data_source_type': 'DAILY_CHECK_APP',
+                'data_source_column': {
+                    'name': 'connectivity_speed',
+                    'type': 'int',
+                    'unit': 'bps',
+                    'is_parameter': True,
+                    'alias': 'Download Speed',
+                    'base_benchmark': 1000000,
+                    'display_unit': 'Mbps',
+                }
+            }, {
+                'name': 'QoS',
+                'data_source_type': 'QOS',
+                'data_source_column': {
+                    'name': 'connectivity_speed',
+                    'type': 'int',
+                    'unit': 'bps',
+                    'is_parameter': True,
+                    'alias': 'Download Speed',
+                    'base_benchmark': 1000000,
+                    'display_unit': 'Mbps',
+                }
+            }
+        ]
+    },
+    {
+        'code': 'DEFAULT_HEALTH_DOWNLOAD',
+        'name': 'Health Download',
+        'entity_type_code': 'health',
+        'icon': """<svg id="icon" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><style>.cls-1 {fill: none;}</style></defs><path d="M26,24v4H6V24H4v4H4a2,2,0,0,0,2,2H26a2,2,0,0,0,2-2h0V24Z"/><polygon points="26 14 24.59 12.59 17 20.17 17 2 15 2 15 20.17 7.41 12.59 6 14 16 24 26 14"/><g id="_Transparent_Rectangle_" data-name="&lt;Transparent Rectangle&gt;"><rect class="cls-1" width="32" height="32"/></g></svg>""",
+        'description': 'System Health Download Layer',
+        'version': 'V 1.0',
+        'type': 'LIVE',
+        'category': 'CONNECTIVITY',
+        'applicable_countries': [],
+        'global_benchmark': {'value': '20000000', 'unit': 'bps', 'convert_unit': 'mbps'},
+        'legend_configs': {
+            'good': {
+                'color': '#12c45e',
+                'values': ['SQL:{table_name}."{col_name}">=20000000'],
+                'benchmark_value': 20000000
+            },
+            'moderate': {
+                'color': '#ffb939',
+                'values': [
+                    'SQL:{table_name}."{col_name}">=1000000',
+                    'SQL:{table_name}."{col_name}"<20000000'
+                ]
+            },
+            'bad': {
+                'color': '#ff4d4f',
+                'values': [
+                    'SQL:{table_name}."{col_name}"<1000000',
+                    'SQL:{table_name}."{col_name}">0'
+                ]
+            },
+            'unknown': {
+                'color': '#c4c4c4',
+                'values': ['SQL:{table_name}."{col_name}" IS NULL']
+            }
+        },
         'is_reverse': False,
         'status': 'PUBLISHED',
         'data_sources': [
@@ -864,9 +955,14 @@ def load_data_sources_data():
 def load_system_data_layers_data():
     for row_data in download_and_coverage_data_layer_json:
         try:
+            entity_type = None
+            if 'entity_type_code' in row_data:
+                entity_type = EntityType.objects.filter(code=row_data['entity_type_code']).first()
+
             layer_instance, created = accounts_models.DataLayer.objects.update_or_create(
                 name=row_data['name'],
                 type=row_data['type'],
+                entity_type=entity_type,
                 defaults={
                     'icon': row_data['icon'],
                     'description': row_data['description'],

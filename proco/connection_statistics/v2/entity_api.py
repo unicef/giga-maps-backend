@@ -206,7 +206,7 @@ class EntityGlobalStatsAPIView(APIView):
 
         if len(entity_static_filters) > 0:
             stats_qs = stats_qs.annotate(
-                total_weekly_schools=Count('last_weekly_status__entity_id', distinct=True),
+                total_weekly_entities=Count('last_weekly_status__entity_id', distinct=True),
             ).values('connected', 'not_connected', 'unknown', 'total_entities',
                      'all_countries', 'entities_with_connectivity_status_mapped',
                      'countries_with_connectivity_status_mapped', 'total_weekly_entities')
