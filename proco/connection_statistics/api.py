@@ -818,7 +818,7 @@ class ConnectivityConfigurationsViewSet(APIView):
 
             last_week_entry = date_queryset.filter(
                 date__range=(last_week_start, last_week_end)
-            ).aggregate(last_week_date=Max('date'))['last_week_date']
+            ).values_list('date', flat=True).order_by('-date').first()
 
             date_boundaries = date_queryset.aggregate(first_date=Min('date'), last_date=Max('date'))
             first_date = date_boundaries['first_date']
