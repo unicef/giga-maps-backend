@@ -19,12 +19,12 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument(
             '-start_date', dest='start_date', type=str,
-            default=date_utilities.format_date(get_current_datetime_object().date() - timedelta(days=1)),
-            help='Start date in YYYY-MM-DD format. Default is yesterday.'
+            default=get_current_datetime_object().date().strftime('%Y-%m-%d'),
+            help='Start date in YYYY-MM-DD format. Default is today.'
         )
         parser.add_argument(
             '-end_date', dest='end_date', type=str,
-            default=date_utilities.format_date(get_current_datetime_object().date()),
+            default=get_current_datetime_object().date().strftime('%Y-%m-%d'),
             help='End date in YYYY-MM-DD format. Default is today.'
         )
         parser.add_argument(
