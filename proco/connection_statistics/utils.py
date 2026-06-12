@@ -19,6 +19,8 @@ from proco.connection_statistics.models import (
     RealTimeConnectivity,
     SchoolDailyStatus,
     SchoolWeeklyStatus,
+    EntityDailyStatus,
+    EntityWeeklyStatus,
 )
 from proco.core.utils import convert_to_int, get_current_datetime_object
 from proco.locations.models import Country
@@ -251,6 +253,93 @@ def aggregate_school_daily_status_to_school_weekly_status(country, date) -> bool
                 school_weekly.num_schools_per_building = prev_weekly.num_schools_per_building
 
         school_weekly.save()
+
+    return updated
+
+
+def aggregate_entity_daily_status_to_entity_weekly_status(country, date, entity_type_code=None) -> bool:
+    monday_date = date - timedelta(days=date.weekday())
+    sunday_date = monday_date + timedelta(days=6)
+
+    monday_week_no = date_utilities.get_week_from_date(monday_date)
+    monday_year = date_utilities.get_year_from_date(monday_date)
+
+    entity_ids_qs = EntityDailyStatus.objects.all().filter(
+        date__range=[monday_date, sunday_date],
+        entity__country=country,
+        entity__deleted__isnull=True
+    )
+    if entity_type_code:
+        entity_ids_qs = entity_ids_qs.filter(entity__entity_type__code=entity_type_code)
+
+    entity_ids = entity_ids_qs.values_list('entity', flat=True).order_by('entity_id').distinct('entity_id')
+
+    updated = False
+
+    for entity_id in entity_ids:
+        updated = True
+        created = False
+
+        entity_weekly = EntityWeeklyStatus.objects.filter(
+            entity_id=entity_id, week=monday_week_no, year=monday_year,
+        ).last()
+
+        if not entity_weekly:
+            entity_weekly = EntityWeeklyStatus.objects.create(
+                entity_id=entity_id,
+                year=monday_year,
+                week=monday_week_no,
+                date=monday_date,
+            )
+            created = True
+
+        aggregate_qs = EntityDailyStatus.objects.all().filter(
+            entity_id=entity_id, date__range=[monday_date, sunday_date],
+        )
+        if date_utilities.get_year_from_date(date) >= 2024:
+            aggregate_qs = aggregate_qs.filter(entity__deleted__isnull=True)
+
+        aggregate = aggregate_qs.aggregate(
+            Avg('connectivity_speed'), Avg('connectivity_upload_speed'), Avg('connectivity_latency'),
+            Avg('roundtrip_time'), Avg('jitter_download'), Avg('jitter_upload'), Avg('rtt_packet_loss_pct'),
+            Avg('connectivity_speed_probe'), Avg('connectivity_upload_speed_probe'), Avg('connectivity_latency_probe'),
+            Avg('connectivity_speed_mean'), Avg('connectivity_upload_speed_mean'),
+        )
+
+        entity_weekly.connectivity_speed = aggregate['connectivity_speed__avg']
+        entity_weekly.connectivity_latency = aggregate['connectivity_latency__avg']
+        entity_weekly.roundtrip_time = aggregate['roundtrip_time__avg']
+        entity_weekly.jitter_download = aggregate['jitter_download__avg']
+        entity_weekly.jitter_upload = aggregate['jitter_upload__avg']
+        entity_weekly.rtt_packet_loss_pct = aggregate['rtt_packet_loss_pct__avg']
+        entity_weekly.connectivity_speed_probe = aggregate['connectivity_speed_probe__avg']
+        entity_weekly.connectivity_upload_speed_probe = aggregate['connectivity_upload_speed_probe__avg']
+        entity_weekly.connectivity_latency_probe = aggregate['connectivity_latency_probe__avg']
+        entity_weekly.connectivity_speed_mean = aggregate['connectivity_speed_mean__avg']
+        entity_weekly.connectivity_upload_speed_mean = aggregate['connectivity_upload_speed_mean__avg']
+        entity_weekly.connectivity_upload_speed = aggregate['connectivity_upload_speed__avg']
+
+        entity_weekly.save()
+
+        # Update the entity's last_weekly_status and connectivity_status
+        entity = entity_weekly.entity
+        update_fields = []
+        
+        status = 'unknown'
+        if entity_weekly.connectivity_speed is not None:
+            status = statuses_schema.get_connectivity_status_by_connectivity_speed(entity_weekly.connectivity_speed)
+            
+        if entity.connectivity_status != status:
+            entity.connectivity_status = status
+            update_fields.append('connectivity_status')
+            
+        if entity.last_weekly_status_id != entity_weekly.id:
+            if not entity.last_weekly_status or entity.last_weekly_status.date < entity_weekly.date:
+                entity.last_weekly_status = entity_weekly
+                update_fields.append('last_weekly_status')
+                
+        if update_fields:
+            entity.save(update_fields=update_fields)
 
     return updated
 

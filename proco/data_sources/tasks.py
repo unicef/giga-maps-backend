@@ -784,7 +784,7 @@ def cleanup_school_master_rows():
                 WHERE id IN (
                     SELECT id FROM (
                         SELECT id, ROW_NUMBER() OVER (
-                            PARTITION BY school_id_giga, country_id 
+                            PARTITION BY school_id_giga, country_id
                             ORDER BY created DESC
                         ) as rn
                         FROM data_sources_schoolmasterdata
@@ -802,7 +802,7 @@ def cleanup_school_master_rows():
                 WHERE id IN (
                     SELECT id FROM (
                         SELECT id, ROW_NUMBER() OVER (
-                            PARTITION BY school_id_giga, country_id 
+                            PARTITION BY school_id_giga, country_id
                             ORDER BY published_at DESC
                         ) as rn
                         FROM data_sources_schoolmasterdata
@@ -821,7 +821,7 @@ def cleanup_school_master_rows():
                 WHERE id IN (
                     SELECT id FROM (
                         SELECT id, ROW_NUMBER() OVER (
-                            PARTITION BY school_id_giga, country_id 
+                            PARTITION BY school_id_giga, country_id
                             ORDER BY created DESC
                         ) as rn
                         FROM data_sources_schoolmasterdata
@@ -854,7 +854,7 @@ def cleanup_health_entity_master_rows():
                 WHERE id IN (
                     SELECT id FROM (
                         SELECT id, ROW_NUMBER() OVER (
-                            PARTITION BY health_id_giga, country_id 
+                            PARTITION BY health_id_giga, country_id
                             ORDER BY created DESC
                         ) as rn
                         FROM data_sources_healthentitymasterintermediatedata
@@ -872,7 +872,7 @@ def cleanup_health_entity_master_rows():
                 WHERE id IN (
                     SELECT id FROM (
                         SELECT id, ROW_NUMBER() OVER (
-                            PARTITION BY health_id_giga, country_id 
+                            PARTITION BY health_id_giga, country_id
                             ORDER BY published_at DESC
                         ) as rn
                         FROM data_sources_healthentitymasterintermediatedata
@@ -891,7 +891,7 @@ def cleanup_health_entity_master_rows():
                 WHERE id IN (
                     SELECT id FROM (
                         SELECT id, ROW_NUMBER() OVER (
-                            PARTITION BY health_id_giga, country_id 
+                            PARTITION BY health_id_giga, country_id
                             ORDER BY created DESC
                         ) as rn
                         FROM data_sources_healthentitymasterintermediatedata
@@ -1481,7 +1481,7 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
             admin1_giga_ids = [row.admin1_id_giga for row in data_chunk if not core_utilities.is_blank_string(row.admin1_id_giga)]
             admin2_giga_ids = [row.admin2_id_giga for row in data_chunk if not core_utilities.is_blank_string(row.admin2_id_giga)]
             country_ids = list(set([row.country_id for row in data_chunk]))
-            
+
             admin1_map = {}
             if admin1_giga_ids:
                 admin1_qs = CountryAdminMetadata.objects.filter(
@@ -1490,7 +1490,7 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
                     layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN1,
                 )
                 admin1_map = {(a.country_id, a.giga_id_admin): a for a in admin1_qs}
-                
+
             admin2_map = {}
             if admin2_giga_ids:
                 admin2_qs = CountryAdminMetadata.objects.filter(
@@ -1753,9 +1753,11 @@ def fetch_entity_giga_meter_ping_data(entity_type_code, start_date, end_date, co
         }
 
         try:
+            # Build full URL for logging so parameters are visible
+            log_url = f"{api_endpoint}?page={page}&size={page_size}&country={country_iso3}"
             logger.info(
                 'Entity Giga Meter - Fetching page %d for country %s from %s',
-                page, country_iso3, api_endpoint,
+                page, country_iso3, log_url,
             )
             response = requests.get(api_endpoint, params=params, headers=headers)
 
@@ -2090,6 +2092,26 @@ def run_entity_ping_aggregation(entity_type_code, start_date, end_date, task_ins
             total_upserted += len(batch)
 
             logger.info('Entity Giga Meter - Country %s: upserted %d records', country_iso3, len(batch))
+
+            # Auto-aggregate to WeeklyStatus and ensure RealTimeRegistration
+            country_obj = Country.objects.get(iso3_format=country_iso3)
+            current_date = start_date
+            while current_date <= end_date:
+                aggregate_entity_daily_status_to_entity_weekly_status(country_obj, current_date, entity_type_code)
+                current_date += timedelta(days=7)
+            # Ensure the final week is covered
+            aggregate_entity_daily_status_to_entity_weekly_status(country_obj, end_date, entity_type_code)
+
+            # Auto-register entities for realtime data
+            for giga_id, entity_obj in entity_map.items():
+                statistics_models.EntityRealTimeRegistration.objects.update_or_create(
+                    entity=entity_obj,
+                    defaults={
+                        'rt_registered': True,
+                        'rt_source': statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE,
+                        'rt_registration_date': start_date, # Approximation
+                    }
+                )
 
         except EntityAggregationOngoingException:
             # Re-raise to let the task retry
