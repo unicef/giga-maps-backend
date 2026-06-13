@@ -139,3 +139,23 @@ class DataSourcesTasksTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(sources_tasks.scheduler_for_data_loss_recovery_for_qos_dates(
             self.country.iso3_format, '01-01-2025', '07-01-2025', True, True, True
         ), None)
+
+    def test_handle_published_entity_master_data_row(self):
+        from proco.entities.models import EntityType, Entity
+        entity_type, _ = EntityType.objects.get_or_create(code='health', name='Health Facility', master_data_model='data_sources.HealthEntityMasterIntermediateData', detail_model='entities.HealthEntity')
+
+        row = sources_models.HealthEntityMasterIntermediateData.objects.create(
+            country=self.country,
+            health_id_giga='test-health-giga-id',
+            facility_name='Test Health Facility',
+            latitude=10.0,
+            longitude=20.0,
+            status=sources_models.HealthEntityMasterIntermediateData.ROW_STATUS_PUBLISHED,
+            is_read=False,
+            facility_hours='24_7',
+        )
+
+        self.assertEqual(sources_models.HealthEntityMasterIntermediateData.objects.filter(is_read=False).count(), 1)
+        sources_tasks.handle_published_entity_master_data_row()
+        self.assertEqual(sources_models.HealthEntityMasterIntermediateData.objects.filter(is_read=False).count(), 0)
+        self.assertTrue(Entity.objects.filter(giga_id='test-health-giga-id').exists())

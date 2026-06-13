@@ -1673,7 +1673,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     query_result = db_utilities.sql_to_response(
                         DataLayerInfoViewSet.get_info_query(self),
                         label=self.__class__.__name__,
-                        db_var=settings.READ_ONLY_DB_KEY)
+                        db_var=settings.READ_ONLY_DB_KEY,
+                        raise_exception=True)
                 except Exception as sql_exc:
                     return {
                         'error': (
@@ -1775,7 +1776,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 try:
                     query_result = db_utilities.sql_to_response(self.get_info_query(query_labels),
                                                                 label=self.__class__.__name__,
-                                                                db_var=settings.READ_ONLY_DB_KEY)
+                                                                db_var=settings.READ_ONLY_DB_KEY,
+                                                                raise_exception=True)
                 except Exception as sql_exc:
                     return {
                         'error': (
@@ -1877,7 +1879,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     query_result = db_utilities.sql_to_response(
                         _SchoolViewSet.get_static_info_query(self, query_labels),
                         label=self.__class__.__name__,
-                        db_var=settings.READ_ONLY_DB_KEY)
+                        db_var=settings.READ_ONLY_DB_KEY,
+                        raise_exception=True)
                 except Exception as sql_exc:
                     return {
                         'error': (
@@ -1937,7 +1940,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 try:
                     query_result = db_utilities.sql_to_response(self.get_static_info_query(query_labels),
                                                                 label=self.__class__.__name__,
-                                                                db_var=settings.READ_ONLY_DB_KEY)
+                                                                db_var=settings.READ_ONLY_DB_KEY,
+                                                                raise_exception=True)
                 except Exception as sql_exc:
                     return {
                         'error': (

@@ -776,62 +776,56 @@ def cleanup_school_master_rows():
 
     if task_instance:
         logger.debug('Not found running job for school master cleanup task: {}'.format(task_key))
-        # Delete all the old records where more than 1 record are in DRAFT/UPDATED_IN_DRAFT or
-        # ROW_STATUS_DRAFT_LOCKED/ROW_STATUS_UPDATED_IN_DRAFT_LOCKED/ROW_STATUS_DELETED for same School GIGA ID
-        with connection.cursor() as cursor:
-            cursor.execute("""
-                DELETE FROM data_sources_schoolmasterdata
-                WHERE id IN (
-                    SELECT id FROM (
-                        SELECT id, ROW_NUMBER() OVER (
-                            PARTITION BY school_id_giga, country_id
-                            ORDER BY created DESC
-                        ) as rn
-                        FROM data_sources_schoolmasterdata
-                        WHERE status IN ('DRAFT', 'UPDATED_IN_DRAFT', 'DRAFT_LOCKED', 'UPDATED_IN_DRAFT_LOCKED', 'DELETED', 'DELETED_PUBLISHED', 'DISCARDED')
-                    ) t
-                    WHERE t.rn > 1
-                )
-            """)
-        task_instance.info('Deleted duplicate non-published rows for same School GIGA ID')
+        country_ids = list(sources_models.SchoolMasterData.objects.values_list('country_id', flat=True).distinct())
+        for country_id in country_ids:
+            if not country_id:
+                continue
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    DELETE FROM data_sources_schoolmasterdata
+                    WHERE country_id = %s AND id IN (
+                        SELECT id FROM (
+                            SELECT id, ROW_NUMBER() OVER (
+                                PARTITION BY school_id_giga
+                                ORDER BY created DESC
+                            ) as rn
+                            FROM data_sources_schoolmasterdata
+                            WHERE country_id = %s AND status IN ('DRAFT', 'UPDATED_IN_DRAFT', 'DRAFT_LOCKED', 'UPDATED_IN_DRAFT_LOCKED', 'DELETED', 'DELETED_PUBLISHED', 'DISCARDED')
+                        ) t
+                        WHERE t.rn > 1
+                    )
+                """, [country_id, country_id])
 
-        # At least keep 1 PUBLISHED row for each school in the school master table
-        with connection.cursor() as cursor:
-            cursor.execute("""
-                DELETE FROM data_sources_schoolmasterdata
-                WHERE id IN (
-                    SELECT id FROM (
-                        SELECT id, ROW_NUMBER() OVER (
-                            PARTITION BY school_id_giga, country_id
-                            ORDER BY published_at DESC
-                        ) as rn
-                        FROM data_sources_schoolmasterdata
-                        WHERE status = 'PUBLISHED'
-                    ) t
-                    WHERE t.rn > 1
-                )
-            """)
-        task_instance.info('Deleted duplicate PUBLISHED rows for same School GIGA ID')
+                cursor.execute("""
+                    DELETE FROM data_sources_schoolmasterdata
+                    WHERE country_id = %s AND id IN (
+                        SELECT id FROM (
+                            SELECT id, ROW_NUMBER() OVER (
+                                PARTITION BY school_id_giga
+                                ORDER BY published_at DESC
+                            ) as rn
+                            FROM data_sources_schoolmasterdata
+                            WHERE country_id = %s AND status = 'PUBLISHED'
+                        ) t
+                        WHERE t.rn > 1
+                    )
+                """, [country_id, country_id])
 
-        # Delete all the old records where more than 1 record are in is_read=True
-        # by keeping at least 1 PUBLISHED row for same School GIGA ID
-        with connection.cursor() as cursor:
-            cursor.execute("""
-                DELETE FROM data_sources_schoolmasterdata
-                WHERE id IN (
-                    SELECT id FROM (
-                        SELECT id, ROW_NUMBER() OVER (
-                            PARTITION BY school_id_giga, country_id
-                            ORDER BY created DESC
-                        ) as rn
-                        FROM data_sources_schoolmasterdata
-                        WHERE is_read = True AND status != 'PUBLISHED'
-                    ) t
-                    WHERE t.rn > 1
-                )
-            """)
-        task_instance.info('Deleted duplicate is_read=True rows by keeping at least 1 PUBLISHED row for same School GIGA ID')
-
+                cursor.execute("""
+                    DELETE FROM data_sources_schoolmasterdata
+                    WHERE country_id = %s AND id IN (
+                        SELECT id FROM (
+                            SELECT id, ROW_NUMBER() OVER (
+                                PARTITION BY school_id_giga
+                                ORDER BY created DESC
+                            ) as rn
+                            FROM data_sources_schoolmasterdata
+                            WHERE country_id = %s AND is_read = True AND status != 'PUBLISHED'
+                        ) t
+                        WHERE t.rn > 1
+                    )
+                """, [country_id, country_id])
+        task_instance.info('Deleted duplicate rows for same School GIGA ID chunked by country')
         background_task_utilities.task_on_complete(task_instance)
     else:
         logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
@@ -846,62 +840,56 @@ def cleanup_health_entity_master_rows():
 
     if task_instance:
         logger.debug('Not found running job for health master cleanup task: {}'.format(task_key))
-        # Delete all the old records where more than 1 record are in DRAFT/UPDATED_IN_DRAFT or
-        # ROW_STATUS_DRAFT_LOCKED/ROW_STATUS_UPDATED_IN_DRAFT_LOCKED/ROW_STATUS_DELETED for same Health GIGA ID
-        with connection.cursor() as cursor:
-            cursor.execute("""
-                DELETE FROM data_sources_healthentitymasterintermediatedata
-                WHERE id IN (
-                    SELECT id FROM (
-                        SELECT id, ROW_NUMBER() OVER (
-                            PARTITION BY health_id_giga, country_id
-                            ORDER BY created DESC
-                        ) as rn
-                        FROM data_sources_healthentitymasterintermediatedata
-                        WHERE status IN ('DRAFT', 'UPDATED_IN_DRAFT', 'DRAFT_LOCKED', 'UPDATED_IN_DRAFT_LOCKED', 'DELETED', 'DELETED_PUBLISHED', 'DISCARDED')
-                    ) t
-                    WHERE t.rn > 1
-                )
-            """)
-        task_instance.info('Deleted duplicate non-published rows for same Health GIGA ID')
+        country_ids = list(sources_models.HealthEntityMasterIntermediateData.objects.values_list('country_id', flat=True).distinct())
+        for country_id in country_ids:
+            if not country_id:
+                continue
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    DELETE FROM data_sources_healthentitymasterintermediatedata
+                    WHERE country_id = %s AND id IN (
+                        SELECT id FROM (
+                            SELECT id, ROW_NUMBER() OVER (
+                                PARTITION BY health_id_giga
+                                ORDER BY created DESC
+                            ) as rn
+                            FROM data_sources_healthentitymasterintermediatedata
+                            WHERE country_id = %s AND status IN ('DRAFT', 'UPDATED_IN_DRAFT', 'DRAFT_LOCKED', 'UPDATED_IN_DRAFT_LOCKED', 'DELETED', 'DELETED_PUBLISHED', 'DISCARDED')
+                        ) t
+                        WHERE t.rn > 1
+                    )
+                """, [country_id, country_id])
 
-        # At least keep 1 PUBLISHED row for each health entity in the master table
-        with connection.cursor() as cursor:
-            cursor.execute("""
-                DELETE FROM data_sources_healthentitymasterintermediatedata
-                WHERE id IN (
-                    SELECT id FROM (
-                        SELECT id, ROW_NUMBER() OVER (
-                            PARTITION BY health_id_giga, country_id
-                            ORDER BY published_at DESC
-                        ) as rn
-                        FROM data_sources_healthentitymasterintermediatedata
-                        WHERE status = 'PUBLISHED'
-                    ) t
-                    WHERE t.rn > 1
-                )
-            """)
-        task_instance.info('Deleted duplicate PUBLISHED rows for same Health GIGA ID')
+                cursor.execute("""
+                    DELETE FROM data_sources_healthentitymasterintermediatedata
+                    WHERE country_id = %s AND id IN (
+                        SELECT id FROM (
+                            SELECT id, ROW_NUMBER() OVER (
+                                PARTITION BY health_id_giga
+                                ORDER BY published_at DESC
+                            ) as rn
+                            FROM data_sources_healthentitymasterintermediatedata
+                            WHERE country_id = %s AND status = 'PUBLISHED'
+                        ) t
+                        WHERE t.rn > 1
+                    )
+                """, [country_id, country_id])
 
-        # Delete all the old records where more than 1 record are in is_read=True
-        # by keeping at least 1 PUBLISHED row for same Health GIGA ID
-        with connection.cursor() as cursor:
-            cursor.execute("""
-                DELETE FROM data_sources_healthentitymasterintermediatedata
-                WHERE id IN (
-                    SELECT id FROM (
-                        SELECT id, ROW_NUMBER() OVER (
-                            PARTITION BY health_id_giga, country_id
-                            ORDER BY created DESC
-                        ) as rn
-                        FROM data_sources_healthentitymasterintermediatedata
-                        WHERE is_read = True AND status != 'PUBLISHED'
-                    ) t
-                    WHERE t.rn > 1
-                )
-            """)
-        task_instance.info('Deleted duplicate is_read=True rows by keeping at least 1 PUBLISHED row for same Health GIGA ID')
-
+                cursor.execute("""
+                    DELETE FROM data_sources_healthentitymasterintermediatedata
+                    WHERE country_id = %s AND id IN (
+                        SELECT id FROM (
+                            SELECT id, ROW_NUMBER() OVER (
+                                PARTITION BY health_id_giga
+                                ORDER BY created DESC
+                            ) as rn
+                            FROM data_sources_healthentitymasterintermediatedata
+                            WHERE country_id = %s AND is_read = True AND status != 'PUBLISHED'
+                        ) t
+                        WHERE t.rn > 1
+                    )
+                """, [country_id, country_id])
+        task_instance.info('Deleted duplicate rows for same Health GIGA ID chunked by country')
         background_task_utilities.task_on_complete(task_instance)
     else:
         logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
@@ -1085,6 +1073,46 @@ def clean_old_live_data():
         background_tasks_qs = BackgroundTask.objects.filter(created_at__lt=older_then_date)
         background_tasks_qs._raw_delete(background_tasks_qs.db)
         task_instance.info('"BackgroundTask" data table completed')
+
+        # Purge soft-deleted schools and related statuses to reclaim DB space and prevent bloat
+        logger.info('Purging soft-deleted schools and statuses...')
+        deleted_school_ids = list(School.objects.all_records().filter(deleted__isnull=False).values_list('id', flat=True)[:50000])
+        logger.info('Found {0} soft-deleted schools to purge.'.format(len(deleted_school_ids)))
+        for i in range(0, len(deleted_school_ids), 5000):
+            chunk = deleted_school_ids[i:i+5000]
+            sources_models.SchoolMasterData.objects.filter(school_id__in=chunk).update(school_id=None)
+            statistics_models.SchoolDailyStatus.objects.all_records().filter(school_id__in=chunk)._raw_delete(connection.alias)
+            statistics_models.SchoolWeeklyStatus.objects.all_records().filter(school_id__in=chunk)._raw_delete(connection.alias)
+            statistics_models.RealTimeConnectivity.objects.all_records().filter(school_id__in=chunk)._raw_delete(connection.alias)
+            statistics_models.SchoolRealTimeRegistration.objects.all_records().filter(school_id__in=chunk)._raw_delete(connection.alias)
+            sources_models.QoSData.objects.all_records().filter(school_id__in=chunk)._raw_delete(connection.alias)
+            School.objects.all_records().filter(id__in=chunk)._raw_delete(connection.alias)
+        logger.info('Purged soft-deleted schools successfully.')
+
+        # Purge any orphan soft-deleted school statuses
+        statistics_models.SchoolDailyStatus.objects.all_records().filter(deleted__isnull=False)._raw_delete(connection.alias)
+        statistics_models.SchoolWeeklyStatus.objects.all_records().filter(deleted__isnull=False)._raw_delete(connection.alias)
+
+        # Purge soft-deleted entities and related statuses
+        logger.info('Purging soft-deleted entities and statuses...')
+        deleted_entity_ids = list(Entity.objects.all_records().filter(deleted__isnull=False).values_list('id', flat=True)[:50000])
+        logger.info('Found {0} soft-deleted entities to purge.'.format(len(deleted_entity_ids)))
+        for i in range(0, len(deleted_entity_ids), 5000):
+            chunk = deleted_entity_ids[i:i+5000]
+            sources_models.HealthEntityMasterIntermediateData.objects.filter(entity_id__in=chunk).update(entity_id=None)
+            statistics_models.EntityDailyStatus.objects.all_records().filter(entity_id__in=chunk)._raw_delete(connection.alias)
+            statistics_models.EntityWeeklyStatus.objects.all_records().filter(entity_id__in=chunk)._raw_delete(connection.alias)
+            statistics_models.EntityRealTimeConnectivity.objects.all_records().filter(entity_id__in=chunk)._raw_delete(connection.alias)
+            statistics_models.EntityRealTimeRegistration.objects.all_records().filter(entity_id__in=chunk)._raw_delete(connection.alias)
+
+            from proco.entities.models import HealthEntity
+            HealthEntity.objects.all_records().filter(entity_id__in=chunk)._raw_delete(connection.alias)
+            Entity.objects.all_records().filter(id__in=chunk)._raw_delete(connection.alias)
+        logger.info('Purged soft-deleted entities successfully.')
+
+        # Purge any orphan soft-deleted entity statuses
+        statistics_models.EntityDailyStatus.objects.all_records().filter(deleted__isnull=False)._raw_delete(connection.alias)
+        statistics_models.EntityWeeklyStatus.objects.all_records().filter(deleted__isnull=False)._raw_delete(connection.alias)
 
         background_task_utilities.task_on_complete(task_instance)
     else:
@@ -1474,18 +1502,35 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
         if country_ids and len(country_ids) > 0:
             new_published_records = new_published_records.filter(country_id__in=country_ids)
 
-        task_instance.info('Total published records to update: {}'.format(new_published_records.count()))
+        new_published_record_ids = list(new_published_records.values_list('id', flat=True))
+        task_instance.info('Total published records to update: {}'.format(len(new_published_record_ids)))
 
-        for data_chunk in core_utilities.queryset_iterator(new_published_records, chunk_size=2000, print_msg=False):
+        entity_field_names = {f.name for f in Entity._meta.fields}
+        lookup_fields = {
+            'giga_id', 'country', 'entity_type',
+            'country_id', 'entity_type_id', 'id',
+            'admin1', 'admin2', 'admin1_id', 'admin2_id',
+            'geopoint', 'external_id', 'name'
+        }
+        if detail_model:
+            detail_entity_field_names = {f.name for f in detail_model._meta.fields}
+            detail_lookup_fields = {'entity', 'entity_id', 'id', 'deleted'}
+
+        for i in range(0, len(new_published_record_ids), 2000):
+            chunk_ids = new_published_record_ids[i:i+2000]
+            data_chunk = list(master_model.objects.filter(id__in=chunk_ids))
+            if not data_chunk:
+                continue
+
             # Pre-fetch Admin1 and Admin2 metadata to prevent N+1 queries
             admin1_giga_ids = [row.admin1_id_giga for row in data_chunk if not core_utilities.is_blank_string(row.admin1_id_giga)]
             admin2_giga_ids = [row.admin2_id_giga for row in data_chunk if not core_utilities.is_blank_string(row.admin2_id_giga)]
-            country_ids = list(set([row.country_id for row in data_chunk]))
+            chunk_country_ids = list(set([row.country_id for row in data_chunk]))
 
             admin1_map = {}
             if admin1_giga_ids:
                 admin1_qs = CountryAdminMetadata.objects.filter(
-                    country_id__in=country_ids,
+                    country_id__in=chunk_country_ids,
                     giga_id_admin__in=admin1_giga_ids,
                     layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN1,
                 )
@@ -1494,7 +1539,7 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
             admin2_map = {}
             if admin2_giga_ids:
                 admin2_qs = CountryAdminMetadata.objects.filter(
-                    country_id__in=country_ids,
+                    country_id__in=chunk_country_ids,
                     giga_id_admin__in=admin2_giga_ids,
                     layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN2,
                 )
@@ -1519,6 +1564,9 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
             for row in data_chunk:
                 latest_row_by_giga[row.health_id_giga] = row
 
+            row_field_names = {f.name for f in data_chunk[0]._meta.fields}
+            common_entity_fields = (entity_field_names & row_field_names) - lookup_fields
+
             for giga_id, row in latest_row_by_giga.items():
                 try:
                     admin1_instance = None
@@ -1529,21 +1577,9 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
                     if not core_utilities.is_blank_string(row.admin2_id_giga):
                         admin2_instance = admin2_map.get((row.country_id, row.admin2_id_giga))
 
-                    row_data = {
-                        f.name: getattr(row, f.name)
-                        for f in row._meta.fields
-                    }
-                    entity_field_names = {f.name for f in Entity._meta.fields}
-                    # Exclude lookup fields and their FK IDs from defaults to avoid conflicts
-                    lookup_fields = {
-                        'giga_id', 'country', 'entity_type',
-                        'country_id', 'entity_type_id', 'id',
-                        'admin1', 'admin2', 'admin1_id', 'admin2_id',
-                        'geopoint', 'external_id', 'name'
-                    }
                     entity_defaults = {
-                        k: v for k, v in row_data.items()
-                        if k in entity_field_names and k not in lookup_fields
+                        name: getattr(row, name)
+                        for name in common_entity_fields
                     }
                     entity_defaults['geopoint'] = Point(row.longitude, row.latitude)
                     entity_defaults['admin1'] = admin1_instance
@@ -1619,6 +1655,7 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
 
                 details_to_create = []
                 details_to_update = []
+                common_detail_fields = (detail_entity_field_names & row_field_names) - detail_lookup_fields
 
                 for giga_id, row in latest_row_by_giga.items():
                     entity = local_entities.get(giga_id)
@@ -1626,15 +1663,9 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
                         continue
 
                     try:
-                        row_data = {
-                            f.name: getattr(row, f.name)
-                            for f in row._meta.fields
-                        }
-                        detail_entity_field_names = {f.name for f in detail_model._meta.fields}
-                        detail_lookup_fields = {'entity', 'entity_id', 'id', 'deleted'}
                         detail_entity_defaults = {
-                            k: v for k, v in row_data.items()
-                            if k in detail_entity_field_names and k not in detail_lookup_fields
+                            name: getattr(row, name)
+                            for name in common_detail_fields
                         }
 
                         if entity.id in existing_details:
@@ -2192,14 +2223,56 @@ def run_entity_ping_aggregation(entity_type_code, start_date, end_date, task_ins
             aggregate_entity_daily_status_to_entity_weekly_status(country_obj, end_date, entity_type_code)
 
             # Auto-register entities for realtime data
-            for giga_id, entity_obj in entity_map.items():
-                statistics_models.EntityRealTimeRegistration.objects.update_or_create(
-                    entity=entity_obj,
-                    defaults={
-                        'rt_registered': True,
-                        'rt_source': statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE,
-                        'rt_registration_date': start_date, # Approximation
-                    }
+            from django.utils import timezone
+            existing_regs = {
+                reg.entity_id: reg
+                for reg in statistics_models.EntityRealTimeRegistration.objects.all_records().filter(
+                    entity__in=entity_map.values()
+                )
+            }
+
+            to_create = []
+            to_update = []
+            for entity_obj in entity_map.values():
+                reg = existing_regs.get(entity_obj.id)
+                if reg:
+                    updated = False
+                    if not reg.rt_registered:
+                        reg.rt_registered = True
+                        updated = True
+                    if reg.rt_source != statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE:
+                        reg.rt_source = statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE
+                        updated = True
+                    if not reg.rt_registration_date or reg.rt_registration_date.date() != start_date:
+                        if reg.rt_registration_date and timezone.is_aware(reg.rt_registration_date):
+                            start_datetime = timezone.make_aware(datetime.combine(start_date, datetime.min.time()))
+                        else:
+                            start_datetime = datetime.combine(start_date, datetime.min.time())
+                        reg.rt_registration_date = start_datetime
+                        updated = True
+
+                    if updated:
+                        to_update.append(reg)
+                else:
+                    if settings.USE_TZ:
+                        start_datetime = timezone.make_aware(datetime.combine(start_date, datetime.min.time()))
+                    else:
+                        start_datetime = datetime.combine(start_date, datetime.min.time())
+
+                    to_create.append(statistics_models.EntityRealTimeRegistration(
+                        entity=entity_obj,
+                        rt_registered=True,
+                        rt_source=statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE,
+                        rt_registration_date=start_datetime
+                    ))
+
+            if to_create:
+                statistics_models.EntityRealTimeRegistration.objects.bulk_create(to_create, batch_size=5000)
+            if to_update:
+                statistics_models.EntityRealTimeRegistration.objects.bulk_update(
+                    to_update,
+                    ['rt_registered', 'rt_source', 'rt_registration_date'],
+                    batch_size=5000
                 )
 
         except EntityAggregationOngoingException:

@@ -20,10 +20,11 @@ def update_entity_last_weekly_status(instance, created=False, **kwargs):
 def update_entity_last_master_status_id(instance, created=False, **kwargs):
     if created:
         entity = instance.entity
-        entity_last_status_id = entity.last_master_status_id
-        if not entity_last_status_id:
-            entity.last_master_status_id = instance.id
-            entity.save()
-        elif entity_last_status_id < instance.id:
-            entity.last_master_status_id = instance.id
-            entity.save()
+        if entity:
+            entity_last_status_id = entity.last_master_status_id
+            if not entity_last_status_id:
+                entity.last_master_status_id = instance.id
+                entity.save()
+            elif entity_last_status_id < instance.id:
+                entity.last_master_status_id = instance.id
+                entity.save()
