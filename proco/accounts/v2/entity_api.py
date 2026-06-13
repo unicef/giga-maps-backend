@@ -366,7 +366,7 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
                 if len(values) > 0:
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
-                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        sql_statement = str(' AND '.join(values)).replace('SQL:', '').format(**kwargs)
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
                     label_cases.append("ELSE '{label}'".format(label=title))
@@ -562,7 +562,7 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
             if len(values) > 0:
                 is_sql_value = 'SQL:' in values[0]
                 if is_sql_value:
-                    sql_statement = str(','.join(values)).replace('SQL:', '').format(
+                    sql_statement = str(' AND '.join(values)).replace('SQL:', '').format(
                         table_name=kwargs['table_name'],
                         col_name=kwargs['col_name'],
                     )
@@ -824,7 +824,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 if len(values) > 0:
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
-                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        sql_statement = str(' AND '.join(values)).replace('SQL:', '').format(**kwargs)
                         label_cases.append(
                             'COUNT(DISTINCT CASE WHEN {sql} THEN eds.entity_id ELSE NULL END) AS "{label}",'.format(
                                 sql=sql_statement, label=label))
@@ -983,7 +983,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 if len(values) > 0:
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
-                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        sql_statement = str(' AND '.join(values)).replace('SQL:', '').format(**kwargs)
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
                     label_cases.append("ELSE '{label}'".format(label=title))
@@ -1294,7 +1294,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             if len(values) > 0:
                 is_sql_value = 'SQL:' in values[0]
                 if is_sql_value:
-                    sql_statement = str(','.join(values)).replace('SQL:', '').format(
+                    sql_statement = str(' AND '.join(values)).replace('SQL:', '').format(
                         table_name=kwargs['table_name'],
                         col_name=kwargs['col_name'],
                     )
@@ -1425,7 +1425,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             if len(values) > 0:
                 is_sql_value = 'SQL:' in values[0]
                 if is_sql_value:
-                    sql_statement = str(','.join(values)).replace('SQL:', '').format(
+                    sql_statement = str(' AND '.join(values)).replace('SQL:', '').format(
                         table_name=kwargs['table_name'],
                         col_name=kwargs['col_name'],
                     )
@@ -1669,13 +1669,30 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 elif len(self.kwargs.get('country_ids', [])) > 0:
                     is_data_synced_qs = is_data_synced_qs.filter(school__country_id__in=self.kwargs['country_ids'])
 
-                query_result = db_utilities.sql_to_response(
-                    DataLayerInfoViewSet.get_info_query(self),
-                    label=self.__class__.__name__,
-                    db_var=settings.READ_ONLY_DB_KEY)
+                try:
+                    query_result = db_utilities.sql_to_response(
+                        DataLayerInfoViewSet.get_info_query(self),
+                        label=self.__class__.__name__,
+                        db_var=settings.READ_ONLY_DB_KEY)
+                except Exception as sql_exc:
+                    return {
+                        'error': (
+                            f'Failed to fetch live data for {entity_code} layer '
+                            f'(layer_id={layer_id}, column="{parameter_column_name}", '
+                            f'entity="{data_layer_instance.entity_name}", path=legacy). '
+                            f'DB error: {sql_exc}'
+                        )
+                    }
                 if not query_result:
                     return {
-                        'error': f'Failed to fetch data for {entity_code} layer. The configured column may not exist.'
+                        'error': (
+                            f'Failed to fetch live data for {entity_code} layer '
+                            f'(layer_id={layer_id}, column="{parameter_column_name}", '
+                            f'entity="{data_layer_instance.entity_name}", path=legacy). '
+                            f'The query returned no results. Check that column '
+                            f'"{parameter_column_name}" exists in the SchoolDailyStatus table '
+                            f'and that there is data for the given date range and country.'
+                        )
                     }
                 query_response = query_result[-1]
 
@@ -1755,12 +1772,29 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     is_data_synced_qs = is_data_synced_qs.filter(entity__country_id__in=self.kwargs['country_ids'])
 
                 query_labels = []
-                query_result = db_utilities.sql_to_response(self.get_info_query(query_labels),
-                                                            label=self.__class__.__name__,
-                                                            db_var=settings.READ_ONLY_DB_KEY)
+                try:
+                    query_result = db_utilities.sql_to_response(self.get_info_query(query_labels),
+                                                                label=self.__class__.__name__,
+                                                                db_var=settings.READ_ONLY_DB_KEY)
+                except Exception as sql_exc:
+                    return {
+                        'error': (
+                            f'Failed to fetch live data for {entity_code} layer '
+                            f'(layer_id={layer_id}, column="{parameter_column_name}", '
+                            f'entity="{data_layer_instance.entity_name}"). '
+                            f'DB error: {sql_exc}'
+                        )
+                    }
                 if not query_result:
                     return {
-                        'error': f'Failed to fetch data for {entity_code} layer. The configured column may not exist.'
+                        'error': (
+                            f'Failed to fetch live data for {entity_code} layer '
+                            f'(layer_id={layer_id}, column="{parameter_column_name}", '
+                            f'entity="{data_layer_instance.entity_name}"). '
+                            f'The query returned no results. Check that column '
+                            f'"{parameter_column_name}" exists in EntityDailyStatus '
+                            f'and that there is data for the given date range and country.'
+                        )
                     }
                 query_response = query_result[-1]
 
@@ -1839,13 +1873,30 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 from proco.accounts.api import DataLayerInfoViewSet as _SchoolViewSet
 
                 query_labels = []
-                query_result = db_utilities.sql_to_response(
-                    _SchoolViewSet.get_static_info_query(self, query_labels),
-                    label=self.__class__.__name__,
-                    db_var=settings.READ_ONLY_DB_KEY)
+                try:
+                    query_result = db_utilities.sql_to_response(
+                        _SchoolViewSet.get_static_info_query(self, query_labels),
+                        label=self.__class__.__name__,
+                        db_var=settings.READ_ONLY_DB_KEY)
+                except Exception as sql_exc:
+                    return {
+                        'error': (
+                            f'Failed to fetch static data for {entity_code} layer '
+                            f'(layer_id={layer_id}, column="{parameter_column_name}", '
+                            f'entity="{data_layer_instance.entity_name}", path=legacy). '
+                            f'DB error: {sql_exc}'
+                        )
+                    }
                 if not query_result:
                     return {
-                        'error': f'Failed to fetch static data for {entity_code} layer. The configured column may not exist.'
+                        'error': (
+                            f'Failed to fetch static data for {entity_code} layer '
+                            f'(layer_id={layer_id}, column="{parameter_column_name}", '
+                            f'entity="{data_layer_instance.entity_name}", path=legacy). '
+                            f'The query returned no results. Check that column '
+                            f'"{parameter_column_name}" exists in SchoolWeeklyStatus '
+                            f'and that there is data for the given country.'
+                        )
                     }
                 query_response = query_result[-1]
                 response_data = {
@@ -1883,12 +1934,29 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 response_data = sorted_info_panel_entity_list
             else:
                 query_labels = []
-                query_result = db_utilities.sql_to_response(self.get_static_info_query(query_labels),
-                                                            label=self.__class__.__name__,
-                                                            db_var=settings.READ_ONLY_DB_KEY)
+                try:
+                    query_result = db_utilities.sql_to_response(self.get_static_info_query(query_labels),
+                                                                label=self.__class__.__name__,
+                                                                db_var=settings.READ_ONLY_DB_KEY)
+                except Exception as sql_exc:
+                    return {
+                        'error': (
+                            f'Failed to fetch static data for {entity_code} layer '
+                            f'(layer_id={layer_id}, column="{parameter_column_name}", '
+                            f'entity="{data_layer_instance.entity_name}"). '
+                            f'DB error: {sql_exc}'
+                        )
+                    }
                 if not query_result:
                     return {
-                        'error': f'Failed to fetch static data for {entity_code} layer. The configured column may not exist.'
+                        'error': (
+                            f'Failed to fetch static data for {entity_code} layer '
+                            f'(layer_id={layer_id}, column="{parameter_column_name}", '
+                            f'entity="{data_layer_instance.entity_name}"). '
+                            f'The query returned no results. Check that column '
+                            f'"{parameter_column_name}" exists in EntityWeeklyStatus '
+                            f'and that there is data for the given country.'
+                        )
                     }
                 query_response = query_result[-1]
                 response_data = {
@@ -2127,7 +2195,7 @@ class EntityDataLayerPreviewViewSet(APIView):
                 if len(values) > 0:
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
-                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        sql_statement = str(' AND '.join(values)).replace('SQL:', '').format(**kwargs)
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
                     label_cases.append("ELSE '{label}'".format(label=title))
@@ -2199,7 +2267,7 @@ class EntityDataLayerPreviewViewSet(APIView):
             if len(values) > 0:
                 is_sql_value = 'SQL:' in values[0]
                 if is_sql_value:
-                    sql_statement = str(','.join(values)).replace('SQL:', '').format(
+                    sql_statement = str(' AND '.join(values)).replace('SQL:', '').format(
                         table_name=kwargs['table_name'],
                         col_name=kwargs['col_name'],
                     )

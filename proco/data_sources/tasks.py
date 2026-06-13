@@ -1476,7 +1476,7 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
 
         task_instance.info('Total published records to update: {}'.format(new_published_records.count()))
 
-        for data_chunk in core_utilities.queryset_iterator(new_published_records, chunk_size=100, print_msg=False):
+        for data_chunk in core_utilities.queryset_iterator(new_published_records, chunk_size=2000, print_msg=False):
             # Pre-fetch Admin1 and Admin2 metadata to prevent N+1 queries
             admin1_giga_ids = [row.admin1_id_giga for row in data_chunk if not core_utilities.is_blank_string(row.admin1_id_giga)]
             admin2_giga_ids = [row.admin2_id_giga for row in data_chunk if not core_utilities.is_blank_string(row.admin2_id_giga)]
@@ -1500,8 +1500,26 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
                 )
                 admin2_map = {(a.country_id, a.giga_id_admin): a for a in admin2_qs}
 
-            rows_to_update = []
+            # Batch fetch existing Entity records to avoid N+1 SELECT queries
+            health_giga_ids = [row.health_id_giga for row in data_chunk]
+            existing_entities = {
+                e.giga_id: e for e in Entity.objects.filter(
+                    giga_id__in=health_giga_ids,
+                    entity_type=entity_type,
+                    deleted__isnull=True
+                )
+            }
+
+            local_entities = {}
+            entities_to_create = []
+            entities_to_update = []
+
+            # Find latest row per unique health_id_giga within the chunk
+            latest_row_by_giga = {}
             for row in data_chunk:
+                latest_row_by_giga[row.health_id_giga] = row
+
+            for giga_id, row in latest_row_by_giga.items():
                 try:
                     admin1_instance = None
                     if not core_utilities.is_blank_string(row.admin1_id_giga):
@@ -1544,46 +1562,117 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
                     else:
                         entity_defaults['connectivity_status'] = 'unknown'
 
-                    entity, created = Entity.objects.update_or_create(
-                        giga_id=row.health_id_giga,
-                        country=row.country,
-                        entity_type=entity_type,
-                        deleted__isnull=True,  # Match the unique constraint condition
-                        defaults=entity_defaults
-                    )
-
-                    # To update HealthEntity
-                    detail_entity_field_names = {f.name for f in detail_model._meta.fields}
-                    # Exclude lookup fields from defaults
-                    detail_lookup_fields = {'entity', 'entity_id', 'id', 'deleted'}
-                    detail_entity_defaults = {
-                        k: v for k, v in row_data.items()
-                        if k in detail_entity_field_names and k not in detail_lookup_fields
-                    }
-
-                    if detail_model:
-                        detail_model.objects.update_or_create(
-                            entity=entity,
-                            deleted__isnull=True,  # Match the unique constraint condition
-                            defaults=detail_entity_defaults,
+                    if giga_id in existing_entities:
+                        entity = existing_entities[giga_id]
+                        for k, v in entity_defaults.items():
+                            setattr(entity, k, v)
+                        entity.name_lower = str(entity.name).lower()
+                        if entity.external_id:
+                            entity.external_id = str(entity.external_id).lower()
+                        entities_to_update.append(entity)
+                    else:
+                        entity = Entity(
+                            giga_id=giga_id,
+                            country_id=row.country_id,
+                            entity_type=entity_type,
                         )
+                        for k, v in entity_defaults.items():
+                            setattr(entity, k, v)
+                        entity.name_lower = str(entity.name).lower()
+                        if entity.external_id:
+                            entity.external_id = str(entity.external_id).lower()
+                        entities_to_create.append(entity)
 
-                    # date = core_utilities.get_current_datetime_object().date()
+                    local_entities[giga_id] = entity
+                except Exception as ex:
+                    logger.debug('Error building Entity record: {0}'.format(ex))
+                    task_instance.info('Error building Entity record for ID ({0}) on publishing: {1}'.format(row.id, ex))
 
+            # Perform Entity bulk creation
+            if entities_to_create:
+                Entity.objects.bulk_create(entities_to_create)
+                # Populate IDs back into local_entities map
+                for entity in entities_to_create:
+                    local_entities[entity.giga_id] = entity
+
+            # Perform Entity bulk update
+            if entities_to_update:
+                entity_fields_to_update = [
+                    'geopoint', 'admin1', 'admin2', 'external_id', 'name', 'name_lower', 'connectivity_status'
+                ]
+                # Also include dynamic fields
+                dummy_row = data_chunk[0]
+                for f in dummy_row._meta.fields:
+                    if f.name in entity_field_names and f.name not in lookup_fields:
+                        entity_fields_to_update.append(f.name)
+                entity_fields_to_update = list(set(entity_fields_to_update))
+                Entity.objects.bulk_update(entities_to_update, fields=entity_fields_to_update)
+
+            # Process detail models (e.g. HealthEntity) in bulk
+            if detail_model:
+                existing_details = {
+                    d.entity_id: d for d in detail_model.objects.filter(
+                        entity_id__in=[e.id for e in local_entities.values() if e.id],
+                        deleted__isnull=True
+                    )
+                }
+
+                details_to_create = []
+                details_to_update = []
+
+                for giga_id, row in latest_row_by_giga.items():
+                    entity = local_entities.get(giga_id)
+                    if not entity or not entity.id:
+                        continue
+
+                    try:
+                        row_data = {
+                            f.name: getattr(row, f.name)
+                            for f in row._meta.fields
+                        }
+                        detail_entity_field_names = {f.name for f in detail_model._meta.fields}
+                        detail_lookup_fields = {'entity', 'entity_id', 'id', 'deleted'}
+                        detail_entity_defaults = {
+                            k: v for k, v in row_data.items()
+                            if k in detail_entity_field_names and k not in detail_lookup_fields
+                        }
+
+                        if entity.id in existing_details:
+                            detail = existing_details[entity.id]
+                            for k, v in detail_entity_defaults.items():
+                                setattr(detail, k, v)
+                            details_to_update.append(detail)
+                        else:
+                            detail = detail_model(entity=entity)
+                            for k, v in detail_entity_defaults.items():
+                                setattr(detail, k, v)
+                            details_to_create.append(detail)
+                    except Exception as ex:
+                        logger.debug('Error building detail model record: {0}'.format(ex))
+                        task_instance.info('Error building detail record for ID ({0}) on publishing: {1}'.format(row.id, ex))
+
+                if details_to_create:
+                    detail_model.objects.bulk_create(details_to_create)
+
+                if details_to_update:
+                    detail_fields_to_update = [
+                        f.name for f in detail_model._meta.fields
+                        if f.name not in detail_lookup_fields
+                    ]
+                    detail_model.objects.bulk_update(details_to_update, fields=detail_fields_to_update)
+
+            # Link master rows to their updated Entity
+            rows_to_update = []
+            for row in data_chunk:
+                entity = local_entities.get(row.health_id_giga)
+                if entity and entity.id:
                     row.is_read = True
                     row.entity = entity
                     rows_to_update.append(row)
 
-                    # updated_entity_ids.append(entity.id)
-                    # if created:
-                    #     created_entity_ids.append(entity.id)
-                except Exception as ex:
-                    logger.debug('Error reported on publishing: {0}'.format(ex))
-                    logger.debug('Record: {0}'.format(row.__dict__))
-                    task_instance.info('Error reported for ID ({0}) on publishing: {1}'.format(row.id, ex))
-
             if rows_to_update:
                 master_model.objects.bulk_update(rows_to_update, fields=['is_read', 'entity'])
+
 
         # Need to update the below tasks once ready
         # if len(updated_entity_ids) > 0:
