@@ -26,7 +26,8 @@ from proco.utils import dates as date_utilities
 from proco.connection_statistics.config import app_config as statistics_configs
 from proco.connection_statistics.models import SchoolWeeklyStatus, SchoolDailyStatus, EntityDailyStatus
 from proco.connection_statistics.utils import get_benchmark_value_for_default_download_layer
-from proco.entities.constants import LEGACY_MODEL, ALL_ENTITIES
+from proco.entities.constants import LEGACY_MODEL
+from proco.entities.mixins import EntityTypeCodeMixin
 from proco.locations.api import BaseSearchMixin
 from proco.locations.search_indexes import UnifiedEntityIndex
 from proco.utils.cache import cache_manager, custom_cache_control
@@ -369,7 +370,7 @@ class EntityTypeListAPIView(APIView):
         return Response(response_data, status=200)
 
 
-class AggregateSearchEntityViewSet(BaseSearchMixin, ListAPIView):
+class AggregateSearchEntityViewSet(EntityTypeCodeMixin, BaseSearchMixin, ListAPIView):
     """
     AggregateSearchViewSet
         Endpoint to use the Cognitive search index.
@@ -401,12 +402,15 @@ class AggregateSearchEntityViewSet(BaseSearchMixin, ListAPIView):
     }
 
     def normalize_entity_type_filter(self, request):
-        entity_type = request.query_params.get('entity_type__code')
-        if not entity_type or entity_type == ALL_ENTITIES:
+        entity_types = self.get_entity_type_code_params(request=request)
+        if not entity_types:
             return
 
         mutable_querydict = request.query_params.copy()
-        mutable_querydict['entity_type_code__exact'] = entity_type
+        if len(entity_types) == 1:
+            mutable_querydict['entity_type_code__exact'] = entity_types[0]
+        else:
+            mutable_querydict['entity_type_code__in'] = ','.join(entity_types)
         mutable_querydict.pop('entity_type__code', None)
         request._request.GET = mutable_querydict
 

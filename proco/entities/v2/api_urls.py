@@ -19,6 +19,9 @@ urlpatterns = [
     # Cognitive Search Index based searching for Entities
     path('gentity-search/', entities_api.AggregateSearchEntityViewSet.as_view(), name='global-search-filter'),
 
+    # Entity Global Stat
+    path('global-stat/', stats_entity_api.EntityGlobalStatsAPIView.as_view(), name='global-stat-all-entities'),
+
     # Entity tiles
     path('tiles/connectivity_status/',
          entities_api.EntityConnectivityStatusTileRequestHandler.as_view(),
@@ -82,8 +85,7 @@ urlpatterns = [
     path('countries/', locations_entity_api.EntityCountryViewSet.as_view({'get': 'list'})),
     path('countries/<str:pk>/', locations_entity_api.EntityCountryViewSet.as_view({'get': 'retrieve'})),
 
-    # Entity Global Stat
-    path('global-stat/', stats_entity_api.EntityGlobalStatsAPIView.as_view(), name='global-stat-all-entities'),
+
     path('connectivity-stat/', stats_entity_api.EntityConnectivityAPIView.as_view(),
          name='global-connectivity-stat-entities'),
 

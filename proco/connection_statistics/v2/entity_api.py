@@ -25,6 +25,7 @@ from proco.connection_statistics.models import SchoolWeeklyStatus, EntityWeeklyS
 from proco.connection_statistics.utils import get_benchmark_value_for_default_download_layer
 from proco.core import utils as core_utilities
 from proco.entities.constants import LEGACY_MODEL, LEGACY_MODEL_NAME
+from proco.entities.mixins import EntityDetailFilterMixin, EntityTypeCodeMixin
 from proco.entities.models import EntityType, Entity
 from proco.schools.models import School
 from proco.utils import dates as date_utilities
@@ -32,7 +33,7 @@ from proco.utils.cache import cache_manager
 
 
 @method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
-class EntityGlobalStatsAPIView(APIView):
+class EntityGlobalStatsAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, APIView):
     permission_classes = (AllowAny,)
 
     model = LEGACY_MODEL_NAME
@@ -128,7 +129,7 @@ class EntityGlobalStatsAPIView(APIView):
             'no_of_countries': school_connectivity_status['all_countries'],
             'countries_with_connectivity_status_mapped': school_connectivity_status[
                 'countries_with_connectivity_status_mapped'],
-            'entities_connected': school_connectivity_status['total_schools'],
+            'entities_total': school_connectivity_status['total_schools'],
             'entities_with_connectivity_status_mapped': school_connectivity_status[
                 'schools_with_connectivity_status_mapped'],
             'connectivity_global_benchmark': {
@@ -201,6 +202,8 @@ class EntityGlobalStatsAPIView(APIView):
         if len(entity_filters) > 0:
             stats_qs = stats_qs.extra(where=[entity_filters])
 
+        stats_qs = self.apply_entity_detail_filters(stats_qs, entity_type_obj)
+
         entity_static_filters = core_utilities.get_filter_sql(self.request, 'entity_static',
                                                               'connection_statistics_entityweeklystatus')
 
@@ -238,12 +241,18 @@ class EntityGlobalStatsAPIView(APIView):
 
     def calculate_global_statistic(self):
         response = {}
+        requested_entity_type_codes = self.get_entity_type_code_params()
 
-        # ✅ School → OLD code
-        response[LEGACY_MODEL] = self.calculate_school_global_statistic()
+        if requested_entity_type_codes is None or LEGACY_MODEL in requested_entity_type_codes:
+            response[LEGACY_MODEL] = self.calculate_school_global_statistic()
 
-        # ✅ Other entities → NEW code
         entity_types = EntityType.get_all_active().exclude(is_legacy=True)
+        if requested_entity_type_codes is not None:
+            entity_types = entity_types.filter(code__in=[
+                entity_type_code
+                for entity_type_code in requested_entity_type_codes
+                if entity_type_code != LEGACY_MODEL
+            ])
 
         for entity_type in entity_types:
             response[entity_type.code] = self.calculate_entity_global_statistic(
@@ -254,7 +263,7 @@ class EntityGlobalStatsAPIView(APIView):
 
 
 @method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
-class EntityConnectivityAPIView(APIView):
+class EntityConnectivityAPIView(EntityTypeCodeMixin, APIView):
     permission_classes = (AllowAny,)
 
     CACHE_KEY = 'cache'
@@ -270,7 +279,7 @@ class EntityConnectivityAPIView(APIView):
                                 '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))), )
 
     def get(self, request, *args, **kwargs):
-        entity_type = request.query_params.get("entity_type__code")
+        entity_type = self.get_entity_type_code_param(request=request)
 
         if entity_type == LEGACY_MODEL:
             self.queryset = School.objects.all()
@@ -760,7 +769,7 @@ class EntityConnectivityAPIView(APIView):
 
 
 @method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
-class EntityConnectivityConfigurationsViewSet(APIView):
+class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
     base_auth_permissions = (
         AllowAny,
     )
@@ -1046,14 +1055,14 @@ class EntityConnectivityConfigurationsViewSet(APIView):
 
         return static_data
 
-    @staticmethod
-    def resolve_entity_type(request):
+    @classmethod
+    def resolve_entity_type(cls, request):
         """
         Determine the canonical entity type code from the request.
         Priority: layer_id's entity_type > explicit entity_type__code param > default (school).
         """
         layer_id = request.query_params.get('layer_id')
-        explicit_entity_type = request.query_params.get('entity_type__code')
+        explicit_entity_type = cls.parse_entity_type_code_param(request)
 
         if layer_id:
             try:
