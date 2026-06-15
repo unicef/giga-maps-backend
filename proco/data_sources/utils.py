@@ -19,7 +19,7 @@ from rest_framework import status
 
 from proco.accounts.models import APIKey
 from proco.connection_statistics.config import app_config as statistics_configs
-from proco.connection_statistics.models import RealTimeConnectivity, SchoolRealTimeRegistration, EntityRealTimeConnectivity, EntityDailyStatus
+from proco.connection_statistics.models import RealTimeConnectivity, SchoolRealTimeRegistration, EntityRealTimeConnectivity, EntityDailyStatus, EntityRealTimeRegistration
 from proco.core import utils as core_utilities
 from proco.core.config import app_config as core_configs
 from proco.custom_auth.models import ApplicationUser
@@ -1315,6 +1315,9 @@ def sync_entity_qos_realtime_data(country_id, entity_type_code='health', start_d
     ).order_by('created__date')
 
     daily_records = []
+    processed_entity_ids = set()
+    processed_dates = set()
+
     for record in realtime_records:
         daily_records.append(EntityDailyStatus(
             entity_id=record['entity_id'],
@@ -1328,6 +1331,9 @@ def sync_entity_qos_realtime_data(country_id, entity_type_code='health', start_d
             rtt_packet_loss_pct=record.get('rtt_packet_loss_pct_avg'),
             live_data_source=statistics_configs.QOS_SOURCE,
         ))
+        processed_entity_ids.add(record['entity_id'])
+        if record.get('created__date'):
+            processed_dates.add(record['created__date'])
 
         if len(daily_records) == 5000:
             logger.info('Entity QoS - Bulk creating 5000 EntityDailyStatus records.')
@@ -1337,4 +1343,80 @@ def sync_entity_qos_realtime_data(country_id, entity_type_code='health', start_d
     if daily_records:
         logger.info('Entity QoS - Bulk creating remaining %d EntityDailyStatus records.', len(daily_records))
         EntityDailyStatus.objects.bulk_create(daily_records, ignore_conflicts=True)
+
+    if not processed_entity_ids:
+        logger.info('Entity QoS - No entities processed, skipping registration and weekly aggregation.')
+        return
+
+    # --- Auto-register entities in EntityRealTimeRegistration ---
+    from datetime import datetime as dt_class
+    from django.utils import timezone
+
+    min_date = min(processed_dates) if processed_dates else (
+        start_date or current_datetime.date()
+    )
+    max_date = max(processed_dates) if processed_dates else (
+        end_date or current_datetime.date()
+    )
+
+    if settings.USE_TZ:
+        reg_datetime = timezone.make_aware(dt_class.combine(min_date, dt_class.min.time()))
+    else:
+        reg_datetime = dt_class.combine(min_date, dt_class.min.time())
+
+    existing_regs = {
+        reg.entity_id: reg
+        for reg in EntityRealTimeRegistration.objects.all_records().filter(
+            entity_id__in=processed_entity_ids
+        )
+    }
+
+    to_create = []
+    to_update = []
+    for entity_id in processed_entity_ids:
+        reg = existing_regs.get(entity_id)
+        if reg:
+            updated = False
+            if not reg.rt_registered:
+                reg.rt_registered = True
+                updated = True
+            if reg.rt_source != statistics_configs.QOS_SOURCE:
+                reg.rt_source = statistics_configs.QOS_SOURCE
+                updated = True
+            if not reg.rt_registration_date or reg.rt_registration_date > reg_datetime:
+                reg.rt_registration_date = reg_datetime
+                updated = True
+            if updated:
+                to_update.append(reg)
+        else:
+            to_create.append(EntityRealTimeRegistration(
+                entity_id=entity_id,
+                rt_registered=True,
+                rt_source=statistics_configs.QOS_SOURCE,
+                rt_registration_date=reg_datetime,
+            ))
+
+    if to_create:
+        EntityRealTimeRegistration.objects.bulk_create(to_create, batch_size=5000)
+        logger.info('Entity QoS - Created %d EntityRealTimeRegistration records.', len(to_create))
+    if to_update:
+        EntityRealTimeRegistration.objects.bulk_update(
+            to_update,
+            ['rt_registered', 'rt_source', 'rt_registration_date'],
+            batch_size=5000,
+        )
+        logger.info('Entity QoS - Updated %d EntityRealTimeRegistration records.', len(to_update))
+
+    # --- Aggregate daily status to weekly status ---
+    from proco.connection_statistics.utils import aggregate_entity_daily_status_to_entity_weekly_status
+
+    country_obj = Country.objects.get(id=country_id)
+    current_date = min_date
+    while current_date <= max_date:
+        aggregate_entity_daily_status_to_entity_weekly_status(country_obj, current_date, entity_type_code)
+        current_date += timedelta(days=7)
+    # Ensure the final week is covered
+    aggregate_entity_daily_status_to_entity_weekly_status(country_obj, max_date, entity_type_code)
+    logger.info('Entity QoS - Weekly aggregation completed for country %s (%s to %s).',
+                country_id, min_date, max_date)
 

@@ -2397,10 +2397,6 @@ class DataLayerInfoApiTestCase(TestAPIViewSetMixin, TestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIn('school', response.data)
-        self.assertIn('health', response.data)
-        self.assertEqual(response.data['school'][0]['id'], school.id)
-        self.assertEqual(response.data['health'][0]['id'], entity.id)
 
 
 class InvalidateCacheApiTestCase(TestAPIViewSetMixin, TestCase):

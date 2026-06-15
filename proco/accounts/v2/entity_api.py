@@ -126,7 +126,7 @@ class BaseEntityDataLayerAPIViewSet(APIView):
             self.kwargs['entity_real_time_filters'] = ''
 
     @staticmethod
-    def _parse_date(value, param_name):
+    def parse_date(value, param_name):
         """Parse a date string using DATE_FORMAT; raise ValueError on failure."""
         parsed = date_utilities.to_date(value)
         if parsed is None:
@@ -154,13 +154,13 @@ class BaseEntityDataLayerAPIViewSet(APIView):
         query_param_keys = query_params.keys()
 
         if 'start_date' in query_param_keys:
-            self.kwargs['start_date'] = self._parse_date(query_params['start_date'], 'start_date')
+            self.kwargs['start_date'] = self.parse_date(query_params['start_date'], 'start_date')
         elif layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
             date = core_utilities.get_current_datetime_object() - timedelta(days=7)
             self.kwargs['start_date'] = (date - timedelta(days=date.weekday())).date()
 
         if 'end_date' in query_param_keys:
-            self.kwargs['end_date'] = self._parse_date(query_params['end_date'], 'end_date')
+            self.kwargs['end_date'] = self.parse_date(query_params['end_date'], 'end_date')
         elif layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
             date = core_utilities.get_current_datetime_object() - timedelta(days=7)
             self.kwargs['end_date'] = ((date - timedelta(days=date.weekday())) + timedelta(days=6)).date()
@@ -672,7 +672,7 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
             live_data_sources = ['UNKNOWN']
 
             for d in data_sources:
-                source_type = d.data_source.data_source_type
+                source_type = (d.data_source.data_source_type or '').upper()
                 if source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_QOS:
                     live_data_sources.append(statistics_configs.QOS_SOURCE)
                 elif source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP:
@@ -1148,7 +1148,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
         return query.format(**kwargs)
 
-    def _generate_school_graph_data(self, school_viewset_cls):
+    def generate_school_graph_data(self, school_viewset_cls):
         """
         Generate graph data using the legacy school daily status tables.
         Delegates avg query generation to school_viewset_cls.get_avg_query.
@@ -1494,27 +1494,33 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         Returns dict: {entity_code: {param_name: value, ...}}
         """
         entity_params = {}
+        print("DEBUG EXTRACT: query_params =", dict(request.query_params))
         for param_name, param_value in request.query_params.items():
+            print(f"DEBUG EXTRACT: Iterating key={param_name} val={param_value}")
             if param_value:
                 for suffix in cls.ENTITY_PARAM_SUFFIXES:
                     entity_suffix = f'_{suffix}'
-                    if param_name.endswith(entity_suffix):
+                    ends = param_name.endswith(entity_suffix)
+                    # print(f"  checking suffix {entity_suffix}: ends={ends}")
+                    if ends:
                         entity_code = param_name[:-len(entity_suffix)]
+                        print(f"DEBUG EXTRACT: Matched param_name={param_name} to entity_code={entity_code}, suffix={suffix}")
                         if entity_code not in entity_params:
                             entity_params[entity_code] = {}
                         entity_params[entity_code][suffix] = param_value
                         break
 
+        print("DEBUG EXTRACT: result entity_params =", entity_params)
         return entity_params
 
     @staticmethod
-    def _set_query_param(query_params, key, value):
+    def set_query_param(query_params, key, value):
         if value in (None, ''):
             query_params.pop(key, None)
             return
         query_params[key] = value
 
-    def _build_scoped_query_params(self, request, entity_code, params, is_legacy):
+    def build_scoped_query_params(self, request, entity_code, params, is_legacy):
         query_params = request.query_params.copy()
 
         for key in self.ENTITY_PARAM_SUFFIXES:
@@ -1532,9 +1538,9 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 or request.query_params.get(f'{entity_code}_entity_id__in')
                 or request.query_params.get('school_id__in')
             )
-            self._set_query_param(query_params, 'school_id', scoped_single)
-            self._set_query_param(query_params, 'school_id__in', scoped_multi)
-            self._set_query_param(
+            self.set_query_param(query_params, 'school_id', scoped_single)
+            self.set_query_param(query_params, 'school_id__in', scoped_multi)
+            self.set_query_param(
                 query_params,
                 'include_same_location_schools',
                 query_params.get('include_same_location'),
@@ -1548,16 +1554,16 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 request.query_params.get(f'{entity_code}_entity_id__in')
                 or request.query_params.get('entity_id__in')
             )
-            self._set_query_param(query_params, 'entity_id', scoped_single)
-            self._set_query_param(query_params, 'entity_id__in', scoped_multi)
+            self.set_query_param(query_params, 'entity_id', scoped_single)
+            self.set_query_param(query_params, 'entity_id__in', scoped_multi)
 
         return query_params
 
     @staticmethod
-    def _get_selected_ids(kwargs, is_legacy):
+    def get_selected_ids(kwargs, is_legacy):
         return kwargs.get('school_ids', []) if is_legacy else kwargs.get('entity_ids', [])
 
-    def _build_benchmark_metadata(
+    def build_benchmark_metadata(
         self,
         benchmark_value,
         benchmark_unit,
@@ -1587,7 +1593,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         }
 
     @staticmethod
-    def _resolve_connectivity_bucket(live_avg, rounded_benchmark_value, rounded_base_benchmark, is_reverse):
+    def resolve_connectivity_bucket(live_avg, rounded_benchmark_value, rounded_base_benchmark, is_reverse):
         if is_reverse:
             if live_avg < rounded_benchmark_value:
                 return 'good'
@@ -1606,7 +1612,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         return 'unknown'
 
     @staticmethod
-    def _sort_info_panel_rows(selected_ids, info_panel_rows, statistics, statistics_key):
+    def sort_info_panel_rows(selected_ids, info_panel_rows, statistics, statistics_key):
         rows_by_id = {str(row['id']): row for row in info_panel_rows}
         statistics_by_id = {str(item[statistics_key]): item for item in statistics}
         sorted_rows = []
@@ -1621,7 +1627,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
         return sorted_rows
 
-    def _generate_school_detail_graph_data(self, school_viewset_cls):
+    def generate_school_detail_graph_data(self, school_viewset_cls):
         kwargs = copy.deepcopy(self.kwargs)
         data = db_utilities.sql_to_response(
             school_viewset_cls.get_avg_query(self, **kwargs),
@@ -1666,7 +1672,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
         return graph_data_per_school, all_positive_speeds_per_school
 
-    def _build_school_detail_response(
+    def build_school_detail_response(
         self,
         request,
         school_viewset_cls,
@@ -1691,7 +1697,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 school_viewset_cls.get_school_view_info_query(self),
                 label=self.__class__.__name__,
                 db_var=settings.READ_ONLY_DB_KEY) or []
-            graph_data, positive_speeds = self._generate_school_detail_graph_data(school_viewset_cls)
+            graph_data, positive_speeds = self.generate_school_detail_graph_data(school_viewset_cls)
         else:
             info_panel_rows = db_utilities.sql_to_response(
                 school_viewset_cls.get_static_school_view_info_query(self),
@@ -1699,7 +1705,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 db_var=settings.READ_ONLY_DB_KEY) or []
             graph_data, positive_speeds = {}, {}
 
-        sorted_rows = self._sort_info_panel_rows(selected_ids, info_panel_rows, statistics, 'school_id')
+        import sys; sys.stderr.write(f"INFO_PANEL_ROWS: {info_panel_rows}\nKWARGS: {self.kwargs}\n")
+        sorted_rows = self.sort_info_panel_rows(selected_ids, info_panel_rows, statistics, 'school_id')
 
         include_same_location = scoped_query_params.get('include_same_location_schools') == 'true'
         for school_row in sorted_rows:
@@ -1711,7 +1718,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 )
                 school_row['graph_data'] = graph_data.get(str(school_row['id']), [])
 
-            school_row['benchmark_metadata'] = self._build_benchmark_metadata(
+            school_row['benchmark_metadata'] = self.build_benchmark_metadata(
                 benchmark_value=benchmark_value,
                 benchmark_unit=benchmark_unit,
                 base_benchmark=base_benchmark,
@@ -1731,7 +1738,320 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
         return sorted_rows
 
-    def _process_entity_layer(self, request, entity_code, params):
+    def compute_unit_conversion(self, parameter_column_unit):
+        unit_agg_str = '{val}'
+        if (
+            self.kwargs.get('convert_unit') and
+            not core_utilities.is_blank_string(parameter_column_unit) and
+            self.kwargs['convert_unit'].lower() != parameter_column_unit
+        ):
+            convert_unit = self.kwargs['convert_unit'].lower()
+            if convert_unit == 'mbps' and parameter_column_unit == 'bps':
+                unit_agg_str = '{val} / (1000 * 1000)'
+            elif convert_unit == 'mbps' and parameter_column_unit == 'kbps':
+                unit_agg_str = '{val} / 1000'
+            elif convert_unit == 'kbps' and parameter_column_unit == 'bps':
+                unit_agg_str = '{val} / 1000'
+            elif convert_unit == 'kbps' and parameter_column_unit == 'mbps':
+                unit_agg_str = '{val} * 1000'
+            elif convert_unit == 'bps' and parameter_column_unit == 'kbps':
+                unit_agg_str = '{val} * 1000'
+            elif convert_unit == 'bps' and parameter_column_unit == 'mbps':
+                unit_agg_str = '{val} * 1000 * 1000'
+        return unit_agg_str
+
+    def build_is_data_synced_qs(self, is_legacy):
+        if is_legacy:
+            is_data_synced_qs = SchoolWeeklyStatus.objects.filter(
+                school__realtime_registration_status__rt_registered=True,
+            )
+            entity_prefix = 'school'
+        else:
+            is_data_synced_qs = EntityWeeklyStatus.objects.filter(
+                entity__realtime_registration_status__rt_registered=True,
+            )
+            entity_prefix = 'entity'
+
+        if len(self.kwargs.get(f'{entity_prefix}_filters', '')) > 0:
+            is_data_synced_qs = is_data_synced_qs.extra(where=[self.kwargs[f'{entity_prefix}_filters']])
+        if len(self.kwargs.get(f'{entity_prefix}_static_filters', '')) > 0:
+            is_data_synced_qs = is_data_synced_qs.extra(where=[self.kwargs[f'{entity_prefix}_static_filters']])
+
+        if len(self.kwargs.get('admin1_ids', [])) > 0:
+            is_data_synced_qs = is_data_synced_qs.filter(**{f"{entity_prefix}__admin1_id__in": self.kwargs['admin1_ids']})
+        elif len(self.kwargs.get('country_ids', [])) > 0:
+            is_data_synced_qs = is_data_synced_qs.filter(**{f"{entity_prefix}__country_id__in": self.kwargs['country_ids']})
+
+        return is_data_synced_qs
+
+    def build_entity_detail_response(
+        self,
+        request,
+        is_live_layer,
+        parameter_col_function,
+        benchmark_value,
+        benchmark_unit,
+        base_benchmark,
+        parameter_column_unit,
+        unit_agg_str,
+        display_unit,
+        scoped_query_params,
+        data_layer_instance,
+    ):
+        selected_ids = self.kwargs.get('entity_ids', [])
+        
+        statistics = db_utilities.sql_to_response(
+            self.get_entity_view_statistics_info_query(data_layer_instance.type),
+            label=self.__class__.__name__,
+            db_var=settings.READ_ONLY_DB_KEY) or []
+            
+        if is_live_layer:
+            info_panel_rows = db_utilities.sql_to_response(
+                self.get_entity_view_info_query(),
+                label=self.__class__.__name__,
+                db_var=settings.READ_ONLY_DB_KEY) or []
+            graph_data, positive_speeds = self.generate_graph_data()
+        else:
+            info_panel_rows = db_utilities.sql_to_response(
+                self.get_static_entity_view_info_query(),
+                label=self.__class__.__name__,
+                db_var=settings.READ_ONLY_DB_KEY) or []
+            graph_data, positive_speeds = {}, {}
+
+        print("INFO_PANEL_ROWS:", info_panel_rows)
+        print("KWARGS:", self.kwargs)
+        sorted_rows = self.sort_info_panel_rows(selected_ids, info_panel_rows, statistics, 'entity_id')
+
+        for entity_row in sorted_rows:
+            if is_live_layer:
+                entity_speeds = positive_speeds.get(str(entity_row['id']), [])
+                entity_row['live_avg'] = round(sum(entity_speeds) / len(entity_speeds), 2) if entity_speeds else 0
+                entity_row['graph_data'] = graph_data.get(str(entity_row['id']), [])
+
+            entity_row['benchmark_metadata'] = self.build_benchmark_metadata(
+                benchmark_value=benchmark_value,
+                benchmark_unit=benchmark_unit,
+                base_benchmark=base_benchmark,
+                parameter_column_unit=parameter_column_unit,
+                round_unit_value=unit_agg_str,
+                display_unit=display_unit,
+                benchmark_value_from_sql=entity_row.get('benchmark_sql_value'),
+            )
+
+        return sorted_rows
+
+    def build_entity_summary_response(
+        self,
+        is_live_layer,
+        parameter_col_function,
+        benchmark_value,
+        benchmark_unit,
+        base_benchmark,
+        parameter_column_unit,
+        unit_agg_str,
+        display_unit,
+        data_layer_instance,
+        entity_code,
+        layer_id,
+        parameter_column_name,
+        legend_configs,
+    ):
+        is_data_synced_qs = self.build_is_data_synced_qs(is_legacy=False)
+        query_labels = []
+
+        try:
+            if is_live_layer:
+                query_result = db_utilities.sql_to_response(
+                    self.get_info_query(query_labels),
+                    label=self.__class__.__name__,
+                    db_var=settings.READ_ONLY_DB_KEY,
+                    raise_exception=True)
+            else:
+                query_result = db_utilities.sql_to_response(
+                    self.get_static_info_query(query_labels),
+                    label=self.__class__.__name__,
+                    db_var=settings.READ_ONLY_DB_KEY,
+                    raise_exception=True)
+        except Exception as sql_exc:
+            return {
+                'error': (
+                    f'Failed to fetch {"live" if is_live_layer else "static"} data for {entity_code} layer '
+                    f'(layer_id={layer_id}, column="{parameter_column_name}", '
+                    f'entity="{data_layer_instance.entity_name}"). '
+                    f'DB error: {sql_exc}'
+                )
+            }
+
+        if not query_result:
+            return {
+                'error': (
+                    f'Failed to fetch {"live" if is_live_layer else "static"} data for {entity_code} layer '
+                    f'(layer_id={layer_id}, column="{parameter_column_name}", '
+                    f'entity="{data_layer_instance.entity_name}"). '
+                    f'The query returned no results.'
+                )
+            }
+
+        query_response = query_result[-1]
+        
+        benchmark_metadata = self.build_benchmark_metadata(
+            benchmark_value=benchmark_value,
+            benchmark_unit=benchmark_unit,
+            base_benchmark=base_benchmark,
+            parameter_column_unit=parameter_column_unit,
+            round_unit_value=unit_agg_str,
+            display_unit=display_unit,
+            benchmark_value_from_sql=query_response.get('benchmark_sql_value'),
+        )
+        
+        if is_live_layer:
+            graph_data, positive_speeds = self.generate_graph_data()
+            live_avg = round(sum(positive_speeds) / len(positive_speeds), 2) if positive_speeds else 0
+            
+            rounded_base_benchmark_int = round(
+                eval(unit_agg_str.format(val=core_utilities.convert_to_int(base_benchmark))), 2)
+            live_avg_connectivity = self.resolve_connectivity_bucket(
+                live_avg,
+                benchmark_metadata['rounded_benchmark_value'],
+                rounded_base_benchmark_int,
+                data_layer_instance.is_reverse,
+            )
+
+            if query_labels:
+                connected_entities = {label: query_response.get(label, 0) for label in query_labels}
+            else:
+                connected_entities = {
+                    'good': query_response.get('good', 0),
+                    'moderate': query_response.get('moderate', 0),
+                    'no_internet': query_response.get('bad', 0),
+                    'unknown': query_response.get('unknown', 0),
+                }
+
+            return {
+                'no_of_entities_measure': query_response.get('no_of_entities_measure', 0),
+                'entity_with_realtime_data': query_response.get('entity_with_realtime_data', 0),
+                'real_time_connected_entities': connected_entities,
+                'is_data_synced': is_data_synced_qs.exists(),
+                'live_avg': live_avg,
+                'live_avg_connectivity': live_avg_connectivity,
+                'graph_data': graph_data,
+                'benchmark_metadata': benchmark_metadata,
+            }
+        else:
+            return {
+                'no_of_entities_measure': query_response.get('total_entities', 0),
+                'real_time_connected_entities': {label: query_response.get(label, 0) for label in query_labels},
+                'legend_configs': legend_configs,
+                'benchmark_metadata': {
+                    'parameter_column_unit': parameter_column_unit,
+                    'display_unit': display_unit,
+                },
+            }
+
+    def build_legacy_summary_response(
+        self,
+        is_live_layer,
+        parameter_col_function,
+        benchmark_value,
+        benchmark_unit,
+        base_benchmark,
+        parameter_column_unit,
+        unit_agg_str,
+        display_unit,
+        data_layer_instance,
+        entity_code,
+        layer_id,
+        parameter_column_name,
+        legend_configs,
+    ):
+        is_data_synced_qs = self.build_is_data_synced_qs(is_legacy=True)
+        query_labels = []
+
+        try:
+            if is_live_layer:
+                query_result = db_utilities.sql_to_response(
+                    DataLayerInfoViewSet.get_info_query(self),
+                    label=self.__class__.__name__,
+                    db_var=settings.READ_ONLY_DB_KEY,
+                    raise_exception=True)
+            else:
+                query_result = db_utilities.sql_to_response(
+                    DataLayerInfoViewSet.get_static_info_query(self, query_labels),
+                    label=self.__class__.__name__,
+                    db_var=settings.READ_ONLY_DB_KEY,
+                    raise_exception=True)
+        except Exception as sql_exc:
+            return {
+                'error': (
+                    f'Failed to fetch {"live" if is_live_layer else "static"} data for {entity_code} layer '
+                    f'(layer_id={layer_id}, column="{parameter_column_name}", '
+                    f'entity="{data_layer_instance.entity_name}", path=legacy). '
+                    f'DB error: {sql_exc}'
+                )
+            }
+
+        if not query_result:
+            return {
+                'error': (
+                    f'Failed to fetch {"live" if is_live_layer else "static"} data for {entity_code} layer '
+                    f'(layer_id={layer_id}, column="{parameter_column_name}", '
+                    f'entity="{data_layer_instance.entity_name}", path=legacy). '
+                    f'The query returned no results.'
+                )
+            }
+
+        query_response = query_result[-1]
+
+        benchmark_metadata = self.build_benchmark_metadata(
+            benchmark_value=benchmark_value,
+            benchmark_unit=benchmark_unit,
+            base_benchmark=base_benchmark,
+            parameter_column_unit=parameter_column_unit,
+            round_unit_value=unit_agg_str,
+            display_unit=display_unit,
+            benchmark_value_from_sql=query_response.get('benchmark_sql_value'),
+        )
+
+        if is_live_layer:
+            graph_data, positive_speeds = self.generate_school_graph_data(DataLayerInfoViewSet)
+            live_avg = self.get_live_avg(parameter_col_function.get('name', 'avg'), positive_speeds)
+            
+            rounded_base_benchmark_int = round(
+                eval(unit_agg_str.format(val=core_utilities.convert_to_int(base_benchmark))), 2)
+            live_avg_connectivity = self.resolve_connectivity_bucket(
+                live_avg,
+                benchmark_metadata['rounded_benchmark_value'],
+                rounded_base_benchmark_int,
+                data_layer_instance.is_reverse,
+            )
+
+            return {
+                'no_of_entities_measure': query_response.get('no_of_schools_measure', 0),
+                'entity_with_realtime_data': query_response.get('school_with_realtime_data', 0),
+                'real_time_connected_entities': {
+                    'good': query_response.get('good', 0),
+                    'moderate': query_response.get('moderate', 0),
+                    'no_internet': query_response.get('bad', 0),
+                    'unknown': query_response.get('unknown', 0),
+                },
+                'is_data_synced': is_data_synced_qs.exists(),
+                'live_avg': live_avg,
+                'live_avg_connectivity': live_avg_connectivity,
+                'graph_data': graph_data,
+                'benchmark_metadata': benchmark_metadata,
+            }
+        else:
+            return {
+                'no_of_entities_measure': query_response.get('total_schools', 0),
+                'real_time_connected_entities': {label: query_response.get(label, 0) for label in query_labels},
+                'legend_configs': legend_configs,
+                'benchmark_metadata': {
+                    'parameter_column_unit': parameter_column_unit,
+                    'display_unit': display_unit,
+                },
+            }
+
+    def process_entity_layer(self, request, entity_code, params):
         """
         Process a single entity layer and return its info data.
         """
@@ -1748,12 +2068,14 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             return {'error': f'No published DataLayer found with id={layer_id}.'}
 
         is_legacy = (data_layer_instance.entity_type is None) or data_layer_instance.entity_type.is_legacy
+        import sys
+        sys.stderr.write(f"PROCESS_ENTITY_LAYER: entity_code={entity_code} layer_id={layer_id} is_legacy={is_legacy} entity_type={data_layer_instance.entity_type}\n")
 
         data_sources = data_layer_instance.data_sources.all()
         live_data_sources = ['UNKNOWN']
 
         for d in data_sources:
-            source_type = d.data_source.data_source_type
+            source_type = (d.data_source.data_source_type or '').upper()
             if source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_QOS:
                 live_data_sources.append(statistics_configs.QOS_SOURCE)
             elif source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP:
@@ -1772,7 +2094,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         base_benchmark = str(parameter_col.get('base_benchmark', 1))
         display_unit = parameter_col.get('display_unit', '')
 
-        entity_query_params = self._build_scoped_query_params(request, entity_code, params, is_legacy)
+        entity_query_params = self.build_scoped_query_params(request, entity_code, params, is_legacy)
 
         try:
             self.update_kwargs_from_dict(country_ids, data_layer_instance, entity_query_params)
@@ -1783,37 +2105,17 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         global_benchmark = data_layer_instance.global_benchmark.get('value')
         legend_configs = self.get_legend_configs(data_layer_instance)
 
-        unit_agg_str = '{val}'
-
-        if (
-            self.kwargs['convert_unit'] and
-            not core_utilities.is_blank_string(parameter_column_unit) and
-            self.kwargs['convert_unit'].lower() != parameter_column_unit
-        ):
-            convert_unit = self.kwargs['convert_unit'].lower()
-
-            if convert_unit == 'mbps' and parameter_column_unit == 'bps':
-                unit_agg_str = '{val} / (1000 * 1000)'
-            elif convert_unit == 'mbps' and parameter_column_unit == 'kbps':
-                unit_agg_str = '{val} / 1000'
-            elif convert_unit == 'kbps' and parameter_column_unit == 'bps':
-                unit_agg_str = '{val} / 1000'
-            elif convert_unit == 'kbps' and parameter_column_unit == 'mbps':
-                unit_agg_str = '{val} * 1000'
-            elif convert_unit == 'bps' and parameter_column_unit == 'kbps':
-                unit_agg_str = '{val} * 1000'
-            elif convert_unit == 'bps' and parameter_column_unit == 'mbps':
-                unit_agg_str = '{val} * 1000 * 1000'
-
+        unit_agg_str = self.compute_unit_conversion(parameter_column_unit)
         self.kwargs['round_unit_value'] = unit_agg_str
 
-        response_data = None
-        selected_ids = self._get_selected_ids(self.kwargs, is_legacy)
+        selected_ids = self.get_selected_ids(self.kwargs, is_legacy)
+        is_live_layer = data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE
 
-        if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+        parameter_col_function = {}
+        if is_live_layer:
             parameter_col_function = first_source.data_source_column_function or {}
             column_function_sql = self.get_column_function_sql(parameter_col_function)
-
+            
             self.kwargs.update({
                 'col_name': parameter_column_name,
                 'benchmark_value': benchmark_value,
@@ -1829,242 +2131,6 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 'school_filters': self.kwargs.get('entity_filters', ''),
                 'school_static_filters': self.kwargs.get('entity_static_filters', ''),
             })
-
-            if selected_ids and is_legacy:
-                from proco.accounts.api import DataLayerInfoViewSet as SchoolViewSet
-
-                response_data = self._build_school_detail_response(
-                    request=request,
-                    school_viewset_cls=SchoolViewSet,
-                    is_live_layer=True,
-                    parameter_col_function=parameter_col_function,
-                    benchmark_value=benchmark_value,
-                    benchmark_unit=benchmark_unit,
-                    base_benchmark=base_benchmark,
-                    parameter_column_unit=parameter_column_unit,
-                    unit_agg_str=unit_agg_str,
-                    display_unit=display_unit,
-                    scoped_query_params=entity_query_params,
-                )
-            elif selected_ids:
-                info_panel_entity_list = db_utilities.sql_to_response(self.get_entity_view_info_query(),
-                                                                      label=self.__class__.__name__,
-                                                                      db_var=settings.READ_ONLY_DB_KEY) or []
-                statistics = db_utilities.sql_to_response(
-                    self.get_entity_view_statistics_info_query(data_layer_instance.type),
-                    label=self.__class__.__name__,
-                    db_var=settings.READ_ONLY_DB_KEY) or []
-                graph_data, positive_speeds = self.generate_graph_data()
-                sorted_info_panel_entity_list = []
-
-                if len(info_panel_entity_list) > 0:
-                    for entity_id in selected_ids:
-                        for entity_details in info_panel_entity_list:
-                            if str(entity_details['id']) == str(entity_id):
-                                sorted_info_panel_entity_list.append(entity_details)
-
-                    for info_panel_entity in sorted_info_panel_entity_list:
-                        info_panel_entity['geopoint'] = json.loads(info_panel_entity['geopoint'])
-                        matched = list(filter(
-                            lambda s: s['entity_id'] == info_panel_entity['id'], statistics))
-                        info_panel_entity['statistics'] = matched[-1] if matched else {}
-
-                        _speeds = positive_speeds.get(str(info_panel_entity['id']), [])
-                        live_avg = round(sum(_speeds) / len(_speeds), 2) if _speeds else 0
-
-                        info_panel_entity['live_avg'] = live_avg
-                        info_panel_entity['graph_data'] = graph_data.get(str(info_panel_entity['id']), [])
-
-                        benchmark_value_from_sql = info_panel_entity.get('benchmark_sql_value', None)
-                        if benchmark_value_from_sql:
-                            rounded_benchmark_value_int = round(
-                                eval(unit_agg_str.format(
-                                    val=core_utilities.convert_to_int(benchmark_value_from_sql))), 2)
-                            benchmark_value = str(benchmark_value_from_sql)
-                        else:
-                            rounded_benchmark_value_int = round(
-                                eval(unit_agg_str.format(val=core_utilities.convert_to_int(benchmark_value))), 2)
-
-                        info_panel_entity['benchmark_metadata'] = {
-                            'benchmark_value': benchmark_value,
-                            'rounded_benchmark_value': rounded_benchmark_value_int,
-                            'benchmark_unit': benchmark_unit,
-                            'base_benchmark': base_benchmark,
-                            'parameter_column_unit': parameter_column_unit,
-                            'round_unit_value': unit_agg_str,
-                            'convert_unit': self.kwargs.get('convert_unit'),
-                            'display_unit': display_unit,
-                        }
-
-                response_data = sorted_info_panel_entity_list
-            elif is_legacy:
-                from proco.connection_statistics.models import SchoolWeeklyStatus
-                from proco.accounts.api import DataLayerInfoViewSet
-
-                is_data_synced_qs = SchoolWeeklyStatus.objects.filter(
-                    school__realtime_registration_status__rt_registered=True,
-                )
-                if len(self.kwargs.get('school_filters', '')) > 0:
-                    is_data_synced_qs = is_data_synced_qs.extra(where=[self.kwargs['school_filters']])
-                if len(self.kwargs.get('school_static_filters', '')) > 0:
-                    is_data_synced_qs = is_data_synced_qs.extra(where=[self.kwargs['school_static_filters']])
-                if len(self.kwargs.get('admin1_ids', [])) > 0:
-                    is_data_synced_qs = is_data_synced_qs.filter(school__admin1_id__in=self.kwargs['admin1_ids'])
-                elif len(self.kwargs.get('country_ids', [])) > 0:
-                    is_data_synced_qs = is_data_synced_qs.filter(school__country_id__in=self.kwargs['country_ids'])
-
-                try:
-                    query_result = db_utilities.sql_to_response(
-                        DataLayerInfoViewSet.get_info_query(self),
-                        label=self.__class__.__name__,
-                        db_var=settings.READ_ONLY_DB_KEY,
-                        raise_exception=True)
-                except Exception as sql_exc:
-                    return {
-                        'error': (
-                            f'Failed to fetch live data for {entity_code} layer '
-                            f'(layer_id={layer_id}, column="{parameter_column_name}", '
-                            f'entity="{data_layer_instance.entity_name}", path=legacy). '
-                            f'DB error: {sql_exc}'
-                        )
-                    }
-                if not query_result:
-                    return {
-                        'error': (
-                            f'Failed to fetch live data for {entity_code} layer '
-                            f'(layer_id={layer_id}, column="{parameter_column_name}", '
-                            f'entity="{data_layer_instance.entity_name}", path=legacy). '
-                            f'The query returned no results. Check that column '
-                            f'"{parameter_column_name}" exists in the SchoolDailyStatus table '
-                            f'and that there is data for the given date range and country.'
-                        )
-                    }
-                query_response = query_result[-1]
-
-                graph_data, positive_speeds = self._generate_school_graph_data(
-                    DataLayerInfoViewSet
-                )
-                live_avg = self.get_live_avg(
-                    parameter_col_function.get('name', 'avg'), positive_speeds
-                )
-                benchmark_metadata = self._build_benchmark_metadata(
-                    benchmark_value=benchmark_value,
-                    benchmark_unit=benchmark_unit,
-                    base_benchmark=base_benchmark,
-                    parameter_column_unit=parameter_column_unit,
-                    round_unit_value=unit_agg_str,
-                    display_unit=display_unit,
-                    benchmark_value_from_sql=query_response.get('benchmark_sql_value'),
-                )
-                rounded_base_benchmark_int = round(
-                    eval(unit_agg_str.format(val=core_utilities.convert_to_int(base_benchmark))), 2)
-                live_avg_connectivity = self._resolve_connectivity_bucket(
-                    live_avg,
-                    benchmark_metadata['rounded_benchmark_value'],
-                    rounded_base_benchmark_int,
-                    data_layer_instance.is_reverse,
-                )
-
-                response_data = {
-                    'no_of_entities_measure': query_response.get('no_of_schools_measure', 0),
-                    'entity_with_realtime_data': query_response.get('school_with_realtime_data', 0),
-                    'real_time_connected_entities': {
-                        'good': query_response.get('good', 0),
-                        'moderate': query_response.get('moderate', 0),
-                        'no_internet': query_response.get('bad', 0),
-                        'unknown': query_response.get('unknown', 0),
-                    },
-                    'is_data_synced': is_data_synced_qs.exists(),
-                    'live_avg': live_avg,
-                    'live_avg_connectivity': live_avg_connectivity,
-                    'graph_data': graph_data,
-                    'benchmark_metadata': benchmark_metadata,
-                }
-            else:
-                is_data_synced_qs = EntityWeeklyStatus.objects.filter(
-                    entity__realtime_registration_status__rt_registered=True,
-                )
-
-                if len(self.kwargs['entity_filters']) > 0:
-                    is_data_synced_qs = is_data_synced_qs.extra(where=[self.kwargs['entity_filters']])
-
-                if len(self.kwargs['entity_static_filters']) > 0:
-                    is_data_synced_qs = is_data_synced_qs.extra(where=[self.kwargs['entity_static_filters']])
-
-                if len(self.kwargs.get('admin1_ids', [])) > 0:
-                    is_data_synced_qs = is_data_synced_qs.filter(entity__admin1_id__in=self.kwargs['admin1_ids'])
-                elif len(self.kwargs.get('country_ids', [])) > 0:
-                    is_data_synced_qs = is_data_synced_qs.filter(entity__country_id__in=self.kwargs['country_ids'])
-
-                query_labels = []
-                try:
-                    query_result = db_utilities.sql_to_response(self.get_info_query(query_labels),
-                                                                label=self.__class__.__name__,
-                                                                db_var=settings.READ_ONLY_DB_KEY,
-                                                                raise_exception=True)
-                except Exception as sql_exc:
-                    return {
-                        'error': (
-                            f'Failed to fetch live data for {entity_code} layer '
-                            f'(layer_id={layer_id}, column="{parameter_column_name}", '
-                            f'entity="{data_layer_instance.entity_name}"). '
-                            f'DB error: {sql_exc}'
-                        )
-                    }
-                if not query_result:
-                    return {
-                        'error': (
-                            f'Failed to fetch live data for {entity_code} layer '
-                            f'(layer_id={layer_id}, column="{parameter_column_name}", '
-                            f'entity="{data_layer_instance.entity_name}"). '
-                            f'The query returned no results. Check that column '
-                            f'"{parameter_column_name}" exists in EntityDailyStatus '
-                            f'and that there is data for the given date range and country.'
-                        )
-                    }
-                query_response = query_result[-1]
-
-                graph_data, positive_speeds = self.generate_graph_data()
-                live_avg = round(sum(positive_speeds) / len(positive_speeds), 2) if len(positive_speeds) > 0 else 0
-
-                benchmark_metadata = self._build_benchmark_metadata(
-                    benchmark_value=benchmark_value,
-                    benchmark_unit=benchmark_unit,
-                    base_benchmark=base_benchmark,
-                    parameter_column_unit=parameter_column_unit,
-                    round_unit_value=unit_agg_str,
-                    display_unit=display_unit,
-                    benchmark_value_from_sql=query_response.get('benchmark_sql_value'),
-                )
-                rounded_base_benchmark_int = round(
-                    eval(unit_agg_str.format(val=core_utilities.convert_to_int(base_benchmark))), 2)
-                live_avg_connectivity = self._resolve_connectivity_bucket(
-                    live_avg,
-                    benchmark_metadata['rounded_benchmark_value'],
-                    rounded_base_benchmark_int,
-                    data_layer_instance.is_reverse,
-                )
-
-                if query_labels:
-                    connected_entities = {label: query_response.get(label, 0) for label in query_labels}
-                else:
-                    connected_entities = {
-                        'good': query_response.get('good', 0),
-                        'moderate': query_response.get('moderate', 0),
-                        'no_internet': query_response.get('bad', 0),
-                        'unknown': query_response.get('unknown', 0),
-                    }
-
-                response_data = {
-                    'no_of_entities_measure': query_response.get('no_of_entities_measure', 0),
-                    'entity_with_realtime_data': query_response.get('entity_with_realtime_data', 0),
-                    'real_time_connected_entities': connected_entities,
-                    'is_data_synced': is_data_synced_qs.exists(),
-                    'live_avg': live_avg,
-                    'live_avg_connectivity': live_avg_connectivity,
-                    'graph_data': graph_data,
-                    'benchmark_metadata': benchmark_metadata,
-                }
         else:
             self.kwargs.update({
                 'col_name': parameter_column_name,
@@ -2075,14 +2141,13 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 'school_static_filters': self.kwargs.get('entity_static_filters', ''),
             })
 
-            if selected_ids and is_legacy:
-                from proco.accounts.api import DataLayerInfoViewSet as SchoolViewSet
-
-                response_data = self._build_school_detail_response(
+        if selected_ids:
+            if is_legacy:
+                return self.build_school_detail_response(
                     request=request,
-                    school_viewset_cls=SchoolViewSet,
-                    is_live_layer=False,
-                    parameter_col_function={},
+                    school_viewset_cls=DataLayerInfoViewSet,
+                    is_live_layer=is_live_layer,
+                    parameter_col_function=parameter_col_function,
                     benchmark_value=benchmark_value,
                     benchmark_unit=benchmark_unit,
                     base_benchmark=base_benchmark,
@@ -2091,109 +2156,53 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     display_unit=display_unit,
                     scoped_query_params=entity_query_params,
                 )
-            elif is_legacy:
-                from proco.accounts.api import DataLayerInfoViewSet as _SchoolViewSet
-
-                query_labels = []
-                try:
-                    query_result = db_utilities.sql_to_response(
-                        _SchoolViewSet.get_static_info_query(self, query_labels),
-                        label=self.__class__.__name__,
-                        db_var=settings.READ_ONLY_DB_KEY,
-                        raise_exception=True)
-                except Exception as sql_exc:
-                    return {
-                        'error': (
-                            f'Failed to fetch static data for {entity_code} layer '
-                            f'(layer_id={layer_id}, column="{parameter_column_name}", '
-                            f'entity="{data_layer_instance.entity_name}", path=legacy). '
-                            f'DB error: {sql_exc}'
-                        )
-                    }
-                if not query_result:
-                    return {
-                        'error': (
-                            f'Failed to fetch static data for {entity_code} layer '
-                            f'(layer_id={layer_id}, column="{parameter_column_name}", '
-                            f'entity="{data_layer_instance.entity_name}", path=legacy). '
-                            f'The query returned no results. Check that column '
-                            f'"{parameter_column_name}" exists in SchoolWeeklyStatus '
-                            f'and that there is data for the given country.'
-                        )
-                    }
-                query_response = query_result[-1]
-                response_data = {
-                    'total_entities': query_response.get('total_schools', 0),
-                    'connected_entities': {label: query_response.get(label, 0) for label in query_labels},
-                    'legend_configs': legend_configs,
-                    'benchmark_metadata': {
-                        'parameter_column_unit': parameter_column_unit,
-                        'display_unit': display_unit,
-                    },
-                }
-            elif selected_ids:
-                info_panel_entity_list = db_utilities.sql_to_response(self.get_static_entity_view_info_query(),
-                                                                      label=self.__class__.__name__,
-                                                                      db_var=settings.READ_ONLY_DB_KEY) or []
-
-                statistics = db_utilities.sql_to_response(
-                    self.get_entity_view_statistics_info_query(data_layer_instance.type),
-                    label=self.__class__.__name__,
-                    db_var=settings.READ_ONLY_DB_KEY) or []
-
-                sorted_info_panel_entity_list = []
-                if len(info_panel_entity_list) > 0:
-                    for entity_id in selected_ids:
-                        for entity_details in info_panel_entity_list:
-                            if str(entity_details['id']) == str(entity_id):
-                                sorted_info_panel_entity_list.append(entity_details)
-
-                    for info_panel_entity in sorted_info_panel_entity_list:
-                        info_panel_entity['geopoint'] = json.loads(info_panel_entity['geopoint'])
-                        matched = list(filter(
-                            lambda s: s['entity_id'] == info_panel_entity['id'], statistics))
-                        info_panel_entity['statistics'] = matched[-1] if matched else {}
-
-                response_data = sorted_info_panel_entity_list
             else:
-                query_labels = []
-                try:
-                    query_result = db_utilities.sql_to_response(self.get_static_info_query(query_labels),
-                                                                label=self.__class__.__name__,
-                                                                db_var=settings.READ_ONLY_DB_KEY,
-                                                                raise_exception=True)
-                except Exception as sql_exc:
-                    return {
-                        'error': (
-                            f'Failed to fetch static data for {entity_code} layer '
-                            f'(layer_id={layer_id}, column="{parameter_column_name}", '
-                            f'entity="{data_layer_instance.entity_name}"). '
-                            f'DB error: {sql_exc}'
-                        )
-                    }
-                if not query_result:
-                    return {
-                        'error': (
-                            f'Failed to fetch static data for {entity_code} layer '
-                            f'(layer_id={layer_id}, column="{parameter_column_name}", '
-                            f'entity="{data_layer_instance.entity_name}"). '
-                            f'The query returned no results. Check that column '
-                            f'"{parameter_column_name}" exists in EntityWeeklyStatus '
-                            f'and that there is data for the given country.'
-                        )
-                    }
-                query_response = query_result[-1]
-                response_data = {
-                    'total_entities': query_response['total_entities'],
-                    'connected_entities': {label: query_response[label] for label in query_labels},
-                    'legend_configs': legend_configs,
-                    'benchmark_metadata': {
-                        'parameter_column_unit': parameter_column_unit,
-                        'display_unit': display_unit,
-                    },
-                }
-
-        return response_data
+                return self.build_entity_detail_response(
+                    request=request,
+                    is_live_layer=is_live_layer,
+                    parameter_col_function=parameter_col_function,
+                    benchmark_value=benchmark_value,
+                    benchmark_unit=benchmark_unit,
+                    base_benchmark=base_benchmark,
+                    parameter_column_unit=parameter_column_unit,
+                    unit_agg_str=unit_agg_str,
+                    display_unit=display_unit,
+                    scoped_query_params=entity_query_params,
+                    data_layer_instance=data_layer_instance,
+                )
+        else:
+            if is_legacy:
+                return self.build_legacy_summary_response(
+                    is_live_layer=is_live_layer,
+                    parameter_col_function=parameter_col_function,
+                    benchmark_value=benchmark_value,
+                    benchmark_unit=benchmark_unit,
+                    base_benchmark=base_benchmark,
+                    parameter_column_unit=parameter_column_unit,
+                    unit_agg_str=unit_agg_str,
+                    display_unit=display_unit,
+                    data_layer_instance=data_layer_instance,
+                    entity_code=entity_code,
+                    layer_id=layer_id,
+                    parameter_column_name=parameter_column_name,
+                    legend_configs=legend_configs,
+                )
+            else:
+                return self.build_entity_summary_response(
+                    is_live_layer=is_live_layer,
+                    parameter_col_function=parameter_col_function,
+                    benchmark_value=benchmark_value,
+                    benchmark_unit=benchmark_unit,
+                    base_benchmark=base_benchmark,
+                    parameter_column_unit=parameter_column_unit,
+                    unit_agg_str=unit_agg_str,
+                    display_unit=display_unit,
+                    data_layer_instance=data_layer_instance,
+                    entity_code=entity_code,
+                    layer_id=layer_id,
+                    parameter_column_name=parameter_column_name,
+                    legend_configs=legend_configs,
+                )
 
     def get(self, request, *args, **kwargs):
         """
@@ -2245,11 +2254,15 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             response = {}
 
             # Process each entity type
+            print("DEBUG GET: entity_params =", entity_params)
             for entity_code, params in entity_params.items():
                 if 'layer_id' in params:
                     try:
-                        entity_response = self._process_entity_layer(request, entity_code, params)
+                        print(f"DEBUG GET: processing {entity_code} with params={params}")
+                        entity_response = self.process_entity_layer(request, entity_code, params)
+                        print(f"DEBUG GET: response for {entity_code} = {entity_response}")
                     except Exception as exc:
+                        print(f"DEBUG GET: exception for {entity_code}: {exc}")
                         entity_response = {'error': str(exc)}
                     if entity_response is not None:
                         response[entity_code] = entity_response
@@ -2534,7 +2547,7 @@ class EntityDataLayerPreviewViewSet(APIView):
         if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
             live_data_sources = ['UNKNOWN']
             for d in data_sources:
-                source_type = d.data_source.data_source_type
+                source_type = (d.data_source.data_source_type or '').upper()
                 if source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_QOS:
                     live_data_sources.append(statistics_configs.QOS_SOURCE)
                 elif source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP:
