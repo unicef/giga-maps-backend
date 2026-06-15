@@ -8,12 +8,17 @@ logger = logging.getLogger('gigamaps.' + __name__)
 
 
 class BaseEntitySerializer(serializers.ModelSerializer):
+    entity_type_code = serializers.SerializerMethodField()
+
     class Meta:
         model = Entity
         fields = (
-            'id', 'name', 'geopoint',
+            'id', 'name', 'geopoint', 'entity_type_code',
         )
         read_only_fields = fields
+
+    def get_entity_type_code(self, obj):
+        return obj.entity_type.code if obj.entity_type else None
 
 
 class CountryToSerializerMixin(object):
@@ -24,18 +29,13 @@ class CountryToSerializerMixin(object):
 
 class ListEntitySerializer(CountryToSerializerMixin, BaseEntitySerializer):
     is_verified = serializers.SerializerMethodField()
-    entity_type_code = serializers.SerializerMethodField()
 
     class Meta(BaseEntitySerializer.Meta):
         fields = BaseEntitySerializer.Meta.fields + (
-            'entity_type_code',
             'connectivity_status',
             'coverage_status',
             'is_verified',
         )
-
-    def get_entity_type_code(self, obj):
-        return obj.entity_type.code if obj.entity_type else None
 
     def get_is_verified(self, obj):
         # TODO: Get this logic

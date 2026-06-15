@@ -12,6 +12,8 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_control
 from rest_framework.generics import ListAPIView
 from django_filters.rest_framework import DjangoFilterBackend
+import django_filters
+from django_filters import rest_framework as df_filters
 from rest_framework import mixins, permissions, viewsets, status as rest_status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -56,11 +58,18 @@ class EntitiesViewSet(
     filter_backends = (
         DjangoFilterBackend,
     )
-    filterset_fields = {
-        'entity_type__code': ['exact', 'in'],
-        'id': ['exact', 'in'],
-        'country_id': ['exact', 'in'],
-    }
+
+    class EntitiesFilter(django_filters.FilterSet):
+        entity_type__code = django_filters.CharFilter(field_name='entity_type__code', lookup_expr='exact')
+        id = django_filters.CharFilter(field_name='id', lookup_expr='exact')
+        country_id = django_filters.NumberFilter(field_name='country_id', lookup_expr='exact')
+        admin1_id = django_filters.NumberFilter(field_name='admin1_id', lookup_expr='exact')
+
+        class Meta:
+            model = Entity
+            fields = ['entity_type__code', 'id', 'country_id', 'admin1_id']
+
+    filterset_class = EntitiesFilter
     related_model = Country
 
     def get_serializer(self, *args, **kwargs):

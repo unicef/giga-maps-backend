@@ -527,7 +527,7 @@ class InvalidateCacheByPattern(APIView):
                     "*COUNTRIES_LIST_",
                     "*PUBLISHED_LAYERS_LIST_*",
                     "*GLOBAL_COUNTRY_SEARCH_MAPPING_",
-                    "*country_id_\['{0}'\]*".format(country_id),
+                    "*country_id_\\['{0}'\\]*".format(country_id),
                     "*country_id_{0}*".format(country_id),
                     "*COUNTRY_INFO_pk_{0}".format(country_code),
                 ]
@@ -537,7 +537,7 @@ class InvalidateCacheByPattern(APIView):
                     "*PUBLISHED_LAYERS_LIST_*",
                     "*DATA_LAYER_INFO_{0}*".format(layer_id),
                     "*DATA_LAYER_MAP_{0}*".format(layer_id),
-                    "*layer_id_\['{0}'\]*".format(layer_id),
+                    "*layer_id_\\['{0}'\\]*".format(layer_id),
                     "*layer_id_{0}*".format(layer_id),
                 ]
 
