@@ -1,6 +1,8 @@
 import logging
 import uuid
 
+from datetime import timedelta
+
 from celery import chain
 from celery import current_task
 from django.conf import settings
@@ -14,7 +16,7 @@ from proco.background import utils as background_task_utilities
 from proco.core import db_utils as db_utilities
 from proco.core import utils as core_utilities
 from proco.taskapp import app
-from proco.utils.dates import format_date
+from proco.utils.dates import format_date, to_date
 
 
 logger = logging.getLogger('gigamaps.' + __name__)
@@ -30,7 +32,7 @@ def update_cached_value(*args, url='', query_params=None, **kwargs):
         client.get(url, {'cache': False}, format='json')
 
 
-@app.task(soft_time_limit=15 * 60, time_limit=15 * 60)
+@app.task(soft_time_limit=60 * 60, time_limit=65 * 60)
 def update_all_cached_values(*args, clean_cache=False):
     from proco.accounts.models import DataLayerCountryRelationship, DataLayer
     from proco.locations.models import Country
@@ -95,15 +97,150 @@ def update_all_cached_values(*args, clean_cache=False):
             ]
 
             if country_wise_default_layers.get(country.id, None):
-                country_wise_task_list.append(update_cached_value.s(
-                    url=reverse('connection_statistics:get-latest-week-and-month'),
-                    query_params={
-                        'country_id': country.id,
-                        'layer_id': country_wise_default_layers[country.id],
-                    },
-                ))
+                layer_id = country_wise_default_layers[country.id]
+
+                client = APIClient()
+                response = client.get(
+                    reverse('connection_statistics:get-latest-week-and-month'),
+                    {'country_id': country.id, 'layer_id': layer_id, 'cache': False},
+                    format='json',
+                )
+
+                if response.status_code == 200 and response.data and response.data.get('week'):
+                    latest_week_start_str = response.data['week']['start_date']
+                    latest_week_end_str = response.data['week']['end_date']
+
+                    country_wise_task_list.append(update_cached_value.s(
+                        url=reverse('accounts:info-data-layer', kwargs={'pk': layer_id}),
+                        query_params={
+                            'country_id': country.id,
+                            'start_date': latest_week_start_str,
+                            'end_date': latest_week_end_str,
+                            'is_weekly': 'true',
+                            'benchmark': 'global',
+                            'include_same_location_schools': 'false',
+                        },
+                    ))
+
+                    if country.iso3_format == 'BRA':
+                        # Case 1: Cache info API for last 4 weeks
+                        latest_week_end = to_date(latest_week_end_str).date()
+                        for week_offset in range(4):
+                            week_end = latest_week_end - timedelta(weeks=week_offset)
+                            week_start = week_end - timedelta(days=6)
+
+                            start_date_str = week_start.strftime('%d-%m-%Y')
+                            end_date_str = week_end.strftime('%d-%m-%Y')
+
+                            country_wise_task_list.append(update_cached_value.s(
+                                url=reverse('accounts:info-data-layer', kwargs={'pk': layer_id}),
+                                query_params={
+                                    'country_id': country.id,
+                                    'start_date': start_date_str,
+                                    'end_date': end_date_str,
+                                    'is_weekly': 'true',
+                                    'benchmark': 'global',
+                                    'include_same_location_schools': 'false',
+                                },
+                            ))
+
+                        # Case 2: Cache with filters
+                        from proco.accounts.models import AdvanceFilter
+                        country_filters = AdvanceFilter.objects.filter(
+                            status=AdvanceFilter.FILTER_STATUS_PUBLISHED,
+                            deleted__isnull=True,
+                            active_countries__country_id=country.id,
+                            active_countries__deleted__isnull=True,
+                            type=AdvanceFilter.TYPE_DROPDOWN
+                        ).distinct()
+
+                        for advance_filter in country_filters:
+                            query_param = advance_filter.query_param_filter
+                            column_config = advance_filter.column_configuration
+                            if not column_config:
+                                continue
+
+                            filter_field = column_config.name
+                            filter_options = advance_filter.options or {}
+                            static_choices = filter_options.get('choices', [])
+
+                            filter_values = []
+                            for choice in static_choices:
+                                if isinstance(choice, dict) and 'value' in choice:
+                                    filter_values.append(choice['value'])
+
+                            # Cache global-stat and info API with each filter value
+                            for value in filter_values:
+                                filter_params = {f'{filter_field}__{query_param}': value}
+
+                                # Global-stat with filter
+                                global_stat_params = {'country_id': country.id}
+                                global_stat_params.update(filter_params)
+                                country_wise_task_list.append(update_cached_value.s(
+                                    url=reverse('connection_statistics:global-stat'),
+                                    query_params=global_stat_params,
+                                ))
+
+                                # Info API with filter
+                                info_params = {
+                                    'country_id': country.id,
+                                    'start_date': latest_week_start_str,
+                                    'end_date': latest_week_end_str,
+                                    'is_weekly': 'true',
+                                    'benchmark': 'global',
+                                    'include_same_location_schools': 'false',
+                                }
+                                info_params.update(filter_params)
+                                country_wise_task_list.append(update_cached_value.s(
+                                    url=reverse('accounts:info-data-layer', kwargs={'pk': layer_id}),
+                                    query_params=info_params,
+                                ))
+
+                        # Case 3: Cache admin1 views
+                        from proco.locations.models import CountryAdminMetadata
+                        admin1_ids = list(CountryAdminMetadata.objects.filter(
+                            country_id=country.id,
+                            layer_name='adm1',
+                            deleted__isnull=True,
+                        ).values_list('id', flat=True))
+
+                        logger.info(f'Brazil: Queueing cache for {len(admin1_ids)} admin1 regions')
+                        for adm1_id in admin1_ids:
+                            # Connectivityconfigs for admin1
+                            country_wise_task_list.append(update_cached_value.s(
+                                url=reverse('connection_statistics:get-latest-week-and-month'),
+                                query_params={
+                                    'country_id': country.id,
+                                    'admin1_id': adm1_id,
+                                    'layer_id': layer_id,
+                                },
+                            ))
+
+                            # Global-stat for admin1
+                            country_wise_task_list.append(update_cached_value.s(
+                                url=reverse('connection_statistics:global-stat'),
+                                query_params={
+                                    'country_id': country.id,
+                                    'admin1_id': adm1_id,
+                                },
+                            ))
+
+                            # Info API for admin1
+                            country_wise_task_list.append(update_cached_value.s(
+                                url=reverse('accounts:info-data-layer', kwargs={'pk': layer_id}),
+                                query_params={
+                                    'country_id': country.id,
+                                    'start_date': latest_week_start_str,
+                                    'end_date': latest_week_end_str,
+                                    'is_weekly': 'true',
+                                    'benchmark': 'global',
+                                    'include_same_location_schools': 'false',
+                                    'admin1_id': adm1_id,
+                                },
+                            ))
 
             chain(country_wise_task_list).delay()
+
 
         background_task_utilities.task_on_complete(task_instance)
     else:

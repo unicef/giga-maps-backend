@@ -16,6 +16,9 @@ urlpatterns = [
     # Entity types
     path('entity-types/', entities_api.EntityTypeListAPIView.as_view(), name='entity-types'),
 
+    # Cognitive Search Index based searching for Entities
+    path('gentity-search/', entities_api.AggregateSearchEntityViewSet.as_view(), name='global-search-filter'),
+
     # Entity tiles
     path('tiles/connectivity_status/',
          entities_api.EntityConnectivityStatusTileRequestHandler.as_view(),
@@ -89,9 +92,6 @@ urlpatterns = [
 
     path('tiles/connectivity/', entities_api.EntityGlobalConnectivityTileRequestHandler.as_view(),
          name='tiles-global-connectivity-view'),
-
-    # Cognitive Search Index based searching for Entities
-    path('gentity-search/', entities_api.AggregateSearchEntityViewSet.as_view(), name='global-search-filter'),
 
     # Entity list by country (Should be at last)
     path('', include(country_entities.urls)),

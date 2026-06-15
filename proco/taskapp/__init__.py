@@ -42,7 +42,7 @@ def finalize_setup(sender, **kwargs):
         # New
         'proco.schools.tasks.update_school_records': {
             'task': 'proco.schools.tasks.update_school_records',
-            'schedule': crontab(hour='1,13', minute=0),
+            'schedule': crontab(hour=1, minute=0),
             'args': (),
         },
         'proco.data_sources.tasks.cleanup_school_master_rows': {
@@ -148,6 +148,12 @@ def finalize_setup(sender, **kwargs):
             'schedule': crontab(hour=5, minute=0),
             'args': (),
             'kwargs': {'today': False},
+        },
+        'proco.giga_meter.tasks.scheduler_for_backup_giga_meter_connectivity_ping_data': {
+            'task': 'proco.giga_meter.tasks.scheduler_for_backup_giga_meter_connectivity_ping_data',
+            # Executes once in a day at 9:30 PM
+            'schedule': crontab(hour=21, minute=30),
+            'args': (),
         },
     })
 
