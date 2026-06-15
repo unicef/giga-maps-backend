@@ -792,7 +792,7 @@ class DataLayerPreviewViewSet(APIView):
                 if len(values) > 0:
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
-                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
                     label_cases.append("ELSE '{label}'".format(label=title))
@@ -867,7 +867,7 @@ class DataLayerPreviewViewSet(APIView):
             if len(values) > 0:
                 is_sql_value = 'SQL:' in values[0]
                 if is_sql_value:
-                    sql_statement = str(','.join(values)).replace('SQL:', '').format(
+                    sql_statement = ' AND '.join(values).replace('SQL:', '').format(
                         table_name=kwargs['table_name'],
                         col_name=kwargs['col_name'],
                     )
@@ -1097,6 +1097,7 @@ class BaseDataLayerAPIViewSet(APIView):
 
         self.kwargs['convert_unit'] = layer_instance.global_benchmark.get('convert_unit', 'mbps')
         self.kwargs['is_reverse'] = layer_instance.is_reverse
+        self.kwargs['layer_type'] = layer_instance.type
 
         self.kwargs['school_filters'] = core_utilities.get_filter_sql(
             self.request, 'schools', 'schools_school')
@@ -1224,6 +1225,9 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(**kwargs) + ' AS benchmark_sql_value,'
 
         legend_configs = kwargs['legend_configs']
+        if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+            kwargs['table_name'] = 'sds'
+
         if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
             label_cases = []
             for title, values_and_label in legend_configs.items():
@@ -1233,7 +1237,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 if len(values) > 0:
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
-                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
                         label_cases.append(
                             'COUNT(DISTINCT CASE WHEN {sql} THEN sds.school_id ELSE NULL END) AS "{label}",'.format(
                                 sql=sql_statement, label=title))
@@ -1245,9 +1249,12 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
             kwargs['case_conditions'] = ' '.join(label_cases)
 
-            kwargs['school_weekly_outer_join'] = """
-            INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
-            """
+            if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+                kwargs['school_weekly_outer_join'] = ''
+            else:
+                kwargs['school_weekly_outer_join'] = """
+                INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
+                """
         else:
             kwargs['case_conditions'] = """
             COUNT(DISTINCT CASE WHEN sds.{col_name} > {benchmark_value} THEN sds.school_id ELSE NULL END) AS "good",
@@ -1321,7 +1328,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             {case_conditions}
         FROM "schools_school" schools_school
         INNER JOIN public.locations_country c ON c."id" = schools_school."country_id"
-        INNER JOIN "connection_statistics_schoolweeklystatus" sws ON schools_school."last_weekly_status_id" = sws."id"
+        LEFT JOIN "connection_statistics_schoolweeklystatus" sws ON schools_school."last_weekly_status_id" = sws."id"
         LEFT JOIN public.locations_countryadminmetadata AS adm1_metadata
             ON adm1_metadata."id" = schools_school.admin1_id
             AND adm1_metadata."layer_name" = 'adm1'
@@ -1364,6 +1371,9 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs = copy.deepcopy(self.kwargs)
         kwargs['ids'] = ','.join(kwargs['school_ids'])
 
+        if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+            kwargs['table_name'] = 'sds'
+
         kwargs['benchmark_value_sql'] = ''
         benchmark_value = kwargs['benchmark_value']
         if benchmark_value and 'SQL:' in benchmark_value:
@@ -1380,7 +1390,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 if len(values) > 0:
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
-                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
                     label_cases.append("ELSE '{label}'".format(label=title))
@@ -1414,7 +1424,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         query = """
         SELECT sws.*
         FROM "schools_school"
-        INNER JOIN connection_statistics_schoolweeklystatus sws
+        LEFT JOIN connection_statistics_schoolweeklystatus sws
             ON "schools_school"."last_weekly_status_id" = sws."id"
         WHERE "schools_school"."deleted" IS NULL
             AND "schools_school"."id" IN ({ids})
@@ -1632,7 +1642,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             if len(values) > 0:
                 is_sql_value = 'SQL:' in values[0]
                 if is_sql_value:
-                    sql_statement = str(','.join(values)).replace('SQL:', '').format(
+                    sql_statement = ' AND '.join(values).replace('SQL:', '').format(
                         table_name=kwargs['table_name'],
                         col_name=kwargs['col_name'],
                     )
@@ -1751,7 +1761,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             if len(values) > 0:
                 is_sql_value = 'SQL:' in values[0]
                 if is_sql_value:
-                    sql_statement = str(','.join(values)).replace('SQL:', '').format(
+                    sql_statement = ' AND '.join(values).replace('SQL:', '').format(
                         table_name=kwargs['table_name'],
                         col_name=kwargs['col_name'],
                     )
@@ -2220,6 +2230,9 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         add_random_condition = True
 
         legend_configs = kwargs['legend_configs']
+        if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+            kwargs['table_name'] = 'sds'
+
         if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
             label_cases = []
             for title, values_and_label in legend_configs.items():
@@ -2229,15 +2242,18 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 if len(values) > 0:
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
-                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
                     label_cases.append("ELSE '{label}'".format(label=title))
 
             kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status,'
-            kwargs['school_weekly_outer_join'] = """
-            INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
-            """
+            if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+                kwargs['school_weekly_outer_join'] = ''
+            else:
+                kwargs['school_weekly_outer_join'] = """
+                INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
+                """
         else:
             kwargs['case_conditions'] = """
                 CASE WHEN sds.{col_name} >  {benchmark_value} THEN 'good'
@@ -2460,7 +2476,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             if len(values) > 0:
                 is_sql_value = 'SQL:' in values[0]
                 if is_sql_value:
-                    sql_statement = str(','.join(values)).replace('SQL:', '').format(
+                    sql_statement = ' AND '.join(values).replace('SQL:', '').format(
                         table_name=kwargs['table_name'],
                         col_name=kwargs['col_name'],
                     )
@@ -2694,7 +2710,7 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
                 if len(values) > 0:
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
-                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
                     label_cases.append("ELSE '{label}'".format(label=title))

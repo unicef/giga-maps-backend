@@ -56,6 +56,11 @@ class EntitiesViewSet(
     filter_backends = (
         DjangoFilterBackend,
     )
+    filterset_fields = {
+        'entity_type__code': ['exact', 'in'],
+        'id': ['exact', 'in'],
+        'country_id': ['exact', 'in'],
+    }
     related_model = Country
 
     def get_serializer(self, *args, **kwargs):

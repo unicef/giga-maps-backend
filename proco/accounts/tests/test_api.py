@@ -13,6 +13,7 @@ from proco.accounts import models as accounts_models
 from proco.accounts.tests import test_utils as accounts_test_utilities
 from proco.core import utils as core_utilities
 from proco.custom_auth.tests import test_utils as test_utilities
+from proco.entities.factories import EntityFactory
 from proco.locations.tests.factories import CountryFactory
 from proco.schools.tests.factories import SchoolFactory
 from proco.utils.tests import TestAPIViewSetMixin
@@ -20,6 +21,17 @@ from proco.utils.tests import TestAPIViewSetMixin
 
 def accounts_url(url_params, query_param, view_name='list-or-create-api-keys'):
     url = reverse('accounts:' + view_name, args=url_params)
+    view = resolve(url)
+    view_info = view.func
+
+    if len(query_param) > 0:
+        query_params = '?' + '&'.join([key + '=' + str(val) for key, val in query_param.items()])
+        url += query_params
+    return url, view, view_info
+
+
+def entities_url(url_params, query_param, view_name):
+    url = reverse('entities:' + view_name, args=url_params)
     view = resolve(url)
     view_info = view.func
 
@@ -87,8 +99,8 @@ class APIsApiTestCase(TestAPIViewSetMixin, TestCase):
         response_data = response.data
 
         self.assertEqual(type(response_data), OrderedDict)
-        self.assertEqual(response_data['count'], 2)
-        self.assertEqual(len(response_data['results']), 2)
+        self.assertEqual(response_data['count'], 3)
+        self.assertEqual(len(response_data['results']), 3)
 
     def test_list_apis_filter_on_category_private(self):
         url, _, view = accounts_url((), {
@@ -102,8 +114,8 @@ class APIsApiTestCase(TestAPIViewSetMixin, TestCase):
         response_data = response.data
 
         self.assertEqual(type(response_data), OrderedDict)
-        self.assertEqual(response_data['count'], 3)
-        self.assertEqual(len(response_data['results']), 3)
+        self.assertEqual(response_data['count'], 2)
+        self.assertEqual(len(response_data['results']), 2)
 
 
 class APIKeysApiTestCase(TestAPIViewSetMixin, TestCase):
@@ -248,7 +260,7 @@ class APIKeysApiTestCase(TestAPIViewSetMixin, TestCase):
             user=self.admin_user,
             view=view,
             data={
-                'api': accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
+                'api': accounts_models.API.objects.get(code='MEASUREMENT').id,
                 'active_countries_list': [self.country.id, ]
             }
         )
@@ -280,7 +292,7 @@ class APIKeysApiTestCase(TestAPIViewSetMixin, TestCase):
             user=self.read_only_user,
             view=view,
             data={
-                'api': accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
+                'api': accounts_models.API.objects.get(code='MEASUREMENT').id,
                 'active_countries_list': [self.country.id, ]
             }
         )
@@ -296,7 +308,7 @@ class APIKeysApiTestCase(TestAPIViewSetMixin, TestCase):
             user=self.read_only_user,
             view=view,
             data={
-                'api': accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
+                'api': accounts_models.API.objects.get(code='MEASUREMENT').id,
                 'active_countries_list': [self.country.id, ]
             }
         )
@@ -331,7 +343,7 @@ class APIKeysApiTestCase(TestAPIViewSetMixin, TestCase):
             user=self.read_only_user,
             view=view,
             data={
-                'api': accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
+                'api': accounts_models.API.objects.get(code='MEASUREMENT').id,
                 'active_countries_list': [self.country.id, ]
             }
         )
@@ -380,7 +392,7 @@ class APIKeysApiTestCase(TestAPIViewSetMixin, TestCase):
             user=self.read_only_user,
             view=view,
             data={
-                'api': accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
+                'api': accounts_models.API.objects.get(code='MEASUREMENT').id,
                 'active_countries_list': [self.country.id, ]
             }
         )
@@ -554,7 +566,7 @@ class APIKeyAPICategoryApiTestCase(TestAPIViewSetMixin, TestCase):
             user=self.admin_user,
             view=view,
             data={
-                "api": accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
+                "api": accounts_models.API.objects.get(code='MEASUREMENT').id,
                 "code": "GOVT",
                 "name": "Govt",
                 "is_default": True,
@@ -573,7 +585,7 @@ class APIKeyAPICategoryApiTestCase(TestAPIViewSetMixin, TestCase):
             user=self.admin_user,
             view=view,
             data={
-                "api": accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
+                "api": accounts_models.API.objects.get(code='MEASUREMENT').id,
                 "code": "GOVT",
                 "name": "Govt",
                 "is_default": True,
@@ -610,7 +622,7 @@ class APIKeyAPICategoryApiTestCase(TestAPIViewSetMixin, TestCase):
             user=self.read_only_user,
             view=view,
             data={
-                "api": accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
+                "api": accounts_models.API.objects.get(code='MEASUREMENT').id,
                 "code": "GOVT",
                 "name": "Govt",
                 "is_default": True,
@@ -629,7 +641,7 @@ class APIKeyAPICategoryApiTestCase(TestAPIViewSetMixin, TestCase):
             user=self.admin_user,
             view=view,
             data={
-                "api": accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
+                "api": accounts_models.API.objects.get(code='MEASUREMENT').id,
                 "code": "GOVT",
                 "name": "Govt",
                 "is_default": True,
@@ -663,7 +675,7 @@ class APIKeyAPICategoryApiTestCase(TestAPIViewSetMixin, TestCase):
             user=self.admin_user,
             view=view,
             data={
-                "api": accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
+                "api": accounts_models.API.objects.get(code='MEASUREMENT').id,
                 "code": "GOVT",
                 "name": "Govt",
                 "is_default": True,
@@ -697,7 +709,7 @@ class APIKeyAPICategoryApiTestCase(TestAPIViewSetMixin, TestCase):
             user=self.admin_user,
             view=view,
             data={
-                "api": accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
+                "api": accounts_models.API.objects.get(code='MEASUREMENT').id,
                 "code": "GOVT",
                 "name": "Govt",
                 "is_default": True,
@@ -719,7 +731,7 @@ class APIKeyAPICategoryApiTestCase(TestAPIViewSetMixin, TestCase):
             user=self.read_only_user,
             view=view,
             data={
-                'api': accounts_models.API.objects.get(code='DAILY_CHECK_APP').id,
+                'api': accounts_models.API.objects.get(code='MEASUREMENT').id,
                 'active_countries_list': [self.country.id, ]
             }
         )
@@ -1153,8 +1165,8 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
         response_data = response.data
 
         self.assertEqual(type(response_data), dict)
-        self.assertEqual(response_data['count'], 2)
-        self.assertEqual(len(response_data['results']), 2)
+        self.assertEqual(response_data['count'], 3)
+        self.assertEqual(len(response_data['results']), 3)
 
     def test_list_data_layers_filter_on_status_published(self):
         url, _, view = accounts_url((), {
@@ -1168,8 +1180,8 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
         response_data = response.data
 
         self.assertEqual(type(response_data), dict)
-        self.assertEqual(response_data['count'], 2)
-        self.assertEqual(len(response_data['results']), 2)
+        self.assertEqual(response_data['count'], 3)
+        self.assertEqual(len(response_data['results']), 3)
 
     def test_list_published_data_layers_for_admin(self):
         url, _, view = accounts_url(('PUBLISHED',), {
@@ -1182,8 +1194,8 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
         response_data = response.data
 
         self.assertEqual(type(response_data), dict)
-        self.assertEqual(response_data['count'], 2)
-        self.assertEqual(len(response_data['results']), 2)
+        self.assertEqual(response_data['count'], 3)
+        self.assertEqual(len(response_data['results']), 3)
 
     def test_list_published_data_layers_without_auth(self):
         url, _, view = accounts_url(('PUBLISHED',), {
@@ -1196,8 +1208,8 @@ class DataLayerApiTestCase(TestAPIViewSetMixin, TestCase):
         response_data = response.data
 
         self.assertEqual(type(response_data), dict)
-        self.assertEqual(response_data['count'], 2)
-        self.assertEqual(len(response_data['results']), 2)
+        self.assertEqual(response_data['count'], 3)
+        self.assertEqual(len(response_data['results']), 3)
 
     def test_list_published_data_layers_for_country(self):
         url, _, view = accounts_url(('PUBLISHED',), {
@@ -1984,7 +1996,8 @@ class DataLayerInfoApiTestCase(TestAPIViewSetMixin, TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        args = ['--delete_data_sources', '--update_data_sources', '--update_data_layers']
+        call_command('seed_entity_types')
+        args = ['--delete_data_sources', '--update_data_sources', '--update_data_layers', '--update_data_layers_code']
         call_command('load_system_data_layers', *args)
 
         cls.admin_user = test_utilities.setup_admin_user_by_role()
@@ -2254,6 +2267,140 @@ class DataLayerInfoApiTestCase(TestAPIViewSetMixin, TestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_live_school_layer_info_without_weekly_status(self):
+        layer = accounts_models.DataLayer.objects.get(name='Download')
+        from proco.connection_statistics.models import SchoolRealTimeRegistration
+        SchoolRealTimeRegistration.objects.create(
+            school=self.school,
+            rt_registered=True,
+            rt_registration_date=core_utilities.get_current_datetime_object().date(),
+        )
+
+        url, view, view_info = accounts_url(
+            (layer.id,),
+            {
+                'country_id': self.country.id,
+                'school_id': self.school.id,
+                'benchmark': 'global',
+                'start_date': '24-06-2024',
+                'end_date': '30-06-2024',
+                'is_weekly': 'true',
+            },
+            view_name='info-data-layer'
+        )
+
+        response = self.forced_auth_req(
+            'get',
+            url,
+            view=view,
+            view_info=view_info,
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_live_entity_layer_info_without_weekly_status(self):
+        from proco.connection_statistics.models import EntityRealTimeRegistration
+        entity, health_entity = EntityFactory.create_entity(
+            'health',
+            country=self.country,
+            name='Test Clinic',
+            giga_id='test-clinic-id',
+            detail_kwargs={'facility_id_govt': 'govt-123'},
+        )
+        EntityRealTimeRegistration.objects.create(
+            entity=entity,
+            rt_registered=True,
+            rt_registration_date=core_utilities.get_current_datetime_object().date(),
+        )
+
+        layer = accounts_models.DataLayer.objects.get(name='Health Download')
+
+        # Using the standard accounts_url helper or raw URL path.
+        # Since entities route is nested under api/v2/entities/layers/info/, let's see how accounts_url handles it
+        url, view, view_info = entities_url(
+            (),
+            {
+                'health_layer_id': layer.id,
+                'health_start_date': '24-06-2024',
+                'health_end_date': '30-06-2024',
+                'health_is_weekly': 'true',
+                'health_benchmark': 'global',
+                'health_include_same_location': 'false',
+                'country_id': self.country.id,
+                'entity_id': entity.id,
+            },
+            view_name='entity-info-data-layer'
+        )
+
+        response = self.forced_auth_req(
+            'get',
+            url,
+            view=view,
+            view_info=view_info,
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_multi_entity_layer_info_supports_school_and_health_detail_views(self):
+        from proco.connection_statistics.models import EntityRealTimeRegistration, SchoolRealTimeRegistration
+
+        school = SchoolFactory(country=self.country)
+        entity, _ = EntityFactory.create_entity(
+            'health',
+            country=self.country,
+            name='Test Clinic Two',
+            giga_id='test-clinic-id-2',
+            detail_kwargs={'facility_id_govt': 'govt-456'},
+        )
+
+        SchoolRealTimeRegistration.objects.create(
+            school=school,
+            rt_registered=True,
+            rt_registration_date=core_utilities.get_current_datetime_object().date(),
+        )
+        EntityRealTimeRegistration.objects.create(
+            entity=entity,
+            rt_registered=True,
+            rt_registration_date=core_utilities.get_current_datetime_object().date(),
+        )
+
+        school_layer = accounts_models.DataLayer.objects.get(name='Download')
+        health_layer = accounts_models.DataLayer.objects.get(name='Health Download')
+
+        url, view, view_info = entities_url(
+            (),
+            {
+                'school_layer_id': school_layer.id,
+                'school_school_id': school.id,
+                'school_start_date': '24-06-2024',
+                'school_end_date': '30-06-2024',
+                'school_is_weekly': 'true',
+                'school_benchmark': 'global',
+                'school_include_same_location': 'false',
+                'health_layer_id': health_layer.id,
+                'health_entity_id': entity.id,
+                'health_start_date': '24-06-2024',
+                'health_end_date': '30-06-2024',
+                'health_is_weekly': 'true',
+                'health_benchmark': 'global',
+                'health_include_same_location': 'false',
+                'country_id': self.country.id,
+                'cache': 'off',
+            },
+            view_name='entity-info-data-layer'
+        )
+
+        response = self.forced_auth_req(
+            'get',
+            url,
+            view=view,
+            view_info=view_info,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('school', response.data)
+        self.assertIn('health', response.data)
+        self.assertEqual(response.data['school'][0]['id'], school.id)
+        self.assertEqual(response.data['health'][0]['id'], entity.id)
 
 
 class InvalidateCacheApiTestCase(TestAPIViewSetMixin, TestCase):

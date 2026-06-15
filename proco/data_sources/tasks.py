@@ -1080,17 +1080,21 @@ def clean_old_live_data():
         logger.info('Found {0} soft-deleted schools to purge.'.format(len(deleted_school_ids)))
         for i in range(0, len(deleted_school_ids), 5000):
             chunk = deleted_school_ids[i:i+5000]
+            School.objects.all_records().filter(id__in=chunk).update(last_weekly_status=None)
             sources_models.SchoolMasterData.objects.filter(school_id__in=chunk).update(school_id=None)
             statistics_models.SchoolDailyStatus.objects.all_records().filter(school_id__in=chunk)._raw_delete(connection.alias)
             statistics_models.SchoolWeeklyStatus.objects.all_records().filter(school_id__in=chunk)._raw_delete(connection.alias)
             statistics_models.RealTimeConnectivity.objects.all_records().filter(school_id__in=chunk)._raw_delete(connection.alias)
             statistics_models.SchoolRealTimeRegistration.objects.all_records().filter(school_id__in=chunk)._raw_delete(connection.alias)
-            sources_models.QoSData.objects.all_records().filter(school_id__in=chunk)._raw_delete(connection.alias)
+            sources_models.QoSData.objects.filter(school_id__in=chunk)._raw_delete(connection.alias)
             School.objects.all_records().filter(id__in=chunk)._raw_delete(connection.alias)
         logger.info('Purged soft-deleted schools successfully.')
 
         # Purge any orphan soft-deleted school statuses
         statistics_models.SchoolDailyStatus.objects.all_records().filter(deleted__isnull=False)._raw_delete(connection.alias)
+        School.objects.all_records().filter(
+            last_weekly_status__in=statistics_models.SchoolWeeklyStatus.objects.all_records().filter(deleted__isnull=False)
+        ).update(last_weekly_status=None)
         statistics_models.SchoolWeeklyStatus.objects.all_records().filter(deleted__isnull=False)._raw_delete(connection.alias)
 
         # Purge soft-deleted entities and related statuses
@@ -1099,6 +1103,7 @@ def clean_old_live_data():
         logger.info('Found {0} soft-deleted entities to purge.'.format(len(deleted_entity_ids)))
         for i in range(0, len(deleted_entity_ids), 5000):
             chunk = deleted_entity_ids[i:i+5000]
+            Entity.objects.all_records().filter(id__in=chunk).update(last_weekly_status=None)
             sources_models.HealthEntityMasterIntermediateData.objects.filter(entity_id__in=chunk).update(entity_id=None)
             statistics_models.EntityDailyStatus.objects.all_records().filter(entity_id__in=chunk)._raw_delete(connection.alias)
             statistics_models.EntityWeeklyStatus.objects.all_records().filter(entity_id__in=chunk)._raw_delete(connection.alias)
@@ -1112,6 +1117,9 @@ def clean_old_live_data():
 
         # Purge any orphan soft-deleted entity statuses
         statistics_models.EntityDailyStatus.objects.all_records().filter(deleted__isnull=False)._raw_delete(connection.alias)
+        Entity.objects.all_records().filter(
+            last_weekly_status__in=statistics_models.EntityWeeklyStatus.objects.all_records().filter(deleted__isnull=False)
+        ).update(last_weekly_status=None)
         statistics_models.EntityWeeklyStatus.objects.all_records().filter(deleted__isnull=False)._raw_delete(connection.alias)
 
         background_task_utilities.task_on_complete(task_instance)

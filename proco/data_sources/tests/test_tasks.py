@@ -107,6 +107,39 @@ class DataSourcesTasksTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(sources_models.DailyCheckAppMeasurementData.objects.all().count(), 0)
         self.assertEqual(sources_models.QoSData.objects.all().count(), 0)
 
+    def test_clean_old_live_data_purging(self):
+        from django.utils import timezone
+        from proco.schools.models import School
+        from proco.connection_statistics.models import SchoolDailyStatus, SchoolWeeklyStatus, RealTimeConnectivity
+        from proco.entities.models import EntityType, Entity
+        from proco.entities.factories import EntityFactory
+
+        school = SchoolFactory(country=self.country, deleted=timezone.now())
+        SchoolDailyStatus.objects.create(school=school, date=timezone.now().date(), connectivity_speed=100)
+        SchoolWeeklyStatus.objects.create(school=school, year=2026, week=1, connectivity_speed=100)
+        RealTimeConnectivity.objects.create(school=school, connectivity_speed=100)
+
+        entity_type, _ = EntityType.objects.get_or_create(
+            code='health',
+            name='Health Facility',
+            master_data_model='data_sources.HealthEntityMasterIntermediateData',
+            detail_model='entities.HealthEntity',
+            detail_related_name='health_entity',
+        )
+        entity, health_entity = EntityFactory.create_entity(
+            'health',
+            country=self.country,
+            name='Test Clinic',
+            giga_id='test-clinic-id',
+            deleted=timezone.now(),
+            detail_kwargs={'facility_id_govt': 'govt-123'},
+        )
+
+        sources_tasks.clean_old_live_data()
+
+        self.assertFalse(School.objects.all_records().filter(id=school.id).exists())
+        self.assertFalse(Entity.objects.all_records().filter(id=entity.id).exists())
+
     def test_clean_historic_data(self):
         self.assertEqual(sources_models.SchoolMasterData.objects.all().count(), 3)
         self.assertEqual(sources_models.SchoolMasterData.history.model.objects.all().count(), 3)
