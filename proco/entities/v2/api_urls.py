@@ -13,6 +13,7 @@ country_entities.register(r'(?P<country_code>\w+)', entities_api.EntitiesViewSet
 app_name = 'entities'
 
 urlpatterns = [
+    # UI
     path('entity-types/', entities_api.EntityTypeListAPIView.as_view(), name='entity-types'),
     path('gentity-search/', entities_api.AggregateSearchEntityViewSet.as_view(), name='global-search-filter'),
     path('global-stat/', stats_entity_api.EntityGlobalStatsAPIView.as_view(), name='global-stat-all-entities'),

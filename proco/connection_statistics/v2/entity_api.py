@@ -18,7 +18,7 @@ from rest_framework.response import Response
 from rest_framework.utils.urls import remove_query_param
 from rest_framework.views import APIView
 
-from proco.accounts.models import DataLayer, DataSource, AdvanceFilter
+from proco.accounts.models import DataLayer, DataSource
 from proco.connection_statistics.config import app_config as statistics_configs
 from proco.connection_statistics.models import SchoolWeeklyStatus, EntityWeeklyStatus, EntityDailyStatus, \
     SchoolDailyStatus
@@ -794,70 +794,6 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
         params.pop(self.CACHE_KEY, None)
         return '{0}_{1}'.format(self.CACHE_KEY_PREFIX,
                                 '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))), )
-
-    @staticmethod
-    def find_most_recent_week(table_name, last_week_start, last_week_end, monday_date, max_weeks=9):
-        """
-        Find the most recent week with data by checking week-by-week backward.
-        Returns (monday_on_entry_date, sunday_on_entry_date) tuple.
-        """
-        monday_on_entry_date = None
-        sunday_on_entry_date = None
-
-        with connection.cursor() as cursor:
-            for weeks_back in range(max_weeks):
-                check_start = last_week_start - timedelta(days=7 * weeks_back)
-                check_end = last_week_end - timedelta(days=7 * weeks_back)
-
-                cursor.execute(f"""
-                    SELECT 1 FROM {table_name}
-                    WHERE deleted IS NULL
-                    AND date BETWEEN %s AND %s
-                    LIMIT 1
-                """, [check_start, check_end])
-
-                if cursor.fetchone() is not None:
-                    monday_on_entry_date = check_start
-                    sunday_on_entry_date = check_end
-                    break
-
-        # If no data found in checked weeks, fallback to latest available date
-        if not monday_on_entry_date:
-            with connection.cursor() as cursor:
-                cursor.execute(f"""
-                    SELECT date FROM {table_name}
-                    WHERE deleted IS NULL
-                    ORDER BY date DESC
-                    LIMIT 1
-                """)
-                row = cursor.fetchone()
-                if row:
-                    latest_daily_entry = row[0]
-                    monday_on_entry_date = latest_daily_entry - timedelta(days=latest_daily_entry.weekday())
-                    sunday_on_entry_date = monday_on_entry_date + timedelta(days=6)
-                else:
-                    monday_on_entry_date = monday_date
-                    sunday_on_entry_date = monday_date + timedelta(days=6)
-
-        return monday_on_entry_date, sunday_on_entry_date
-
-    @staticmethod
-    def get_available_years(table_name, default_year):
-        """
-        Get list of available years from the data using raw SQL.
-        Returns list of years as integers.
-        """
-        with connection.cursor() as cursor:
-            cursor.execute(f"""
-                SELECT DISTINCT EXTRACT(YEAR FROM date)::int as year
-                FROM {table_name}
-                WHERE deleted IS NULL
-                ORDER BY year
-            """)
-            if cursor.rowcount > 0:
-                return [row[0] for row in cursor.fetchall()]
-            return [default_year]
-
     @staticmethod
     def extract_entity_layer_params(request):
         """
@@ -874,250 +810,102 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
                 entity_layers[entity_code] = param_value
         return entity_layers
 
-    @staticmethod
-    def extract_entity_filter_params(request):
-        """
-        Extract all entity filter parameters from the request.
-        Looks for parameters matching pattern: {entity_code}_filter_id
-        e.g., school_filter_id, health_filter_id
-
-        Returns a dict mapping entity_code -> filter_id
-        """
-        entity_filters = {}
-        for param_name, param_value in request.query_params.items():
-            if param_name.endswith('_filter_id') and param_value:
-                entity_code = param_name.replace('_filter_id', '')
-                entity_filters[entity_code] = param_value
-        return entity_filters
-
-    @staticmethod
-    def build_layers_and_filters_list_for_entity(request, entity_code, layer_id=None, filter_id=None):
-        """
-        Helper method to build layers_list and filters_list for a specific entity type.
-        Only includes layers/filters that belong to the specified entity type.
-        Returns a tuple (layers_list, filters_list).
-        """
-        layers_list = []
-        filters_list = []
-
-        # Use explicitly passed layer_id only (do NOT fall back to old layer_id param here)
-        # The calling method should pass the correct layer_id for this entity type
-        effective_layer_id = layer_id
-        if effective_layer_id:
-            try:
-                data_layer = DataLayer.objects.select_related('entity_type').get(
-                    pk=effective_layer_id,
-                    status=DataLayer.LAYER_STATUS_PUBLISHED,
-                )
-                # Validate that the layer belongs to the expected entity type
-                layer_entity_code = data_layer.entity_type.code if data_layer.entity_type else LEGACY_MODEL
-                if layer_entity_code == entity_code:
-                    layers_list.append({
-                        'data_layer_id': data_layer.id,
-                        'name': data_layer.name,
-                        'entity_type': layer_entity_code,
-                    })
-            except DataLayer.DoesNotExist:
-                pass
-
-        # Use explicitly passed filter_id only
-        effective_filter_id = filter_id
-        if effective_filter_id:
-            try:
-                advance_filter = AdvanceFilter.objects.select_related('entity_type').get(
-                    pk=effective_filter_id,
-                    status=AdvanceFilter.FILTER_STATUS_PUBLISHED,
-                )
-                # Validate that the filter belongs to the expected entity type
-                filter_entity_code = advance_filter.entity_type.code if advance_filter.entity_type else LEGACY_MODEL
-                if filter_entity_code == entity_code:
-                    filters_list.append({
-                        'advance_filter_id': advance_filter.id,
-                        'name': advance_filter.name,
-                        'entity_type': filter_entity_code,
-                    })
-            except AdvanceFilter.DoesNotExist:
-                pass
-
-        return layers_list, filters_list
-
-    def get_school_configs(self, request, layer_id=None, filter_id=None, **kwargs):
+    def get_school_configs(self, request, layer_id=None, **kwargs):
         """
         Build connectivity configuration for school entity type.
-
-        Args:
-            request: The HTTP request
-            layer_id: Optional explicit layer ID (overrides request.query_params.get('layer_id'))
-            filter_id: Optional explicit filter ID (overrides request.query_params.get('filter_id'))
         """
-        use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
-        cache_key = self.get_cache_key() + '_school'
+        static_data = {}
+        queryset = SchoolDailyStatus.objects.filter(school__deleted__isnull=True)
 
-        static_data = None
-        if use_cached_data:
-            static_data = cache_manager.get(cache_key)
+        country_id = self.request.query_params.get('country_id', None)
+        if country_id:
+            queryset = queryset.filter(school__country_id=country_id)
 
-        if not static_data:
-            static_data = {}
+        admin1_id = self.request.query_params.get('admin1_id', None)
+        if admin1_id:
+            queryset = queryset.filter(school__admin1_id=admin1_id)
 
-            country_id = self.request.query_params.get('country_id', None)
-            if country_id:
-                self.queryset = self.queryset.filter(school__country_id=country_id)
+        school_id = self.request.query_params.get('school_id', None)
+        if school_id:
+            queryset = queryset.filter(school=school_id)
 
-            admin1_id = self.request.query_params.get('admin1_id', None)
-            if admin1_id:
-                self.queryset = self.queryset.filter(school__admin1_id=admin1_id)
+        school_ids = self.request.query_params.get('school_ids', '')
+        if not core_utilities.is_blank_string(school_ids):
+            school_ids = [int(school_id.strip()) for school_id in school_ids.split(',')]
+            queryset = queryset.filter(school__in=school_ids)
 
-            school_id = self.request.query_params.get('school_id', None)
-            if school_id:
-                self.queryset = self.queryset.filter(school=school_id)
+        effective_layer_id = layer_id
 
-            school_ids = self.request.query_params.get('school_ids', '')
-            if not core_utilities.is_blank_string(school_ids):
-                school_ids = [int(school_id.strip()) for school_id in school_ids.split(',')]
-                self.queryset = self.queryset.filter(school__in=school_ids)
-
-            # Use explicit layer_id if provided, otherwise fall back to request param
-            effective_layer_id = layer_id or request.query_params.get('layer_id')
-
-            if effective_layer_id:
-                data_layer_instance = get_object_or_404(
-                    DataLayer.objects.all(),
-                    pk=effective_layer_id,
-                    status=DataLayer.LAYER_STATUS_PUBLISHED,
-                    type=DataLayer.LAYER_TYPE_LIVE,
-                )
-
-                data_sources = data_layer_instance.data_sources.all()
-
-                live_data_sources = ['UNKNOWN']
-
-                for d in data_sources:
-                    source_type = (d.data_source.data_source_type or '').upper()
-                    if source_type == DataSource.DATA_SOURCE_TYPE_QOS.upper():
-                        live_data_sources.append(statistics_configs.QOS_SOURCE)
-                    elif source_type == DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP.upper():
-                        live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
-
-                parameter_col = data_sources.first().data_source_column
-                parameter_column_name = str(parameter_col['name'])
-
-                self.queryset = self.queryset.filter(
-                    live_data_source__in=live_data_sources,
-                ).filter(**{parameter_column_name + '__isnull': False})
-
-            today_date = core_utilities.get_current_datetime_object().date()
-            monday_date = today_date - timedelta(days=today_date.weekday())
-
-            last_week_start = monday_date - timedelta(days=7)
-            last_week_end = monday_date - timedelta(days=1)
-
-            monday_on_entry_date = None
-            sunday_on_entry_date = None
-
-            last_week_entry = self.queryset.filter(
-                date__range=(last_week_start, last_week_end)
-            ).values_list('date', flat=True).order_by('-date').first()
-
-            if last_week_entry:
-                monday_on_entry_date = last_week_start
-                sunday_on_entry_date = last_week_end
-            else:
-                latest_daily_entry = self.queryset.values_list('date', flat=True).order_by('-date').first()
-                if latest_daily_entry:
-                    monday_on_entry_date = latest_daily_entry - timedelta(days=latest_daily_entry.weekday())
-                    sunday_on_entry_date = monday_on_entry_date + timedelta(days=6)
-
-            # Use explicit filter_id if provided
-            effective_filter_id = filter_id or request.query_params.get('filter_id')
-            layers_list, filters_list = self.build_layers_and_filters_list_for_entity(
-                request, LEGACY_MODEL, effective_layer_id, effective_filter_id
+        if effective_layer_id:
+            data_layer_instance = get_object_or_404(
+                DataLayer.objects.all(),
+                pk=effective_layer_id,
+                status=DataLayer.LAYER_STATUS_PUBLISHED,
+                type=DataLayer.LAYER_TYPE_LIVE,
             )
 
-            if monday_on_entry_date:
-                years = list(
-                    self.queryset.values_list('date__year', flat=True).order_by('date__year').distinct()
-                )
-                static_data = {
-                    'week': {
-                        'start_date': date_utilities.format_date(monday_on_entry_date),
-                        'end_date': date_utilities.format_date(sunday_on_entry_date)
-                    },
-                    'month': {
-                        'start_date': date_utilities.format_date(date_utilities.get_first_date_of_month(
-                            monday_on_entry_date.year, monday_on_entry_date.month)),
-                        'end_date': date_utilities.format_date(date_utilities.get_last_date_of_month(
-                            monday_on_entry_date.year, monday_on_entry_date.month))
-                    },
-                    'years': years,
-                    'layers_list': layers_list,
-                    'filters_list': filters_list,
-                }
-            else:
-                static_data = {
-                    'layers_list': layers_list,
-                    'filters_list': filters_list,
-                }
+            data_sources = data_layer_instance.data_sources.all()
 
-            request_path = remove_query_param(request.get_full_path(), 'cache')
-            cache_manager.set(cache_key, static_data, request_path=request_path,
-                              soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
+            live_data_sources = ['UNKNOWN']
 
+            for d in data_sources:
+                source_type = (d.data_source.data_source_type or '').upper()
+                if source_type == DataSource.DATA_SOURCE_TYPE_QOS.upper():
+                    live_data_sources.append(statistics_configs.QOS_SOURCE)
+                elif source_type == DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP.upper():
+                    live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
+
+            parameter_col = data_sources.first().data_source_column
+            parameter_column_name = str(parameter_col['name'])
+
+            queryset = queryset.filter(
+                live_data_source__in=live_data_sources,
+            ).filter(**{parameter_column_name + '__isnull': False})
+
+        today_date = core_utilities.get_current_datetime_object().date()
+        monday_date = today_date - timedelta(days=today_date.weekday())
+
+        last_week_start = monday_date - timedelta(days=7)
+        last_week_end = monday_date - timedelta(days=1)
+
+        monday_on_entry_date = None
+        sunday_on_entry_date = None
+
+        last_week_entry = queryset.filter(
+            date__range=(last_week_start, last_week_end)
+        ).values_list('date', flat=True).order_by('-date').first()
+
+        if last_week_entry:
+            monday_on_entry_date = last_week_start
+            sunday_on_entry_date = last_week_end
+        else:
+            latest_daily_entry = queryset.values_list('date', flat=True).order_by('-date').first()
+            if latest_daily_entry:
+                monday_on_entry_date = latest_daily_entry - timedelta(days=latest_daily_entry.weekday())
+                sunday_on_entry_date = monday_on_entry_date + timedelta(days=6)
+
+        if monday_on_entry_date:
+            first_date = queryset.order_by('date').values_list('date', flat=True).first()
+            last_date = queryset.order_by('-date').values_list('date', flat=True).first()
+            years = list(range(first_date.year, last_date.year + 1)) if first_date and last_date else []
+            static_data = {
+                'week': {
+                    'start_date': date_utilities.format_date(monday_on_entry_date),
+                    'end_date': date_utilities.format_date(sunday_on_entry_date)
+                },
+                'month': {
+                    'start_date': date_utilities.format_date(date_utilities.get_first_date_of_month(
+                        monday_on_entry_date.year, monday_on_entry_date.month)),
+                    'end_date': date_utilities.format_date(date_utilities.get_last_date_of_month(
+                        monday_on_entry_date.year, monday_on_entry_date.month))
+                },
+                'years': years,
+            }
         return static_data
-
-    @classmethod
-    def resolve_entity_type(cls, request):
-        """
-        Determine the canonical entity type code from the request.
-        Priority: layer_id's entity_type > explicit entity_type__code param > default (school).
-        """
-        layer_id = request.query_params.get('layer_id')
-        explicit_entity_type = cls.parse_entity_type_code_param(request)
-
-        if layer_id:
-            try:
-                data_layer = DataLayer.objects.select_related('entity_type').get(
-                    pk=layer_id,
-                    status=DataLayer.LAYER_STATUS_PUBLISHED,
-                )
-                if data_layer.entity_type:
-                    layer_entity_type = LEGACY_MODEL if data_layer.entity_type.is_legacy else data_layer.entity_type.code
-
-                    if explicit_entity_type and explicit_entity_type != layer_entity_type:
-                        from rest_framework.exceptions import ValidationError
-                        raise ValidationError(
-                            {"error": "Requested entity_type__code does not match the layer's entity type."})
-
-                    return layer_entity_type
-            except DataLayer.DoesNotExist:
-                pass
-
-        if explicit_entity_type:
-            return explicit_entity_type
-
-        return LEGACY_MODEL
 
     def get(self, request, *args, **kwargs):
         """
         Get connectivity configurations for entity types specified via query parameters.
-
-        Query Parameters:
-            {entity_code}_layer_id: Layer ID for a specific entity type (e.g., school_layer_id, health_layer_id)
-            {entity_code}_filter_id: Filter ID for a specific entity type (e.g., school_filter_id, health_filter_id)
-            country_id: Country ID to filter by (applies to all entities)
-            admin1_id: Admin1 ID to filter by (applies to all entities)
-            cache: Set to 'off' to bypass cache
-
-        Returns:
-            Response with entity type codes as keys:
-            {
-                "school": {"week": {...}, "month": {...}, "years": [...], "layers_list": [...], "filters_list": [...]},
-                "health": {"week": {...}, "month": {...}, "years": [...], "layers_list": [...], "filters_list": [...]},
-                ...
-            }
-
-        Future-proof: Adding a new entity type (e.g., hospital) only requires adding
-        hospital_layer_id parameter - no code changes needed.
         """
         use_cached_data = request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
         cache_key = self.get_cache_key()
@@ -1127,48 +915,30 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
             data = cache_manager.get(cache_key)
 
         if not data:
-            # Extract entity-specific layer and filter parameters
             entity_layers = self.extract_entity_layer_params(request)
-            entity_filters = self.extract_entity_filter_params(request)
-
-            # Build the response - only query entity types that have explicit parameters
             data = {}
-
-            # Get entity codes to process (union of layer params and filter params)
-            entity_codes_to_process = set(entity_layers.keys()) | set(entity_filters.keys())
-
-            # Handle backward compatibility: if old-style layer_id is provided without entity-specific params
-            if not entity_codes_to_process and request.query_params.get('layer_id'):
-                resolved_type = self.resolve_entity_type(request)
-                entity_codes_to_process.add(resolved_type)
+            requested_entity_type_codes = self.get_entity_type_code_params(request=request)
+            if requested_entity_type_codes is None:
+                entity_codes_to_process = set(EntityType.get_all_active().values_list('code', flat=True))
+                entity_codes_to_process.add(LEGACY_MODEL)
+            else:
+                entity_codes_to_process = set(requested_entity_type_codes)
 
             # Process each entity type that has parameters
-            for entity_code in entity_codes_to_process:
-                # Get layer_id and filter_id for this entity type
-                layer_id = entity_layers.get(entity_code)
-                filter_id = entity_filters.get(entity_code)
+            if LEGACY_MODEL in entity_codes_to_process:
+                layer_id = entity_layers.get(LEGACY_MODEL)
+                data[LEGACY_MODEL] = self.get_school_configs(request, layer_id=layer_id)
+                entity_codes_to_process.discard(LEGACY_MODEL)
 
-                # Get the entity type object
-                try:
-                    entity_type = EntityType.objects.get(code=entity_code, deleted__isnull=True, is_active=True)
-                except EntityType.DoesNotExist:
-                    # Skip if entity type doesn't exist or is inactive
+            entity_types = EntityType.get_all_active().filter(code__in=entity_codes_to_process)
+            for entity_type in entity_types:
+                entity_code = entity_type.code
+                layer_id = entity_layers.get(entity_code)
+                if entity_type.is_legacy:
                     continue
 
-                # Build configs for this entity type
-                if entity_type.is_legacy:
-                    # School (legacy) - uses SchoolDailyStatus
-                    self.queryset = SchoolDailyStatus.objects.filter(school__deleted__isnull=True)
-                    entity_data = self.get_school_configs(request, layer_id=layer_id, filter_id=filter_id)
-                    data[LEGACY_MODEL] = entity_data
-                else:
-                    # Non-legacy entity (health, etc.) - uses EntityDailyStatus
-                    self.queryset = EntityDailyStatus.objects.filter(
-                        entity__deleted__isnull=True,
-                        entity__entity_type=entity_type,
-                    )
-                    entity_data = self.get_entity_configs(request, entity_code, layer_id=layer_id, filter_id=filter_id)
-                    data[entity_code] = entity_data
+                entity_data = self.get_entity_configs(request, entity_code, layer_id=layer_id)
+                data[entity_code] = entity_data
 
             request_path = remove_query_param(request.get_full_path(), 'cache')
             cache_manager.set(cache_key, data, request_path=request_path,
@@ -1176,127 +946,102 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
 
         return Response(data=data)
 
-    def get_entity_configs(self, request, entity_type_code, layer_id=None, filter_id=None, **kwargs):
+    def get_entity_configs(self, request, entity_type_code, layer_id=None, **kwargs):
         """
         Build connectivity configuration response for non-legacy (non-school) entity types.
-        Mirrors get_school_configs() but operates on EntityDailyStatus.
-
-        Args:
-            request: The HTTP request
-            entity_type_code: The entity type code (e.g., 'health', 'library')
-            layer_id: Optional explicit layer ID
-            filter_id: Optional explicit filter ID
         """
-        use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
-        cache_key = self.get_cache_key() + f'_{entity_type_code}'
+        static_data = {}
+        entity_type_obj = get_object_or_404(
+            EntityType.objects.all(),
+            code=entity_type_code,
+            deleted__isnull=True,
+            is_active=True,
+            is_legacy=False,
+        )
+        queryset = EntityDailyStatus.objects.filter(
+            entity__deleted__isnull=True,
+            entity__entity_type=entity_type_obj,
+        )
 
-        static_data = None
-        if use_cached_data:
-            static_data = cache_manager.get(cache_key)
+        country_id = self.request.query_params.get('country_id', None)
+        if country_id:
+            queryset = queryset.filter(entity__country_id=country_id)
 
-        if not static_data:
-            static_data = {}
+        admin1_id = self.request.query_params.get('admin1_id', None)
+        if admin1_id:
+            queryset = queryset.filter(entity__admin1_id=admin1_id)
 
-            country_id = self.request.query_params.get('country_id', None)
-            if country_id:
-                self.queryset = self.queryset.filter(entity__country_id=country_id)
+        entity_id = self.request.query_params.get('entity_id', None)
+        if entity_id:
+            queryset = queryset.filter(entity=entity_id)
 
-            admin1_id = self.request.query_params.get('admin1_id', None)
-            if admin1_id:
-                self.queryset = self.queryset.filter(entity__admin1_id=admin1_id)
+        entity_ids = self.request.query_params.get('entity_ids', '')
+        if not core_utilities.is_blank_string(entity_ids):
+            entity_ids = [int(eid.strip()) for eid in entity_ids.split(',')]
+            queryset = queryset.filter(entity__in=entity_ids)
 
-            entity_id = self.request.query_params.get('entity_id', None)
-            if entity_id:
-                self.queryset = self.queryset.filter(entity=entity_id)
-
-            entity_ids = self.request.query_params.get('entity_ids', '')
-            if not core_utilities.is_blank_string(entity_ids):
-                entity_ids = [int(eid.strip()) for eid in entity_ids.split(',')]
-                self.queryset = self.queryset.filter(entity__in=entity_ids)
-
-            # Use explicit layer_id if provided
-            effective_layer_id = layer_id or request.query_params.get('layer_id')
-            if effective_layer_id:
-                data_layer_instance = get_object_or_404(
-                    DataLayer.objects.all(),
-                    pk=effective_layer_id,
-                    status=DataLayer.LAYER_STATUS_PUBLISHED,
-                    type=DataLayer.LAYER_TYPE_LIVE,
-                )
-
-                data_sources = data_layer_instance.data_sources.all()
-
-                live_data_sources = ['UNKNOWN']
-
-                for d in data_sources:
-                    source_type = (d.data_source.data_source_type or '').upper()
-                    if source_type == DataSource.DATA_SOURCE_TYPE_QOS.upper():
-                        live_data_sources.append(statistics_configs.QOS_SOURCE)
-                    elif source_type == DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP.upper():
-                        live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
-
-                parameter_col = data_sources.first().data_source_column
-                parameter_column_name = str(parameter_col['name'])
-
-                self.queryset = self.queryset.filter(
-                    live_data_source__in=live_data_sources,
-                ).filter(**{parameter_column_name + '__isnull': False})
-
-            today_date = core_utilities.get_current_datetime_object().date()
-            monday_date = today_date - timedelta(days=today_date.weekday())
-
-            last_week_start = monday_date - timedelta(days=7)
-            last_week_end = monday_date - timedelta(days=1)
-
-            monday_on_entry_date = None
-            sunday_on_entry_date = None
-
-            last_week_entry = self.queryset.filter(
-                date__range=(last_week_start, last_week_end)
-            ).values_list('date', flat=True).order_by('-date').first()
-
-            if last_week_entry:
-                monday_on_entry_date = last_week_start
-                sunday_on_entry_date = last_week_end
-            else:
-                latest_daily_entry = self.queryset.values_list('date', flat=True).order_by('-date').first()
-                if latest_daily_entry:
-                    monday_on_entry_date = latest_daily_entry - timedelta(days=latest_daily_entry.weekday())
-                    sunday_on_entry_date = monday_on_entry_date + timedelta(days=6)
-
-            # Use explicit filter_id if provided
-            effective_filter_id = filter_id or request.query_params.get('filter_id')
-            layers_list, filters_list = self.build_layers_and_filters_list_for_entity(
-                request, entity_type_code, effective_layer_id, effective_filter_id
+        effective_layer_id = layer_id
+        if effective_layer_id:
+            data_layer_instance = get_object_or_404(
+                DataLayer.objects.all(),
+                pk=effective_layer_id,
+                status=DataLayer.LAYER_STATUS_PUBLISHED,
+                type=DataLayer.LAYER_TYPE_LIVE,
             )
 
-            if monday_on_entry_date:
-                years = list(
-                    self.queryset.values_list('date__year', flat=True).order_by('date__year').distinct()
-                )
-                static_data = {
-                    'week': {
-                        'start_date': date_utilities.format_date(monday_on_entry_date),
-                        'end_date': date_utilities.format_date(sunday_on_entry_date)
-                    },
-                    'month': {
-                        'start_date': date_utilities.format_date(date_utilities.get_first_date_of_month(
-                            monday_on_entry_date.year, monday_on_entry_date.month)),
-                        'end_date': date_utilities.format_date(date_utilities.get_last_date_of_month(
-                            monday_on_entry_date.year, monday_on_entry_date.month))
-                    },
-                    'years': years,
-                    'layers_list': layers_list,
-                    'filters_list': filters_list,
-                }
-            else:
-                static_data = {
-                    'layers_list': layers_list,
-                    'filters_list': filters_list,
-                }
+            data_sources = data_layer_instance.data_sources.all()
 
-            request_path = remove_query_param(request.get_full_path(), 'cache')
-            cache_manager.set(cache_key, static_data, request_path=request_path,
-                              soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
+            live_data_sources = ['UNKNOWN']
 
+            for d in data_sources:
+                source_type = (d.data_source.data_source_type or '').upper()
+                if source_type == DataSource.DATA_SOURCE_TYPE_QOS.upper():
+                    live_data_sources.append(statistics_configs.QOS_SOURCE)
+                elif source_type == DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP.upper():
+                    live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
+
+            parameter_col = data_sources.first().data_source_column
+            parameter_column_name = str(parameter_col['name'])
+
+            queryset = queryset.filter(
+                live_data_source__in=live_data_sources,
+            ).filter(**{parameter_column_name + '__isnull': False})
+
+        today_date = core_utilities.get_current_datetime_object().date()
+        monday_date = today_date - timedelta(days=today_date.weekday())
+
+        last_week_start = monday_date - timedelta(days=7)
+        last_week_end = monday_date - timedelta(days=1)
+
+        monday_on_entry_date = None
+        sunday_on_entry_date = None
+
+        last_week_entry = queryset.filter(
+            date__range=(last_week_start, last_week_end)
+        ).values_list('date', flat=True).order_by('-date').first()
+
+        if last_week_entry:
+            monday_on_entry_date = last_week_start
+            sunday_on_entry_date = last_week_end
+        else:
+            latest_daily_entry = queryset.values_list('date', flat=True).order_by('-date').first()
+            if latest_daily_entry:
+                monday_on_entry_date = latest_daily_entry - timedelta(days=latest_daily_entry.weekday())
+                sunday_on_entry_date = monday_on_entry_date + timedelta(days=6)
+
+        if monday_on_entry_date:
+            years = list(range(2020, datetime.now().year + 1))
+            static_data = {
+                'week': {
+                    'start_date': date_utilities.format_date(monday_on_entry_date),
+                    'end_date': date_utilities.format_date(sunday_on_entry_date)
+                },
+                'month': {
+                    'start_date': date_utilities.format_date(date_utilities.get_first_date_of_month(
+                        monday_on_entry_date.year, monday_on_entry_date.month)),
+                    'end_date': date_utilities.format_date(date_utilities.get_last_date_of_month(
+                        monday_on_entry_date.year, monday_on_entry_date.month))
+                },
+                'years': years,
+            }
         return static_data
