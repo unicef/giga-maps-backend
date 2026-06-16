@@ -105,12 +105,12 @@ class EntityGlobalStatsAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, API
                  'all_countries', 'schools_with_connectivity_status_mapped',
                  'countries_with_connectivity_status_mapped').order_by()
 
-        school_filters = core_utilities.get_filter_sql(self.request, 'schools', 'schools_school')
+        school_filters = core_utilities.get_filter_sql(self.request, 'schools', 'schools_school', LEGACY_MODEL)
         if len(school_filters) > 0:
             school_connectivity_status_qry = school_connectivity_status_qry.extra(where=[school_filters])
 
-        school_static_filters = core_utilities.get_filter_sql(self.request, 'school_static',
-                                                              'connection_statistics_schoolweeklystatus')
+        school_static_filters = core_utilities.get_filter_sql(
+            self.request, 'school_static', 'connection_statistics_schoolweeklystatus', LEGACY_MODEL)
 
         if len(school_static_filters) > 0:
             school_connectivity_status_qry = school_connectivity_status_qry.annotate(
@@ -197,15 +197,15 @@ class EntityGlobalStatsAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, API
         )
 
         entity_filters = core_utilities.get_filter_sql(
-            self.request, 'entities', 'entities_entity'
+            self.request, 'entities', 'entities_entity', entity_type
         )
         if len(entity_filters) > 0:
             stats_qs = stats_qs.extra(where=[entity_filters])
 
         stats_qs = self.apply_entity_detail_filters(stats_qs, entity_type_obj)
 
-        entity_static_filters = core_utilities.get_filter_sql(self.request, 'entity_static',
-                                                              'connection_statistics_entityweeklystatus')
+        entity_static_filters = core_utilities.get_filter_sql(
+            self.request, 'entity_static', 'connection_statistics_entityweeklystatus', entity_type)
 
         if len(entity_static_filters) > 0:
             stats_qs = stats_qs.annotate(
@@ -336,7 +336,8 @@ class EntityConnectivityAPIView(EntityTypeCodeMixin, APIView):
             weekly_queryset = weekly_queryset.extra(where=[self.school_filters])
 
         if len(self.school_static_filters) > 0:
-            school_static_filters = core_utilities.get_filter_sql(self.request, 'school_static', 'T5')
+            school_static_filters = core_utilities.get_filter_sql(
+                self.request, 'school_static', 'T5', LEGACY_MODEL)
             weekly_queryset = weekly_queryset.annotate(
                 total_weekly_schools=Count('last_weekly_status__school_id', distinct=True),
             ).values(
@@ -467,9 +468,10 @@ class EntityConnectivityAPIView(EntityTypeCodeMixin, APIView):
             data = cache_manager.get(cache_key)
 
         if not data:
-            self.school_filters = core_utilities.get_filter_sql(self.request, 'schools', 'schools_school')
-            self.school_static_filters = core_utilities.get_filter_sql(self.request, 'school_static',
-                                                                       'connection_statistics_schoolweeklystatus')
+            self.school_filters = core_utilities.get_filter_sql(
+                self.request, 'schools', 'schools_school', LEGACY_MODEL)
+            self.school_static_filters = core_utilities.get_filter_sql(
+                self.request, 'school_static', 'connection_statistics_schoolweeklystatus', LEGACY_MODEL)
 
             country_id = self.request.query_params.get('country_id', None)
             if country_id:
@@ -546,7 +548,8 @@ class EntityConnectivityAPIView(EntityTypeCodeMixin, APIView):
             weekly_queryset = weekly_queryset.extra(where=[self.entity_filters])
 
         if len(self.entity_static_filters) > 0:
-            entity_static_filters = core_utilities.get_filter_sql(self.request, 'entity_static', 'T5')
+            entity_static_filters = core_utilities.get_filter_sql(
+                self.request, 'entity_static', 'T5', self.entity_type_code)
             weekly_queryset = weekly_queryset.annotate(
                 total_weekly_entities=Count('last_weekly_status__entity_id', distinct=True),
             ).values(
@@ -683,11 +686,18 @@ class EntityConnectivityAPIView(EntityTypeCodeMixin, APIView):
 
         if not data:
             # -------- Filters
-            self.entity_filters = []
+            self.entity_type_code = entity_type
+            self.entity_filters = core_utilities.get_filter_sql(
+                self.request,
+                'entities',
+                'entities_entity',
+                entity_type
+            )
             self.entity_static_filters = core_utilities.get_filter_sql(
                 self.request,
                 'entity_static',
-                'connection_statistics_entityweeklystatus'
+                'connection_statistics_entityweeklystatus',
+                entity_type
             )
 
             # -------- Apply entity_type filter

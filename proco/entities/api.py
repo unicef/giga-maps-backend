@@ -129,12 +129,16 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
         elif 'entity_type__in' in query_param_keys:
             table_configs['entity_types'] = [c_id.strip() for c_id in query_params['entity_type__in'].split(',')]
 
+        entity_type_code = None
+        if len(table_configs.get('entity_types', [])) == 1:
+            entity_type_code = table_configs['entity_types'][0]
+
         table_configs['entity_filters'] = core_utilities.get_filter_sql(
-            request, 'entity', 'entities_entity')
+            request, 'entities', 'entities_entity', entity_type_code)
         table_configs['entity_static_filters'] = core_utilities.get_filter_sql(
-            request, 'entity_static', table_configs['master_data_table'])
+            request, 'entity_static', table_configs['master_data_table'], entity_type_code)
         table_configs['entity_real_time_filters'] = core_utilities.get_filter_sql(
-            request, 'entity_real_time', 'connection_statistics_entityweeklystatus')
+            request, 'entity_real_time', 'connection_statistics_entityweeklystatus', entity_type_code)
 
     def envelope_to_sql(self, env, request):
         tbl = self.table_config.copy()

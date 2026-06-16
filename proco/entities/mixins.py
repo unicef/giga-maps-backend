@@ -84,20 +84,23 @@ class EntityDetailFilterMixin:
             detail_filters = core_utilities.get_filter_sql(
                 request,
                 table_alias,
-                table_alias,
+                detail_table_name,
+                entity_type_obj.code,
             )
             if len(detail_filters) == 0:
                 continue
 
-            tables.append('{0} AS {1}'.format(detail_table_name, table_alias))
+            if detail_table_name not in tables:
+                tables.append(detail_table_name)
+
             where.extend([
                 '{0}."{1}" = {2}."{3}"'.format(
                     base_table_name,
                     self.ENTITY_BASE_PK_COLUMN,
-                    table_alias,
+                    detail_table_name,
                     self.ENTITY_DETAIL_FK_COLUMN,
                 ),
-                '{0}."deleted" IS NULL'.format(table_alias),
+                '{0}."deleted" IS NULL'.format(detail_table_name),
                 detail_filters,
             ])
 

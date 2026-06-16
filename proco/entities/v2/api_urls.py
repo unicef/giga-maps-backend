@@ -13,14 +13,11 @@ country_entities.register(r'(?P<country_code>\w+)', entities_api.EntitiesViewSet
 app_name = 'entities'
 
 urlpatterns = [
-    # Entity types
     path('entity-types/', entities_api.EntityTypeListAPIView.as_view(), name='entity-types'),
-
-    # Cognitive Search Index based searching for Entities
     path('gentity-search/', entities_api.AggregateSearchEntityViewSet.as_view(), name='global-search-filter'),
-
-    # Entity Global Stat
     path('global-stat/', stats_entity_api.EntityGlobalStatsAPIView.as_view(), name='global-stat-all-entities'),
+    path('connectivityconfigs/', stats_entity_api.EntityConnectivityConfigurationsViewSet.as_view(),
+         name='entity-get-latest-week-and-month'),
 
     # Entity tiles
     path('tiles/connectivity_status/',
@@ -88,9 +85,6 @@ urlpatterns = [
 
     path('connectivity-stat/', stats_entity_api.EntityConnectivityAPIView.as_view(),
          name='global-connectivity-stat-entities'),
-
-    path('connectivityconfigs/', stats_entity_api.EntityConnectivityConfigurationsViewSet.as_view(),
-         name='entity-get-latest-week-and-month'),
 
     path('tiles/connectivity/', entities_api.EntityGlobalConnectivityTileRequestHandler.as_view(),
          name='tiles-global-connectivity-view'),

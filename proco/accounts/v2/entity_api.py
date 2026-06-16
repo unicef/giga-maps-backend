@@ -106,20 +106,20 @@ class BaseEntityDataLayerAPIViewSet(APIView):
         self.kwargs['layer_type'] = layer_instance.type
 
         self.kwargs['school_filters'] = core_utilities.get_filter_sql(
-            self.request, 'schools', 'schools_school')
+            self.request, 'schools', 'schools_school', LEGACY_MODEL)
         self.kwargs['school_static_filters'] = core_utilities.get_filter_sql(
-            self.request, 'school_static', 'connection_statistics_schoolweeklystatus')
+            self.request, 'school_static', 'connection_statistics_schoolweeklystatus', LEGACY_MODEL)
 
         if layer_instance.entity_type is not None and not layer_instance.entity_type.is_legacy:
             entity_type = layer_instance.entity_type.code
             entity_static_table = f"entities_{entity_type}_entity"
 
             self.kwargs['entity_filters'] = core_utilities.get_filter_sql(
-                self.request, 'entity', 'entities_entity')
+                self.request, 'entities', 'entities_entity', entity_type)
             self.kwargs['entity_static_filters'] = core_utilities.get_filter_sql(
-                self.request, 'entity_static', entity_static_table)
+                self.request, 'entity_static', entity_static_table, entity_type)
             self.kwargs['entity_real_time_filters'] = core_utilities.get_filter_sql(
-                self.request, 'entity_real_time', 'connection_statistics_entityweeklystatus')
+                self.request, 'entity_real_time', 'connection_statistics_entityweeklystatus', entity_type)
         else:
             self.kwargs['entity_filters'] = ''
             self.kwargs['entity_static_filters'] = ''
@@ -195,20 +195,20 @@ class BaseEntityDataLayerAPIViewSet(APIView):
         self.kwargs['layer_type'] = layer_instance.type
 
         self.kwargs['school_filters'] = core_utilities.get_filter_sql(
-            self.request, 'schools', 'schools_school')
+            self.request, 'schools', 'schools_school', LEGACY_MODEL)
         self.kwargs['school_static_filters'] = core_utilities.get_filter_sql(
-            self.request, 'school_static', 'connection_statistics_schoolweeklystatus')
+            self.request, 'school_static', 'connection_statistics_schoolweeklystatus', LEGACY_MODEL)
 
         if layer_instance.entity_type is not None and not layer_instance.entity_type.is_legacy:
             entity_type = layer_instance.entity_type.code
             entity_static_table = f"entities_{entity_type}_entity"
 
             self.kwargs['entity_filters'] = core_utilities.get_filter_sql(
-                self.request, 'entity', 'entities_entity')
+                self.request, 'entities', 'entities_entity', entity_type)
             self.kwargs['entity_static_filters'] = core_utilities.get_filter_sql(
-                self.request, 'entity_static', entity_static_table)
+                self.request, 'entity_static', entity_static_table, entity_type)
             self.kwargs['entity_real_time_filters'] = core_utilities.get_filter_sql(
-                self.request, 'entity_real_time', 'connection_statistics_entityweeklystatus')
+                self.request, 'entity_real_time', 'connection_statistics_entityweeklystatus', entity_type)
 
     def get_benchmark_value(self, data_layer_instance):
         benchmark_val = data_layer_instance.global_benchmark.get('value')

@@ -333,17 +333,31 @@ def get_giga_filter_fields(request):
     return filter_field_data
 
 
-def get_filter_sql(request, filter_key, table_name):
+def get_filter_sql(request, filter_key, table_name, entity_type_code=None):
     query_params = request.query_params.dict()
     if len(query_params) == 0:
         return ''
 
     filter_fields = get_giga_filter_fields(request)
-    advance_filters = set(filter_fields.get(filter_key, [])) & set(query_params.keys())
+
+    normalized_query_params = {}
+    if entity_type_code:
+        entity_type_prefix = '{0}__'.format(entity_type_code)
+        for query_param_key in query_params:
+            if query_param_key.startswith(entity_type_prefix):
+                normalized_query_params[query_param_key[len(entity_type_prefix):]] = query_param_key
+
+    for query_param_key in query_params:
+        normalized_query_params.setdefault(query_param_key, query_param_key)
+
+    advance_filters = []
+    for filter_field in filter_fields.get(filter_key, []):
+        if filter_field in normalized_query_params:
+            advance_filters.append((filter_field, normalized_query_params[filter_field]))
 
     sql_list = []
-    for field_filter in advance_filters:
-        filter_value = str(query_params[field_filter]).lower()
+    for field_filter, query_param_key in advance_filters:
+        filter_value = str(query_params[query_param_key]).lower()
         sql_str = None
         field_name = None
 
@@ -353,7 +367,7 @@ def get_filter_sql(request, filter_key, table_name):
             if filter_value == 'none':
                 sql_str = """({table_name}."{field_name}" IS NULL OR {table_name}."{field_name}" = '')"""
             elif '|' in filter_value:
-                filter_values = str(query_params[field_filter]).split('|')
+                filter_values = str(query_params[query_param_key]).split('|')
                 value_list  = []
                 for val in filter_values:
                     if val == 'none':
@@ -368,7 +382,7 @@ def get_filter_sql(request, filter_key, table_name):
                     else:
                         sql_str = """{table_name}."{field_name}" IN ({value})"""
             else:
-                filter_value = str(query_params[field_filter]).replace("'", "''")
+                filter_value = str(query_params[query_param_key]).replace("'", "''")
                 sql_str = """{table_name}."{field_name}" = '{value}'"""
         elif field_filter.endswith('__iexact'):
             field_name = field_filter.replace('__iexact', '')
@@ -395,7 +409,7 @@ def get_filter_sql(request, filter_key, table_name):
                 filter_value = filter_value.replace("'", "''")
         elif field_filter.endswith('__contains'):
             field_name = field_filter.replace('__contains', '')
-            filter_value = str(query_params[field_filter]).replace("'", "''")
+            filter_value = str(query_params[query_param_key]).replace("'", "''")
             sql_str = """{table_name}."{field_name}"::text LIKE '{value}'"""
         elif field_filter.endswith('__icontains'):
             field_name = field_filter.replace('__icontains', '')
