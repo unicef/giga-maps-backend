@@ -294,6 +294,16 @@ health_data_source_json = [
                 'table_name': 'entities_entity',
                 'count_labels': ['good', 'moderate', 'no', 'unknown'],
             },
+            {
+                'name': 'coverage_status',
+                'type': 'str',
+                'is_parameter': True,
+                'alias': 'Coverage Status (coverage_status)',
+                'unit': '',
+                'display_unit': '',
+                'table_name': 'entities_entity',
+                'count_labels': ['good', 'moderate', 'no', 'unknown'],
+            },
         ],
         'status': 'PUBLISHED'
     },
@@ -387,6 +397,54 @@ health_data_layer_json = [
                     'alias': 'Latency',
                     'base_benchmark': 1,
                     'display_unit': 'ms',
+                    'supported_functions': []
+                }
+            }
+        ]
+    },
+    {
+        'code': 'DEFAULT_COVERAGE_HEALTH',
+        'name': 'Health Coverage data',
+        'icon': """<svg id="icon" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><style>.cls-1 {fill: none;}</style></defs><path d="M10.57,30l.9333-2h8.9928l.9333,2h2.2072L17,15.7778V11H15v4.7778L8.3631,30ZM16,18.3647,17.6965,22h-3.393ZM13.37,24h5.26l.9333,2H12.4369Z" transform="translate(0 0)"/><path d="M10.7832,9.3325a7.0007,7.0007,0,0,1,10.4341,0l-1.49,1.334a5,5,0,0,0-7.4537,0Z" transform="translate(0 0)"/><path d="M7.1992,6.3994a11.0019,11.0019,0,0,1,17.6006,0L23.2,7.6a9.0009,9.0009,0,0,0-14.4014,0Z" transform="translate(0 0)"/><rect id="_Transparent_Rectangle_" data-name="&lt;Transparent Rectangle&gt;" class="cls-1" width="32" height="32"/></svg>""",
+        'description': 'Coverage status for health facilities',
+        'version': 'V 1.0',
+        'type': 'STATIC',
+        'category': 'COVERAGE',
+        'applicable_countries': [],
+        'global_benchmark': {},
+        'legend_configs': {
+            'good': {
+                'values': ['good'],
+                'labels': 'Covered'
+            },
+            'moderate': {
+                'values': ['moderate'],
+                'labels': 'Moderate'
+            },
+            'bad': {
+                'values': ['no'],
+                'labels': 'No Coverage'
+            },
+            'unknown': {
+                'values': [],
+                'labels': 'Unknown'
+            }
+        },
+        'is_reverse': False,
+        'status': 'PUBLISHED',
+        'data_sources': [
+            {
+                'name': 'Health Entity Master',
+                'data_source_type': 'HEALTH_MASTER',
+                'data_source_column': {
+                    'name': 'coverage_status',
+                    'type': 'str',
+                    'is_parameter': True,
+                    'alias': 'Coverage Status',
+                    'unit': '',
+                    'display_unit': '',
+                    'table_name': 'entities_entity',
+                    'count_labels': ['good', 'moderate', 'no', 'unknown'],
                     'supported_functions': []
                 }
             }
