@@ -1632,6 +1632,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         parameter_col_type = kwargs['parameter_col'].get('type', 'str').lower()
         kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'sws')
         is_sql_value = False
+        has_remainder = False
 
         for title, values_and_label in legend_configs.items():
             values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
@@ -1682,7 +1683,12 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                         ))
                 else:
                     values = set(values_l)
-                    if parameter_col_type == 'str':
+                    if not values:
+                        label_cases.append('0 AS "{label}",'.format(label=label))
+                    elif has_remainder:
+                        label_cases.append('0 AS "{label}",'.format(label=label))
+                    elif parameter_col_type == 'str':
+                        has_remainder = True
                         label_cases.append(
                             'COUNT(DISTINCT CASE WHEN LOWER({table_name}."{col_name}") NOT IN ({value}) '
                             'THEN schools_school."id" ELSE NULL END) AS "{label}",'.format(
@@ -1692,6 +1698,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                                 value=','.join(["'" + str(v).lower() + "'" for v in values])
                             ))
                     elif parameter_col_type == 'int':
+                        has_remainder = True
                         label_cases.append(
                             'COUNT(DISTINCT CASE WHEN {table_name}."{col_name}" NOT IN ({value}) '
                             'THEN schools_school."id" ELSE NULL END) AS "{label}",'.format(

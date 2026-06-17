@@ -887,26 +887,26 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
                 DataLayer.objects.all(),
                 pk=effective_layer_id,
                 status=DataLayer.LAYER_STATUS_PUBLISHED,
-                type=DataLayer.LAYER_TYPE_LIVE,
             )
 
-            data_sources = data_layer_instance.data_sources.all()
+            if data_layer_instance.type == DataLayer.LAYER_TYPE_LIVE:
+                data_sources = data_layer_instance.data_sources.all()
 
-            live_data_sources = ['UNKNOWN']
+                live_data_sources = ['UNKNOWN']
 
-            for d in data_sources:
-                source_type = (d.data_source.data_source_type or '').upper()
-                if source_type == DataSource.DATA_SOURCE_TYPE_QOS.upper():
-                    live_data_sources.append(statistics_configs.QOS_SOURCE)
-                elif source_type == DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP.upper():
-                    live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
+                for d in data_sources:
+                    source_type = (d.data_source.data_source_type or '').upper()
+                    if source_type == DataSource.DATA_SOURCE_TYPE_QOS.upper():
+                        live_data_sources.append(statistics_configs.QOS_SOURCE)
+                    elif source_type == DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP.upper():
+                        live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
 
-            parameter_col = data_sources.first().data_source_column
-            parameter_column_name = str(parameter_col['name'])
+                parameter_col = data_sources.first().data_source_column
+                parameter_column_name = str(parameter_col['name'])
 
-            queryset = queryset.filter(
-                live_data_source__in=live_data_sources,
-            ).filter(**{parameter_column_name + '__isnull': False})
+                queryset = queryset.filter(
+                    live_data_source__in=live_data_sources,
+                ).filter(**{parameter_column_name + '__isnull': False})
 
         today_date = core_utilities.get_current_datetime_object().date()
         monday_date = today_date - timedelta(days=today_date.weekday())
@@ -1032,26 +1032,26 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
                 DataLayer.objects.all(),
                 pk=effective_layer_id,
                 status=DataLayer.LAYER_STATUS_PUBLISHED,
-                type=DataLayer.LAYER_TYPE_LIVE,
             )
 
-            data_sources = data_layer_instance.data_sources.all()
+            if data_layer_instance.type == DataLayer.LAYER_TYPE_LIVE:
+                data_sources = data_layer_instance.data_sources.all()
 
-            live_data_sources = ['UNKNOWN']
+                live_data_sources = ['UNKNOWN']
 
-            for d in data_sources:
-                source_type = (d.data_source.data_source_type or '').upper()
-                if source_type == DataSource.DATA_SOURCE_TYPE_QOS.upper():
-                    live_data_sources.append(statistics_configs.QOS_SOURCE)
-                elif source_type == DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP.upper():
-                    live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
+                for d in data_sources:
+                    source_type = (d.data_source.data_source_type or '').upper()
+                    if source_type == DataSource.DATA_SOURCE_TYPE_QOS.upper():
+                        live_data_sources.append(statistics_configs.QOS_SOURCE)
+                    elif source_type == DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP.upper():
+                        live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
 
-            parameter_col = data_sources.first().data_source_column
-            parameter_column_name = str(parameter_col['name'])
+                parameter_col = data_sources.first().data_source_column
+                parameter_column_name = str(parameter_col['name'])
 
-            queryset = queryset.filter(
-                live_data_source__in=live_data_sources,
-            ).filter(**{parameter_column_name + '__isnull': False})
+                queryset = queryset.filter(
+                    live_data_source__in=live_data_sources,
+                ).filter(**{parameter_column_name + '__isnull': False})
 
         today_date = core_utilities.get_current_datetime_object().date()
         monday_date = today_date - timedelta(days=today_date.weekday())

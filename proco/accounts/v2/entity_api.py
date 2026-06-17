@@ -1313,6 +1313,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         parameter_col_type = kwargs['parameter_col'].get('type', 'str').lower()
         kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'entities_entity')
         is_sql_value = False
+        has_remainder = False
 
         for title, values_and_label in legend_configs.items():
             values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
@@ -1364,14 +1365,11 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 else:
                     values = set(values_l)
                     if not values:
-                        label_cases.append(
-                            'COUNT(DISTINCT CASE WHEN {table_name}."{col_name}" IS NOT NULL '
-                            'THEN entities_entity."id" ELSE NULL END) AS "{label}",'.format(
-                                table_name=kwargs['table_name'],
-                                col_name=kwargs['col_name'],
-                                label=label,
-                            ))
+                        label_cases.append('0 AS "{label}",'.format(label=label))
+                    elif has_remainder:
+                        label_cases.append('0 AS "{label}",'.format(label=label))
                     elif parameter_col_type == 'str':
+                        has_remainder = True
                         label_cases.append(
                             'COUNT(DISTINCT CASE WHEN LOWER({table_name}."{col_name}") NOT IN ({value}) '
                             'THEN entities_entity."id" ELSE NULL END) AS "{label}",'.format(
@@ -1381,6 +1379,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                                 value=','.join(["'" + str(v).lower() + "'" for v in values])
                             ))
                     elif parameter_col_type == 'int':
+                        has_remainder = True
                         label_cases.append(
                             'COUNT(DISTINCT CASE WHEN {table_name}."{col_name}" NOT IN ({value}) '
                             'THEN entities_entity."id" ELSE NULL END) AS "{label}",'.format(
