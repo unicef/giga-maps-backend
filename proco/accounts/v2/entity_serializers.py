@@ -29,6 +29,7 @@ from proco.core import utils as core_utilities
 from proco.custom_auth import models as auth_models
 from proco.custom_auth.serializers import ExpandUserSerializer
 from proco.custom_auth.utils import get_user_emails_for_permissions
+from proco.entities.constants import LEGACY_MODEL
 from proco.locations import models as locations_models
 from proco.schools.models import School
 from proco.utils import dates as date_utilities
@@ -1346,7 +1347,7 @@ class EntityDataLayersListSerializer(FlexFieldsModelSerializer):
     benchmark_metadata = serializers.SerializerMethodField()
 
     active_countries_list = serializers.JSONField()
-    entity_type__code = serializers.CharField(source='entity_type.code')
+    entity_type__code = serializers.SerializerMethodField()
 
     class Meta:
         model = accounts_models.DataLayer
@@ -1421,6 +1422,11 @@ class EntityDataLayersListSerializer(FlexFieldsModelSerializer):
             })
 
         return benchmark_metadata
+
+    def get_entity_type__code(self, instance):
+        if not instance.entity_type:
+            return LEGACY_MODEL
+        return instance.entity_type.code
 
     def to_representation(self, data_layer):
         data_sources_list = []
@@ -1920,7 +1926,6 @@ class DataLayerCountryRelationshipSerializer(serializers.ModelSerializer):
 
             instance = super().create(validated_data)
         return instance
-
 
 
 

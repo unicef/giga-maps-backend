@@ -24,7 +24,8 @@ from proco.accounts.models import DataLayer, DataSource
 from proco.connection_statistics.api import ConnectivityConfigurationsViewSet
 from proco.utils import dates as date_utilities
 from proco.connection_statistics.config import app_config as statistics_configs
-from proco.connection_statistics.models import SchoolWeeklyStatus, SchoolDailyStatus, EntityDailyStatus
+from proco.connection_statistics.models import SchoolWeeklyStatus, SchoolDailyStatus, EntityDailyStatus, \
+    EntityWeeklyStatus
 from proco.connection_statistics.utils import get_benchmark_value_for_default_download_layer
 from proco.entities.constants import LEGACY_MODEL
 from proco.entities.mixins import EntityTypeCodeMixin
@@ -445,13 +446,51 @@ class AggregateSearchEntityViewSet(EntityTypeCodeMixin, BaseSearchMixin, ListAPI
         return Response(resp_data)
 
 
-class EntityConnectivityTileGenerator(BaseTileGenerator):
+class EntityConnectivityTileGenerator(EntityTypeCodeMixin, BaseTileGenerator):
     def __init__(self, table_config):
         super().__init__()
         self.table_config = table_config
 
+    @staticmethod
+    def build_in_condition(table_name, column_name, values):
+        return ' AND {0}.{1} IN ({2})'.format(
+            table_name,
+            column_name,
+            ','.join([str(value).strip() for value in values if str(value).strip()])
+        )
+
     def query_filters(self, request, table_configs):
         table_configs['limit_condition'] = 'LIMIT ' + request.query_params.get('limit', '50000')
+        requested_entity_type_codes = self.get_entity_type_code_params(request=request)
+        include_school = requested_entity_type_codes is None or LEGACY_MODEL in requested_entity_type_codes
+
+        if requested_entity_type_codes is None:
+            entity_type_ids = list(
+                EntityType.get_all_active().exclude(is_legacy=True).values_list('id', flat=True)
+            )
+        else:
+            entity_type_ids = list(
+                EntityType.get_all_active()
+                .exclude(is_legacy=True)
+                .filter(code__in=[
+                    entity_type_code
+                    for entity_type_code in requested_entity_type_codes
+                    if entity_type_code != LEGACY_MODEL
+                ])
+                .values_list('id', flat=True)
+            )
+
+        if not include_school:
+            table_configs['school_condition'] += ' AND FALSE'
+
+        if entity_type_ids:
+            table_configs['entity_type_condition'] = self.build_in_condition(
+                'entities_entity',
+                'entity_type_id',
+                entity_type_ids,
+            )
+        else:
+            table_configs['entity_condition'] += ' AND FALSE'
 
         if (
             'country_id' in request.query_params or
@@ -459,27 +498,41 @@ class EntityConnectivityTileGenerator(BaseTileGenerator):
             'admin1_id' in request.query_params or
             'admin1_id__in' in request.query_params or
             'school_id' in request.query_params or
-            'school_id__in' in request.query_params
+            'school_id__in' in request.query_params or
+            'entity_id' in request.query_params or
+            'entity_id__in' in request.query_params
         ):
             if 'school_id' in request.query_params:
                 table_configs['school_condition'] = f" AND schools_school.id = {request.query_params['school_id']}"
+                table_configs['entity_condition'] += ' AND FALSE'
             elif 'school_id__in' in request.query_params:
                 school_ids = ','.join([c.strip() for c in request.query_params['school_id__in'].split(',')])
                 table_configs['school_condition'] = f" AND schools_school.id IN ({school_ids})"
+                table_configs['entity_condition'] += ' AND FALSE'
+
+            elif 'entity_id' in request.query_params:
+                table_configs['school_condition'] += ' AND FALSE'
+                table_configs['entity_condition'] = f" AND entities_entity.id = {request.query_params['entity_id']}"
+            elif 'entity_id__in' in request.query_params:
+                entity_ids = ','.join([c.strip() for c in request.query_params['entity_id__in'].split(',')])
+                table_configs['school_condition'] += ' AND FALSE'
+                table_configs['entity_condition'] = f" AND entities_entity.id IN ({entity_ids})"
 
             elif 'admin1_id' in request.query_params:
-                table_configs[
-                    'admin1_condition'] = f" AND schools_school.admin1_id = {request.query_params['admin1_id']}"
+                table_configs['school_admin1_condition'] = f" AND schools_school.admin1_id = {request.query_params['admin1_id']}"
+                table_configs['entity_admin1_condition'] = f" AND entities_entity.admin1_id = {request.query_params['admin1_id']}"
             elif 'admin1_id__in' in request.query_params:
                 admin1_ids = ','.join([c.strip() for c in request.query_params['admin1_id__in'].split(',')])
-                table_configs['admin1_condition'] = f" AND schools_school.admin1_id IN ({admin1_ids})"
+                table_configs['school_admin1_condition'] = f" AND schools_school.admin1_id IN ({admin1_ids})"
+                table_configs['entity_admin1_condition'] = f" AND entities_entity.admin1_id IN ({admin1_ids})"
 
             elif 'country_id' in request.query_params:
-                table_configs[
-                    'country_condition'] = f" AND schools_school.country_id = {request.query_params['country_id']}"
+                table_configs['school_country_condition'] = f" AND schools_school.country_id = {request.query_params['country_id']}"
+                table_configs['entity_country_condition'] = f" AND entities_entity.country_id = {request.query_params['country_id']}"
             elif 'country_id__in' in request.query_params:
                 country_ids = ','.join([c.strip() for c in request.query_params['country_id__in'].split(',')])
-                table_configs['country_condition'] = f" AND schools_school.country_id IN ({country_ids})"
+                table_configs['school_country_condition'] = f" AND schools_school.country_id IN ({country_ids})"
+                table_configs['entity_country_condition'] = f" AND entities_entity.country_id IN ({country_ids})"
 
         else:
             zoom_level = int(request.query_params.get('z', '0'))
@@ -490,6 +543,12 @@ class EntityConnectivityTileGenerator(BaseTileGenerator):
 
             table_configs['random_order'] = 'ORDER BY schools_school.giga_id_school ASC'
             table_configs['entity_random_order'] = 'ORDER BY entities_entity.giga_id ASC'
+
+        if not include_school and 'FALSE' not in table_configs['school_condition']:
+            table_configs['school_condition'] += ' AND FALSE'
+
+        if not entity_type_ids and 'FALSE' not in table_configs['entity_condition']:
+            table_configs['entity_condition'] += ' AND FALSE'
 
         if 'is_weekly' in request.query_params:
             is_weekly = request.query_params.get('is_weekly', 'true') == 'true'
@@ -514,7 +573,8 @@ class EntityConnectivityTileGenerator(BaseTileGenerator):
                 dates_on_all_sundays = date_utilities.all_days_of_a_month(year_number, month_number,
                                                                           day_name='sunday').keys()
                 week_numbers_for_month = [date_utilities.get_week_from_date(date) for date in dates_on_all_sundays]
-                week_number = SchoolWeeklyStatus.objects.all().filter(
+                weekly_status_model = SchoolWeeklyStatus if include_school else EntityWeeklyStatus
+                week_number = weekly_status_model.objects.all().filter(
                     year=year_number, week__in=week_numbers_for_month, ).order_by('-week').values_list(
                     'week', flat=True).first()
 
@@ -524,6 +584,10 @@ class EntityConnectivityTileGenerator(BaseTileGenerator):
 
             table_configs['weekly_lookup_condition'] = (f'ON schools_school.id = c.school_id AND c.week={week_number} '
                                                         f'AND c.year={year_number}')
+            table_configs['entity_weekly_lookup_condition'] = (
+                f'ON entities_entity.id = c.entity_id AND c.week={week_number} '
+                f'AND c.year={year_number}'
+            )
 
         table_configs['benchmark'], table_configs['benchmark_unit'] = get_benchmark_value_for_default_download_layer(
             request.query_params.get('benchmark', 'global'),
@@ -535,14 +599,17 @@ class EntityConnectivityTileGenerator(BaseTileGenerator):
         tbl['env'] = self.envelope_to_bounds_sql(env)
 
         tbl['limit_condition'] = ''
-        tbl['country_condition'] = ''
-        tbl['admin1_condition'] = ''
+        tbl['school_country_condition'] = ''
+        tbl['school_admin1_condition'] = ''
+        tbl['entity_country_condition'] = ''
+        tbl['entity_admin1_condition'] = ''
         tbl['school_condition'] = ''
         tbl['weekly_lookup_condition'] = 'ON schools_school.last_weekly_status_id = c.id'
         tbl['random_order'] = ''
         tbl['entity_random_order'] = ''
         tbl['rt_date_condition'] = ''
         tbl['entity_condition'] = ''
+        tbl['entity_type_condition'] = ''
         tbl['entity_weekly_lookup_condition'] = 'ON entities_entity.last_weekly_status_id = c.id'
 
         self.query_filters(request, tbl)
@@ -578,8 +645,8 @@ class EntityConnectivityTileGenerator(BaseTileGenerator):
                 LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status
                     ON rt_status.school_id = schools_school.id AND rt_status."deleted" IS NULL
                 WHERE schools_school."deleted" IS NULL
-                    {country_condition}
-                    {admin1_condition}
+                    {school_country_condition}
+                    {school_admin1_condition}
                     {school_condition}
                     {school_weekly_condition}
                 {random_order}
@@ -605,15 +672,16 @@ class EntityConnectivityTileGenerator(BaseTileGenerator):
                 (SELECT code FROM entities_entity_type WHERE id = entities_entity.entity_type_id) AS entity_type
                 FROM entities_entity
                 INNER JOIN bounds ON ST_Intersects(entities_entity.geopoint, ST_Transform(bounds.geom, {srid}))
-                {school_weekly_join}
+                {entity_weekly_join}
                 LEFT JOIN connection_statistics_entityweeklystatus c {entity_weekly_lookup_condition}
                     AND c."deleted" IS NULL
                 LEFT JOIN connection_statistics_entityrealtimeregistration rt_status
                     ON rt_status.entity_id = entities_entity.id AND rt_status."deleted" IS NULL
                 WHERE entities_entity."deleted" IS NULL
-                    {country_condition}
-                    {admin1_condition}
+                    {entity_country_condition}
+                    {entity_admin1_condition}
                     {entity_condition}
+                    {entity_type_condition}
                     {entity_weekly_condition}
                 {entity_random_order}
                 {limit_condition}
@@ -637,7 +705,17 @@ class EntityConnectivityTileGenerator(BaseTileGenerator):
         tbl['entity_weekly_condition'] = ''
 
         school_filters = core_utilities.get_filter_sql(request, 'schools', 'schools_school')
-        entity_filters = core_utilities.get_filter_sql(request, 'entities', 'entities_entity')
+        requested_entity_type_codes = self.get_entity_type_code_params(request=request)
+        single_entity_type_code = None
+        if requested_entity_type_codes is not None and len(requested_entity_type_codes) == 1:
+            single_entity_type_code = requested_entity_type_codes[0]
+
+        entity_filters = core_utilities.get_filter_sql(
+            request,
+            'entities',
+            'entities_entity',
+            single_entity_type_code,
+        )
         if len(school_filters) > 0:
             tbl['school_condition'] += ' AND ' + school_filters
 
@@ -646,8 +724,12 @@ class EntityConnectivityTileGenerator(BaseTileGenerator):
 
         school_static_filters = core_utilities.get_filter_sql(request, 'school_static',
                                                               'connection_statistics_schoolweeklystatus')
-        entity_static_filters = core_utilities.get_filter_sql(request, 'entity_static',
-                                                              'connection_statistics_entityweeklystatus')
+        entity_static_filters = core_utilities.get_filter_sql(
+            request,
+            'entity_static',
+            'connection_statistics_entityweeklystatus',
+            single_entity_type_code,
+        )
         if len(school_static_filters) > 0:
             tbl['school_weekly_join'] = """
             LEFT OUTER JOIN connection_statistics_schoolweeklystatus

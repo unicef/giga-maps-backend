@@ -24,6 +24,8 @@ urlpatterns = [
     path('connectivity-stat/', stats_entity_api.EntityConnectivityAPIView.as_view(),
          name='global-connectivity-stat-entities'),
 
+    path('tiles/connectivity/', entities_api.EntityGlobalConnectivityTileRequestHandler.as_view(),
+         name='tiles-global-connectivity-view'),
 
     # Entity tiles
     path('tiles/connectivity_status/',
@@ -84,9 +86,6 @@ urlpatterns = [
     path('filters/<str:status>/<int:country_id>/', entity_filter_api.PublishedEntityAdvanceFiltersViewSet.as_view({
         'get': 'list',
     }), name='list-published-entity-filters'),
-
-    path('tiles/connectivity/', entities_api.EntityGlobalConnectivityTileRequestHandler.as_view(),
-         name='tiles-global-connectivity-view'),
 
     # Entity list by country (Should be at last)
     path('', include(country_entities.urls)),
