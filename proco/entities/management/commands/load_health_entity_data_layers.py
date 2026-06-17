@@ -147,7 +147,7 @@ health_data_source_json = [
                 'alias': 'Facility Type (facility_type)',
                 'unit': '',
                 'display_unit': '',
-                'count_labels': ['hospital', 'clinic', 'health_center'],
+                'count_labels': ['hospital', 'clinic', 'pharmacy', 'health_center', 'dentist', 'doctors', 'laboratory', 'specialized', 'unknown'],
             },
             {
                 'name': 'facility_level',
@@ -445,6 +445,74 @@ health_data_layer_json = [
                     'display_unit': '',
                     'table_name': 'entities_entity',
                     'count_labels': ['good', 'moderate', 'no', 'unknown'],
+                    'supported_functions': []
+                }
+            }
+        ]
+    },
+    {
+        'code': 'FACILITY_TYPE_HEALTH',
+        'name': 'Health Facility type',
+        'icon': """<svg id="icon" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><style>.cls-1 {fill: none;}</style></defs><path d="M16 2L2 12V30H30V12ZM16 4.45L27 12V28H5V12Z"/><rect id="_Transparent_Rectangle_" data-name="&lt;Transparent Rectangle&gt;" class="cls-1" width="32" height="32"/></svg>""",
+        'description': 'this layer is for health facility type',
+        'version': 'V 1.0',
+        'type': 'STATIC',
+        'category': 'COVERAGE',
+        'applicable_countries': [],
+        'global_benchmark': {},
+        'legend_configs': {
+            'hospital': {
+                'values': ['hospital', '1st level hospital', '2nd level hospital', '3rd level hospital', 'hospital de helvecia', 'hospital;atm', 'hospital;dentist', 'hospital;place_of_worship', 'townhall;hospital', 'clinic;hospital', 'clinic/hospital/pharmacy', 'doctors;hospital'],
+                'labels': 'Hospital', 'tooltip': ''
+            },
+            'clinic': {
+                'values': ['clinic', 'clince', 'general clinic', 'dental clinic', 'eye clinic', 'mobile clinic', 'clinic;doctors'],
+                'labels': 'Clinic', 'tooltip': ''
+            },
+            'pharmacy': {
+                'values': ['pharmacy', 'chemist', 'drugstore', 'atm;pharmacy', 'cafe;pharmacy', 'restaurant;pharmacy', 'pharmacy;cafe', 'pharmacy;telephone', 'veterinary_pharmacy', 'pharmaccy'],
+                'labels': 'Pharmacy', 'tooltip': ''
+            },
+            'health_center': {
+                'values': ['health_centre', 'community_health_center', 'caps', 'chc', 'chp', 'chps', 'healthpost', 'health_post', 'heath_post', 'mchp', 'reference_health_center', 'health_facility', 'healthcare', 'health_care', 'first-aid stations', 'first_aid', 'medical_centre'],
+                'labels': 'Health Center/Post', 'tooltip': ''
+            },
+            'dentist': {
+                'values': ['dentist', 'dentist;doctors', 'post_office;dentist', 'orthodontics'],
+                'labels': 'Dentist', 'tooltip': ''
+            },
+            'doctors': {
+                'values': ['doctors', 'public_bath;doctors', 'audiologist', 'physiotherapist', 'radiologist', 'therapist', 'surgery'],
+                'labels': 'Doctors/Specialists', 'tooltip': ''
+            },
+            'laboratory': {
+                'values': ['laboratory', 'clinical_laboratory', 'medical_laboratory', 'main laboratory', 'diagnostic centre', 'blood_bank', 'blood_donation'],
+                'labels': 'Laboratory/Diagnostics', 'tooltip': ''
+            },
+            'specialized': {
+                'values': ['alternative_medicine', 'healer', 'traditional', 'traditional circumcision centre', 'traditional health centre', 'traditional herbalist centre', 'traditional orthopaedic healing centre', 'rehabilitation', 'rehabilitation centre', 'reha', 'sanatorium', 'hospice', 'nursing_home', 'medical_supply', 'wellbeing_center', 'spa', 'physical training center', 'childcare', 'optic clinics'],
+                'labels': 'Specialized/Other Health', 'tooltip': ''
+            },
+            'unknown': {
+                'values': ['*', 'fixme', 'others', 'yes', 'countr'],
+                'labels': 'Unknown', 'tooltip': ''
+            }
+        },
+        'is_reverse': False,
+        'status': 'PUBLISHED',
+        'data_sources': [
+            {
+                'name': 'Health Entity Master',
+                'data_source_type': 'HEALTH_MASTER',
+                'data_source_column': {
+                    'name': 'facility_type',
+                    'type': 'str',
+                    'is_parameter': True,
+                    'alias': 'Facility Type (facility_type)',
+                    'unit': '',
+                    'display_unit': '',
+                    'table_name': 'entities_entity',
+                    'count_labels': ['hospital', 'clinic', 'pharmacy', 'health_center', 'dentist', 'doctors', 'laboratory', 'specialized', 'unknown'],
                     'supported_functions': []
                 }
             }
