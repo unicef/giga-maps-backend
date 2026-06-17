@@ -19,6 +19,11 @@ urlpatterns = [
     path('global-stat/', stats_entity_api.EntityGlobalStatsAPIView.as_view(), name='global-stat-all-entities'),
     path('connectivityconfigs/', stats_entity_api.EntityConnectivityConfigurationsViewSet.as_view(),
          name='entity-get-latest-week-and-month'),
+    path('countries/', locations_entity_api.EntityCountryViewSet.as_view({'get': 'list'})),
+    path('countries/<str:pk>/', locations_entity_api.EntityCountryViewSet.as_view({'get': 'retrieve'})),
+    path('connectivity-stat/', stats_entity_api.EntityConnectivityAPIView.as_view(),
+         name='global-connectivity-stat-entities'),
+
 
     # Entity tiles
     path('tiles/connectivity_status/',
@@ -79,13 +84,6 @@ urlpatterns = [
     path('filters/<str:status>/<int:country_id>/', entity_filter_api.PublishedEntityAdvanceFiltersViewSet.as_view({
         'get': 'list',
     }), name='list-published-entity-filters'),
-
-    path('countries/', locations_entity_api.EntityCountryViewSet.as_view({'get': 'list'})),
-    path('countries/<str:pk>/', locations_entity_api.EntityCountryViewSet.as_view({'get': 'retrieve'})),
-
-
-    path('connectivity-stat/', stats_entity_api.EntityConnectivityAPIView.as_view(),
-         name='global-connectivity-stat-entities'),
 
     path('tiles/connectivity/', entities_api.EntityGlobalConnectivityTileRequestHandler.as_view(),
          name='tiles-global-connectivity-view'),

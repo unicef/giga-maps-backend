@@ -263,7 +263,7 @@ class EntityGlobalStatsAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, API
 
 
 @method_decorator([cache_control(public=True, max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE)], name='dispatch')
-class EntityConnectivityAPIView(EntityTypeCodeMixin, APIView):
+class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, APIView):
     permission_classes = (AllowAny,)
 
     CACHE_KEY = 'cache'
@@ -271,6 +271,9 @@ class EntityConnectivityAPIView(EntityTypeCodeMixin, APIView):
 
     school_filters = []
     school_static_filters = []
+    entity_filters = []
+    entity_static_filters = []
+    entity_type_code = None
 
     def get_cache_key(self):
         params = dict(self.request.query_params)
@@ -279,28 +282,34 @@ class EntityConnectivityAPIView(EntityTypeCodeMixin, APIView):
                                 '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))), )
 
     def get(self, request, *args, **kwargs):
-        entity_type = self.get_entity_type_code_param(request=request)
-
-        if entity_type == LEGACY_MODEL:
-            self.queryset = School.objects.all()
-            return Response(self.get_school_data(request))
-        if entity_type:
-            self.queryset = Entity.objects.all()
-            return Response(self.get_entity_data(request, entity_type))
-
         response = {}
+        requested_entity_type_codes = self.get_entity_type_code_params(request=request)
 
-        # School - utilising old code
-        self.queryset = School.objects.all()
-        response["school"] = self.get_school_data(request)
+        if requested_entity_type_codes is None or LEGACY_MODEL in requested_entity_type_codes:
+            response[LEGACY_MODEL] = self.get_school_data(request)
 
-        # For the entities other than school
         entity_types = EntityType.get_all_active().exclude(is_legacy=True)
-        self.queryset = Entity.objects.all()
+        if requested_entity_type_codes is not None:
+            entity_types = entity_types.filter(code__in=[
+                entity_type_code
+                for entity_type_code in requested_entity_type_codes
+                if entity_type_code != LEGACY_MODEL
+            ])
+
         for et in entity_types:
             response[et.code] = self.get_entity_data(request, et.code)
 
         return Response(response)
+
+    @staticmethod
+    def get_stat_row(queryset, defaults):
+        rows = list(queryset)
+        if not rows:
+            return defaults.copy()
+
+        row = defaults.copy()
+        row.update(rows[0])
+        return row
 
     def calculate_country_download_data(self, start_date, end_date, week_number, year_number):
         benchmark = self.request.query_params.get('benchmark', 'global')
@@ -345,7 +354,15 @@ class EntityConnectivityAPIView(EntityTypeCodeMixin, APIView):
                 'no_of_schools_measure', 'countries_with_realtime_data', 'total_weekly_schools'
             ).extra(where=[school_static_filters])
 
-        weekly_status = list(weekly_queryset)[0]
+        weekly_status = self.get_stat_row(weekly_queryset, {
+            'good': 0,
+            'moderate': 0,
+            'bad': 0,
+            'unknown': 0,
+            'school_with_realtime_data': 0,
+            'no_of_schools_measure': 0,
+            'countries_with_realtime_data': 0,
+        })
         real_time_connected_schools = {
             'good': weekly_status['good'],
             'moderate': weekly_status['moderate'],
@@ -459,6 +476,8 @@ class EntityConnectivityAPIView(EntityTypeCodeMixin, APIView):
         return graph_data, all_positive_speeds
 
     def get_school_data(self, request):
+        self.queryset = School.objects.all()
+
         use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
         request_path = remove_query_param(request.get_full_path(), 'cache')
         cache_key = self.get_cache_key()
@@ -557,7 +576,15 @@ class EntityConnectivityAPIView(EntityTypeCodeMixin, APIView):
                 'no_of_entities_measure', 'countries_with_realtime_data', 'total_weekly_entities'
             ).extra(where=[entity_static_filters])
 
-        weekly_status = list(weekly_queryset)[0]
+        weekly_status = self.get_stat_row(weekly_queryset, {
+            'good': 0,
+            'moderate': 0,
+            'bad': 0,
+            'unknown': 0,
+            'entity_with_realtime_data': 0,
+            'no_of_entities_measure': 0,
+            'countries_with_realtime_data': 0,
+        })
         real_time_connected_entities = {
             'good': weekly_status['good'],
             'moderate': weekly_status['moderate'],
@@ -585,6 +612,7 @@ class EntityConnectivityAPIView(EntityTypeCodeMixin, APIView):
 
         is_data_synced_qs = EntityWeeklyStatus.objects.filter(
             entity__realtime_registration_status__rt_registered=True,
+            entity__entity_type__code=self.entity_type_code,
         )
 
         if len(self.entity_filters) > 0:
@@ -597,6 +625,11 @@ class EntityConnectivityAPIView(EntityTypeCodeMixin, APIView):
             is_data_synced_qs = is_data_synced_qs.filter(entity__admin1_id=admin1_id)
         if country_id:
             is_data_synced_qs = is_data_synced_qs.filter(entity__country_id=country_id)
+
+        is_data_synced_qs = self.apply_entity_detail_filters(
+            is_data_synced_qs,
+            self.entity_type_obj,
+        )
 
         return {
             'live_avg': live_avg,
@@ -671,6 +704,8 @@ class EntityConnectivityAPIView(EntityTypeCodeMixin, APIView):
         return graph_data, all_positive_speeds
 
     def get_entity_data(self, request, entity_type):
+        self.queryset = Entity.objects.all()
+
         use_cached_data = self.request.query_params.get(
             self.CACHE_KEY, 'on'
         ).lower() in ['on', 'true']
@@ -687,6 +722,13 @@ class EntityConnectivityAPIView(EntityTypeCodeMixin, APIView):
         if not data:
             # -------- Filters
             self.entity_type_code = entity_type
+            self.entity_type_obj = get_object_or_404(
+                EntityType.objects.all(),
+                code=entity_type,
+                deleted__isnull=True,
+                is_active=True,
+                is_legacy=False,
+            )
             self.entity_filters = core_utilities.get_filter_sql(
                 self.request,
                 'entities',
@@ -702,7 +744,11 @@ class EntityConnectivityAPIView(EntityTypeCodeMixin, APIView):
 
             # -------- Apply entity_type filter
             self.queryset = self.queryset.filter(
-                entity_type__code=entity_type
+                entity_type=self.entity_type_obj
+            )
+            self.queryset = self.apply_entity_detail_filters(
+                self.queryset,
+                self.entity_type_obj,
             )
 
             # -------- Country / admin filters
