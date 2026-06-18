@@ -463,39 +463,39 @@ health_data_layer_json = [
         'legend_configs': {
             'hospital': {
                 'values': ['hospital', '1st level hospital', '2nd level hospital', '3rd level hospital', 'hospital de helvecia', 'hospital;atm', 'hospital;dentist', 'hospital;place_of_worship', 'townhall;hospital', 'clinic;hospital', 'clinic/hospital/pharmacy', 'doctors;hospital'],
-                'labels': 'Hospital', 'tooltip': ''
+                'labels': 'Hospital', 'tooltip': '', 'color': '#D32F2F'
             },
             'clinic': {
                 'values': ['clinic', 'clince', 'general clinic', 'dental clinic', 'eye clinic', 'mobile clinic', 'clinic;doctors'],
-                'labels': 'Clinic', 'tooltip': ''
+                'labels': 'Clinic', 'tooltip': '', 'color': '#C2185B'
             },
             'pharmacy': {
                 'values': ['pharmacy', 'chemist', 'drugstore', 'atm;pharmacy', 'cafe;pharmacy', 'restaurant;pharmacy', 'pharmacy;cafe', 'pharmacy;telephone', 'veterinary_pharmacy', 'pharmaccy'],
-                'labels': 'Pharmacy', 'tooltip': ''
+                'labels': 'Pharmacy', 'tooltip': '', 'color': '#7B1FA2'
             },
             'health_center': {
                 'values': ['health_centre', 'community_health_center', 'caps', 'chc', 'chp', 'chps', 'healthpost', 'health_post', 'heath_post', 'mchp', 'reference_health_center', 'health_facility', 'healthcare', 'health_care', 'first-aid stations', 'first_aid', 'medical_centre'],
-                'labels': 'Health Center/Post', 'tooltip': ''
+                'labels': 'Health Center/Post', 'tooltip': '', 'color': '#303F9F'
             },
             'dentist': {
                 'values': ['dentist', 'dentist;doctors', 'post_office;dentist', 'orthodontics'],
-                'labels': 'Dentist', 'tooltip': ''
+                'labels': 'Dentist', 'tooltip': '', 'color': '#0288D1'
             },
             'doctors': {
                 'values': ['doctors', 'public_bath;doctors', 'audiologist', 'physiotherapist', 'radiologist', 'therapist', 'surgery'],
-                'labels': 'Doctors/Specialists', 'tooltip': ''
+                'labels': 'Doctors/Specialists', 'tooltip': '', 'color': '#00796B'
             },
             'laboratory': {
                 'values': ['laboratory', 'clinical_laboratory', 'medical_laboratory', 'main laboratory', 'diagnostic centre', 'blood_bank', 'blood_donation'],
-                'labels': 'Laboratory/Diagnostics', 'tooltip': ''
+                'labels': 'Laboratory/Diagnostics', 'tooltip': '', 'color': '#388E3C'
             },
             'specialized': {
                 'values': ['alternative_medicine', 'healer', 'traditional', 'traditional circumcision centre', 'traditional health centre', 'traditional herbalist centre', 'traditional orthopaedic healing centre', 'rehabilitation', 'rehabilitation centre', 'reha', 'sanatorium', 'hospice', 'nursing_home', 'medical_supply', 'wellbeing_center', 'spa', 'physical training center', 'childcare', 'optic clinics'],
-                'labels': 'Specialized/Other Health', 'tooltip': ''
+                'labels': 'Specialized/Other Health', 'tooltip': '', 'color': '#F57C00'
             },
             'unknown': {
                 'values': ['*', 'fixme', 'others', 'yes', 'countr'],
-                'labels': 'Unknown', 'tooltip': ''
+                'labels': 'Unknown', 'tooltip': '', 'color': '#1E88E5'
             }
         },
         'is_reverse': False,
