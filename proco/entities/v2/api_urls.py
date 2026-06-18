@@ -23,11 +23,8 @@ urlpatterns = [
     path('countries/<str:pk>/', locations_entity_api.EntityCountryViewSet.as_view({'get': 'retrieve'})),
     path('connectivity-stat/', stats_entity_api.EntityConnectivityAPIView.as_view(),
          name='global-connectivity-stat-entities'),
-
     path('tiles/connectivity/', entities_api.EntityGlobalConnectivityTileRequestHandler.as_view(),
          name='tiles-global-connectivity-view'),
-
-    # Entity tiles
     path('tiles/connectivity_status/',
          entities_api.EntityConnectivityStatusTileRequestHandler.as_view(),
          name='tiles-entity-connectivity-status-view'),

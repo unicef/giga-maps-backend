@@ -562,6 +562,7 @@ class SchoolStatusConnectivityTileGenerator(BaseTileGenerator):
         tbl['school_condition'] = ''
         tbl['random_order'] = ''
         tbl['same_school_coords_condition'] = ''
+        tbl['mvt_layer'] = self.table_config.get('mvt_layer', 'default')
 
         self.update_kwargs(request, tbl)
 
@@ -618,7 +619,7 @@ class SchoolStatusConnectivityTileGenerator(BaseTileGenerator):
                 FROM sampled_schools
                 CROSS JOIN bounds
             )
-            SELECT ST_AsMVT(DISTINCT mvtgeom.*) FROM mvtgeom;
+            SELECT ST_AsMVT(DISTINCT mvtgeom.*, '{mvt_layer}') FROM mvtgeom;
         """
 
         tbl['school_weekly_join'] = ''

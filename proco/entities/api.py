@@ -4,7 +4,6 @@ from datetime import datetime, time, timedelta
 
 from django.conf import settings
 from django.db import models
-from django.http import JsonResponse
 from django.db.models.functions.text import Lower
 from azure.search.documents.indexes.models import SearchFieldDataType
 from django.shortcuts import get_object_or_404
@@ -125,19 +124,25 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
         elif 'entity_id__in' in query_param_keys:
             table_configs['entity_ids'] = [s_id.strip() for s_id in query_params['entity_id__in'].split(',')]
 
-        if 'entity_type' in query_param_keys:
-            table_configs['entity_types'] = [query_params['entity_type'], ]
-        elif 'entity_type__in' in query_param_keys:
-            table_configs['entity_types'] = [c_id.strip() for c_id in query_params['entity_type__in'].split(',')]
+        entity_type_codes = EntityTypeCodeMixin.parse_entity_type_code_params(request)
+        if entity_type_codes is not None:
+            table_configs['entity_types'] = [
+                entity_type_code
+                for entity_type_code in entity_type_codes
+                if entity_type_code != LEGACY_MODEL
+            ]
 
-        entity_type_code = None
+        entity_type_code = table_configs.get('entity')
         if len(table_configs.get('entity_types', [])) == 1:
             entity_type_code = table_configs['entity_types'][0]
 
         table_configs['entity_filters'] = core_utilities.get_filter_sql(
             request, 'entities', 'entities_entity', entity_type_code)
-        table_configs['entity_static_filters'] = core_utilities.get_filter_sql(
-            request, 'entity_static', table_configs['master_data_table'], entity_type_code)
+        if entity_type_code and table_configs.get('master_data_table'):
+            table_configs['entity_static_filters'] = core_utilities.get_filter_sql(
+                request, 'entity_static', table_configs['master_data_table'], entity_type_code)
+        else:
+            table_configs['entity_static_filters'] = ''
         table_configs['entity_real_time_filters'] = core_utilities.get_filter_sql(
             request, 'entity_real_time', 'connection_statistics_entityweeklystatus', entity_type_code)
 
@@ -150,6 +155,7 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
         tbl['admin1_condition'] = ''
         tbl['entity_condition'] = ''
         tbl['random_order'] = ''
+        tbl['mvt_layer'] = self.table_config.get('mvt_layer', 'default')
 
         self.update_kwargs(request, tbl)
 
@@ -172,7 +178,7 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
                 {entity_weekly_join}
                 {entity_master_join}
                 WHERE entities_entity."deleted" IS NULL
-                    AND entities_entity_type.code = '{entity}'
+                    {entity_type_condition}
                     {country_condition}
                     {admin1_condition}
                     {entity_condition}
@@ -181,13 +187,28 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
                     {random_order}
                     {limit_condition}
             )
-            SELECT ST_AsMVT(DISTINCT mvtgeom.*) FROM mvtgeom;
+            SELECT ST_AsMVT(DISTINCT mvtgeom.*, '{mvt_layer}') FROM mvtgeom;
         """
 
         tbl['entity_weekly_join'] = ''
         tbl['entity_weekly_condition'] = ''
         tbl['entity_master_join'] = ''
         tbl['entity_master_condition'] = ''
+        entity_type_codes = tbl.get('entity_types')
+        if entity_type_codes:
+            tbl['entity_type_condition'] = "AND entities_entity_type.code IN ({0})".format(
+                ','.join(["'{0}'".format(entity_type_code.replace("'", "''")) for entity_type_code in entity_type_codes])
+            )
+        elif tbl.get('entity'):
+            tbl['entity_type_condition'] = "AND entities_entity_type.code = '{0}'".format(
+                tbl['entity'].replace("'", "''")
+            )
+        else:
+            tbl['entity_type_condition'] = """
+                    AND entities_entity_type.is_legacy = FALSE
+                    AND entities_entity_type.is_active = TRUE
+                    AND entities_entity_type.deleted IS NULL
+            """
 
         add_random_condition = True
 
@@ -253,6 +274,57 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
         return sql_tmpl.format(**tbl)
 
 
+class EntityStatusConnectivityCombinedTileGenerator(EntityTypeCodeMixin, BaseTileGenerator):
+    def __init__(self, table_config):
+        super().__init__()
+        self.table_config = table_config
+
+    def envelope_to_sql(self, env, request):
+        entity_type_codes = self.parse_entity_type_code_params(request)
+        include_school = entity_type_codes is None or LEGACY_MODEL in entity_type_codes
+        entity_type_qs = EntityType.get_all_active().exclude(is_legacy=True)
+        if entity_type_codes is not None:
+            entity_type_qs = entity_type_qs.filter(
+                code__in=[
+                    entity_type_code
+                    for entity_type_code in entity_type_codes
+                    if entity_type_code != LEGACY_MODEL
+                ]
+            )
+
+        sql_parts = []
+        if include_school:
+            school_table_config = {
+                'table': 'schools_school',
+                'srid': self.table_config['srid'],
+                'geomColumn': 'geopoint',
+                'attrColumns': 'id',
+                'mvt_layer': LEGACY_MODEL,
+            }
+            sql_parts.append(
+                SchoolStatusConnectivityTileGenerator(school_table_config).envelope_to_sql(env, request).rstrip(';\n ')
+            )
+
+        for entity_type in entity_type_qs:
+            master_data_model = entity_type.get_master_data_model_class()
+            entity_table_config = {
+                'entity': entity_type.code,
+                'srid': self.table_config['srid'],
+                'mvt_layer': entity_type.code,
+                'master_data_table': master_data_model._meta.db_table if master_data_model else '',
+            }
+            sql_parts.append(
+                EntityStatusConnectivityTileGenerator(entity_table_config).envelope_to_sql(env, request).rstrip(';\n ')
+            )
+
+        if not sql_parts:
+            return "SELECT ''::bytea"
+
+        return "SELECT {0};".format(
+            ' || '.join(["COALESCE(({0}), ''::bytea)".format(sql) for sql in sql_parts])
+        )
+
+
 @method_decorator([
     custom_cache_control(
         public=True,
@@ -313,16 +385,23 @@ class EntityConnectivityTileRequestHandler(APIView):
         cache_status_codes=[rest_status.HTTP_200_OK],
     )
 ], name='dispatch')
-class EntityConnectivityStatusTileRequestHandler(EntityConnectivityTileRequestHandler):
+class EntityConnectivityStatusTileRequestHandler(EntityTypeCodeMixin, EntityConnectivityTileRequestHandler):
 
-    def dispatch(self, request, *args, **kwargs):
-        entity = request.GET.get("entity_type__code")
-        if not entity:
-            return JsonResponse({"error": "Missing required query param: entity_type"}, status=400)
-        try:
-            entity_type = EntityType.objects.get(code=entity)
-        except EntityType.DoesNotExist:
-            return JsonResponse(
+    def get(self, request, *args, **kwargs):
+        entity_type_codes = self.parse_entity_type_code_params(request)
+
+        if entity_type_codes is None or len(entity_type_codes) != 1:
+            table_config = {
+                'srid': '4326',
+            }
+            self.tile_generator = EntityStatusConnectivityCombinedTileGenerator(table_config)
+            self.CACHE_KEY_PREFIX = 'ENTITY_STATUS_CONNECTIVITY_TILES_MAP'
+            return super().get(request, *args, **kwargs)
+
+        entity = entity_type_codes[0]
+        entity_type = EntityType.get_all_active().filter(code=entity).first()
+        if entity_type is None:
+            return Response(
                 {"error": f"Invalid entity_type__code: {entity}"},
                 status=400
             )
@@ -343,7 +422,7 @@ class EntityConnectivityStatusTileRequestHandler(EntityConnectivityTileRequestHa
 
         self.CACHE_KEY_PREFIX = extra_config.get("tile_cache_prefix")
 
-        return super().dispatch(request, *args, **kwargs)
+        return super().get(request, *args, **kwargs)
 
     def get_cache_key(self):
         params = dict(self.request.query_params)
