@@ -168,6 +168,7 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
             mvtgeom AS (
                 SELECT ST_AsMVTGeom(ST_Transform(entities_entity.geopoint, 3857), bounds.b2d) AS geom,
                 entities_entity.id,
+                entities_entity_type.code AS entity_type,
                 CASE WHEN entities_entity.connectivity_status IN ('good', 'moderate') THEN 'connected'
                     WHEN entities_entity.connectivity_status = 'no' THEN 'not_connected'
                     ELSE 'unknown'
@@ -280,16 +281,17 @@ class EntityStatusConnectivityCombinedTileGenerator(EntityTypeCodeMixin, BaseTil
         self.table_config = table_config
 
     def envelope_to_sql(self, env, request):
-        entity_type_codes = self.parse_entity_type_code_params(request)
-        include_school = entity_type_codes is None or LEGACY_MODEL in entity_type_codes
+        requested_entity_type_codes = self.parse_entity_type_code_params(request)
+        include_school = requested_entity_type_codes is None or LEGACY_MODEL in requested_entity_type_codes
+        entity_type_codes = [
+            entity_type_code
+            for entity_type_code in requested_entity_type_codes or []
+            if entity_type_code != LEGACY_MODEL
+        ]
         entity_type_qs = EntityType.get_all_active().exclude(is_legacy=True)
-        if entity_type_codes is not None:
+        if requested_entity_type_codes is not None:
             entity_type_qs = entity_type_qs.filter(
-                code__in=[
-                    entity_type_code
-                    for entity_type_code in entity_type_codes
-                    if entity_type_code != LEGACY_MODEL
-                ]
+                code__in=entity_type_codes
             )
 
         sql_parts = []
@@ -305,13 +307,12 @@ class EntityStatusConnectivityCombinedTileGenerator(EntityTypeCodeMixin, BaseTil
                 SchoolStatusConnectivityTileGenerator(school_table_config).envelope_to_sql(env, request).rstrip(';\n ')
             )
 
-        for entity_type in entity_type_qs:
-            master_data_model = entity_type.get_master_data_model_class()
+        if requested_entity_type_codes is None or entity_type_codes:
+            entity_type_codes = list(entity_type_qs.values_list('code', flat=True))
             entity_table_config = {
-                'entity': entity_type.code,
                 'srid': self.table_config['srid'],
-                'mvt_layer': entity_type.code,
-                'master_data_table': master_data_model._meta.db_table if master_data_model else '',
+                'mvt_layer': 'entities',
+                'entity_types': entity_type_codes,
             }
             sql_parts.append(
                 EntityStatusConnectivityTileGenerator(entity_table_config).envelope_to_sql(env, request).rstrip(';\n ')
@@ -412,7 +413,8 @@ class EntityConnectivityStatusTileRequestHandler(EntityTypeCodeMixin, EntityConn
             "entity": entity_type.code,
             "table": extra_config.get("main_table"),
             "srid": extra_config.get("srid"),
-            "master_data_table": entity_type.get_master_data_model_class()._meta.db_table
+            "master_data_table": entity_type.get_master_data_model_class()._meta.db_table,
+            "mvt_layer": LEGACY_MODEL if entity_type.code == LEGACY_MODEL else 'entities',
         }
 
         if entity_type.code == LEGACY_MODEL:
