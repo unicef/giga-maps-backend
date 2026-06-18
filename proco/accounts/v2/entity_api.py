@@ -38,6 +38,7 @@ from proco.core.viewsets import BaseModelViewSet
 from proco.custom_auth import models as auth_models
 from proco.entities.config import build_parameter_config, get_entity_type_config
 from proco.entities.constants import LEGACY_MODEL
+from proco.entities.mixins import EntityTypeCodeMixin
 from proco.locations.models import Country
 from proco.utils import dates as date_utilities
 from proco.utils.cache import cache_manager, custom_cache_control, no_expiry_cache_manager
@@ -1798,12 +1799,12 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         data_layer_instance,
     ):
         selected_ids = self.kwargs.get('entity_ids', [])
-        
+
         statistics = db_utilities.sql_to_response(
             self.get_entity_view_statistics_info_query(data_layer_instance.type),
             label=self.__class__.__name__,
             db_var=settings.READ_ONLY_DB_KEY) or []
-            
+
         if is_live_layer:
             info_panel_rows = db_utilities.sql_to_response(
                 self.get_entity_view_info_query(),
@@ -1892,7 +1893,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             }
 
         query_response = query_result[-1]
-        
+
         benchmark_metadata = self.build_benchmark_metadata(
             benchmark_value=benchmark_value,
             benchmark_unit=benchmark_unit,
@@ -1902,11 +1903,11 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             display_unit=display_unit,
             benchmark_value_from_sql=query_response.get('benchmark_sql_value'),
         )
-        
+
         if is_live_layer:
             graph_data, positive_speeds = self.generate_graph_data()
             live_avg = round(sum(positive_speeds) / len(positive_speeds), 2) if positive_speeds else 0
-            
+
             rounded_base_benchmark_int = round(
                 eval(unit_agg_str.format(val=core_utilities.convert_to_int(base_benchmark))), 2)
             live_avg_connectivity = self.resolve_connectivity_bucket(
@@ -2014,7 +2015,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         if is_live_layer:
             graph_data, positive_speeds = self.generate_school_graph_data(DataLayerInfoViewSet)
             live_avg = self.get_live_avg(parameter_col_function.get('name', 'avg'), positive_speeds)
-            
+
             rounded_base_benchmark_int = round(
                 eval(unit_agg_str.format(val=core_utilities.convert_to_int(base_benchmark))), 2)
             live_avg_connectivity = self.resolve_connectivity_bucket(
@@ -2114,7 +2115,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         if is_live_layer:
             parameter_col_function = first_source.data_source_column_function or {}
             column_function_sql = self.get_column_function_sql(parameter_col_function)
-            
+
             self.kwargs.update({
                 'col_name': parameter_column_name,
                 'benchmark_value': benchmark_value,
@@ -2599,7 +2600,7 @@ class EntityDataLayerPreviewViewSet(APIView):
         return Response(data={'map': map_points})
 
 
-class PublishedEntityDataLayersViewSet(CachedListMixin, BaseModelViewSet):
+class PublishedEntityDataLayersViewSet(EntityTypeCodeMixin, CachedListMixin, BaseModelViewSet):
     """
     PublishedEntityDataLayersViewSet
     Cache Attr:
@@ -2627,7 +2628,6 @@ class PublishedEntityDataLayersViewSet(CachedListMixin, BaseModelViewSet):
         'id': ['exact', 'in'],
         'published_by_id': ['exact', 'in'],
         'name': ['iexact', 'in', 'exact'],
-        'entity_type__code': ['iexact', 'in', 'exact'],
     }
 
     permit_list_expands = ['created_by', 'published_by', 'last_modified_by']
@@ -2639,6 +2639,7 @@ class PublishedEntityDataLayersViewSet(CachedListMixin, BaseModelViewSet):
         :return queryset:
         """
         queryset = queryset.filter(status=self.kwargs.get('status', 'PUBLISHED'))
+        entity_type_codes = self.get_entity_type_code_params()
 
         query_params = self.request.query_params.dict()
         query_param_keys = query_params.keys()
@@ -2660,6 +2661,21 @@ class PublishedEntityDataLayersViewSet(CachedListMixin, BaseModelViewSet):
                 active_countries__is_default=is_default,
                 active_countries__deleted__isnull=True,
             )
+        if entity_type_codes is not None:
+            entity_type_query = Q()
+            non_legacy_entity_type_codes = [
+                entity_type_code
+                for entity_type_code in entity_type_codes
+                if entity_type_code != LEGACY_MODEL
+            ]
+
+            if LEGACY_MODEL in entity_type_codes:
+                entity_type_query |= Q(entity_type__isnull=True) | Q(entity_type__code=LEGACY_MODEL)
+
+            if non_legacy_entity_type_codes:
+                entity_type_query |= Q(entity_type__code__in=non_legacy_entity_type_codes)
+
+            queryset = queryset.filter(entity_type_query)
 
         return super().apply_queryset_filters(queryset)
 

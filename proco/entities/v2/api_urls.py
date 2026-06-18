@@ -29,22 +29,18 @@ urlpatterns = [
          name='tiles-entity-connectivity-status-view'),
     path('filters/<str:status>/<int:country_id>/', entity_filter_api.PublishedEntityAdvanceFiltersViewSet.as_view({
         'get': 'list', }), name='list-published-entity-filters'),
+    path('layers/<str:status>/', entity_api.PublishedEntityDataLayersViewSet.as_view({'get': 'list',}),
+        name='list-published-data-layers-entities'),
 
 
-    # Entity data layers - CRUD
-    path('layers/', entity_api.EntityDataLayersViewSet.as_view({
-        'get': 'list',
-        'post': 'create',
-    }), name='list-or-create-data-layers-entities'),
-    path('layers/<int:pk>/', entity_api.EntityDataLayersViewSet.as_view({
-        'put': 'partial_update',
-        'delete': 'destroy',
-    }), name='update-or-delete-data-layer-entities'),
+    # Admin
+    path('layers/', entity_api.EntityDataLayersViewSet.as_view({'get': 'list', 'post': 'create', }),
+        name='list-or-create-data-layers-entities'),
+    path('layers/<int:pk>/', entity_api.EntityDataLayersViewSet.as_view({'put': 'partial_update', 'delete': 'destroy',}),
+        name='update-or-delete-data-layer-entities'),
+    path('layers/<int:pk>/publish/', entity_api.EntityDataLayerPublishViewSet.as_view({'put': 'partial_update',}),
+        name='publish-data-layer-entities'),
 
-    # Entity data layers - publish, preview, metadata, info, map
-    path('layers/<int:pk>/publish/', entity_api.EntityDataLayerPublishViewSet.as_view({
-        'put': 'partial_update',
-    }), name='publish-data-layer-entities'),
     path('layers/<int:pk>/preview/', entity_api.EntityDataLayerPreviewViewSet.as_view(),
          name='preview-data-layer-entities'),
     path('layers/<int:pk>/metadata/', entity_api.EntityDataLayerMetadataViewSet.as_view({
@@ -54,11 +50,6 @@ urlpatterns = [
          name='entity-info-data-layer'),
     path('layers/<int:pk>/map/', entity_api.EntityDataLayerMapViewSet.as_view(),
          name='entity-map-data-layer'),
-
-    # Published entity data layers
-    path('layers/<str:status>/', entity_api.PublishedEntityDataLayersViewSet.as_view({
-        'get': 'list',
-    }), name='list-published-data-layers-entities'),
 
     # Entity column configurations
     path('column_configurations/', entity_filter_api.EntityColumnConfigurationViewSet.as_view({
