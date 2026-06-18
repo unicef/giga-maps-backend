@@ -25,9 +25,11 @@ urlpatterns = [
          name='global-connectivity-stat-entities'),
     path('tiles/connectivity/', entities_api.EntityGlobalConnectivityTileRequestHandler.as_view(),
          name='tiles-global-connectivity-view'),
-    path('tiles/connectivity_status/',
-         entities_api.EntityConnectivityStatusTileRequestHandler.as_view(),
+    path('tiles/connectivity_status/', entities_api.EntityConnectivityStatusTileRequestHandler.as_view(),
          name='tiles-entity-connectivity-status-view'),
+    path('filters/<str:status>/<int:country_id>/', entity_filter_api.PublishedEntityAdvanceFiltersViewSet.as_view({
+        'get': 'list', }), name='list-published-entity-filters'),
+
 
     # Entity data layers - CRUD
     path('layers/', entity_api.EntityDataLayersViewSet.as_view({
@@ -79,10 +81,6 @@ urlpatterns = [
         'put': 'partial_update',
     }), name='publish-entity-filter'),
 
-    # Published entity filters
-    path('filters/<str:status>/<int:country_id>/', entity_filter_api.PublishedEntityAdvanceFiltersViewSet.as_view({
-        'get': 'list',
-    }), name='list-published-entity-filters'),
 
     # Entity list by country (Should be at last)
     path('', include(country_entities.urls)),

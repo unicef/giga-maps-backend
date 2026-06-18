@@ -1,3 +1,4 @@
+from django.db.models import Q
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import permissions
 from rest_framework.filters import SearchFilter
@@ -8,6 +9,8 @@ from proco.accounts.v2 import entity_filter_serializers as serializers
 from proco.core import permissions as core_permissions
 from proco.core import utils as core_utilities
 from proco.core.viewsets import BaseModelViewSet
+from proco.entities.constants import LEGACY_MODEL
+from proco.entities.mixins import EntityTypeCodeMixin
 from proco.utils.mixins import CachedListMixin
 from proco.utils.filters import NullsAlwaysLastOrderingFilter
 
@@ -120,7 +123,7 @@ class EntityAdvanceFiltersPublishViewSet(BaseModelViewSet):
         return super().apply_queryset_filters(queryset)
 
 
-class PublishedEntityAdvanceFiltersViewSet(CachedListMixin, BaseModelViewSet):
+class PublishedEntityAdvanceFiltersViewSet(EntityTypeCodeMixin, CachedListMixin, BaseModelViewSet):
     """
     PublishedEntityAdvanceFiltersViewSet
     Cache Attr:
@@ -148,7 +151,6 @@ class PublishedEntityAdvanceFiltersViewSet(CachedListMixin, BaseModelViewSet):
         'id': ['exact', 'in'],
         'published_by_id': ['exact', 'in'],
         'name': ['iexact', 'in', 'exact'],
-        'entity_type__code': ['iexact', 'in', 'exact'],
     }
 
     permit_list_expands = ['column_configuration', ]
@@ -165,12 +167,29 @@ class PublishedEntityAdvanceFiltersViewSet(CachedListMixin, BaseModelViewSet):
     def apply_queryset_filters(self, queryset):
         country_id = self.kwargs.get('country_id')
         status = self.kwargs.get('status', 'PUBLISHED')
+        entity_type_codes = self.get_entity_type_code_params()
 
         queryset = queryset.filter(
             status=status,
             active_countries__country=country_id,
             active_countries__deleted__isnull=True,
         )
+
+        if entity_type_codes is not None:
+            entity_type_query = Q()
+            non_legacy_entity_type_codes = [
+                entity_type_code
+                for entity_type_code in entity_type_codes
+                if entity_type_code != LEGACY_MODEL
+            ]
+
+            if LEGACY_MODEL in entity_type_codes:
+                entity_type_query |= Q(entity_type__isnull=True) | Q(entity_type__code=LEGACY_MODEL)
+
+            if non_legacy_entity_type_codes:
+                entity_type_query |= Q(entity_type__code__in=non_legacy_entity_type_codes)
+
+            queryset = queryset.filter(entity_type_query)
 
         return super().apply_queryset_filters(queryset)
 
