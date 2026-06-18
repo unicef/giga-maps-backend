@@ -1938,8 +1938,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             }
         else:
             return {
-                'no_of_entities_measure': query_response.get('total_entities', 0),
-                'real_time_connected_entities': {label: query_response.get(label, 0) for label in query_labels},
+                'total_entities': query_response.get('total_entities', 0),
+                'connected_entities': {label: query_response.get(label, 0) for label in query_labels},
                 'legend_configs': legend_configs,
                 'benchmark_metadata': {
                     'parameter_column_unit': parameter_column_unit,
@@ -2041,8 +2041,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             }
         else:
             return {
-                'no_of_entities_measure': query_response.get('total_schools', 0),
-                'real_time_connected_entities': {label: query_response.get(label, 0) for label in query_labels},
+                'total_entities': query_response.get('total_schools', 0),
+                'connected_entities': {label: query_response.get(label, 0) for label in query_labels},
                 'legend_configs': legend_configs,
                 'benchmark_metadata': {
                     'parameter_column_unit': parameter_column_unit,
