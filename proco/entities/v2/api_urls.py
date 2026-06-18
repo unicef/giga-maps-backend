@@ -33,6 +33,13 @@ urlpatterns = [
         name='list-published-data-layers-entities'),
 
 
+    path('layers/<int:pk>/map/', entity_api.EntityDataLayerMapViewSet.as_view(),
+        name='entity-map-data-layer'),
+
+    path('layers/info/', entity_api.EntityDataLayerInfoViewSet.as_view(),
+        name='entity-info-data-layer'),
+
+
     # Admin
     path('layers/', entity_api.EntityDataLayersViewSet.as_view({'get': 'list', 'post': 'create', }),
         name='list-or-create-data-layers-entities'),
@@ -40,37 +47,20 @@ urlpatterns = [
         name='update-or-delete-data-layer-entities'),
     path('layers/<int:pk>/publish/', entity_api.EntityDataLayerPublishViewSet.as_view({'put': 'partial_update',}),
         name='publish-data-layer-entities'),
-
     path('layers/<int:pk>/preview/', entity_api.EntityDataLayerPreviewViewSet.as_view(),
-         name='preview-data-layer-entities'),
-    path('layers/<int:pk>/metadata/', entity_api.EntityDataLayerMetadataViewSet.as_view({
-        'get': 'retrieve',
-    }), name='metadata-data-layer-entities'),
-    path('layers/info/', entity_api.EntityDataLayerInfoViewSet.as_view(),
-         name='entity-info-data-layer'),
-    path('layers/<int:pk>/map/', entity_api.EntityDataLayerMapViewSet.as_view(),
-         name='entity-map-data-layer'),
-
-    # Entity column configurations
-    path('column_configurations/', entity_filter_api.EntityColumnConfigurationViewSet.as_view({
-        'get': 'list',
-    }), name='list-entity-column-configurations'),
-    path('column_configurations/<int:pk>/choices/', entity_filter_api.EntityColumnConfigurationChoicesViewSet.as_view({
-        'get': 'retrieve',
-    }), name='retrieve-entity-column-configuration-choices'),
-
-    # Entity advance filters - CRUD
-    path('filters/', entity_filter_api.EntityAdvanceFiltersViewSet.as_view({
-        'get': 'list',
-        'post': 'create',
-    }), name='list-or-create-entity-filters'),
-    path('filters/<int:pk>/', entity_filter_api.EntityAdvanceFiltersViewSet.as_view({
-        'put': 'partial_update',
-        'delete': 'destroy',
-    }), name='update-or-delete-entity-filter'),
-    path('filters/<int:pk>/publish/', entity_filter_api.EntityAdvanceFiltersPublishViewSet.as_view({
-        'put': 'partial_update',
-    }), name='publish-entity-filter'),
+         name='preview-data-layer-entities'), # not working
+    path('filters/', entity_filter_api.EntityAdvanceFiltersViewSet.as_view({'get': 'list', 'post': 'create',}),
+        name='list-or-create-entity-filters'),
+    path('filters/<int:pk>/', entity_filter_api.EntityAdvanceFiltersViewSet.as_view({'put': 'partial_update', 'delete': 'destroy',}),
+        name='update-or-delete-entity-filter'),
+    path('filters/<int:pk>/publish/', entity_filter_api.EntityAdvanceFiltersPublishViewSet.as_view({'put': 'partial_update',}),
+        name='publish-entity-filter'),
+    path('column_configurations/', entity_filter_api.EntityColumnConfigurationViewSet.as_view({'get': 'list',}),
+        name='list-entity-column-configurations'),
+    path('column_configurations/<int:pk>/choices/', entity_filter_api.EntityColumnConfigurationChoicesViewSet.as_view({'get': 'retrieve',}),
+        name='retrieve-entity-column-configuration-choices'),
+    path('layers/<int:pk>/metadata/', entity_api.EntityDataLayerMetadataViewSet.as_view({'get': 'retrieve',}),
+        name='metadata-data-layer-entities'),
 
 
     # Entity list by country (Should be at last)
