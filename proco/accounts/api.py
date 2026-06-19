@@ -1357,7 +1357,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             adm1_metadata."name", adm1_metadata."description_ui_label",
             adm2_metadata."name", adm2_metadata."description_ui_label",
             c."name", adm1_metadata."giga_id_admin", adm2_metadata."giga_id_admin",
-            sds."{col_name}", sws."download_speed_benchmark"
+            sds."{col_name}", sws."id", sws."download_speed_benchmark"
         ORDER BY schools_school."id" ASC
         """
 
@@ -1959,7 +1959,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                             #     positive_speeds[str(info_panel_school['id'])]) > 0 else 0)
 
                             info_panel_school['live_avg'] = self.get_live_avg(
-                                parameter_col_function.get('name', 'avg'),
+                                (parameter_col_function or {}).get('name', 'avg'),
                                 positive_speeds[str(info_panel_school['id'])]
                             )
                             info_panel_school['graph_data'] = graph_data[str(info_panel_school['id'])]
@@ -2014,7 +2014,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
                     graph_data, positive_speeds = self.generate_graph_data()
                     live_avg = self.get_live_avg(
-                        parameter_col_function.get('name', 'avg'),
+                        (parameter_col_function or {}).get('name', 'avg'),
                         positive_speeds
                     )
 
