@@ -491,6 +491,10 @@ LOGGING = {
         'verbose': {
             'format': '%(hostname)s %(hostip)s %(asctime)s %(levelname)s %(pathname)s: %(message)s'
         },
+        'file_readable': {
+            'format': '\n==================== [ %(asctime)s ] %(levelname)s ====================\nModule: %(module)s (Line %(lineno)d)\nMessage: %(message)s',
+            'datefmt': '%Y-%m-%d %H:%M:%S'
+        },
     },
     'handlers': {
         'console': {
@@ -500,12 +504,31 @@ LOGGING = {
             'stream': sys.stderr,
             'filters': ['hostname_filter'],
         },
+        'file': {
+            'level': 'ERROR',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': str(root('django_errors.log')),
+            'when': 'midnight',
+            'interval': 1,
+            'backupCount': 14,
+            'formatter': 'file_readable',
+        },
     },
     'loggers': {
         'gigamaps': {
             'level': GIGAMAPS_LOG_LEVEL,
             'handlers': ['console'],
             'filters': ['hostname_filter'],
+        },
+        'django.request': {
+            'handlers': ['console', 'file'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+        'django.server': {
+            'handlers': ['console', 'file'],
+            'level': 'ERROR',
+            'propagate': False,
         },
     },
 }

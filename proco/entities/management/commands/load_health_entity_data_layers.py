@@ -450,7 +450,7 @@ health_data_layer_json = [
             }
         ]
     },
-],
+]
 
 
 def load_health_data_sources():
