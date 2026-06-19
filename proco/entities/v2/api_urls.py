@@ -31,15 +31,15 @@ urlpatterns = [
         'get': 'list', }), name='list-published-entity-filters'),
     path('layers/<int:pk>/', entity_api.EntityDataLayersViewSet.as_view({'put': 'partial_update', 'delete': 'destroy',}),
         name='update-or-delete-data-layer-entities'),
-    path('layers/<str:status>/', entity_api.PublishedEntityDataLayersViewSet.as_view({'get': 'list',}),
-        name='list-published-data-layers-entities'),
-
 
     path('layers/<int:pk>/map/', entity_api.EntityDataLayerMapViewSet.as_view(),
         name='entity-map-data-layer'),
 
     path('layers/info/', entity_api.EntityDataLayerInfoViewSet.as_view(),
         name='entity-info-data-layer'),
+
+    path('layers/<str:status>/', entity_api.PublishedEntityDataLayersViewSet.as_view({'get': 'list',}),
+        name='list-published-data-layers-entities'),
 
 
     # Admin
