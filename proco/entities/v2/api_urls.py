@@ -32,12 +32,7 @@ urlpatterns = [
     path('layers/<str:status>/', entity_api.PublishedEntityDataLayersViewSet.as_view({'get': 'list',}),
         name='list-published-data-layers-entities'),
     path('layers/<int:pk>/map/', entity_api.EntityDataLayerMapViewSet.as_view(), name='entity-map-data-layer'),
-
     path('layers/info/', entity_api.EntityDataLayerInfoViewSet.as_view(), name='entity-info-data-layer'),
-
-    path('layers/<str:status>/', entity_api.PublishedEntityDataLayersViewSet.as_view({'get': 'list',}),
-        name='list-published-data-layers-entities'),
-
 
     # Admin
     path('layers/', entity_api.EntityDataLayersViewSet.as_view({'get': 'list', 'post': 'create', }),
@@ -59,6 +54,8 @@ urlpatterns = [
         name='retrieve-entity-column-configuration-choices'),
     path('layers/<int:pk>/metadata/', entity_api.EntityDataLayerMetadataViewSet.as_view({'get': 'retrieve',}),
         name='metadata-data-layer-entities'),
+    path('layers/<int:pk>/', entity_api.EntityDataLayersViewSet.as_view({'put': 'partial_update', 'delete': 'destroy',}),
+        name='update-or-delete-data-layer-entities'),
 
 
     # Entity list by country (Should be at last)
