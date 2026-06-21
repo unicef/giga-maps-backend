@@ -261,7 +261,7 @@ class BaseEntityDataLayerAPIViewSet(APIView):
         cache_status_codes=[rest_status.HTTP_200_OK, ],
     )
 ], name='dispatch')
-class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities.BaseTileGenerator):
+class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewSet, account_utilities.BaseTileGenerator):
     CACHE_KEY = 'cache'
     CACHE_KEY_PREFIX = 'ENTITY_DATA_LAYER_MAP'
 
@@ -635,23 +635,43 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
 
         return False
 
+    def get_layer_entity_type_code(self, data_layer_instance):
+        if data_layer_instance.entity_type and data_layer_instance.entity_type.is_legacy:
+            return LEGACY_MODEL
+        return data_layer_instance.entity_name
+
+    def validate_requested_entity_type(self, data_layer_instance):
+        requested_entity_type_codes = self.get_entity_type_code_params()
+        if requested_entity_type_codes is None:
+            return None
+
+        layer_entity_type_code = self.get_layer_entity_type_code(data_layer_instance)
+        if layer_entity_type_code not in requested_entity_type_codes:
+            return Response(
+                {
+                    'error': (
+                        f"entity_type__code does not match data layer entity type: "
+                        f"{layer_entity_type_code}"
+                    )
+                },
+                status=400,
+            )
+        return None
+
     def get(self, request, *args, **kwargs):
-        entity_type = self.request.query_params.get('entity_type__code')
-        if entity_type == LEGACY_MODEL:
+        data_layer_instance = get_object_or_404(
+            accounts_models.DataLayer.objects.select_related('entity_type'),
+            pk=self.kwargs.get('pk'),
+            status=accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
+        )
+
+        entity_type_validation_error = self.validate_requested_entity_type(data_layer_instance)
+        if entity_type_validation_error:
+            return entity_type_validation_error
+
+        if self.get_layer_entity_type_code(data_layer_instance) == LEGACY_MODEL:
             school_view = DataLayerMapViewSet.as_view()
             return school_view(request._request, *args, **kwargs)
-
-        # If entity_type__code is not provided, we will extract entity using data layer :
-        # NEED TO CONFIRM WITH FE ON THIS
-        # data_layer_instance = get_object_or_404(
-        #     accounts_models.DataLayer.objects.all(),
-        #     pk=self.kwargs.get('pk'),
-        #     status=accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
-        #
-        # )
-        # if data_layer_instance.entity_type.code == LEGACY_MODEL:
-        #     school_view = DataLayerMapViewSet.as_view()
-        #     return school_view(request._request, *args, **kwargs)
 
         use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
         request_path = remove_query_param(request.get_full_path(), 'cache')
@@ -662,12 +682,6 @@ class EntityDataLayerMapViewSet(BaseEntityDataLayerAPIViewSet, account_utilities
             response = cache_manager.get(cache_key)
 
         if not response:
-            data_layer_instance = get_object_or_404(
-                accounts_models.DataLayer.objects.all(),
-                pk=self.kwargs.get('pk'),
-                status=accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
-
-            )
             data_sources = data_layer_instance.data_sources.all()
 
             live_data_sources = ['UNKNOWN']

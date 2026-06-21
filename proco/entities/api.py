@@ -770,7 +770,7 @@ class EntityConnectivityTileGenerator(EntityTypeCodeMixin, BaseTileGenerator):
 
             SELECT
                 (
-                    SELECT ST_AsMVT(school_mvtgeom, 'schools')
+                    SELECT ST_AsMVT(school_mvtgeom, 'school')
                     FROM school_mvtgeom
                 )
                 ||
@@ -837,7 +837,7 @@ class EntityConnectivityTileGenerator(EntityTypeCodeMixin, BaseTileGenerator):
 ], name='dispatch')
 class EntityGlobalConnectivityTileRequestHandler(APIView):
     CACHE_KEY = 'cache'
-    CACHE_KEY_PREFIX = 'CONNECTIVITY_GLOBAL_TILES_MAP'
+    CACHE_KEY_PREFIX = 'CONNECTIVITY_GLOBAL_TILES_MAP_V2'
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
