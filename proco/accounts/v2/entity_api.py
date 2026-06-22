@@ -51,6 +51,16 @@ logger = logging.getLogger('gigamaps.' + __name__)
 
 class BaseEntityDataLayerAPIViewSet(APIView):
     model = accounts_models.DataLayer
+    ENTITY_PARAM_SUFFIXES = (
+        'layer_id',
+        'start_date',
+        'end_date',
+        'is_weekly',
+        'benchmark',
+        'include_same_location',
+        'country_id',
+        'admin1_id',
+    )
 
     permission_classes = (
         permissions.AllowAny,
@@ -211,6 +221,75 @@ class BaseEntityDataLayerAPIViewSet(APIView):
             self.kwargs['entity_real_time_filters'] = core_utilities.get_filter_sql(
                 self.request, 'entity_real_time', 'connection_statistics_entityweeklystatus', entity_type)
 
+    @classmethod
+    def extract_entity_params(cls, request):
+        """
+        Extract entity-specific parameters from query params.
+        Looks for patterns like: {entity_code}_{param_name}
+        e.g., school_layer_id, health_start_date, school_benchmark
+
+        Returns dict: {entity_code: {param_name: value, ...}}
+        """
+        entity_params = {}
+        for param_name, param_value in request.query_params.items():
+            if not param_value:
+                continue
+
+            for suffix in cls.ENTITY_PARAM_SUFFIXES:
+                entity_suffix = f'_{suffix}'
+                if param_name.endswith(entity_suffix):
+                    entity_code = param_name[:-len(entity_suffix)]
+                    entity_params.setdefault(entity_code, {})[suffix] = param_value
+                    break
+
+        return entity_params
+
+    @staticmethod
+    def set_query_param(query_params, key, value):
+        if value in (None, ''):
+            query_params.pop(key, None)
+            return
+        query_params[key] = value
+
+    def build_scoped_query_params(self, request, entity_code, params, is_legacy):
+        query_params = request.query_params.copy()
+
+        for key in self.ENTITY_PARAM_SUFFIXES:
+            if key in params:
+                query_params[key] = params[key]
+
+        if is_legacy:
+            scoped_single = (
+                request.query_params.get(f'{entity_code}_school_id')
+                or request.query_params.get(f'{entity_code}_entity_id')
+                or request.query_params.get('school_id')
+            )
+            scoped_multi = (
+                request.query_params.get(f'{entity_code}_school_id__in')
+                or request.query_params.get(f'{entity_code}_entity_id__in')
+                or request.query_params.get('school_id__in')
+            )
+            self.set_query_param(query_params, 'school_id', scoped_single)
+            self.set_query_param(query_params, 'school_id__in', scoped_multi)
+            self.set_query_param(
+                query_params,
+                'include_same_location_schools',
+                query_params.get('include_same_location'),
+            )
+        else:
+            scoped_single = (
+                request.query_params.get(f'{entity_code}_entity_id')
+                or request.query_params.get('entity_id')
+            )
+            scoped_multi = (
+                request.query_params.get(f'{entity_code}_entity_id__in')
+                or request.query_params.get('entity_id__in')
+            )
+            self.set_query_param(query_params, 'entity_id', scoped_single)
+            self.set_query_param(query_params, 'entity_id__in', scoped_multi)
+
+        return query_params
+
     def get_benchmark_value(self, data_layer_instance):
         benchmark_val = data_layer_instance.global_benchmark.get('value')
         benchmark_unit = data_layer_instance.global_benchmark.get('unit')
@@ -264,16 +343,53 @@ class BaseEntityDataLayerAPIViewSet(APIView):
 class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewSet, account_utilities.BaseTileGenerator):
     CACHE_KEY = 'cache'
     CACHE_KEY_PREFIX = 'ENTITY_DATA_LAYER_MAP'
+    LAYER_ID_QUERY_PARAM = 'layer_id'
 
     def get_cache_key(self):
-        pk = self.kwargs.get('pk')
+        layer_id = self.get_layer_id()
         params = dict(self.request.query_params)
         params.pop(self.CACHE_KEY, None)
         return '{0}_{1}_{2}'.format(
             self.CACHE_KEY_PREFIX,
-            pk,
+            layer_id,
             '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))),
         )
+
+    def get_layer_id(self):
+        _, params = self.get_entity_layer_params()
+        if params:
+            return params.get(self.LAYER_ID_QUERY_PARAM)
+        return None
+
+    def get_entity_layer_params(self):
+        entity_params = self.extract_entity_params(self.request)
+        requested_entity_type_codes = self.get_entity_type_code_params()
+
+        if requested_entity_type_codes:
+            if len(requested_entity_type_codes) > 1:
+                return None, None
+
+            entity_code = requested_entity_type_codes[0]
+            params = entity_params.get(entity_code)
+            if params and params.get(self.LAYER_ID_QUERY_PARAM):
+                return entity_code, params
+
+        layer_entity_params = {
+            entity_code: params
+            for entity_code, params in entity_params.items()
+            if params.get(self.LAYER_ID_QUERY_PARAM)
+        }
+        if len(layer_entity_params) == 1:
+            entity_code, params = next(iter(layer_entity_params.items()))
+            return entity_code, params
+        if len(layer_entity_params) > 1:
+            return None, None
+
+        layer_id = self.request.query_params.get(self.LAYER_ID_QUERY_PARAM)
+        if layer_id:
+            return None, {self.LAYER_ID_QUERY_PARAM: layer_id}
+
+        return None, None
 
     def envelope_to_sql(self, env, request):
         if self.kwargs['layer_type'] == accounts_models.DataLayer.LAYER_TYPE_LIVE:
@@ -659,9 +775,24 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
         return None
 
     def get(self, request, *args, **kwargs):
+        entity_code, entity_params = self.get_entity_layer_params()
+        layer_id = entity_params.get(self.LAYER_ID_QUERY_PARAM) if entity_params else None
+        if not layer_id:
+            return Response(
+                {
+                    'error': (
+                        'Provide a layer_id query parameter or exactly one '
+                        '{entity_code}_layer_id query parameter.'
+                    )
+                },
+                status=400,
+            )
+
+        self.kwargs[self.LAYER_ID_QUERY_PARAM] = layer_id
+
         data_layer_instance = get_object_or_404(
             accounts_models.DataLayer.objects.select_related('entity_type'),
-            pk=self.kwargs.get('pk'),
+            pk=layer_id,
             status=accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
         )
 
@@ -670,6 +801,14 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
             return entity_type_validation_error
 
         if self.get_layer_entity_type_code(data_layer_instance) == LEGACY_MODEL:
+            if entity_code:
+                scoped_query_params = self.build_scoped_query_params(
+                    request,
+                    entity_code,
+                    entity_params,
+                    is_legacy=True,
+                )
+                request._request.GET = scoped_query_params
             school_view = DataLayerMapViewSet.as_view()
             return school_view(request._request, *args, **kwargs)
 
@@ -699,7 +838,16 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
             parameter_column_name = str(parameter_col['name'])
             base_benchmark = str(parameter_col.get('base_benchmark', 1))
 
-            self.update_kwargs(country_ids, data_layer_instance)
+            if entity_code:
+                scoped_query_params = self.build_scoped_query_params(
+                    request,
+                    entity_code,
+                    entity_params,
+                    is_legacy=False,
+                )
+                self.update_kwargs_from_dict(country_ids, data_layer_instance, scoped_query_params)
+            else:
+                self.update_kwargs(country_ids, data_layer_instance)
             benchmark_value, _ = self.get_benchmark_value(data_layer_instance)
             global_benchmark = data_layer_instance.global_benchmark.get('value')
 
@@ -749,16 +897,6 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
 class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
     CACHE_KEY = 'cache'
     CACHE_KEY_PREFIX = 'ENTITY_DATA_LAYER_INFO'
-    ENTITY_PARAM_SUFFIXES = (
-        'layer_id',
-        'start_date',
-        'end_date',
-        'is_weekly',
-        'benchmark',
-        'include_same_location',
-        'country_id',
-        'admin1_id',
-    )
 
     def get_cache_key(self):
         params = dict(self.request.query_params)
@@ -1497,81 +1635,6 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         kwargs['label_case_statements'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status,'
 
         return query.format(**kwargs)
-
-    @classmethod
-    def extract_entity_params(cls, request):
-        """
-        Extract entity-specific parameters from query params.
-        Looks for patterns like: {entity_code}_{param_name}
-        e.g., school_layer_id, health_start_date, school_benchmark
-
-        Returns dict: {entity_code: {param_name: value, ...}}
-        """
-        entity_params = {}
-        print("DEBUG EXTRACT: query_params =", dict(request.query_params))
-        for param_name, param_value in request.query_params.items():
-            print(f"DEBUG EXTRACT: Iterating key={param_name} val={param_value}")
-            if param_value:
-                for suffix in cls.ENTITY_PARAM_SUFFIXES:
-                    entity_suffix = f'_{suffix}'
-                    ends = param_name.endswith(entity_suffix)
-                    # print(f"  checking suffix {entity_suffix}: ends={ends}")
-                    if ends:
-                        entity_code = param_name[:-len(entity_suffix)]
-                        print(f"DEBUG EXTRACT: Matched param_name={param_name} to entity_code={entity_code}, suffix={suffix}")
-                        if entity_code not in entity_params:
-                            entity_params[entity_code] = {}
-                        entity_params[entity_code][suffix] = param_value
-                        break
-
-        print("DEBUG EXTRACT: result entity_params =", entity_params)
-        return entity_params
-
-    @staticmethod
-    def set_query_param(query_params, key, value):
-        if value in (None, ''):
-            query_params.pop(key, None)
-            return
-        query_params[key] = value
-
-    def build_scoped_query_params(self, request, entity_code, params, is_legacy):
-        query_params = request.query_params.copy()
-
-        for key in self.ENTITY_PARAM_SUFFIXES:
-            if key in params:
-                query_params[key] = params[key]
-
-        if is_legacy:
-            scoped_single = (
-                request.query_params.get(f'{entity_code}_school_id')
-                or request.query_params.get(f'{entity_code}_entity_id')
-                or request.query_params.get('school_id')
-            )
-            scoped_multi = (
-                request.query_params.get(f'{entity_code}_school_id__in')
-                or request.query_params.get(f'{entity_code}_entity_id__in')
-                or request.query_params.get('school_id__in')
-            )
-            self.set_query_param(query_params, 'school_id', scoped_single)
-            self.set_query_param(query_params, 'school_id__in', scoped_multi)
-            self.set_query_param(
-                query_params,
-                'include_same_location_schools',
-                query_params.get('include_same_location'),
-            )
-        else:
-            scoped_single = (
-                request.query_params.get(f'{entity_code}_entity_id')
-                or request.query_params.get('entity_id')
-            )
-            scoped_multi = (
-                request.query_params.get(f'{entity_code}_entity_id__in')
-                or request.query_params.get('entity_id__in')
-            )
-            self.set_query_param(query_params, 'entity_id', scoped_single)
-            self.set_query_param(query_params, 'entity_id__in', scoped_multi)
-
-        return query_params
 
     @staticmethod
     def get_selected_ids(kwargs, is_legacy):
