@@ -993,6 +993,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             label_cases = []
             for title, values_and_label in legend_configs.items():
                 label = values_and_label.get('labels', title).strip()
+                if not label:
+                    continue  # Skip empty labels to prevent SQL syntax errors
                 query_labels.append(label)
                 values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
                                      values_and_label.get('values', [])))
@@ -1472,6 +1474,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
                                  values_and_label.get('values', [])))
             label = values_and_label.get('labels', title).strip()
+            if not label:
+                continue
             query_labels.append(label)
 
             if len(values) > 0:

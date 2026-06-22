@@ -28,7 +28,7 @@ from proco.connection_statistics.utils import (
     aggregate_real_time_data_to_school_daily_status,
     aggregate_school_daily_status_to_school_weekly_status,
     aggregate_school_daily_to_country_daily,
-    update_country_weekly_status,
+    update_country_weekly_status, aggregate_entity_daily_status_to_entity_weekly_status,
 )
 from proco.core import utils as core_utilities
 from proco.core.config import app_config as core_configs
