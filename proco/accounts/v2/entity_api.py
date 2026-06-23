@@ -459,6 +459,7 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                 SELECT DISTINCT ST_AsMVTGeom(ST_Transform("entities_entity".geopoint, 3857), bounds.b2d) AS geom,
                     {random_select_list}
                     "entities_entity".id,
+                    '{entity_name}' AS entity_type,
                     True AS is_rt_connected,
                     eds.{col_name} AS field_avg,
                     {case_conditions}
@@ -498,11 +499,12 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                     {random_order}
                     {limit_condition}
             )
-            SELECT ST_AsMVT(DISTINCT mvtgeom.*) FROM mvtgeom;
+            SELECT ST_AsMVT(DISTINCT mvtgeom.*, '{mvt_layer}') FROM mvtgeom;
         """
 
         kwargs = copy.deepcopy(self.kwargs)
 
+        kwargs['mvt_layer'] = kwargs.get('mvt_layer', 'default')
         kwargs['country_condition'] = ''
         kwargs['admin1_condition'] = ''
         kwargs['entity_condition'] = ''
@@ -643,6 +645,7 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
             SELECT DISTINCT ST_AsMVTGeom(ST_Transform(entities_entity.geopoint, 3857), bounds.b2d) AS geom,
                 {random_select_list}
                 entities_entity.id,
+                '{entity_name}' AS entity_type,
                 {table_name}."{col_name}" AS field_value,
                 'connected' AS connectivity_status,
                 {label_case_statements}
@@ -658,11 +661,12 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
             {random_order}
             {limit_condition}
         )
-        SELECT ST_AsMVT(DISTINCT mvtgeom.*) FROM mvtgeom;
+        SELECT ST_AsMVT(DISTINCT mvtgeom.*, '{mvt_layer}') FROM mvtgeom;
         """
 
         kwargs = copy.deepcopy(self.kwargs)
 
+        kwargs['mvt_layer'] = kwargs.get('mvt_layer', 'default')
         kwargs['country_condition'] = ''
         kwargs['admin1_condition'] = ''
         kwargs['entity_condition'] = ''
@@ -895,6 +899,7 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                     'layer_type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                     'legend_configs': legend_configs,
                     'entity_name': data_layer_instance.entity_name,
+                    'mvt_layer': LEGACY_MODEL if is_legacy else 'entities',
                 })
             else:
                 self.kwargs.update({
@@ -903,6 +908,7 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                     'parameter_col': parameter_col,
                     'layer_type': accounts_models.DataLayer.LAYER_TYPE_STATIC,
                     'entity_name': data_layer_instance.entity_name,
+                    'mvt_layer': LEGACY_MODEL if is_legacy else 'entities',
                 })
 
             return {
@@ -975,6 +981,10 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                     is_legacy=True,
                 )
                 request._request.GET = scoped_query_params
+            kwargs.update({
+                'pk': layer_id,
+                'mvt_layer': LEGACY_MODEL,
+            })
             school_view = DataLayerMapViewSet.as_view()
             return school_view(request._request, *args, **kwargs)
 
@@ -1031,6 +1041,7 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                     'layer_type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                     'legend_configs': legend_configs,
                     'entity_name': data_layer_instance.entity_name,
+                    'mvt_layer': 'entities',
                 })
             else:
                 self.kwargs.update({
@@ -1039,6 +1050,7 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                     'parameter_col': parameter_col,
                     'layer_type': accounts_models.DataLayer.LAYER_TYPE_STATIC,
                     'entity_name': data_layer_instance.entity_name,
+                    'mvt_layer': 'entities',
                 })
 
             try:
