@@ -346,7 +346,7 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
     LAYER_ID_QUERY_PARAM = 'layer_id'
 
     def get_cache_key(self):
-        layer_id = self.get_layer_id()
+        layer_id = self.get_layer_ids_cache_part()
         params = dict(self.request.query_params)
         params.pop(self.CACHE_KEY, None)
         return '{0}_{1}_{2}'.format(
@@ -355,11 +355,35 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
             '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))),
         )
 
+    def get_layer_ids_cache_part(self):
+        layer_entity_params = self.get_prefixed_layer_params()
+        if layer_entity_params:
+            return '_'.join([
+                f'{entity_code}_{params[self.LAYER_ID_QUERY_PARAM]}'
+                for entity_code, params in sorted(layer_entity_params.items())
+            ])
+        return self.get_layer_id()
+
     def get_layer_id(self):
         _, params = self.get_entity_layer_params()
         if params:
             return params.get(self.LAYER_ID_QUERY_PARAM)
         return None
+
+    def get_prefixed_layer_params(self):
+        requested_entity_type_codes = self.get_entity_type_code_params()
+        layer_entity_params = {
+            entity_code: params
+            for entity_code, params in self.extract_entity_params(self.request).items()
+            if params.get(self.LAYER_ID_QUERY_PARAM)
+        }
+        if requested_entity_type_codes is None:
+            return layer_entity_params
+        return {
+            entity_code: params
+            for entity_code, params in layer_entity_params.items()
+            if entity_code in requested_entity_type_codes
+        }
 
     def get_entity_layer_params(self):
         entity_params = self.extract_entity_params(self.request)
@@ -392,6 +416,35 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
         return None, None
 
     def envelope_to_sql(self, env, request):
+        if getattr(self, 'layer_sql_contexts', None):
+            sql_parts = []
+            original_kwargs = self.kwargs
+            try:
+                for layer_context in self.layer_sql_contexts:
+                    self.kwargs = copy.deepcopy(layer_context['kwargs'])
+                    if layer_context['is_legacy']:
+                        school_map_view = DataLayerMapViewSet()
+                        school_map_view.kwargs = self.kwargs
+                        if self.kwargs['layer_type'] == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+                            sql = school_map_view.get_live_map_query(env, request)
+                        else:
+                            sql = school_map_view.get_static_map_query(env, request)
+                    elif self.kwargs['layer_type'] == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+                        sql = self.get_live_entity_map_query(env, request)
+                    else:
+                        sql = self.get_static_entity_map_query(env, request)
+
+                    sql_parts.append(sql.rstrip(';\n '))
+            finally:
+                self.kwargs = original_kwargs
+
+            return "SELECT {0};".format(
+                " || ".join([
+                    "COALESCE(({0}), ''::bytea)".format(sql)
+                    for sql in sql_parts
+                ])
+            )
+
         if self.kwargs['layer_type'] == accounts_models.DataLayer.LAYER_TYPE_LIVE:
             return self.get_live_entity_map_query(env, request)
         return self.get_static_entity_map_query(env, request)
@@ -774,7 +827,120 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
             )
         return None
 
+    def build_layer_sql_context(self, request, entity_code, entity_params):
+        layer_id = entity_params.get(self.LAYER_ID_QUERY_PARAM)
+        data_layer_instance = get_object_or_404(
+            accounts_models.DataLayer.objects.select_related('entity_type'),
+            pk=layer_id,
+            status=accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
+        )
+
+        layer_entity_type_code = self.get_layer_entity_type_code(data_layer_instance)
+        if entity_code and entity_code != layer_entity_type_code:
+            return Response(
+                {
+                    'error': (
+                        f"{entity_code}_layer_id does not match data layer entity type: "
+                        f"{layer_entity_type_code}"
+                    )
+                },
+                status=400,
+            )
+
+        is_legacy = layer_entity_type_code == LEGACY_MODEL
+        data_sources = data_layer_instance.data_sources.all()
+        first_data_source = data_sources.first()
+        if first_data_source is None:
+            return Response({'error': f'DataLayer (id={layer_id}) has no data sources configured.'}, status=400)
+
+        live_data_sources = ['UNKNOWN']
+        for data_source_relationship in data_sources:
+            source_type = (data_source_relationship.data_source.data_source_type or '').upper()
+            if source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_QOS:
+                live_data_sources.append(statistics_configs.QOS_SOURCE)
+            elif source_type == accounts_models.DataSource.DATA_SOURCE_TYPE_DAILY_CHECK_APP:
+                live_data_sources.append(statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE)
+
+        country_ids = data_layer_instance.applicable_countries
+        parameter_col = first_data_source.data_source_column
+        parameter_column_name = str(parameter_col['name'])
+        base_benchmark = str(parameter_col.get('base_benchmark', 1))
+        scoped_query_params = self.build_scoped_query_params(
+            request,
+            entity_code,
+            entity_params,
+            is_legacy=is_legacy,
+        )
+
+        original_kwargs = self.kwargs
+        self.kwargs = {}
+        try:
+            self.update_kwargs_from_dict(country_ids, data_layer_instance, scoped_query_params)
+            benchmark_value, _ = self.get_benchmark_value(data_layer_instance)
+            global_benchmark = data_layer_instance.global_benchmark.get('value')
+            legend_configs = self.get_legend_configs(data_layer_instance)
+
+            if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+                self.kwargs.update({
+                    'col_name': parameter_column_name,
+                    'benchmark_value': benchmark_value,
+                    'global_benchmark': global_benchmark,
+                    'national_benchmark': benchmark_value,
+                    'base_benchmark': base_benchmark,
+                    'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
+                    'parameter_col': parameter_col,
+                    'parameter_col_function_sql': self.get_column_function_sql(
+                        first_data_source.data_source_column_function
+                    ),
+                    'layer_type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
+                    'legend_configs': legend_configs,
+                    'entity_name': data_layer_instance.entity_name,
+                })
+            else:
+                self.kwargs.update({
+                    'col_name': parameter_column_name,
+                    'legend_configs': legend_configs,
+                    'parameter_col': parameter_col,
+                    'layer_type': accounts_models.DataLayer.LAYER_TYPE_STATIC,
+                    'entity_name': data_layer_instance.entity_name,
+                })
+
+            return {
+                'data_layer_instance': data_layer_instance,
+                'is_legacy': is_legacy,
+                'kwargs': copy.deepcopy(self.kwargs),
+            }
+        finally:
+            self.kwargs = original_kwargs
+
     def get(self, request, *args, **kwargs):
+        layer_entity_params = self.get_prefixed_layer_params()
+        if len(layer_entity_params) > 1:
+            use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
+            request_path = remove_query_param(request.get_full_path(), 'cache')
+            cache_key = self.get_cache_key()
+
+            response = cache_manager.get(cache_key) if use_cached_data else None
+            if not response:
+                layer_sql_contexts = []
+                for entity_code, entity_params in layer_entity_params.items():
+                    layer_context = self.build_layer_sql_context(request, entity_code, entity_params)
+                    if isinstance(layer_context, Response):
+                        return layer_context
+                    layer_sql_contexts.append(layer_context)
+
+                self.layer_sql_contexts = layer_sql_contexts
+                try:
+                    response = self.generate_tile(request)
+                finally:
+                    self.layer_sql_contexts = []
+
+                if response.status_code == rest_status.HTTP_200_OK:
+                    cache_manager.set(cache_key, response, request_path=request_path,
+                                      soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
+
+            return response
+
         entity_code, entity_params = self.get_entity_layer_params()
         layer_id = entity_params.get(self.LAYER_ID_QUERY_PARAM) if entity_params else None
         if not layer_id:
