@@ -27,7 +27,7 @@ from proco.connection_statistics.models import SchoolWeeklyStatus, SchoolDailySt
     EntityWeeklyStatus
 from proco.connection_statistics.utils import get_benchmark_value_for_default_download_layer
 from proco.entities.constants import LEGACY_MODEL
-from proco.entities.mixins import EntityTypeCodeMixin
+from proco.entities.mixins import EntityDetailFilterMixin, EntityTypeCodeMixin
 from proco.locations.api import BaseSearchMixin
 from proco.locations.search_indexes import UnifiedEntityIndex
 from proco.utils.cache import cache_manager, custom_cache_control
@@ -100,7 +100,45 @@ class EntitiesViewSet(
         return super().get_queryset().filter(country=self.get_country())
 
 
-class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
+class RawEntityDetailFilterMixin(EntityDetailFilterMixin):
+    def get_entity_detail_filter_sql(self, request, entity_type_code, base_table_ref='entities_entity'):
+        if not entity_type_code or entity_type_code == LEGACY_MODEL:
+            return '', ''
+
+        entity_type_obj = EntityType.get_all_active().filter(code=entity_type_code).first()
+        if entity_type_obj is None:
+            return '', ''
+
+        detail_table_name = self.get_entity_detail_table_name(entity_type_obj)
+        if not detail_table_name:
+            return '', ''
+
+        conditions = []
+        for table_alias in self.get_entity_detail_filter_aliases(entity_type_obj):
+            detail_filters = core_utilities.get_filter_sql(
+                request,
+                table_alias,
+                detail_table_name,
+                entity_type_code,
+            )
+            if len(detail_filters) > 0:
+                conditions.append(detail_filters)
+
+        if not conditions:
+            return '', ''
+
+        join_sql = """
+                INNER JOIN "{detail_table_name}"
+                    ON {base_table_ref}."id" = "{detail_table_name}"."entity_id"
+                    AND "{detail_table_name}"."deleted" IS NULL
+        """.format(
+            base_table_ref=base_table_ref,
+            detail_table_name=detail_table_name,
+        )
+        return join_sql, ' AND ' + ' AND '.join(conditions)
+
+
+class EntityStatusConnectivityTileGenerator(RawEntityDetailFilterMixin, BaseTileGenerator):
     def __init__(self, table_config):
         super().__init__()
         self.table_config = table_config
@@ -145,6 +183,10 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
             table_configs['entity_static_filters'] = ''
         table_configs['entity_real_time_filters'] = core_utilities.get_filter_sql(
             request, 'entity_real_time', 'connection_statistics_entityweeklystatus', entity_type_code)
+        (
+            table_configs['entity_detail_join'],
+            table_configs['entity_detail_condition'],
+        ) = self.get_entity_detail_filter_sql(request, entity_type_code)
 
     def envelope_to_sql(self, env, request):
         tbl = self.table_config.copy()
@@ -176,6 +218,7 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
                 FROM entities_entity
                 INNER JOIN entities_entity_type ON entities_entity.entity_type_id = entities_entity_type.id
                 INNER JOIN bounds ON ST_Intersects(entities_entity.geopoint, ST_Transform(bounds.geom, {srid}))
+                {entity_detail_join}
                 {entity_weekly_join}
                 {entity_master_join}
                 WHERE entities_entity."deleted" IS NULL
@@ -183,6 +226,7 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
                     {country_condition}
                     {admin1_condition}
                     {entity_condition}
+                    {entity_detail_condition}
                     {entity_weekly_condition}
                     {entity_master_condition}
                     {random_order}
@@ -195,6 +239,8 @@ class EntityStatusConnectivityTileGenerator(BaseTileGenerator):
         tbl['entity_weekly_condition'] = ''
         tbl['entity_master_join'] = ''
         tbl['entity_master_condition'] = ''
+        tbl.setdefault('entity_detail_join', '')
+        tbl.setdefault('entity_detail_condition', '')
         entity_type_codes = tbl.get('entity_types')
         if entity_type_codes:
             tbl['entity_type_condition'] = "AND entities_entity_type.code IN ({0})".format(
@@ -527,7 +573,7 @@ class AggregateSearchEntityViewSet(EntityTypeCodeMixin, BaseSearchMixin, ListAPI
         return Response(resp_data)
 
 
-class EntityConnectivityTileGenerator(EntityTypeCodeMixin, BaseTileGenerator):
+class EntityConnectivityTileGenerator(RawEntityDetailFilterMixin, EntityTypeCodeMixin, BaseTileGenerator):
     def __init__(self, table_config):
         super().__init__()
         self.table_config = table_config
@@ -691,6 +737,8 @@ class EntityConnectivityTileGenerator(EntityTypeCodeMixin, BaseTileGenerator):
         tbl['rt_date_condition'] = ''
         tbl['entity_condition'] = ''
         tbl['entity_type_condition'] = ''
+        tbl['entity_detail_join'] = ''
+        tbl['entity_detail_condition'] = ''
         tbl['entity_weekly_lookup_condition'] = 'ON entities_entity.last_weekly_status_id = c.id'
 
         self.query_filters(request, tbl)
@@ -753,6 +801,7 @@ class EntityConnectivityTileGenerator(EntityTypeCodeMixin, BaseTileGenerator):
                 (SELECT code FROM entities_entity_type WHERE id = entities_entity.entity_type_id) AS entity_type
                 FROM entities_entity
                 INNER JOIN bounds ON ST_Intersects(entities_entity.geopoint, ST_Transform(bounds.geom, {srid}))
+                {entity_detail_join}
                 {entity_weekly_join}
                 LEFT JOIN connection_statistics_entityweeklystatus c {entity_weekly_lookup_condition}
                     AND c."deleted" IS NULL
@@ -763,6 +812,7 @@ class EntityConnectivityTileGenerator(EntityTypeCodeMixin, BaseTileGenerator):
                     {entity_admin1_condition}
                     {entity_condition}
                     {entity_type_condition}
+                    {entity_detail_condition}
                     {entity_weekly_condition}
                 {entity_random_order}
                 {limit_condition}
@@ -802,6 +852,12 @@ class EntityConnectivityTileGenerator(EntityTypeCodeMixin, BaseTileGenerator):
 
         if len(entity_filters) > 0:
             tbl['entity_condition'] += ' AND ' + entity_filters
+
+        if single_entity_type_code and single_entity_type_code != LEGACY_MODEL:
+            (
+                tbl['entity_detail_join'],
+                tbl['entity_detail_condition'],
+            ) = self.get_entity_detail_filter_sql(request, single_entity_type_code)
 
         school_static_filters = core_utilities.get_filter_sql(request, 'school_static',
                                                               'connection_statistics_schoolweeklystatus')

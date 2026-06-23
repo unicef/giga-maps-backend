@@ -38,7 +38,7 @@ from proco.core.viewsets import BaseModelViewSet
 from proco.custom_auth import models as auth_models
 from proco.entities.config import build_parameter_config, get_entity_type_config
 from proco.entities.constants import LEGACY_MODEL
-from proco.entities.mixins import EntityTypeCodeMixin
+from proco.entities.mixins import EntityDetailFilterMixin, EntityTypeCodeMixin
 from proco.locations.models import Country
 from proco.utils import dates as date_utilities
 from proco.utils.cache import cache_manager, custom_cache_control, no_expiry_cache_manager
@@ -49,7 +49,7 @@ from proco.utils.tasks import update_all_cached_values
 logger = logging.getLogger('gigamaps.' + __name__)
 
 
-class BaseEntityDataLayerAPIViewSet(APIView):
+class BaseEntityDataLayerAPIViewSet(EntityDetailFilterMixin, APIView):
     model = accounts_models.DataLayer
     ENTITY_PARAM_SUFFIXES = (
         'layer_id',
@@ -70,6 +70,38 @@ class BaseEntityDataLayerAPIViewSet(APIView):
         if isinstance(parameter_col_function, dict) and len(parameter_col_function) > 0:
             return parameter_col_function.get('sql').format(col_name='t."{col_name}"')
         return 'AVG(t."{col_name}")'
+
+    def get_entity_detail_filter_sql(self, entity_type_obj, base_table_ref='"entities_entity"'):
+        if entity_type_obj is None or entity_type_obj.is_legacy:
+            return '', ''
+
+        detail_table_name = self.get_entity_detail_table_name(entity_type_obj)
+        if not detail_table_name:
+            return '', ''
+
+        conditions = []
+        for table_alias in self.get_entity_detail_filter_aliases(entity_type_obj):
+            detail_filters = core_utilities.get_filter_sql(
+                self.request,
+                table_alias,
+                detail_table_name,
+                entity_type_obj.code,
+            )
+            if len(detail_filters) > 0:
+                conditions.append(detail_filters)
+
+        if not conditions:
+            return '', ''
+
+        join_sql = """
+                INNER JOIN "{detail_table_name}"
+                    ON {base_table_ref}."id" = "{detail_table_name}"."entity_id"
+                    AND "{detail_table_name}"."deleted" IS NULL
+        """.format(
+            base_table_ref=base_table_ref,
+            detail_table_name=detail_table_name,
+        )
+        return join_sql, ' AND ' + ' AND '.join(conditions)
 
     def update_kwargs(self, country_ids, layer_instance):
         query_params = self.request.query_params.dict()
@@ -131,10 +163,16 @@ class BaseEntityDataLayerAPIViewSet(APIView):
                 self.request, 'entity_static', entity_static_table, entity_type)
             self.kwargs['entity_real_time_filters'] = core_utilities.get_filter_sql(
                 self.request, 'entity_real_time', 'connection_statistics_entityweeklystatus', entity_type)
+            (
+                self.kwargs['entity_detail_join'],
+                self.kwargs['entity_detail_condition'],
+            ) = self.get_entity_detail_filter_sql(layer_instance.entity_type)
         else:
             self.kwargs['entity_filters'] = ''
             self.kwargs['entity_static_filters'] = ''
             self.kwargs['entity_real_time_filters'] = ''
+            self.kwargs['entity_detail_join'] = ''
+            self.kwargs['entity_detail_condition'] = ''
 
     @staticmethod
     def parse_date(value, param_name):
@@ -156,6 +194,8 @@ class BaseEntityDataLayerAPIViewSet(APIView):
         self.kwargs.setdefault('entity_filters', '')
         self.kwargs.setdefault('entity_static_filters', '')
         self.kwargs.setdefault('entity_real_time_filters', '')
+        self.kwargs.setdefault('entity_detail_join', '')
+        self.kwargs.setdefault('entity_detail_condition', '')
         self.kwargs.setdefault('school_filters', '')
         self.kwargs.setdefault('school_static_filters', '')
         self.kwargs.setdefault('convert_unit', 'mbps')
@@ -220,6 +260,10 @@ class BaseEntityDataLayerAPIViewSet(APIView):
                 self.request, 'entity_static', entity_static_table, entity_type)
             self.kwargs['entity_real_time_filters'] = core_utilities.get_filter_sql(
                 self.request, 'entity_real_time', 'connection_statistics_entityweeklystatus', entity_type)
+            (
+                self.kwargs['entity_detail_join'],
+                self.kwargs['entity_detail_condition'],
+            ) = self.get_entity_detail_filter_sql(layer_instance.entity_type)
 
     @classmethod
     def extract_entity_params(cls, request):
@@ -495,7 +539,9 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                     GROUP BY "entities_entity"."id"
                 ) AS eds ON eds.entity_id = "entities_entity".id
                 {entity_weekly_outer_join}
+                {entity_detail_join}
                 WHERE "entities_entity"."deleted" IS NULL
+                    {entity_detail_condition}
                     {random_order}
                     {limit_condition}
             )
@@ -514,6 +560,8 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
         kwargs['entity_weekly_outer_join'] = ''
         kwargs['entity_master_table_join'] = ''
         kwargs['entity_master_table_condition'] = ''
+        kwargs.setdefault('entity_detail_join', '')
+        kwargs.setdefault('entity_detail_condition', '')
 
         kwargs['env'] = self.envelope_to_bounds_sql(env)
 
@@ -652,9 +700,11 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
             FROM entities_entity
             INNER JOIN bounds ON ST_Intersects(entities_entity.geopoint, ST_Transform(bounds.geom, 4326))
             INNER JOIN entities_{entity_name}_entity ews ON "entities_entity"."id" = ews."entity_id"
+            {entity_detail_join}
             {entity_master_table_condition}
             WHERE entities_entity."deleted" IS NULL
             AND entities_entity.entity_type_id = (SELECT id FROM entities_entity_type WHERE code = '{entity_name}' AND deleted IS NULL)
+            {entity_detail_condition}
             {country_condition}
             {admin1_condition}
             {entity_condition}
@@ -673,6 +723,8 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
 
         kwargs['entity_master_table_join'] = ''
         kwargs['entity_master_table_condition'] = ''
+        kwargs.setdefault('entity_detail_join', '')
+        kwargs.setdefault('entity_detail_condition', '')
 
         kwargs['env'] = self.envelope_to_bounds_sql(env)
 
