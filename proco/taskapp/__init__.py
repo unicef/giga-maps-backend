@@ -155,5 +155,23 @@ def finalize_setup(sender, **kwargs):
             'schedule': crontab(hour=21, minute=30),
             'args': (),
         },
+        'proco.utils.tasks.populate_entity_registration_data': {
+            'task': 'proco.utils.tasks.populate_entity_registration_data',
+            # Executes 4 times daily (offset from school equivalent by 5 minutes)
+            'schedule': crontab(hour='2,8,14,20', minute=55),
+            'args': (),
+        },
+        'proco.utils.tasks.update_entity_records': {
+            'task': 'proco.utils.tasks.update_entity_records',
+            # Executes twice daily at 1:30 AM and 1:30 PM (offset from school equivalent)
+            'schedule': crontab(hour='1,13', minute=30),
+            'args': (),
+        },
+        'proco.utils.tasks.handle_deleted_entity_master_data_row': {
+            'task': 'proco.utils.tasks.handle_deleted_entity_master_data_row',
+            # Executes every 4 hours at :22
+            'schedule': crontab(hour='*/4', minute=22),
+            'args': (),
+        },
     })
 

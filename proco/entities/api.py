@@ -562,6 +562,18 @@ class AggregateSearchEntityViewSet(EntityTypeCodeMixin, BaseSearchMixin, ListAPI
         ]
         return ','.join(index_fields)
 
+    @property
+    def get_search_fields(self):
+        search_fields = super().get_search_fields
+        if search_fields:
+            # Replace giga_id_school with giga_id since the unified index uses giga_id
+            search_fields = ['giga_id' if f == 'giga_id_school' else f for f in search_fields]
+            
+            # Filter out any invalid fields that aren't in the index
+            valid_fields = self.index_class.Meta.searchable_fields
+            search_fields = [f for f in search_fields if f in valid_fields]
+        return search_fields
+
     def list(self, request, *args, **kwargs):
         resp_data = OrderedDict()
 

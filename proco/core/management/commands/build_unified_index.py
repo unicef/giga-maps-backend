@@ -10,8 +10,9 @@ from azure.search.documents.indexes import SearchIndexClient
 from azure.search.documents.indexes.models import CorsOptions, SearchIndex
 from django.conf import settings
 from django.core.management.base import BaseCommand
-from django.db.models import F, Case, IntegerField, Value, When, FilteredRelation, Q
+from django.db.models import F, Case, IntegerField, Value, When, Exists, OuterRef
 
+from proco.connection_statistics.models import SchoolRealTimeRegistration
 from proco.core.utils import is_blank_string
 from proco.entities.constants import LEGACY_MODEL
 from proco.entities.models import Entity
@@ -97,18 +98,19 @@ def collect_unified_data(country_id=None, school_id=None, entity_id=None, batch_
     # SCHOOL DOCUMENTS
     # =====================
     if include_schools:
+        rt_registered = SchoolRealTimeRegistration.objects.filter(
+            school_id=OuterRef('pk'),
+            rt_registered=True,
+            deleted__isnull=True
+        )
+
         schools = School.objects.annotate(
-            srr=FilteredRelation(
-                'realtime_registration_status',
-                condition=Q(realtime_registration_status__rt_registered=True)
-                          & Q(realtime_registration_status__deleted__isnull=True),
-            )
-        ).annotate(
             country_name=F('country__name'),
             country_code=F('country__code'),
             admin1_name=F('admin1__name'),
             admin2_name=F('admin2__name'),
-            row_score=Case(When(srr__id__isnull=True, then=Value(0)), default=1, output_field=IntegerField())
+            has_rt=Exists(rt_registered),
+            row_score=Case(When(has_rt=True, then=Value(1)), default=Value(0), output_field=IntegerField())
         ).values(
             'id',
             'name',
@@ -122,7 +124,7 @@ def collect_unified_data(country_id=None, school_id=None, entity_id=None, batch_
             'country_name',
             'country_code',
             'row_score',
-        ).order_by('id').distinct()
+        ).order_by('id')
 
         if country_id:
             schools = schools.filter(country_id=country_id)

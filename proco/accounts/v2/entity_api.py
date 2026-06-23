@@ -2379,8 +2379,6 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             return {'error': f'No published DataLayer found with id={layer_id}.'}
 
         is_legacy = (data_layer_instance.entity_type is None) or data_layer_instance.entity_type.is_legacy
-        import sys
-        sys.stderr.write(f"PROCESS_ENTITY_LAYER: entity_code={entity_code} layer_id={layer_id} is_legacy={is_legacy} entity_type={data_layer_instance.entity_type}\n")
 
         data_sources = data_layer_instance.data_sources.all()
         live_data_sources = ['UNKNOWN']
@@ -2574,15 +2572,11 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             response = {}
 
             # Process each entity type
-            print("DEBUG GET: entity_params =", entity_params)
             for entity_code, params in entity_params.items():
                 if 'layer_id' in params:
                     try:
-                        print(f"DEBUG GET: processing {entity_code} with params={params}")
                         entity_response = self.process_entity_layer(request, entity_code, params)
-                        print(f"DEBUG GET: response for {entity_code} = {entity_response}")
                     except Exception as exc:
-                        print(f"DEBUG GET: exception for {entity_code}: {exc}")
                         entity_response = {'error': str(exc)}
                     if entity_response is not None:
                         response[entity_code] = entity_response
