@@ -2485,8 +2485,17 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         # Check for legacy entity_type__code (backward compatibility)
         entity_type = request.query_params.get('entity_type__code')
         if entity_type == LEGACY_MODEL:
+            entity_params = self.extract_entity_params(request)
+            params = entity_params.get(entity_type, {})
+
+            layer_id = params.get('layer_id') or request.query_params.get('layer_id')
+            if layer_id:
+                kwargs['pk'] = layer_id
+            scoped_params = self.build_scoped_query_params(request, entity_type, params, is_legacy=True)
+            modified_request = copy.copy(request._request)
+            modified_request.GET = scoped_params
             school_view = DataLayerInfoViewSet.as_view()
-            return school_view(request._request, *args, **kwargs)
+            return school_view(modified_request, *args, **kwargs)
 
         use_cached_data = request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
         request_path = remove_query_param(request.get_full_path(), 'cache')
