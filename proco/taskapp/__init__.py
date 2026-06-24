@@ -23,23 +23,18 @@ app.conf.redbeat_lock_timeout = 36000
 def finalize_setup(sender, **kwargs):
 
     app.conf.beat_schedule.update({
-        'proco.utils.tasks.update_all_cached_values': {
-            'task': 'proco.utils.tasks.update_all_cached_values',
-            'schedule': crontab(hour=4, minute=45),
-            'args': (),
-            'kwargs': {'clean_cache': True},
-        },
+        # No longer needed - require Entity based tasks
+        # 'proco.utils.tasks.update_all_cached_values': {
+        #     'task': 'proco.utils.tasks.update_all_cached_values',
+        #     'schedule': crontab(hour=4, minute=45),
+        #     'args': (),
+        #     'kwargs': {'clean_cache': True},
+        # },
         # 'proco.utils.tasks.rebuild_school_index': {
         #     'task': 'proco.utils.tasks.rebuild_school_index',
         #     'schedule': crontab(hour=2, minute=0),
         #     'args': (),
         # },
-        'proco.utils.tasks.rebuild_unified_index': {
-            'task': 'proco.utils.tasks.rebuild_unified_index',
-            'schedule': crontab(hour=2, minute=0),
-            'args': (),
-        },
-        # New
         'proco.schools.tasks.update_school_records': {
             'task': 'proco.schools.tasks.update_school_records',
             'schedule': crontab(hour=1, minute=0),
@@ -48,11 +43,6 @@ def finalize_setup(sender, **kwargs):
         'proco.data_sources.tasks.cleanup_school_master_rows': {
             'task': 'proco.data_sources.tasks.cleanup_school_master_rows',
             'schedule': crontab(hour='1,15', minute=40),
-            'args': (),
-        },
-        'proco.data_sources.tasks.cleanup_health_entity_master_rows': {
-            'task': 'proco.data_sources.tasks.cleanup_health_entity_master_rows',
-            'schedule': crontab(hour='1,15', minute=45),
             'args': (),
         },
         'proco.data_sources.tasks.update_static_data': {
@@ -118,6 +108,24 @@ def finalize_setup(sender, **kwargs):
             'schedule': crontab(hour=20, minute=30),
             'args': (),
         },
+        'proco.giga_meter.tasks.fetch_and_aggregate_ping_data': {
+            'task': 'proco.giga_meter.tasks.fetch_and_aggregate_ping_data',
+            'schedule': crontab(minute=15, hour='9,15,21,23'),
+            'args': (),
+        },
+        'proco.giga_meter.tasks.scheduler_for_backup_giga_meter_connectivity_ping_data': {
+            'task': 'proco.giga_meter.tasks.scheduler_for_backup_giga_meter_connectivity_ping_data',
+            # Executes once in a day at 9:30 PM
+            'schedule': crontab(hour=21, minute=30),
+            'args': (),
+        },
+
+        # Entity Based Tasks
+        'proco.utils.tasks.rebuild_unified_index': {
+            'task': 'proco.utils.tasks.rebuild_unified_index',
+            'schedule': crontab(hour=2, minute=0),
+            'args': (),
+        },
         'proco.data_sources.tasks.update_entity_static_data': {
             'task': 'proco.data_sources.tasks.update_entity_static_data',
             # Executes at 4:00 AM every day
@@ -130,12 +138,6 @@ def finalize_setup(sender, **kwargs):
             'schedule': crontab(hour='*/4', minute=27),
             'args': (),
         },
-        'proco.giga_meter.tasks.fetch_and_aggregate_ping_data': {
-            'task': 'proco.giga_meter.tasks.fetch_and_aggregate_ping_data',
-            'schedule': crontab(minute=15, hour='9,15,21,23'),
-            'args': (),
-        },
-        # Entity Live Data Tasks
         'proco.data_sources.tasks.update_entity_live_data_from_giga_meter': {
             'task': 'proco.data_sources.tasks.update_entity_live_data_from_giga_meter',
             # Executes 3 times a day at 10:30 AM, 4:30 PM, 10:30 PM
@@ -148,12 +150,6 @@ def finalize_setup(sender, **kwargs):
             'schedule': crontab(hour=5, minute=0),
             'args': (),
             'kwargs': {'today': False},
-        },
-        'proco.giga_meter.tasks.scheduler_for_backup_giga_meter_connectivity_ping_data': {
-            'task': 'proco.giga_meter.tasks.scheduler_for_backup_giga_meter_connectivity_ping_data',
-            # Executes once in a day at 9:30 PM
-            'schedule': crontab(hour=21, minute=30),
-            'args': (),
         },
         'proco.utils.tasks.populate_entity_registration_data': {
             'task': 'proco.utils.tasks.populate_entity_registration_data',
@@ -171,6 +167,11 @@ def finalize_setup(sender, **kwargs):
             'task': 'proco.utils.tasks.handle_deleted_entity_master_data_row',
             # Executes every 4 hours at :22
             'schedule': crontab(hour='*/4', minute=22),
+            'args': (),
+        },
+        'proco.data_sources.tasks.cleanup_health_entity_master_rows': {
+            'task': 'proco.data_sources.tasks.cleanup_health_entity_master_rows',
+            'schedule': crontab(hour='1,15', minute=45),
             'args': (),
         },
     })
