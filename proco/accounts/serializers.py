@@ -23,6 +23,7 @@ from proco.accounts.v2.entity_filter_serializers import (
     EntityColumnConfigurationChoicesSerializer,
 )
 from proco.core import utils as core_utilities
+from proco.core import db_utils as db_utilities
 from proco.custom_auth import models as auth_models
 from proco.custom_auth.serializers import ExpandUserSerializer
 from proco.custom_auth.utils import get_user_emails_for_permissions

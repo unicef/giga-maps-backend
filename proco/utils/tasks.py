@@ -665,7 +665,7 @@ def rebuild_unified_index():
     if task_instance:
         logger.debug('Not found running job: {}'.format(task_key))
         cmd_args = ['--delete_index', '--create_index', '--clean_index', '--update_index']
-        call_command('rebuild_unified_index', *cmd_args)
+        call_command('build_unified_index', *cmd_args)
         background_task_utilities.task_on_complete(task_instance)
     else:
         logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
