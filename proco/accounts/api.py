@@ -1117,7 +1117,8 @@ class BaseDataLayerAPIViewSet(APIView):
                 ).order_by('id').values_list('benchmark_metadata', flat=True).first()
 
                 if benchmark_metadata and len(benchmark_metadata) > 0:
-                    benchmark_metadata = json.loads(benchmark_metadata)
+                    if isinstance(benchmark_metadata, str):
+                        benchmark_metadata = json.loads(benchmark_metadata)
                     data_layer_type = data_layer_instance.type
                     if data_layer_type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
                         all_live_layers = benchmark_metadata.get('live_layer', {})
@@ -1142,7 +1143,10 @@ class BaseDataLayerAPIViewSet(APIView):
                     active_layers__data_layer_id=data_layer_instance.id,
                 ).order_by('id').values_list('active_layers__legend_configs', flat=True).first()
                 if legend_configurations and len(legend_configurations) > 0:
-                    legend_configs = json.loads(legend_configurations)
+                    if isinstance(legend_configurations, str):
+                        legend_configs = json.loads(legend_configurations)
+                    else:
+                        legend_configs = legend_configurations
 
         return legend_configs
 
@@ -1221,7 +1225,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs['benchmark_value_sql'] = ''
 
         benchmark_value = kwargs['benchmark_value']
-        if benchmark_value and 'SQL:' in benchmark_value:
+        if benchmark_value is not None and isinstance(benchmark_value, str) and 'SQL:' in benchmark_value:
             kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(**kwargs) + ' AS benchmark_sql_value,'
 
         legend_configs = kwargs['legend_configs']
@@ -1376,7 +1380,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
         kwargs['benchmark_value_sql'] = ''
         benchmark_value = kwargs['benchmark_value']
-        if benchmark_value and 'SQL:' in benchmark_value:
+        if benchmark_value is not None and isinstance(benchmark_value, str) and 'SQL:' in benchmark_value:
             kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(
                 **kwargs) + ' AS benchmark_sql_value,'
 

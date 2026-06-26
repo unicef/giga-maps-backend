@@ -36,7 +36,7 @@ from proco.core import permissions as core_permissions
 from proco.core import utils as core_utilities
 from proco.core.viewsets import BaseModelViewSet
 from proco.custom_auth import models as auth_models
-from proco.entities.config import build_parameter_config, get_entity_type_config
+from proco.entities.config import build_parameter_config, get_entity_type_config, is_legacy_type
 from proco.entities.constants import LEGACY_MODEL
 from proco.entities.mixins import EntityDetailFilterMixin, EntityTypeCodeMixin
 from proco.locations.models import Country
@@ -347,7 +347,8 @@ class BaseEntityDataLayerAPIViewSet(EntityDetailFilterMixin, APIView):
                 ).order_by('id').values_list('benchmark_metadata', flat=True).first()
 
                 if benchmark_metadata and len(benchmark_metadata) > 0:
-                    benchmark_metadata = json.loads(benchmark_metadata)
+                    if isinstance(benchmark_metadata, str):
+                        benchmark_metadata = json.loads(benchmark_metadata)
                     data_layer_type = data_layer_instance.type
                     if data_layer_type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
                         all_live_layers = benchmark_metadata.get('live_layer', {})
@@ -372,7 +373,10 @@ class BaseEntityDataLayerAPIViewSet(EntityDetailFilterMixin, APIView):
                     active_layers__data_layer_id=data_layer_instance.id,
                 ).order_by('id').values_list('active_layers__legend_configs', flat=True).first()
                 if legend_configurations and len(legend_configurations) > 0:
-                    legend_configs = json.loads(legend_configurations)
+                    if isinstance(legend_configurations, str):
+                        legend_configs = json.loads(legend_configurations)
+                    else:
+                        legend_configs = legend_configurations
 
         return legend_configs
 
@@ -1197,7 +1201,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         kwargs['benchmark_value_sql'] = ''
 
         benchmark_value = kwargs['benchmark_value']
-        if benchmark_value and 'SQL:' in str(benchmark_value):
+        if benchmark_value is not None and isinstance(benchmark_value, str) and 'SQL:' in benchmark_value:
             kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(
                 **kwargs) + ' AS benchmark_sql_value,'
 
@@ -1367,7 +1371,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
         kwargs['benchmark_value_sql'] = ''
         benchmark_value = kwargs['benchmark_value']
-        if benchmark_value and 'SQL:' in str(benchmark_value):
+        if benchmark_value is not None and isinstance(benchmark_value, str) and 'SQL:' in benchmark_value:
             kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(
                 **kwargs) + ' AS benchmark_sql_value,'
 
@@ -1777,6 +1781,46 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                             ))
 
         kwargs['label_case_statements'] = ' '.join(label_cases)
+        return query.format(**kwargs)
+
+    def get_entity_basic_info_query(self):
+        query = """
+        SELECT entities_entity."id",
+            entities_entity."name",
+            entities_entity."external_id",
+            entities_entity."giga_id",
+            entities_entity."country_id",
+            c."name" AS country_name,
+            entities_entity."admin1_id",
+            adm1_metadata."name" AS admin1_name,
+            adm1_metadata."giga_id_admin" AS admin1_code,
+            adm1_metadata."description_ui_label" AS admin1_description_ui_label,
+            entities_entity."admin2_id",
+            adm2_metadata."name" AS admin2_name,
+            adm2_metadata."giga_id_admin" AS admin2_code,
+            adm2_metadata."description_ui_label" AS admin2_description_ui_label,
+            entities_entity."environment",
+            ST_AsGeoJSON(ST_Transform(entities_entity."geopoint", 4326)) AS geopoint,
+            CASE WHEN entities_entity.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                WHEN entities_entity.connectivity_status = 'no' THEN 'not_connected'
+                ELSE 'unknown'
+            END as connectivity_status
+        FROM "entities_entity"
+        INNER JOIN locations_country c ON c.id = entities_entity.country_id
+        LEFT JOIN locations_countryadminmetadata AS adm1_metadata
+            ON adm1_metadata."id" = entities_entity.admin1_id
+            AND adm1_metadata."layer_name" = 'adm1'
+            AND adm1_metadata."deleted" IS NULL
+        LEFT JOIN locations_countryadminmetadata AS adm2_metadata
+            ON adm2_metadata."id" = entities_entity.admin2_id
+            AND adm2_metadata."layer_name" = 'adm2'
+            AND adm2_metadata."deleted" IS NULL
+        WHERE "entities_entity"."id" IN ({ids})
+            AND c."deleted" IS NULL
+        """
+
+        kwargs = copy.deepcopy(self.kwargs)
+        kwargs['ids'] = ','.join(kwargs['entity_ids'])
         return query.format(**kwargs)
 
     def get_static_entity_view_info_query(self):
@@ -2513,6 +2557,56 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     legend_configs=legend_configs,
                 )
 
+    def process_entity_without_layer(self, request, entity_code, params):
+        """
+        Process a single entity type and return its basic info when no layer_id is provided.
+        Only valid for detail views (when entity_ids are provided).
+        """
+        entity_config = get_entity_type_config(entity_code)
+        is_legacy = getattr(entity_config, 'is_legacy', False) if entity_config else False
+        
+        entity_query_params = self.build_scoped_query_params(request, entity_code, params, is_legacy)
+        
+        # Populate kwargs from query params manually for basic usage
+        if 'entity_id__in' in entity_query_params:
+            self.kwargs['entity_ids'] = [s_id.strip() for s_id in entity_query_params['entity_id__in'].split(',')]
+        elif 'entity_id' in entity_query_params:
+            self.kwargs['entity_ids'] = [entity_query_params['entity_id'].strip()]
+        
+        if 'include_same_location' in entity_query_params:
+            self.kwargs['include_same_location_schools'] = entity_query_params['include_same_location']
+            
+        selected_ids = self.kwargs.get('entity_ids', [])
+        
+        # If no selected IDs, we cannot return summary statistics without a layer configuration
+        if not selected_ids:
+            return None
+            
+        if is_legacy:
+            # For legacy, rely on existing school_view fallback via DataLayerInfoViewSet if no layer is needed
+            return None
+        
+        # Get basic entity details
+        info_panel_rows = db_utilities.sql_to_response(
+            self.get_entity_basic_info_query(),
+            label=self.__class__.__name__,
+            db_var=settings.READ_ONLY_DB_KEY) or []
+            
+        sorted_rows = self.sort_info_panel_rows(selected_ids, info_panel_rows, [], 'entity_id')
+        
+        # Determine if we should include same location entities
+        include_same_location = self.kwargs.get('include_same_location_schools') == 'true'
+        if include_same_location:
+            school_viewset_cls = DataLayerInfoViewSet()
+            for row in sorted_rows:
+                row['schools_at_same_location'] = school_viewset_cls.get_school_ids_at_same_location(
+                    request,
+                    row.get('id'),
+                    row.get('country_id'),
+                )
+                
+        return sorted_rows
+
     def get(self, request, *args, **kwargs):
         """
         Get layer info for multiple entity types.
@@ -2571,11 +2665,36 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
             response = {}
 
+            # Find entity codes that don't have layer_id but have entity_ids directly
+            for param_name, param_value in request.query_params.items():
+                if param_name.endswith('_entity_id__in') or param_name.endswith('_entity_id'):
+                    if param_name.endswith('_entity_id__in'):
+                        entity_code = param_name[:-len('_entity_id__in')]
+                    else:
+                        entity_code = param_name[:-len('_entity_id')]
+                    
+                    if entity_code not in entity_params:
+                        entity_params[entity_code] = {}
+                        
+            # Also catch the generic entity_id__in case if an entity_type_code is specified
+            generic_entity_id = request.query_params.get('entity_id__in') or request.query_params.get('entity_id')
+            generic_entity_type = request.query_params.get('entity_type__code')
+            if generic_entity_id and generic_entity_type and generic_entity_type not in entity_params:
+                entity_params[generic_entity_type] = {}
+
             # Process each entity type
             for entity_code, params in entity_params.items():
                 if 'layer_id' in params:
                     try:
                         entity_response = self.process_entity_layer(request, entity_code, params)
+                    except Exception as exc:
+                        entity_response = {'error': str(exc)}
+                    if entity_response is not None:
+                        response[entity_code] = entity_response
+                elif params or f'{entity_code}_entity_id__in' in request.query_params or f'{entity_code}_entity_id' in request.query_params or (generic_entity_type == entity_code and generic_entity_id):
+                    # Has params or explicit ID but no layer_id - try processing basic info
+                    try:
+                        entity_response = self.process_entity_without_layer(request, entity_code, params)
                     except Exception as exc:
                         entity_response = {'error': str(exc)}
                     if entity_response is not None:
