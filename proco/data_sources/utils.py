@@ -1414,15 +1414,14 @@ def sync_entity_qos_realtime_data(country_id, entity_type_code='health', start_d
         logger.info('Entity QoS - Updated %d EntityRealTimeRegistration records.', len(to_update))
 
     # --- Aggregate daily status to weekly status ---
-    from proco.connection_statistics.utils import aggregate_entity_daily_status_to_entity_weekly_status
+    from proco.data_sources.tasks import finalize_previous_day_entity_data
 
     country_obj = Country.objects.get(id=country_id)
     current_date = min_date
     while current_date <= max_date:
-        aggregate_entity_daily_status_to_entity_weekly_status(country_obj, current_date, entity_type_code)
+        finalize_previous_day_entity_data.delay(None, country_obj.id, current_date, entity_type_code)
         current_date += timedelta(days=7)
     # Ensure the final week is covered
-    aggregate_entity_daily_status_to_entity_weekly_status(country_obj, max_date, entity_type_code)
+    finalize_previous_day_entity_data.delay(None, country_obj.id, max_date, entity_type_code)
     logger.info('Entity QoS - Weekly aggregation completed for country %s (%s to %s).',
                 country_id, min_date, max_date)
-

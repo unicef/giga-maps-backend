@@ -3,15 +3,10 @@ import json
 import logging
 from datetime import timedelta
 
-import requests
-import uuid
 from django.conf import settings
-from django.contrib.admin.models import LogEntry
-from django.db.models import Case, IntegerField, Value, When
-from django.db.models import Q, F
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
-from django.views.decorators.cache import cache_control
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import permissions
 from rest_framework import status as rest_status
@@ -20,31 +15,25 @@ from rest_framework.response import Response
 from rest_framework.utils.urls import remove_query_param
 from rest_framework.views import APIView
 
-from proco.accounts import exceptions as accounts_exceptions
 from proco.accounts import models as accounts_models
-from proco.accounts import serializers
 from proco.accounts import utils as account_utilities
 from proco.accounts.api import DataLayerInfoViewSet, DataLayerMapViewSet
-from proco.accounts.config import app_config as account_config
 from proco.accounts.v2 import entity_serializers
 from proco.connection_statistics import models as statistics_models
 from proco.connection_statistics.config import app_config as statistics_configs
 from proco.connection_statistics.models import SchoolWeeklyStatus, EntityWeeklyStatus
-from proco.contact.models import ContactMessage
 from proco.core import db_utils as db_utilities
 from proco.core import permissions as core_permissions
 from proco.core import utils as core_utilities
 from proco.core.viewsets import BaseModelViewSet
-from proco.custom_auth import models as auth_models
-from proco.entities.config import build_parameter_config, get_entity_type_config, is_legacy_type
+from proco.entities.config import build_parameter_config, get_entity_type_config
 from proco.entities.constants import LEGACY_MODEL
 from proco.entities.mixins import EntityDetailFilterMixin, EntityTypeCodeMixin
 from proco.locations.models import Country
 from proco.utils import dates as date_utilities
-from proco.utils.cache import cache_manager, custom_cache_control, no_expiry_cache_manager
+from proco.utils.cache import cache_manager, custom_cache_control
 from proco.utils.filters import NullsAlwaysLastOrderingFilter
 from proco.utils.mixins import CachedListMixin
-from proco.utils.tasks import update_all_cached_values
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -2565,36 +2554,36 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         """
         entity_config = get_entity_type_config(entity_code)
         is_legacy = getattr(entity_config, 'is_legacy', False) if entity_config else False
-        
+
         entity_query_params = self.build_scoped_query_params(request, entity_code, params, is_legacy)
-        
+
         # Populate kwargs from query params manually for basic usage
         if 'entity_id__in' in entity_query_params:
             self.kwargs['entity_ids'] = [s_id.strip() for s_id in entity_query_params['entity_id__in'].split(',')]
         elif 'entity_id' in entity_query_params:
             self.kwargs['entity_ids'] = [entity_query_params['entity_id'].strip()]
-        
+
         if 'include_same_location' in entity_query_params:
             self.kwargs['include_same_location_schools'] = entity_query_params['include_same_location']
-            
+
         selected_ids = self.kwargs.get('entity_ids', [])
-        
+
         # If no selected IDs, we cannot return summary statistics without a layer configuration
         if not selected_ids:
             return None
-            
+
         if is_legacy:
             # For legacy, rely on existing school_view fallback via DataLayerInfoViewSet if no layer is needed
             return None
-        
+
         # Get basic entity details
         info_panel_rows = db_utilities.sql_to_response(
             self.get_entity_basic_info_query(),
             label=self.__class__.__name__,
             db_var=settings.READ_ONLY_DB_KEY) or []
-            
+
         sorted_rows = self.sort_info_panel_rows(selected_ids, info_panel_rows, [], 'entity_id')
-        
+
         # Determine if we should include same location entities
         include_same_location = self.kwargs.get('include_same_location_schools') == 'true'
         if include_same_location:
@@ -2605,7 +2594,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     row.get('id'),
                     row.get('country_id'),
                 )
-                
+
         return sorted_rows
 
     def get(self, request, *args, **kwargs):
@@ -2673,10 +2662,10 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                         entity_code = param_name[:-len('_entity_id__in')]
                     else:
                         entity_code = param_name[:-len('_entity_id')]
-                    
+
                     if entity_code not in entity_params:
                         entity_params[entity_code] = {}
-                        
+
             # Also catch the generic entity_id__in case if an entity_type_code is specified
             generic_entity_id = request.query_params.get('entity_id__in') or request.query_params.get('entity_id')
             generic_entity_type = request.query_params.get('entity_type__code')

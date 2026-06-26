@@ -40,7 +40,7 @@ from proco.utils import dates as date_utilities
 from proco.utils.cache import cache_manager, custom_cache_control, no_expiry_cache_manager
 from proco.utils.filters import NullsAlwaysLastOrderingFilter
 from proco.utils.mixins import CachedListMixin
-from proco.utils.tasks import update_all_cached_values
+from proco.utils.tasks import update_all_cached_values, update_all_entity_cached_values
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -490,7 +490,7 @@ class InvalidateCache(APIView):
             cache_manager.invalidate()
             message = 'Cache invalidation started. Maps will be updated in a few minutes.'
 
-        update_all_cached_values.delay()
+        update_all_entity_cached_values.delay()
         return Response(data={'message': message})
 
 
@@ -516,7 +516,7 @@ class InvalidateCacheByPattern(APIView):
                 cache_manager.invalidate()
                 message = 'Cache invalidation started. Maps will be updated in a few minutes.'
 
-            update_all_cached_values.delay()
+            update_all_entity_cached_values.delay()
         else:
             keys = []
 

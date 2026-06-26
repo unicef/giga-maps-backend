@@ -241,7 +241,7 @@ def update_all_cached_values(*args, clean_cache=False):
 
             chain(country_wise_task_list).delay()
 
-        update_entities_cache()
+        # update_entities_cache()
 
         background_task_utilities.task_on_complete(task_instance)
     else:
@@ -822,3 +822,191 @@ def handle_deleted_entity_master_data_row(deleted_row_id=None, country_ids=None)
         background_task_utilities.task_on_complete(task_instance)
     else:
         logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+
+
+@app.task(soft_time_limit=60 * 60, time_limit=65 * 60)
+def update_all_entity_cached_values(*args, clean_cache=False):
+    from proco.entities.models import Entity, EntityType
+    from proco.locations.models import Country
+    from proco.accounts.models import DataLayerCountryRelationship, DataLayer
+    from proco.utils.cache import cache_manager
+
+    task_key = 'update_all_entity_cached_values_status_{current_time}'.format(
+        current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H%M'))
+
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(
+        task_id, task_key, 'Update the Entity Redis cache, allowed once in a hour')
+
+    if not task_instance:
+        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        return
+
+    logger.info('Not found running job: {}'.format(task_key))
+
+    if clean_cache:
+        if settings.INVALIDATE_CACHE_HARD.lower() == 'true':
+            cache_manager.invalidate(hard=True)
+            logger.info('Cache cleared. Map is updated in real time.')
+        else:
+            cache_manager.invalidate()
+            logger.info('Cache invalidation started. Maps will be updated in a few minutes.')
+
+    update_cached_value.delay(url=reverse('entities:global-stat-all-entities'))
+
+    active_entity_types = EntityType.get_all_active().exclude(is_legacy=True)
+    entity_country_ids = Entity.objects.filter(deleted__isnull=True).values_list('country_id', flat=True).order_by('country_id').distinct()
+    entity_countries = Country.objects.filter(id__in=list(entity_country_ids))
+
+    for entity_type in active_entity_types:
+        entity_wise_default_layers = {
+            row['country_id']: row['data_layer_id']
+            for row in DataLayerCountryRelationship.objects.filter(
+                Q(is_default=True) | Q(
+                    is_default=False,
+                    data_layer__category=DataLayer.LAYER_CATEGORY_CONNECTIVITY,
+                    data_layer__created_by__isnull=True,
+                ),
+                data_layer__type=DataLayer.LAYER_TYPE_LIVE,
+                data_layer__status=DataLayer.LAYER_STATUS_PUBLISHED,
+                data_layer__deleted__isnull=True,
+                data_layer__entity_type=entity_type,
+                country_id__in=list(entity_countries)
+            ).values('country_id', 'data_layer_id').order_by('country_id').distinct()
+        }
+
+        for country in entity_countries:
+            country_wise_task_list = [
+                update_cached_value.s(
+                    url=reverse('entities:global-stat-all-entities'),
+                    query_params={'country_id': country.id, 'entity_type__code': entity_type.code},
+                ),
+                update_cached_value.s(
+                    url=reverse('entities:list-published-entity-filters',
+                                kwargs={'status': 'PUBLISHED', 'country_id': country.id}),
+                    query_params={'expand': 'column_configuration', 'ordering': 'name', 'entity_type__code': entity_type.code},
+                ),
+            ]
+
+            if entity_wise_default_layers.get(country.id, None):
+                layer_id = entity_wise_default_layers[country.id]
+
+                client = APIClient()
+                response = client.get(
+                    reverse('entities:entity-get-latest-week-and-month'),
+                    {'country_id': country.id, 'layer_id': layer_id, 'cache': False},
+                    format='json',
+                )
+
+                if response.status_code == 200 and response.data and response.data.get('week'):
+                    latest_week_start_str = response.data['week']['start_date']
+                    latest_week_end_str = response.data['week']['end_date']
+
+                    country_wise_task_list.append(update_cached_value.s(
+                        url=reverse('entities:entity-info-data-layer', kwargs={'pk': layer_id}),
+                        query_params={
+                            'country_id': country.id,
+                            'entity_type__code': entity_type.code,
+                            f'{entity_type.code}_start_date': latest_week_start_str,
+                            f'{entity_type.code}_end_date': latest_week_end_str,
+                            f'{entity_type.code}_is_weekly': 'true',
+                            f'{entity_type.code}_benchmark': 'global',
+                            f'{entity_type.code}_include_same_location': 'false',
+                        },
+                    ))
+
+                    # Cache with filters
+                    from proco.accounts.models import AdvanceFilter
+                    country_filters = AdvanceFilter.objects.filter(
+                        status=AdvanceFilter.FILTER_STATUS_PUBLISHED,
+                        deleted__isnull=True,
+                        active_countries__country_id=country.id,
+                        active_countries__deleted__isnull=True,
+                        type=AdvanceFilter.TYPE_DROPDOWN
+                    ).distinct()
+
+                    for advance_filter in country_filters:
+                        query_param = advance_filter.query_param_filter
+                        column_config = advance_filter.column_configuration
+                        if not column_config:
+                            continue
+
+                        filter_field = column_config.name
+                        filter_options = advance_filter.options or {}
+                        static_choices = filter_options.get('choices', [])
+
+                        filter_values = []
+                        for choice in static_choices:
+                            if isinstance(choice, dict) and 'value' in choice:
+                                filter_values.append(choice['value'])
+
+                        for value in filter_values:
+                            filter_params = {f'{filter_field}__{query_param}': value, 'entity_type__code': entity_type.code}
+
+                            global_stat_params = {'country_id': country.id}
+                            global_stat_params.update(filter_params)
+                            country_wise_task_list.append(update_cached_value.s(
+                                url=reverse('entities:global-stat-all-entities'),
+                                query_params=global_stat_params,
+                            ))
+
+                            info_params = {
+                                'country_id': country.id,
+                                'entity_type__code': entity_type.code,
+                                f'{entity_type.code}_start_date': latest_week_start_str,
+                                f'{entity_type.code}_end_date': latest_week_end_str,
+                                f'{entity_type.code}_is_weekly': 'true',
+                                f'{entity_type.code}_benchmark': 'global',
+                                f'{entity_type.code}_include_same_location': 'false',
+                            }
+                            info_params.update(filter_params)
+                            country_wise_task_list.append(update_cached_value.s(
+                                url=reverse('entities:entity-info-data-layer', kwargs={'pk': layer_id}),
+                                query_params=info_params,
+                            ))
+
+                    # Cache admin1 views
+                    from proco.locations.models import CountryAdminMetadata
+                    admin1_ids = list(CountryAdminMetadata.objects.filter(
+                        country_id=country.id,
+                        layer_name='adm1',
+                        deleted__isnull=True,
+                    ).values_list('id', flat=True))
+
+                    for adm1_id in admin1_ids:
+                        country_wise_task_list.append(update_cached_value.s(
+                            url=reverse('entities:entity-get-latest-week-and-month'),
+                            query_params={
+                                'country_id': country.id,
+                                'admin1_id': adm1_id,
+                                'layer_id': layer_id,
+                                'entity_type__code': entity_type.code,
+                            },
+                        ))
+
+                        country_wise_task_list.append(update_cached_value.s(
+                            url=reverse('entities:global-stat-all-entities'),
+                            query_params={
+                                'country_id': country.id,
+                                'admin1_id': adm1_id,
+                                'entity_type__code': entity_type.code,
+                            },
+                        ))
+
+                        country_wise_task_list.append(update_cached_value.s(
+                            url=reverse('entities:entity-info-data-layer', kwargs={'pk': layer_id}),
+                            query_params={
+                                'country_id': country.id,
+                                'admin1_id': adm1_id,
+                                'entity_type__code': entity_type.code,
+                                f'{entity_type.code}_start_date': latest_week_start_str,
+                                f'{entity_type.code}_end_date': latest_week_end_str,
+                                f'{entity_type.code}_is_weekly': 'true',
+                                f'{entity_type.code}_benchmark': 'global',
+                                f'{entity_type.code}_include_same_location': 'false',
+                            },
+                        ))
+
+            chain(country_wise_task_list).delay()
+
+    background_task_utilities.task_on_complete(task_instance)

@@ -14,7 +14,6 @@ from django.contrib.gis.geos import Point
 from django.core.exceptions import ImproperlyConfigured
 from django.core.management import call_command
 from django.db import connection, transaction
-from django.db.models import Count, Q
 from django.db.utils import DataError
 from requests.exceptions import HTTPError
 from rest_framework import status
@@ -28,8 +27,7 @@ from proco.connection_statistics.utils import (
     aggregate_real_time_data_to_school_daily_status,
     aggregate_school_daily_status_to_school_weekly_status,
     aggregate_school_daily_to_country_daily,
-    update_country_weekly_status, aggregate_entity_daily_status_to_entity_weekly_status,
-)
+    update_country_weekly_status, )
 from proco.core import utils as core_utilities
 from proco.core.config import app_config as core_configs
 from proco.custom_auth import models as auth_models
@@ -932,6 +930,20 @@ def finalize_previous_day_data(_prev_result, country_id, date, *args):
     weekly_data_available = aggregate_school_daily_status_to_school_weekly_status(country, date)
     if weekly_data_available:
         update_country_weekly_status(country, date)
+
+    country.invalidate_country_related_cache()
+
+@app.task(soft_time_limit=60 * 60, time_limit=60 * 60)
+def finalize_previous_day_entity_data(_prev_result, country_id, date, entity_type_code, *args):
+    from proco.connection_statistics.utils import aggregate_entity_daily_status_to_entity_weekly_status
+    from proco.utils.tasks import update_entity_records
+
+    country = Country.objects.get(id=country_id)
+
+    aggregate_entity_daily_status_to_entity_weekly_status(country, date, entity_type_code)
+
+    # Update entity records after aggregation
+    update_entity_records()
 
     country.invalidate_country_related_cache()
 
@@ -2226,10 +2238,10 @@ def run_entity_ping_aggregation(entity_type_code, start_date, end_date, task_ins
             country_obj = Country.objects.get(iso3_format=country_iso3)
             current_date = start_date
             while current_date <= end_date:
-                aggregate_entity_daily_status_to_entity_weekly_status(country_obj, current_date, entity_type_code)
+                finalize_previous_day_entity_data.delay(None, country_obj.id, current_date, entity_type_code)
                 current_date += timedelta(days=7)
             # Ensure the final week is covered
-            aggregate_entity_daily_status_to_entity_weekly_status(country_obj, end_date, entity_type_code)
+            finalize_previous_day_entity_data.delay(None, country_obj.id, end_date, entity_type_code)
 
             # Auto-register entities for realtime data
             from django.utils import timezone
