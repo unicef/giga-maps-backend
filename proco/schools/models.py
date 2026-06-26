@@ -61,6 +61,7 @@ class School(TimeStampedModel):
 
     school_type = models.CharField(blank=True, max_length=64, db_index=True)
     school_type_lower = models.CharField(blank=True, max_length=64, editable=False, db_index=True)
+    is_verified_school = models.BooleanField(default=True)
 
     last_weekly_status = models.ForeignKey(
         'connection_statistics.SchoolWeeklyStatus', null=True, blank=True,
