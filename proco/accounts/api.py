@@ -962,7 +962,8 @@ class DataLayerPreviewViewSet(APIView):
 
         if map_points:
             for map_point in map_points:
-                map_point['geopoint'] = json.loads(map_point['geopoint'])
+                if isinstance(map_point.get('geopoint'), str):
+                    map_point['geopoint'] = json.loads(map_point['geopoint'])
         return Response(data={'map': map_points})
 
 

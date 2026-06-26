@@ -569,7 +569,8 @@ def get_benchmark_value_for_default_download_layer(benchmark, country_id):
             ).order_by('id').values_list('benchmark_metadata', flat=True).first()
 
             if benchmark_metadata and len(benchmark_metadata) > 0:
-                benchmark_metadata = json.loads(benchmark_metadata)
+                if isinstance(benchmark_metadata, str):
+                    benchmark_metadata = json.loads(benchmark_metadata)
                 all_live_layers = benchmark_metadata.get('live_layer', {})
                 if len(all_live_layers) > 0 and str(data_layer_instance.id) in (all_live_layers.keys()):
                     benchmark_val = all_live_layers[str(data_layer_instance.id)]

@@ -1976,7 +1976,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             row = rows_by_id.get(str(entity_id))
             if row is None:
                 continue
-            row['geopoint'] = json.loads(row['geopoint'])
+            if isinstance(row.get('geopoint'), str):
+                row['geopoint'] = json.loads(row['geopoint'])
             row['statistics'] = statistics_by_id.get(str(entity_id), {})
             sorted_rows.append(row)
 
@@ -3029,7 +3030,8 @@ class EntityDataLayerPreviewViewSet(APIView):
 
         if map_points:
             for map_point in map_points:
-                map_point['geopoint'] = json.loads(map_point['geopoint'])
+                if isinstance(map_point.get('geopoint'), str):
+                    map_point['geopoint'] = json.loads(map_point['geopoint'])
         return Response(data={'map': map_points})
 
 
