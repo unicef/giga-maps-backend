@@ -726,6 +726,7 @@ def populate_entity_registration_data():
 def update_entity_records():
     from proco.entities.models import Entity
     from proco.connection_statistics.models import EntityWeeklyStatus
+    from proco.schools.constants import statuses_schema
     from datetime import timedelta
 
     logger.info('Updating entity records from weekly status changes.')
@@ -749,15 +750,29 @@ def update_entity_records():
             if not entity:
                 continue
 
-            # Update connectivity and coverage fields based on status logic
-            entity.connectivity_status = 'unknown' # Default fallback
-            if status.is_connected_true and status.is_connected_true > 0:
-                entity.connectivity_status = 'good'
+            update_fields = []
 
-            # Entities lack coverage_type so we safely default
-            entity.coverage_status = 'unknown'
+            if not entity.last_weekly_status or entity.last_weekly_status.date < status.date:
+                entity.last_weekly_status = status
+                update_fields.append('last_weekly_status')
 
-            entity.save(update_fields=['connectivity_status', 'coverage_status'])
+            if entity.last_weekly_status_id == status.id:
+                connectivity_status = 'unknown'
+                if status.connectivity_speed is not None:
+                    connectivity_status = statuses_schema.get_connectivity_status_by_connectivity_speed(
+                        status.connectivity_speed
+                    )
+
+                if entity.connectivity_status != connectivity_status:
+                    entity.connectivity_status = connectivity_status
+                    update_fields.append('connectivity_status')
+
+                if entity.coverage_status != 'unknown':
+                    entity.coverage_status = 'unknown'
+                    update_fields.append('coverage_status')
+
+            if update_fields:
+                entity.save(update_fields=update_fields)
 
         background_task_utilities.task_on_complete(task_instance)
     else:
