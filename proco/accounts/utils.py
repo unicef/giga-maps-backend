@@ -14,6 +14,31 @@ from proco.core import utils as core_utilities
 logger = logging.getLogger('gigamaps.' + __name__)
 
 
+def _encode_varint(value):
+    encoded = []
+    while value > 0x7F:
+        encoded.append((value & 0x7F) | 0x80)
+        value >>= 7
+    encoded.append(value)
+    return bytes(encoded)
+
+
+def get_empty_mvt_layer_sql(layer_name, extent=4096):
+    layer_name = str(layer_name)
+    encoded_name = layer_name.encode('utf-8')
+    layer = b''.join([
+        b'\x78',
+        _encode_varint(2),
+        b'\x0a',
+        _encode_varint(len(encoded_name)),
+        encoded_name,
+        b'\x28',
+        _encode_varint(extent),
+    ])
+    tile = b'\x1a' + _encode_varint(len(layer)) + layer
+    return "decode('{0}', 'hex')".format(tile.hex())
+
+
 def send_standard_email(user, data):
     """
     A standard email is sent to user by Application, containing message, Signature by using MailJet creds.

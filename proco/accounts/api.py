@@ -2221,12 +2221,16 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     {random_order}
                     {limit_condition}
             )
-            SELECT ST_AsMVT(DISTINCT mvtgeom.*, '{mvt_layer}') FROM mvtgeom;
+            SELECT COALESCE(NULLIF(tile.mvt, ''::bytea), {empty_mvt_layer})
+            FROM (
+                SELECT ST_AsMVT(DISTINCT mvtgeom.*, '{mvt_layer}') AS mvt FROM mvtgeom
+            ) tile;
         """
 
         kwargs = copy.deepcopy(self.kwargs)
 
         kwargs['mvt_layer'] = kwargs.get('mvt_layer', 'default')
+        kwargs['empty_mvt_layer'] = account_utilities.get_empty_mvt_layer_sql(kwargs['mvt_layer'])
         kwargs['country_condition'] = ''
         kwargs['admin1_condition'] = ''
         kwargs['school_condition'] = ''
@@ -2410,12 +2414,16 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             FROM sampled_schools
             CROSS JOIN bounds
         )
-        SELECT ST_AsMVT(DISTINCT mvtgeom.*, '{mvt_layer}') FROM mvtgeom;
+        SELECT COALESCE(NULLIF(tile.mvt, ''::bytea), {empty_mvt_layer})
+        FROM (
+            SELECT ST_AsMVT(DISTINCT mvtgeom.*, '{mvt_layer}') AS mvt FROM mvtgeom
+        ) tile;
         """
 
         kwargs = copy.deepcopy(self.kwargs)
 
         kwargs['mvt_layer'] = kwargs.get('mvt_layer', 'default')
+        kwargs['empty_mvt_layer'] = account_utilities.get_empty_mvt_layer_sql(kwargs['mvt_layer'])
         kwargs['country_condition'] = ''
         kwargs['admin1_condition'] = ''
         kwargs['school_condition'] = ''
