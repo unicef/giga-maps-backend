@@ -23,13 +23,6 @@ app.conf.redbeat_lock_timeout = 36000
 def finalize_setup(sender, **kwargs):
 
     app.conf.beat_schedule.update({
-        # Entity cache warming task
-        'proco.utils.tasks.update_all_entity_cached_values': {
-            'task': 'proco.utils.tasks.update_all_entity_cached_values',
-            'schedule': crontab(hour=4, minute=45),
-            'args': (),
-            'kwargs': {'clean_cache': True},
-        },
         # Old cache task, kept for reference but disabled
         # 'proco.utils.tasks.update_all_cached_values': {
         #     'task': 'proco.utils.tasks.update_all_cached_values',
@@ -128,6 +121,12 @@ def finalize_setup(sender, **kwargs):
         },
 
         # Entity Based Tasks
+        'proco.utils.tasks.update_all_entity_cached_values': {
+            'task': 'proco.utils.tasks.update_all_entity_cached_values',
+            'schedule': crontab(hour=4, minute=45),
+            'args': (),
+            'kwargs': {'clean_cache': True},
+        },
         'proco.utils.tasks.rebuild_unified_index': {
             'task': 'proco.utils.tasks.rebuild_unified_index',
             'schedule': crontab(hour=2, minute=0),
