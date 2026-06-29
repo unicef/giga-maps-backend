@@ -15,7 +15,6 @@ from rest_framework.test import APIClient
 from proco.background import utils as background_task_utilities
 from proco.core import db_utils as db_utilities
 from proco.core import utils as core_utilities
-from proco.entities.constants import ALL_ENTITIES
 from proco.taskapp import app
 from proco.utils.dates import format_date, to_date
 
@@ -485,9 +484,7 @@ def rebuild_unified_index():
     """
     rebuild_unified_index
         Task which runs to rebuild the Cognitive Search Index for Entities from scratch.
-
         Frequency: Once in a day
-        Limit: 15 minutes
     """
     logger.info('Rebuilding the unified entities indexes.')
     task_key = 'rebuild_unified_index_status_{current_time}'.format(
@@ -662,6 +659,7 @@ def handle_deleted_entity_master_data_row(deleted_row_id=None, country_ids=None)
 @app.task(soft_time_limit=120 * 60, time_limit=125 * 60)
 def update_all_entity_cached_values(*args, clean_cache=False):
     from proco.entities.models import Entity, EntityType
+    from proco.entities.constants import ALL_ENTITIES
     from proco.locations.models import Country
     from proco.accounts.models import DataLayerCountryRelationship, DataLayer
     from proco.utils.cache import cache_manager
