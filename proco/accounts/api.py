@@ -1188,18 +1188,19 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         FROM (
             SELECT "schools_school"."id" AS school_id,
                 "schools_school"."last_weekly_status_id",
-                {col_function} AS "{col_name}"
+                t."{col_name}"
             FROM "schools_school"
             INNER JOIN "connection_statistics_schoolrealtimeregistration"
                 ON ("schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id")
             {school_weekly_join}
-            LEFT OUTER JOIN "connection_statistics_schooldailystatus" t
-                ON (
-                    "schools_school"."id" = t."school_id"
-                    AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
+            LEFT OUTER JOIN (
+                SELECT t."school_id", {col_function} AS "{col_name}"
+                FROM "connection_statistics_schooldailystatus" t
+                WHERE t."date" BETWEEN '{start_date}' AND '{end_date}'
                     AND t."live_data_source" IN ({live_source_types})
                     AND t."deleted" IS NULL
-                )
+                GROUP BY t."school_id"
+            ) t ON t."school_id" = "schools_school"."id"
             WHERE (
                 "schools_school"."deleted" IS NULL
                 AND "connection_statistics_schoolrealtimeregistration"."deleted" IS NULL
@@ -1209,8 +1210,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 {school_weekly_condition}
                 AND "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
                 AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date"::date <= '{end_date}')
-            GROUP BY "schools_school"."id"
-            ORDER BY "schools_school"."id" ASC
         ) AS sds
         {school_weekly_outer_join}
         """
@@ -1254,7 +1253,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
             kwargs['case_conditions'] = ' '.join(label_cases)
 
-            if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+            uses_school_weekly_status = 'sws' in str(legend_configs)
+            if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE and not uses_school_weekly_status:
                 kwargs['school_weekly_outer_join'] = ''
             else:
                 kwargs['school_weekly_outer_join'] = """

@@ -1351,20 +1351,18 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             AND err."deleted" IS NULL
         LEFT JOIN (
             SELECT "entities_entity"."id" AS entity_id,
-                AVG(t."{col_name}") AS "{col_name}"
+                (
+                    SELECT AVG(t."{col_name}")
+                    FROM "connection_statistics_entitydailystatus" t
+                    WHERE t."entity_id" = "entities_entity"."id"
+                        AND t."date" BETWEEN '{start_date}' AND '{end_date}'
+                        AND t."live_data_source" IN ({live_source_types})
+                        AND t."deleted" IS NULL
+                ) AS "{col_name}"
             FROM "entities_entity"
-            LEFT OUTER JOIN "connection_statistics_entitydailystatus" t
-                ON (
-                    "entities_entity"."id" = t."entity_id"
-                    AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
-                    AND t."live_data_source" IN ({live_source_types})
-                    AND t."deleted" IS NULL
-                )
             WHERE ("entities_entity"."id" IN ({ids})
                 AND "entities_entity"."deleted" IS NULL
                 AND entities_entity.entity_type_id = (SELECT id FROM entities_entity_type WHERE code = '{entity_name}' AND deleted IS NULL))
-            GROUP BY "entities_entity"."id"
-            ORDER BY "entities_entity"."id" ASC
         ) AS eds ON eds.entity_id = entities_entity.id
         WHERE "entities_entity"."id" IN ({ids})
             AND c."deleted" IS NULL
@@ -1419,6 +1417,12 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     label_cases.append("ELSE '{label}'".format(label=title))
 
             kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS live_avg_connectivity'
+
+            if 'ews' in str(legend_configs):
+                kwargs['entity_weekly_outer_join'] = """
+                LEFT JOIN "connection_statistics_entityweeklystatus" ews 
+                    ON eds."last_weekly_status_id" = ews."id"
+                """
         else:
             kwargs['case_conditions'] = """
             CASE
