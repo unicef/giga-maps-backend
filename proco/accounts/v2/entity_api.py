@@ -330,10 +330,17 @@ class BaseEntityDataLayerAPIViewSet(EntityDetailFilterMixin, APIView):
         if self.kwargs['benchmark'] == 'national':
             country_ids = self.kwargs.get('country_ids', [])
             if len(country_ids) > 0:
-                benchmark_metadata = Country.objects.all().filter(
-                    id__in=country_ids,
-                    benchmark_metadata__isnull=False,
-                ).order_by('id').values_list('benchmark_metadata', flat=True).first()
+                country_key = tuple(country_ids)
+                if not hasattr(self, '_benchmark_metadata_cache'):
+                    self._benchmark_metadata_cache = {}
+
+                if country_key not in self._benchmark_metadata_cache:
+                    self._benchmark_metadata_cache[country_key] = Country.objects.all().filter(
+                        id__in=country_ids,
+                        benchmark_metadata__isnull=False,
+                    ).order_by('id').values_list('benchmark_metadata', flat=True).first()
+
+                benchmark_metadata = self._benchmark_metadata_cache[country_key]
 
                 if benchmark_metadata and len(benchmark_metadata) > 0:
                     if isinstance(benchmark_metadata, str):
@@ -356,11 +363,18 @@ class BaseEntityDataLayerAPIViewSet(EntityDetailFilterMixin, APIView):
         if self.kwargs['benchmark'] == 'national':
             country_ids = self.kwargs.get('country_ids', [])
             if len(country_ids) > 0:
-                legend_configurations = Country.objects.all().filter(
-                    id__in=country_ids,
-                    active_layers__deleted__isnull=True,
-                    active_layers__data_layer_id=data_layer_instance.id,
-                ).order_by('id').values_list('active_layers__legend_configs', flat=True).first()
+                cache_key = (tuple(country_ids), data_layer_instance.id)
+                if not hasattr(self, '_legend_configs_cache'):
+                    self._legend_configs_cache = {}
+
+                if cache_key not in self._legend_configs_cache:
+                    self._legend_configs_cache[cache_key] = Country.objects.all().filter(
+                        id__in=country_ids,
+                        active_layers__deleted__isnull=True,
+                        active_layers__data_layer_id=data_layer_instance.id,
+                    ).order_by('id').values_list('active_layers__legend_configs', flat=True).first()
+
+                legend_configurations = self._legend_configs_cache[cache_key]
                 if legend_configurations and len(legend_configurations) > 0:
                     if isinstance(legend_configurations, str):
                         legend_configs = json.loads(legend_configurations)
@@ -508,6 +522,7 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                         "entities_entity"."last_weekly_status_id",
                         AVG(t."{col_name}") AS "{col_name}"
                     FROM "entities_entity"
+                    INNER JOIN bounds ON ST_Intersects("entities_entity".geopoint, ST_Transform(bounds.geom, 4326))
                     INNER JOIN connection_statistics_entityrealtimeregistration rt_status ON
                         rt_status."entity_id" = "entities_entity".id
                     {entity_weekly_join}
@@ -1559,22 +1574,38 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
         round_unit_value = kwargs['round_unit_value']
         all_positive_speeds = []
+        entry_idx = {entry['key']: entry for entry in graph_data}
 
         for daily_avg_data in (data or []):
             formatted_date = date_utilities.format_date(daily_avg_data['date'])
-            for entry in graph_data:
-                if entry['key'] == formatted_date:
-                    try:
-                        rounded_speed = 0
-                        if daily_avg_data['field_avg'] is not None:
-                            rounded_speed = round(
-                                eval(round_unit_value.format(val=daily_avg_data['field_avg'])), 2)
-                        entry['value'] = rounded_speed
-                        all_positive_speeds.append(rounded_speed)
-                    except (KeyError, TypeError):
-                        pass
+            entry = entry_idx.get(formatted_date)
+            if entry is not None:
+                try:
+                    rounded_speed = self.apply_unit_conversion(daily_avg_data['field_avg'], round_unit_value)
+                    entry['value'] = rounded_speed
+                    all_positive_speeds.append(rounded_speed)
+                except (KeyError, TypeError):
+                    pass
 
         return graph_data, all_positive_speeds
+
+    @staticmethod
+    def apply_unit_conversion(val, round_unit_value):
+        if val is None:
+            return 0
+        try:
+            val = float(val)
+            if '/ (1000 * 1000)' in round_unit_value:
+                return round(val / 1000000.0, 2)
+            elif '/ 1000' in round_unit_value:
+                return round(val / 1000.0, 2)
+            elif '* 1000 * 1000' in round_unit_value:
+                return round(val * 1000000.0, 2)
+            elif '* 1000' in round_unit_value:
+                return round(val * 1000.0, 2)
+            return round(val, 2)
+        except (ValueError, TypeError):
+            return 0
 
     def generate_graph_data(self):
         kwargs = copy.deepcopy(self.kwargs)
@@ -1600,45 +1631,47 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         if len(kwargs.get('entity_ids', [])) > 0:
             graph_data_per_entity = {}
             all_positive_speeds_per_entity = {}
+            entry_idx_per_entity = {}
 
             for entity_id in kwargs.get('entity_ids', []):
-                graph_data_per_entity[entity_id] = copy.deepcopy(graph_data)
-                all_positive_speeds_per_entity[entity_id] = []
+                entity_id_str = str(entity_id)
+                graph_data_per_entity[entity_id_str] = copy.deepcopy(graph_data)
+                all_positive_speeds_per_entity[entity_id_str] = []
+                entry_idx_per_entity[entity_id_str] = {
+                    entry['key']: entry for entry in graph_data_per_entity[entity_id_str]
+                }
 
             # Update the graph_data with actual values if they exist
-            for daily_avg_data in data:
+            for daily_avg_data in (data or []):
                 entity_id = str(daily_avg_data['id'])
+                if entity_id not in entry_idx_per_entity:
+                    continue
                 formatted_date = date_utilities.format_date(daily_avg_data['date'])
-                entity_graph_data = graph_data_per_entity[entity_id]
-                entity_all_positive_speeds = all_positive_speeds_per_entity[entity_id]
-                for entry in entity_graph_data:
-                    if entry['key'] == formatted_date:
-                        try:
-                            rounded_speed = 0
-                            if daily_avg_data['field_avg'] is not None:
-                                rounded_speed = round(eval(round_unit_value.format(val=daily_avg_data['field_avg'])), 2)
-                            entry['value'] = rounded_speed
-                            entity_all_positive_speeds.append(rounded_speed)
-                        except (KeyError, TypeError):
-                            pass
-                graph_data_per_entity[entity_id] = entity_graph_data
-                all_positive_speeds_per_entity[entity_id] = entity_all_positive_speeds
+
+                entry = entry_idx_per_entity[entity_id].get(formatted_date)
+                if entry is not None:
+                    try:
+                        rounded_speed = self.apply_unit_conversion(daily_avg_data['field_avg'], round_unit_value)
+                        entry['value'] = rounded_speed
+                        all_positive_speeds_per_entity[entity_id].append(rounded_speed)
+                    except (KeyError, TypeError):
+                        pass
             return graph_data_per_entity, all_positive_speeds_per_entity
 
         all_positive_speeds = []
-        # Update the graph_data with actual values if they exist
-        for daily_avg_data in data:
+        entry_idx = {entry['key']: entry for entry in graph_data}
+
+        for daily_avg_data in (data or []):
             formatted_date = date_utilities.format_date(daily_avg_data['date'])
-            for entry in graph_data:
-                if entry['key'] == formatted_date:
-                    try:
-                        rounded_speed = 0
-                        if daily_avg_data['field_avg'] is not None:
-                            rounded_speed = round(eval(round_unit_value.format(val=daily_avg_data['field_avg'])), 2)
-                        entry['value'] = rounded_speed
-                        all_positive_speeds.append(rounded_speed)
-                    except (KeyError, TypeError):
-                        pass
+            entry = entry_idx.get(formatted_date)
+            if entry is not None:
+                try:
+                    rounded_speed = self.apply_unit_conversion(daily_avg_data['field_avg'], round_unit_value)
+                    entry['value'] = rounded_speed
+                    all_positive_speeds.append(rounded_speed)
+                except (KeyError, TypeError):
+                    pass
+
         return graph_data, all_positive_speeds
 
     def get_static_info_query(self, query_labels):
@@ -2000,24 +2033,27 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
         graph_data_per_school = {}
         all_positive_speeds_per_school = {}
+        entry_idx_per_school = {}
+
         for school_id in kwargs.get('school_ids', []):
-            graph_data_per_school[str(school_id)] = copy.deepcopy(graph_data)
-            all_positive_speeds_per_school[str(school_id)] = []
+            school_id_str = str(school_id)
+            graph_data_per_school[school_id_str] = copy.deepcopy(graph_data)
+            all_positive_speeds_per_school[school_id_str] = []
+            entry_idx_per_school[school_id_str] = {
+                entry['key']: entry for entry in graph_data_per_school[school_id_str]
+            }
 
         round_unit_value = kwargs['round_unit_value']
         for daily_avg_data in data:
             school_id = str(daily_avg_data['id'])
-            if school_id not in graph_data_per_school:
+            if school_id not in entry_idx_per_school:
                 continue
 
             formatted_date = date_utilities.format_date(daily_avg_data['date'])
-            for entry in graph_data_per_school[school_id]:
-                if entry['key'] != formatted_date:
-                    continue
+            entry = entry_idx_per_school[school_id].get(formatted_date)
+            if entry is not None:
                 try:
-                    rounded_speed = 0
-                    if daily_avg_data['field_avg'] is not None:
-                        rounded_speed = round(eval(round_unit_value.format(val=daily_avg_data['field_avg'])), 2)
+                    rounded_speed = self.apply_unit_conversion(daily_avg_data['field_avg'], round_unit_value)
                     entry['value'] = rounded_speed
                     all_positive_speeds_per_school[school_id].append(rounded_speed)
                 except (KeyError, TypeError):
@@ -2081,15 +2117,69 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 benchmark_value_from_sql=school_row.get('benchmark_sql_value'),
             )
 
-            if include_same_location:
-                school_row['schools_at_same_location'] = school_viewset_cls.get_school_ids_at_same_location(
-                    self,
-                    request,
-                    school_row.get('id'),
-                    school_row.get('country_id'),
-                )
+            if include_same_location and sorted_rows:
+                is_legacy = self.kwargs.get('entity_name', '') == 'school'
+                same_loc_map = self.get_entities_at_same_location_batched(request, sorted_rows, is_legacy)
+                for school_row in sorted_rows:
+                    school_row['schools_at_same_location'] = same_loc_map.get(school_row.get('id'), {"count": 0, "school_ids": []})
 
         return sorted_rows
+
+    def get_entities_at_same_location_batched(self, request, rows, is_legacy):
+        response_map = {}
+        if not rows:
+            return response_map
+
+        ids_str = ','.join(str(r['id']) for r in rows if r.get('id'))
+        if not ids_str:
+            return response_map
+
+        table_name = "schools_school" if is_legacy else "entities_entity"
+        rt_table_name = "connection_statistics_schoolrealtimeregistration" if is_legacy else "connection_statistics_entityrealtimeregistration"
+        entity_col = "school_id" if is_legacy else "entity_id"
+        end_date_str = self.kwargs.get('end_date', '2099-01-01')
+
+        try:
+            limit = int(request.query_params.get(f"limit_same_location_schools", 300))
+            limit = limit if limit > 0 else 300
+        except ValueError:
+            limit = 300
+        try:
+            offset = int(request.query_params.get(f"offset_same_location_schools", 0))
+            offset = max(offset, 0)
+        except ValueError:
+            offset = 0
+
+        batch_query = f"""
+            SELECT e1.id AS original_id, e2.id AS related_id, srr.id AS srr_id
+            FROM {table_name} e1
+            JOIN {table_name} e2 ON e1.geopoint = e2.geopoint AND e1.id != e2.id
+            LEFT JOIN {rt_table_name} srr
+                ON e2.id = srr.{entity_col}
+                AND srr.deleted IS NULL
+                AND srr.rt_registration_date <= '{{end_date_str}}'
+            WHERE e1.id IN ({{ids_str}})
+              AND e1.deleted IS NULL
+              AND e2.deleted IS NULL
+        """
+
+        from collections import defaultdict
+        grouped = defaultdict(list)
+
+        batch_query_formatted = batch_query.format(ids_str=ids_str, end_date_str=end_date_str)
+        batch_rows = db_utilities.sql_to_response(batch_query_formatted, label=self.__class__.__name__, db_var=settings.READ_ONLY_DB_KEY) or []
+
+        for row in batch_rows:
+            grouped[row['original_id']].append((row['srr_id'] is not None, row['related_id']))
+
+        for orig, items in grouped.items():
+            items.sort(key=lambda x: (0 if x[0] else 1, x[1]))
+            response_map[orig] = {
+                "count": len(items),
+                "school_ids": [x[1] for x in items[offset:offset+limit]]
+            }
+
+        return response_map
 
     def compute_unit_conversion(self, parameter_column_unit):
         unit_agg_str = '{val}'
@@ -2594,14 +2684,10 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
         # Determine if we should include same location entities
         include_same_location = self.kwargs.get('include_same_location_schools') == 'true'
-        if include_same_location:
-            school_viewset_cls = DataLayerInfoViewSet()
+        if include_same_location and sorted_rows:
+            same_loc_map = self.get_entities_at_same_location_batched(request, sorted_rows, is_legacy)
             for row in sorted_rows:
-                row['schools_at_same_location'] = school_viewset_cls.get_school_ids_at_same_location(
-                    request,
-                    row.get('id'),
-                    row.get('country_id'),
-                )
+                row['schools_at_same_location'] = same_loc_map.get(row.get('id'), {"count": 0, "school_ids": []})
 
         return sorted_rows
 

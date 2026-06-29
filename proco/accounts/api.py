@@ -2194,6 +2194,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                         "schools_school"."last_weekly_status_id",
                         {col_function} AS "{col_name}"
                     FROM "schools_school"
+                    INNER JOIN bounds ON ST_Intersects("schools_school".geopoint, ST_Transform(bounds.geom, 4326))
                     INNER JOIN connection_statistics_schoolrealtimeregistration rt_status ON
                         rt_status."school_id" = "schools_school".id
                     {school_weekly_join}
