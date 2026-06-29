@@ -19,8 +19,8 @@ urlpatterns = [
     path('global-stat/', stats_entity_api.EntityGlobalStatsAPIView.as_view(), name='global-stat-all-entities'),
     path('connectivityconfigs/', stats_entity_api.EntityConnectivityConfigurationsViewSet.as_view(),
          name='entity-get-latest-week-and-month'),
-    path('countries/', locations_entity_api.EntityCountryViewSet.as_view({'get': 'list'})),
-    path('countries/<str:pk>/', locations_entity_api.EntityCountryViewSet.as_view({'get': 'retrieve'})),
+    path('countries/', locations_entity_api.EntityCountryViewSet.as_view({'get': 'list'}), name='list-entity-countries'),
+    path('countries/<str:pk>/', locations_entity_api.EntityCountryViewSet.as_view({'get': 'retrieve'}), name='retrieve-entity-country'),
     path('connectivity-stat/', stats_entity_api.EntityConnectivityAPIView.as_view(),
          name='global-connectivity-stat-entities'),
     path('tiles/connectivity/', entities_api.EntityGlobalConnectivityTileRequestHandler.as_view(),
@@ -53,7 +53,7 @@ urlpatterns = [
         name='metadata-data-layer-entities'),
     path('layers/<int:pk>/', entity_api.EntityDataLayersViewSet.as_view({'put': 'partial_update', 'delete': 'destroy',}),
         name='update-or-delete-data-layer-entities'),
-    
+
     path('layers/<str:status>/', entity_api.PublishedEntityDataLayersViewSet.as_view({'get': 'list',}),
         name='list-published-data-layers-entities'),
 

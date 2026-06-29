@@ -15,6 +15,7 @@ from rest_framework.test import APIClient
 from proco.background import utils as background_task_utilities
 from proco.core import db_utils as db_utilities
 from proco.core import utils as core_utilities
+from proco.entities.constants import ALL_ENTITIES
 from proco.taskapp import app
 from proco.utils.dates import format_date, to_date
 
@@ -686,7 +687,9 @@ def update_all_entity_cached_values(*args, clean_cache=False):
             cache_manager.invalidate()
             logger.info('Cache invalidation started. Maps will be updated in a few minutes.')
 
-    update_cached_value.delay(url=reverse('entities:global-stat-all-entities'))
+    update_cached_value.delay(url=reverse('locations:search-countries-admin-schools'))
+    update_cached_value.delay(url=reverse('entities:list-entity-countries'))
+    update_cached_value.delay(url=reverse('entities:global-stat-all-entities'), query_params={'entity_type__code': ALL_ENTITIES})
 
     active_entity_types = EntityType.get_all_active().exclude(is_legacy=True)
     entity_country_ids = Entity.objects.filter(deleted__isnull=True).values_list('country_id', flat=True).order_by('country_id').distinct()
