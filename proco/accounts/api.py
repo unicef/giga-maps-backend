@@ -2254,6 +2254,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
         if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
             label_cases = []
+            uses_school_weekly_status = False
             for title, values_and_label in legend_configs.items():
                 values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
                                      values_and_label.get('values', [])))
@@ -2262,14 +2263,16 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
                         sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
+                        uses_school_weekly_status = uses_school_weekly_status or 'sws.' in sql_statement
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
                     label_cases.append("ELSE '{label}'".format(label=title))
 
             kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status,'
-            if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE:
-                kwargs['school_weekly_outer_join'] = ''
-            else:
+            if (
+                kwargs.get('layer_type') != accounts_models.DataLayer.LAYER_TYPE_LIVE
+                or uses_school_weekly_status
+            ):
                 kwargs['school_weekly_outer_join'] = """
                 INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
                 """
