@@ -383,6 +383,38 @@ class BaseEntityDataLayerAPIViewSet(EntityDetailFilterMixin, APIView):
 
         return legend_configs
 
+    @staticmethod
+    def build_case_expression(label_cases, alias, trailing_comma=False, default_label='unknown'):
+        when_cases = []
+        fallback_label = None
+
+        for label_case in label_cases:
+            label_case = label_case.strip()
+            if label_case.upper().startswith('ELSE '):
+                if fallback_label is None:
+                    fallback_label = label_case[5:].strip()
+            elif label_case:
+                when_cases.append(label_case)
+
+        if fallback_label is None:
+            fallback_label = "'{0}'".format(str(default_label).replace("'", "''"))
+
+        if when_cases:
+            expression = 'CASE {when_cases} ELSE {fallback_label} END AS {alias}'.format(
+                when_cases=' '.join(when_cases),
+                fallback_label=fallback_label,
+                alias=alias,
+            )
+        else:
+            expression = '{fallback_label} AS {alias}'.format(
+                fallback_label=fallback_label,
+                alias=alias,
+            )
+
+        if trailing_comma:
+            expression += ','
+        return expression
+
 
 @method_decorator([
     custom_cache_control(
@@ -609,7 +641,11 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                 else:
                     label_cases.append("ELSE '{label}'".format(label=title))
 
-            kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status,'
+            kwargs['case_conditions'] = self.build_case_expression(
+                label_cases,
+                alias='field_status',
+                trailing_comma=True,
+            )
             if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE:
                 kwargs['entity_weekly_outer_join'] = ''
             else:
@@ -839,7 +875,7 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
             else:
                 label_cases.append("ELSE '{label}'".format(label=title))
 
-        kwargs['label_case_statements'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
+        kwargs['label_case_statements'] = self.build_case_expression(label_cases, alias='field_status')
 
         if add_random_condition:
             if 'limit' in request.query_params:
@@ -1416,7 +1452,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 else:
                     label_cases.append("ELSE '{label}'".format(label=title))
 
-            kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS live_avg_connectivity'
+            kwargs['case_conditions'] = self.build_case_expression(label_cases, alias='live_avg_connectivity')
 
             if 'ews' in str(legend_configs):
                 kwargs['entity_weekly_outer_join'] = """
@@ -1944,7 +1980,11 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             else:
                 label_cases.append("ELSE '{label}'".format(label=title))
 
-        kwargs['label_case_statements'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status,'
+        kwargs['label_case_statements'] = self.build_case_expression(
+            label_cases,
+            alias='field_status',
+            trailing_comma=True,
+        )
 
         return query.format(**kwargs)
 
@@ -2943,7 +2983,11 @@ class EntityDataLayerPreviewViewSet(APIView):
                 else:
                     label_cases.append("ELSE '{label}'".format(label=title))
 
-            kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS connectivity,'
+            kwargs['case_conditions'] = BaseEntityDataLayerAPIViewSet.build_case_expression(
+                label_cases,
+                alias='connectivity',
+                trailing_comma=True,
+            )
         else:
             kwargs['case_conditions'] = """
                         CASE WHEN sds.{col_name} > {benchmark_value} THEN 'good'
@@ -3036,7 +3080,10 @@ class EntityDataLayerPreviewViewSet(APIView):
             else:
                 label_cases.append("ELSE '{label}'".format(label=title))
 
-        kwargs['label_case_statements'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
+        kwargs['label_case_statements'] = BaseEntityDataLayerAPIViewSet.build_case_expression(
+            label_cases,
+            alias='field_status',
+        )
 
         return query.format(**kwargs)
 
