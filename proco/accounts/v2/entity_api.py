@@ -1853,6 +1853,48 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         kwargs['label_case_statements'] = ' '.join(label_cases)
         return query.format(**kwargs)
 
+    def get_school_basic_info_query(self):
+        query = """
+        SELECT schools_school."id",
+            schools_school."name",
+            schools_school."external_id",
+            schools_school."giga_id_school" AS giga_id,
+            schools_school."country_id",
+            c."name" AS country_name,
+            schools_school."admin1_id",
+            adm1_metadata."name" AS admin1_name,
+            adm1_metadata."giga_id_admin" AS admin1_code,
+            adm1_metadata."description_ui_label" AS admin1_description_ui_label,
+            schools_school."admin2_id",
+            adm2_metadata."name" AS admin2_name,
+            adm2_metadata."giga_id_admin" AS admin2_code,
+            adm2_metadata."description_ui_label" AS admin2_description_ui_label,
+            schools_school."environment",
+            ST_AsGeoJSON(ST_Transform(schools_school."geopoint", 4326)) AS geopoint,
+            CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
+                ELSE 'unknown'
+            END as connectivity_status
+        FROM "schools_school"
+        INNER JOIN locations_country c ON c.id = schools_school.country_id
+        LEFT JOIN locations_countryadminmetadata AS adm1_metadata
+            ON adm1_metadata."id" = schools_school.admin1_id
+            AND adm1_metadata."layer_name" = 'adm1'
+            AND adm1_metadata."deleted" IS NULL
+        LEFT JOIN locations_countryadminmetadata AS adm2_metadata
+            ON adm2_metadata."id" = schools_school.admin2_id
+            AND adm2_metadata."layer_name" = 'adm2'
+            AND adm2_metadata."deleted" IS NULL
+        WHERE "schools_school"."id" IN ({ids})
+            AND c."deleted" IS NULL
+            AND schools_school."deleted" IS NULL
+        ORDER BY schools_school."id" ASC
+        """
+
+        kwargs = copy.deepcopy(self.kwargs)
+        kwargs['ids'] = ','.join(kwargs['entity_ids'])
+        return query.format(**kwargs)
+
     def get_entity_basic_info_query(self):
         query = """
         SELECT entities_entity."id",
@@ -2702,11 +2744,17 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         # Populate kwargs from query params manually for basic usage
         if 'entity_id__in' in entity_query_params:
             self.kwargs['entity_ids'] = [s_id.strip() for s_id in entity_query_params['entity_id__in'].split(',')]
+        elif 'school_id__in' in entity_query_params:
+            self.kwargs['entity_ids'] = [s_id.strip() for s_id in entity_query_params['school_id__in'].split(',')]
         elif 'entity_id' in entity_query_params:
             self.kwargs['entity_ids'] = [entity_query_params['entity_id'].strip()]
+        elif 'school_id' in entity_query_params:
+            self.kwargs['entity_ids'] = [entity_query_params['school_id'].strip()]
 
         if 'include_same_location' in entity_query_params:
             self.kwargs['include_same_location_schools'] = entity_query_params['include_same_location']
+        elif 'include_same_location_schools' in entity_query_params:
+            self.kwargs['include_same_location_schools'] = entity_query_params['include_same_location_schools']
 
         selected_ids = self.kwargs.get('entity_ids', [])
 
@@ -2714,15 +2762,17 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         if not selected_ids:
             return None
 
-        if is_legacy:
-            # For legacy, rely on existing school_view fallback via DataLayerInfoViewSet if no layer is needed
-            return None
-
         # Get basic entity details
-        info_panel_rows = db_utilities.sql_to_response(
-            self.get_entity_basic_info_query(),
-            label=self.__class__.__name__,
-            db_var=settings.READ_ONLY_DB_KEY) or []
+        if is_legacy:
+            info_panel_rows = db_utilities.sql_to_response(
+                self.get_school_basic_info_query(),
+                label=self.__class__.__name__,
+                db_var=settings.READ_ONLY_DB_KEY) or []
+        else:
+            info_panel_rows = db_utilities.sql_to_response(
+                self.get_entity_basic_info_query(),
+                label=self.__class__.__name__,
+                db_var=settings.READ_ONLY_DB_KEY) or []
 
         sorted_rows = self.sort_info_panel_rows(selected_ids, info_panel_rows, [], 'entity_id')
 
@@ -2769,13 +2819,6 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             # Extract all entity-specific parameters from query params
             entity_params = self.extract_entity_params(request)
 
-            # If no entity-specific params found, return error
-            if not entity_params:
-                return Response(
-                    {'error': 'No entity parameters found. Please provide at least one entity_layer_id parameter.'},
-                    status=400
-                )
-
             response = {}
 
             # Find entity codes that don't have layer_id but have entity_ids directly
@@ -2794,6 +2837,13 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             generic_entity_type = request.query_params.get('entity_type__code')
             if generic_entity_id and generic_entity_type and generic_entity_type not in entity_params:
                 entity_params[generic_entity_type] = {}
+
+            # If no entity-specific params found, return error
+            if not entity_params:
+                return Response(
+                    {'error': 'No entity parameters found. Please provide at least one entity_layer_id parameter.'},
+                    status=400
+                )
 
             # Process each entity type
             for entity_code, params in entity_params.items():
