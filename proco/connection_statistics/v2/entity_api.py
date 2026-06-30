@@ -317,52 +317,93 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
 
         speed_benchmark, _ = get_benchmark_value_for_default_download_layer(benchmark, country_id)
 
-        weekly_queryset = self.queryset.annotate(
-            t=FilteredRelation(
-                'weekly_status',
-                condition=Q(weekly_status__week=week_number)
-                          & Q(weekly_status__year=year_number)
-                          & Q(weekly_status__deleted__isnull=True),
-            )
-        ).filter(
-            realtime_registration_status__rt_registered=True,
-            realtime_registration_status__rt_registration_date__date__lte=end_date,
-            realtime_registration_status__deleted__isnull=True,
-        ).annotate(
-            dummy_group_by=Value(1)).values('dummy_group_by').annotate(
-            good=Count(Case(When(t__connectivity_speed__gt=speed_benchmark, then='id')), distinct=True),
-            moderate=Count(Case(When(t__connectivity_speed__lte=speed_benchmark, t__connectivity_speed__gte=1000000,
-                                     then='id')), distinct=True),
-            bad=Count(Case(When(t__connectivity_speed__lt=1000000, then='id')), distinct=True),
-            unknown=Count(Case(When(t__connectivity_speed__isnull=True, then='id')), distinct=True),
-            school_with_realtime_data=Count(Case(When(t__connectivity_speed__isnull=False, then='id')), distinct=True),
-            no_of_schools_measure=Count('id', distinct=True),
-            countries_with_realtime_data=Count('country_id', distinct=True),
-        ).values('good', 'moderate', 'bad', 'unknown', 'school_with_realtime_data',
-                 'no_of_schools_measure', 'countries_with_realtime_data').order_by()
-
-        if len(self.school_filters) > 0:
-            weekly_queryset = weekly_queryset.extra(where=[self.school_filters])
-
+        school_static_join_sql = ""
+        school_static_t5_max = ""
+        school_static_t5_count = ""
         if len(self.school_static_filters) > 0:
             school_static_filters = core_utilities.get_filter_sql(
                 self.request, 'school_static', 'T5', LEGACY_MODEL)
-            weekly_queryset = weekly_queryset.annotate(
-                total_weekly_schools=Count('last_weekly_status__school_id', distinct=True),
-            ).values(
-                'good', 'moderate', 'bad', 'unknown', 'school_with_realtime_data',
-                'no_of_schools_measure', 'countries_with_realtime_data', 'total_weekly_schools'
-            ).extra(where=[school_static_filters])
+            if school_static_filters:
+                school_static_join_sql = ' LEFT JOIN "connection_statistics_schoolweeklystatus" "T5" ON ("schools_school"."last_weekly_status_id" = "T5"."id") '
+                school_static_t5_max = ', MAX("T5"."school_id") AS max_t5_school_id'
+                school_static_t5_count = ', COUNT(CASE WHEN max_t5_school_id IS NOT NULL THEN 1 END) AS total_weekly_schools'
+                self.school_static_filters = [school_static_filters]
+            else:
+                self.school_static_filters = []
 
-        weekly_status = self.get_stat_row(weekly_queryset, {
-            'good': 0,
-            'moderate': 0,
-            'bad': 0,
-            'unknown': 0,
-            'school_with_realtime_data': 0,
-            'no_of_schools_measure': 0,
-            'countries_with_realtime_data': 0,
-        })
+        school_filters_sql = ""
+        if len(self.school_filters) > 0:
+            school_filters_sql = f' AND ({" AND ".join(self.school_filters)}) '
+        school_static_filters_sql = ""
+        if len(self.school_static_filters) > 0:
+            school_static_filters_sql = f' AND ({" AND ".join(self.school_static_filters)}) '
+
+        country_filter_sql = f' AND "schools_school"."country_id" = {country_id} ' if country_id else ''
+        admin1_id = self.request.query_params.get('admin1_id', None)
+        admin1_filter_sql = f' AND "schools_school"."admin1_id" = {admin1_id} ' if admin1_id else ''
+
+        query = f"""
+            SELECT
+                COUNT(CASE WHEN max_speed > {speed_benchmark} THEN 1 END) AS good,
+                COUNT(CASE WHEN max_speed <= {speed_benchmark} AND max_speed >= 1000000 THEN 1 END) AS moderate,
+                COUNT(CASE WHEN max_speed < 1000000 THEN 1 END) AS bad,
+                COUNT(CASE WHEN max_speed IS NULL THEN 1 END) AS unknown,
+                COUNT(CASE WHEN max_speed IS NOT NULL THEN 1 END) AS school_with_realtime_data,
+                COUNT(school_id) AS no_of_schools_measure,
+                COUNT(DISTINCT country_id) AS countries_with_realtime_data
+                {school_static_t5_count}
+            FROM (
+                SELECT rt."school_id", "schools_school"."country_id", MAX(t."connectivity_speed") as max_speed
+                       {school_static_t5_max}
+                FROM "connection_statistics_schoolrealtimeregistration" rt
+                INNER JOIN "schools_school" "schools_school" ON "schools_school"."id" = rt."school_id"
+                LEFT JOIN "connection_statistics_schoolweeklystatus" t 
+                    ON t."school_id" = rt."school_id" 
+                   AND t."week" = %s 
+                   AND t."year" = %s 
+                   AND t."deleted" IS NULL
+                {school_static_join_sql}
+                WHERE rt."rt_registered" = true
+                  AND rt."deleted" IS NULL
+                  AND "schools_school"."deleted" IS NULL
+                  AND (rt."rt_registration_date" AT TIME ZONE 'UTC')::date <= %s
+                  {school_filters_sql}
+                  {school_static_filters_sql}
+                  {country_filter_sql}
+                  {admin1_filter_sql}
+                GROUP BY rt."school_id", "schools_school"."country_id"
+            ) as subquery
+        """
+
+        with connection.cursor() as cursor:
+            cursor.execute(query, [week_number, year_number, end_date])
+            row = cursor.fetchone()
+
+        if row:
+            weekly_status = {
+                'good': row[0] or 0,
+                'moderate': row[1] or 0,
+                'bad': row[2] or 0,
+                'unknown': row[3] or 0,
+                'school_with_realtime_data': row[4] or 0,
+                'no_of_schools_measure': row[5] or 0,
+                'countries_with_realtime_data': row[6] or 0,
+            }
+            if len(self.school_static_filters) > 0:
+                weekly_status['total_weekly_schools'] = row[7] or 0
+        else:
+            weekly_status = {
+                'good': 0,
+                'moderate': 0,
+                'bad': 0,
+                'unknown': 0,
+                'school_with_realtime_data': 0,
+                'no_of_schools_measure': 0,
+                'countries_with_realtime_data': 0,
+            }
+            if len(self.school_static_filters) > 0:
+                weekly_status['total_weekly_schools'] = 0
+
         real_time_connected_schools = {
             'good': weekly_status['good'],
             'moderate': weekly_status['moderate'],
@@ -539,52 +580,94 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
 
         speed_benchmark, _ = get_benchmark_value_for_default_download_layer(benchmark, country_id)
 
-        weekly_queryset = self.queryset.annotate(
-            t=FilteredRelation(
-                'weekly_status',
-                condition=Q(weekly_status__week=week_number)
-                          & Q(weekly_status__year=year_number)
-                          & Q(weekly_status__deleted__isnull=True),
-            )
-        ).filter(
-            realtime_registration_status__rt_registered=True,
-            realtime_registration_status__rt_registration_date__date__lte=end_date,
-            realtime_registration_status__deleted__isnull=True,
-        ).annotate(
-            dummy_group_by=Value(1)).values('dummy_group_by').annotate(
-            good=Count(Case(When(t__connectivity_speed__gt=speed_benchmark, then='id')), distinct=True),
-            moderate=Count(Case(When(t__connectivity_speed__lte=speed_benchmark, t__connectivity_speed__gte=1000000,
-                                     then='id')), distinct=True),
-            bad=Count(Case(When(t__connectivity_speed__lt=1000000, then='id')), distinct=True),
-            unknown=Count(Case(When(t__connectivity_speed__isnull=True, then='id')), distinct=True),
-            entity_with_realtime_data=Count(Case(When(t__connectivity_speed__isnull=False, then='id')), distinct=True),
-            no_of_entities_measure=Count('id', distinct=True),
-            countries_with_realtime_data=Count('country_id', distinct=True),
-        ).values('good', 'moderate', 'bad', 'unknown', 'entity_with_realtime_data',
-                 'no_of_entities_measure', 'countries_with_realtime_data').order_by()
-
-        if len(self.entity_filters) > 0:
-            weekly_queryset = weekly_queryset.extra(where=[self.entity_filters])
-
+        entity_static_join_sql = ""
+        entity_static_t5_max = ""
+        entity_static_t5_count = ""
         if len(self.entity_static_filters) > 0:
             entity_static_filters = core_utilities.get_filter_sql(
                 self.request, 'entity_static', 'T5', self.entity_type_code)
-            weekly_queryset = weekly_queryset.annotate(
-                total_weekly_entities=Count('last_weekly_status__entity_id', distinct=True),
-            ).values(
-                'good', 'moderate', 'bad', 'unknown', 'entity_with_realtime_data',
-                'no_of_entities_measure', 'countries_with_realtime_data', 'total_weekly_entities'
-            ).extra(where=[entity_static_filters])
+            if entity_static_filters:
+                entity_static_join_sql = ' LEFT JOIN "connection_statistics_entityweeklystatus" "T5" ON ("entities_entity"."last_weekly_status_id" = "T5"."id") '
+                entity_static_t5_max = ', MAX("T5"."entity_id") AS max_t5_entity_id'
+                entity_static_t5_count = ', COUNT(CASE WHEN max_t5_entity_id IS NOT NULL THEN 1 END) AS total_weekly_entities'
+                self.entity_static_filters = [entity_static_filters]
+            else:
+                self.entity_static_filters = []
 
-        weekly_status = self.get_stat_row(weekly_queryset, {
-            'good': 0,
-            'moderate': 0,
-            'bad': 0,
-            'unknown': 0,
-            'entity_with_realtime_data': 0,
-            'no_of_entities_measure': 0,
-            'countries_with_realtime_data': 0,
-        })
+        entity_filters_sql = ""
+        if len(self.entity_filters) > 0:
+            entity_filters_sql = f' AND ({" AND ".join(self.entity_filters)}) '
+        entity_static_filters_sql = ""
+        if len(self.entity_static_filters) > 0:
+            entity_static_filters_sql = f' AND ({" AND ".join(self.entity_static_filters)}) '
+
+        country_filter_sql = f' AND "entities_entity"."country_id" = {country_id} ' if country_id else ''
+        admin1_id = self.request.query_params.get('admin1_id', None)
+        admin1_filter_sql = f' AND "entities_entity"."admin1_id" = {admin1_id} ' if admin1_id else ''
+
+        query = f"""
+            SELECT
+                COUNT(CASE WHEN max_speed > {speed_benchmark} THEN 1 END) AS good,
+                COUNT(CASE WHEN max_speed <= {speed_benchmark} AND max_speed >= 1000000 THEN 1 END) AS moderate,
+                COUNT(CASE WHEN max_speed < 1000000 THEN 1 END) AS bad,
+                COUNT(CASE WHEN max_speed IS NULL THEN 1 END) AS unknown,
+                COUNT(CASE WHEN max_speed IS NOT NULL THEN 1 END) AS entity_with_realtime_data,
+                COUNT(entity_id) AS no_of_entities_measure,
+                COUNT(DISTINCT country_id) AS countries_with_realtime_data
+                {entity_static_t5_count}
+            FROM (
+                SELECT rt."entity_id", "entities_entity"."country_id", MAX(t."connectivity_speed") as max_speed
+                       {entity_static_t5_max}
+                FROM "connection_statistics_entityrealtimeregistration" rt
+                INNER JOIN "entities_entity" "entities_entity" ON "entities_entity"."id" = rt."entity_id"
+                LEFT JOIN "connection_statistics_entityweeklystatus" t 
+                    ON t."entity_id" = rt."entity_id" 
+                   AND t."week" = %s 
+                   AND t."year" = %s 
+                   AND t."deleted" IS NULL
+                {entity_static_join_sql}
+                WHERE rt."rt_registered" = true
+                  AND rt."deleted" IS NULL
+                  AND "entities_entity"."deleted" IS NULL
+                  AND "entities_entity"."entity_type_id" = %s
+                  AND (rt."rt_registration_date" AT TIME ZONE 'UTC')::date <= %s
+                  {entity_filters_sql}
+                  {entity_static_filters_sql}
+                  {country_filter_sql}
+                  {admin1_filter_sql}
+                GROUP BY rt."entity_id", "entities_entity"."country_id"
+            ) as subquery
+        """
+
+        with connection.cursor() as cursor:
+            cursor.execute(query, [week_number, year_number, self.entity_type_obj.id, end_date])
+            row = cursor.fetchone()
+
+        if row:
+            weekly_status = {
+                'good': row[0] or 0,
+                'moderate': row[1] or 0,
+                'bad': row[2] or 0,
+                'unknown': row[3] or 0,
+                'entity_with_realtime_data': row[4] or 0,
+                'no_of_entities_measure': row[5] or 0,
+                'countries_with_realtime_data': row[6] or 0,
+            }
+            if len(self.entity_static_filters) > 0:
+                weekly_status['total_weekly_entities'] = row[7] or 0
+        else:
+            weekly_status = {
+                'good': 0,
+                'moderate': 0,
+                'bad': 0,
+                'unknown': 0,
+                'entity_with_realtime_data': 0,
+                'no_of_entities_measure': 0,
+                'countries_with_realtime_data': 0,
+            }
+            if len(self.entity_static_filters) > 0:
+                weekly_status['total_weekly_entities'] = 0
+
         real_time_connected_entities = {
             'good': weekly_status['good'],
             'moderate': weekly_status['moderate'],

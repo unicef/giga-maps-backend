@@ -795,7 +795,8 @@ class DataLayerPreviewViewSet(APIView):
                         sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
-                    label_cases.append("ELSE '{label}'".format(label=title))
+                    if not any(c.startswith("ELSE ") for c in label_cases):
+                        label_cases.append("ELSE '{label}'".format(label=title))
 
             kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS connectivity,'
         else:
@@ -891,7 +892,8 @@ class DataLayerPreviewViewSet(APIView):
                                 value=','.join([str(v) for v in values])
                             ))
             else:
-                label_cases.append("ELSE '{label}'".format(label=title))
+                if not any(c.startswith("ELSE ") for c in label_cases):
+                    label_cases.append("ELSE '{label}'".format(label=title))
 
         kwargs['label_case_statements'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
 
@@ -1399,7 +1401,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                         sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
-                    label_cases.append("ELSE '{label}'".format(label=title))
+                    if not any(c.startswith("ELSE ") for c in label_cases):
+                        label_cases.append("ELSE '{label}'".format(label=title))
 
             kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS live_avg_connectivity'
         else:
@@ -1799,7 +1802,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                                 value=','.join([str(v) for v in values])
                             ))
             else:
-                label_cases.append("ELSE '{label}'".format(label=title))
+                if not any(c.startswith("ELSE ") for c in label_cases):
+                    label_cases.append("ELSE '{label}'".format(label=title))
 
         kwargs['label_case_statements'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status,'
 
@@ -2267,7 +2271,8 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                         uses_school_weekly_status = uses_school_weekly_status or 'sws.' in sql_statement
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
-                    label_cases.append("ELSE '{label}'".format(label=title))
+                    if not any(c.startswith("ELSE ") for c in label_cases):
+                        label_cases.append("ELSE '{label}'".format(label=title))
 
             kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status,'
             if (
@@ -2528,7 +2533,8 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                                 value=','.join([str(v) for v in values])
                             ))
             else:
-                label_cases.append("ELSE '{label}'".format(label=title))
+                if not any(c.startswith("ELSE ") for c in label_cases):
+                    label_cases.append("ELSE '{label}'".format(label=title))
 
         # Replace table references with sampled_schools.field_value for use in mvtgeom CTE
         label_case_statements_str = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
@@ -2741,7 +2747,8 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
                         sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
-                    label_cases.append("ELSE '{label}'".format(label=title))
+                    if not any(c.startswith("ELSE ") for c in label_cases):
+                        label_cases.append("ELSE '{label}'".format(label=title))
 
             kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
         else:
