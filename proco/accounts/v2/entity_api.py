@@ -4,6 +4,7 @@ import logging
 from datetime import timedelta
 
 from django.conf import settings
+from django.core.exceptions import FieldDoesNotExist
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
@@ -1171,6 +1172,9 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                 if self.cache_enabled(data_layer_instance) and response.status_code == rest_status.HTTP_200_OK:
                     cache_manager.set(cache_key, response, request_path=request_path,
                                       soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
+            except FieldDoesNotExist as ex:
+                logger.error('Layer configuration error: {}'.format(ex))
+                response = Response(status=rest_status.HTTP_204_NO_CONTENT)
             except Exception as ex:
                 logger.error('Exception occurred for entity connectivity tiles endpoint: {}'.format(ex))
                 response = Response({'error': 'An error occurred while processing the request'}, status=500)

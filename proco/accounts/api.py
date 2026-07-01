@@ -2646,7 +2646,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     cache_manager.set(cache_key, response, request_path=request_path,
                                       soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
             except Exception as ex:
-                logger.error('Exception occurred for school connectivity tiles endpoint: {}'.format(ex))
+                logger.error('Exception occurred for data layer tiles endpoint: {}'.format(ex))
                 response = Response({'error': 'An error occurred while processing the request'}, status=500)
 
         return response

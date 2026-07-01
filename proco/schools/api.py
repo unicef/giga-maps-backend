@@ -6,7 +6,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied
 from django.core.management import call_command
-from django.db import connections
+from django.db import connections, utils as django_db_utilities
 from django.db.models import Prefetch
 from django.db.models.functions.text import Lower
 from django.http import HttpResponse
@@ -186,6 +186,9 @@ class BaseTileGenerator:
                 if not cur:
                     return Response({"error": f"sql query failed: {sql}"}, status=404)
                 return cur.fetchone()[0]
+        except django_db_utilities.DatabaseError as ex:
+            logger.error(f'Database Error during map tile generation: {ex}')
+            return Response(status=rest_status.HTTP_204_NO_CONTENT)
         except Exception:
             return Response({"error": "An error occurred while executing SQL query"}, status=500)
 
@@ -305,7 +308,7 @@ class SchoolTileRequestHandler(APIView):
         try:
             return self.tile_generator.generate_tile(request)
         except Exception as ex:
-            logger.error('Exception occurred for school tiles endpoint: {}'.format(ex))
+            logger.error('Exception occurred for school connectivity tiles endpoint: {}'.format(ex))
             return Response({"error": "An error occurred while processing the request"}, status=500)
 
 

@@ -171,7 +171,10 @@ class BaseTileGenerator:
                     response = Response({"error": f"sql query failed: {sql}"}, status=404)
                 else:
                     response = cur.fetchone()[0]
-            except django_db_utilities.OperationalError:
+            except django_db_utilities.DatabaseError as ex:
+                logger.error(f'Database Error during map tile generation: {ex}')
+                response = Response(status=204)
+            except Exception:
                 response = Response({"error": "An error occurred while executing requested query"}, status=500)
         return response
 
