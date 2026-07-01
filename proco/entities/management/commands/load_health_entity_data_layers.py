@@ -4,9 +4,8 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from proco.accounts import models as accounts_models
+from proco.core.utils import get_current_datetime_object
 from proco.entities.models import EntityType
-from proco.core.utils import get_current_datetime_object, normalize_str
-
 
 # Health Entity Data Sources Configuration
 health_data_source_json = [

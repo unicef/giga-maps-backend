@@ -748,6 +748,7 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
             FROM entities_entity
             INNER JOIN bounds ON ST_Intersects(entities_entity.geopoint, ST_Transform(bounds.geom, 4326))
             INNER JOIN entities_{entity_name}_entity ews ON "entities_entity"."id" = ews."entity_id"
+            {entity_weekly_join}
             {entity_detail_join}
             {entity_master_table_condition}
             WHERE entities_entity."deleted" IS NULL
@@ -876,6 +877,14 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                 label_cases.append("ELSE '{label}'".format(label=title))
 
         kwargs['label_case_statements'] = self.build_case_expression(label_cases, alias='field_status')
+
+        # If legend config SQL or table_name references 'sws' (entity weekly status), add the JOIN
+        kwargs['entity_weekly_join'] = ''
+        if 'sws' in str(legend_configs) or kwargs.get('table_name') == 'sws':
+            kwargs['entity_weekly_join'] = """
+                INNER JOIN "connection_statistics_entityweeklystatus" sws
+                    ON "entities_entity"."last_weekly_status_id" = sws."id"
+            """
 
         if add_random_condition:
             if 'limit' in request.query_params:
@@ -1851,6 +1860,14 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                             ))
 
         kwargs['label_case_statements'] = ' '.join(label_cases)
+
+        # If legend config SQL references 'sws' (entity weekly status), add the JOIN
+        if 'sws' in str(legend_configs):
+            kwargs['entity_weekly_join'] = """
+                INNER JOIN "connection_statistics_entityweeklystatus" sws
+                    ON "entities_entity"."last_weekly_status_id" = sws."id"
+            """
+
         return query.format(**kwargs)
 
     def get_school_basic_info_query(self):
@@ -1962,6 +1979,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         FROM "entities_entity"
         INNER JOIN locations_country c ON c.id = entities_entity.country_id
         INNER JOIN entities_{entity_name}_entity ews ON entities_entity.id = ews.entity_id
+        {entity_weekly_join}
         LEFT JOIN locations_countryadminmetadata AS adm1_metadata
             ON adm1_metadata."id" = entities_entity.admin1_id
             AND adm1_metadata."layer_name" = 'adm1'
@@ -2027,6 +2045,14 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             alias='field_status',
             trailing_comma=True,
         )
+
+        # If legend config SQL or table_name references 'sws' (entity weekly status), add the JOIN
+        kwargs['entity_weekly_join'] = ''
+        if 'sws' in str(legend_configs) or kwargs.get('table_name') == 'sws':
+            kwargs['entity_weekly_join'] = """
+                INNER JOIN "connection_statistics_entityweeklystatus" sws
+                    ON "entities_entity"."last_weekly_status_id" = sws."id"
+            """
 
         return query.format(**kwargs)
 
@@ -2162,23 +2188,29 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         scoped_query_params,
     ):
         selected_ids = self.kwargs.get('school_ids', [])
-        statistics = db_utilities.sql_to_response(
-            school_viewset_cls.get_school_view_statistics_info_query(self),
-            label=self.__class__.__name__,
-            db_var=settings.READ_ONLY_DB_KEY) or []
+        try:
+            statistics = db_utilities.sql_to_response(
+                school_viewset_cls.get_school_view_statistics_info_query(self),
+                label=self.__class__.__name__,
+                db_var=settings.READ_ONLY_DB_KEY,
+                raise_exception=True) or []
 
-        if is_live_layer:
-            info_panel_rows = db_utilities.sql_to_response(
-                school_viewset_cls.get_school_view_info_query(self),
-                label=self.__class__.__name__,
-                db_var=settings.READ_ONLY_DB_KEY) or []
-            graph_data, positive_speeds = self.generate_school_detail_graph_data(school_viewset_cls)
-        else:
-            info_panel_rows = db_utilities.sql_to_response(
-                school_viewset_cls.get_static_school_view_info_query(self),
-                label=self.__class__.__name__,
-                db_var=settings.READ_ONLY_DB_KEY) or []
-            graph_data, positive_speeds = {}, {}
+            if is_live_layer:
+                info_panel_rows = db_utilities.sql_to_response(
+                    school_viewset_cls.get_school_view_info_query(self),
+                    label=self.__class__.__name__,
+                    db_var=settings.READ_ONLY_DB_KEY,
+                    raise_exception=True) or []
+                graph_data, positive_speeds = self.generate_school_detail_graph_data(school_viewset_cls)
+            else:
+                info_panel_rows = db_utilities.sql_to_response(
+                    school_viewset_cls.get_static_school_view_info_query(self),
+                    label=self.__class__.__name__,
+                    db_var=settings.READ_ONLY_DB_KEY,
+                    raise_exception=True) or []
+                graph_data, positive_speeds = {}, {}
+        except Exception as sql_exc:
+            return {'error': str(sql_exc)}
 
         import sys; sys.stderr.write(f"INFO_PANEL_ROWS: {info_panel_rows}\nKWARGS: {self.kwargs}\n")
         sorted_rows = self.sort_info_panel_rows(selected_ids, info_panel_rows, statistics, 'school_id')
@@ -2329,23 +2361,29 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
     ):
         selected_ids = self.kwargs.get('entity_ids', [])
 
-        statistics = db_utilities.sql_to_response(
-            self.get_entity_view_statistics_info_query(data_layer_instance.type),
-            label=self.__class__.__name__,
-            db_var=settings.READ_ONLY_DB_KEY) or []
+        try:
+            statistics = db_utilities.sql_to_response(
+                self.get_entity_view_statistics_info_query(data_layer_instance.type),
+                label=self.__class__.__name__,
+                db_var=settings.READ_ONLY_DB_KEY,
+                raise_exception=True) or []
 
-        if is_live_layer:
-            info_panel_rows = db_utilities.sql_to_response(
-                self.get_entity_view_info_query(),
-                label=self.__class__.__name__,
-                db_var=settings.READ_ONLY_DB_KEY) or []
-            graph_data, positive_speeds = self.generate_graph_data()
-        else:
-            info_panel_rows = db_utilities.sql_to_response(
-                self.get_static_entity_view_info_query(),
-                label=self.__class__.__name__,
-                db_var=settings.READ_ONLY_DB_KEY) or []
-            graph_data, positive_speeds = {}, {}
+            if is_live_layer:
+                info_panel_rows = db_utilities.sql_to_response(
+                    self.get_entity_view_info_query(),
+                    label=self.__class__.__name__,
+                    db_var=settings.READ_ONLY_DB_KEY,
+                    raise_exception=True) or []
+                graph_data, positive_speeds = self.generate_graph_data()
+            else:
+                info_panel_rows = db_utilities.sql_to_response(
+                    self.get_static_entity_view_info_query(),
+                    label=self.__class__.__name__,
+                    db_var=settings.READ_ONLY_DB_KEY,
+                    raise_exception=True) or []
+                graph_data, positive_speeds = {}, {}
+        except Exception as sql_exc:
+            return {'error': str(sql_exc)}
 
         print("INFO_PANEL_ROWS:", info_panel_rows)
         print("KWARGS:", self.kwargs)
@@ -2402,24 +2440,35 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     db_var=settings.READ_ONLY_DB_KEY,
                     raise_exception=True)
         except Exception as sql_exc:
-            return {
-                'error': (
-                    f'Failed to fetch {"live" if is_live_layer else "static"} data for {entity_code} layer '
-                    f'(layer_id={layer_id}, column="{parameter_column_name}", '
-                    f'entity="{data_layer_instance.entity_name}"). '
-                    f'DB error: {sql_exc}'
-                )
-            }
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(
+                f'Failed to fetch {"live" if is_live_layer else "static"} data for {entity_code} layer '
+                f'(layer_id={layer_id}, column="{parameter_column_name}", '
+                f'entity="{data_layer_instance.entity_name}"). '
+                f'DB error: {sql_exc}'
+            )
+            query_result = None
 
         if not query_result:
-            return {
-                'error': (
-                    f'Failed to fetch {"live" if is_live_layer else "static"} data for {entity_code} layer '
-                    f'(layer_id={layer_id}, column="{parameter_column_name}", '
-                    f'entity="{data_layer_instance.entity_name}"). '
-                    f'The query returned no results.'
-                )
-            }
+            if is_live_layer:
+                return {
+                    'no_of_entities_measure': 0,
+                    'entity_with_realtime_data': 0,
+                    'real_time_connected_entities': {},
+                    'is_data_synced': is_data_synced_qs.exists(),
+                    'live_avg': 0,
+                    'live_avg_connectivity': 'unknown',
+                    'graph_data': [],
+                    'benchmark_metadata': {'parameter_column_unit': parameter_column_unit, 'display_unit': display_unit},
+                }
+            else:
+                return {
+                    'total_entities': 0,
+                    'connected_entities': {},
+                    'legend_configs': legend_configs,
+                    'benchmark_metadata': {'parameter_column_unit': parameter_column_unit, 'display_unit': display_unit},
+                }
 
         query_response = query_result[-1]
 
@@ -2510,24 +2559,35 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     db_var=settings.READ_ONLY_DB_KEY,
                     raise_exception=True)
         except Exception as sql_exc:
-            return {
-                'error': (
-                    f'Failed to fetch {"live" if is_live_layer else "static"} data for {entity_code} layer '
-                    f'(layer_id={layer_id}, column="{parameter_column_name}", '
-                    f'entity="{data_layer_instance.entity_name}", path=legacy). '
-                    f'DB error: {sql_exc}'
-                )
-            }
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(
+                f'Failed to fetch {"live" if is_live_layer else "static"} data for {entity_code} layer '
+                f'(layer_id={layer_id}, column="{parameter_column_name}", '
+                f'entity="{data_layer_instance.entity_name}", path=legacy). '
+                f'DB error: {sql_exc}'
+            )
+            query_result = None
 
         if not query_result:
-            return {
-                'error': (
-                    f'Failed to fetch {"live" if is_live_layer else "static"} data for {entity_code} layer '
-                    f'(layer_id={layer_id}, column="{parameter_column_name}", '
-                    f'entity="{data_layer_instance.entity_name}", path=legacy). '
-                    f'The query returned no results.'
-                )
-            }
+            if is_live_layer:
+                return {
+                    'no_of_entities_measure': 0,
+                    'entity_with_realtime_data': 0,
+                    'real_time_connected_entities': {},
+                    'is_data_synced': is_data_synced_qs.exists(),
+                    'live_avg': 0,
+                    'live_avg_connectivity': 'unknown',
+                    'graph_data': [],
+                    'benchmark_metadata': {'parameter_column_unit': parameter_column_unit, 'display_unit': display_unit},
+                }
+            else:
+                return {
+                    'total_entities': 0,
+                    'connected_entities': {},
+                    'legend_configs': legend_configs,
+                    'benchmark_metadata': {'parameter_column_unit': parameter_column_unit, 'display_unit': display_unit},
+                }
 
         query_response = query_result[-1]
 
@@ -2850,8 +2910,31 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 if 'layer_id' in params:
                     try:
                         entity_response = self.process_entity_layer(request, entity_code, params)
+                        if isinstance(entity_response, dict) and 'error' in entity_response:
+                            import logging
+                            logger = logging.getLogger(__name__)
+                            logger.error(f"Failed to process layer for {entity_code}: {entity_response['error']}")
+                            raise ValueError(entity_response['error'])
                     except Exception as exc:
-                        entity_response = {'error': str(exc)}
+                        try:
+                            entity_response = self.process_entity_without_layer(request, entity_code, params)
+                        except Exception:
+                            entity_response = None
+                        
+                        if entity_response is None:
+                            entity_response = {
+                                'total_entities': 0,
+                                'connected_entities': {},
+                                'legend_configs': {},
+                                'no_of_entities_measure': 0,
+                                'entity_with_realtime_data': 0,
+                                'real_time_connected_entities': {},
+                                'is_data_synced': False,
+                                'live_avg': 0,
+                                'live_avg_connectivity': 'unknown',
+                                'graph_data': [],
+                                'benchmark_metadata': {'parameter_column_unit': '', 'display_unit': ''},
+                            }
                     if entity_response is not None:
                         response[entity_code] = entity_response
                 elif params or f'{entity_code}_entity_id__in' in request.query_params or f'{entity_code}_entity_id' in request.query_params or (generic_entity_type == entity_code and generic_entity_id):
@@ -2859,7 +2942,10 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     try:
                         entity_response = self.process_entity_without_layer(request, entity_code, params)
                     except Exception as exc:
-                        entity_response = {'error': str(exc)}
+                        import logging
+                        logger = logging.getLogger(__name__)
+                        logger.error(f"Failed to process basic info for {entity_code}: {exc}")
+                        entity_response = []
                     if entity_response is not None:
                         response[entity_code] = entity_response
 
