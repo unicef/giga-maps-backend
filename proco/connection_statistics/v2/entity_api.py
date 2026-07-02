@@ -411,9 +411,13 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
             'unknown': weekly_status['unknown'],
         }
 
-        graph_data, positive_speeds = self.generate_country_graph_data(start_date, end_date)
-
-        live_avg = round(sum(positive_speeds) / len(positive_speeds), 2) if len(positive_speeds) > 0 else 0
+        if weekly_status['no_of_schools_measure'] == 0:
+            graph_data = []
+            positive_speeds = []
+            live_avg = 0
+        else:
+            graph_data, positive_speeds = self.generate_country_graph_data(start_date, end_date)
+            live_avg = round(sum(positive_speeds) / len(positive_speeds), 2) if len(positive_speeds) > 0 else 0
 
         live_avg_connectivity = 'unknown'
         rounded_benchmark_value_int = round(speed_benchmark / 1000000, 2)

@@ -2497,17 +2497,27 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         )
 
         if is_live_layer:
-            graph_data, positive_speeds = self.generate_graph_data()
-            live_avg = round(sum(positive_speeds) / len(positive_speeds), 2) if positive_speeds else 0
+            no_of_entities_measure = query_response.get('no_of_entities_measure', 0)
+            if no_of_entities_measure == 0:
+                graph_data = []
+                positive_speeds = []
+                live_avg = 0
+            else:
+                graph_data, positive_speeds = self.generate_graph_data()
+                live_avg = round(sum(positive_speeds) / len(positive_speeds), 2) if positive_speeds else 0
 
             rounded_base_benchmark_int = round(
                 eval(unit_agg_str.format(val=core_utilities.convert_to_int(base_benchmark))), 2)
-            live_avg_connectivity = self.resolve_connectivity_bucket(
-                live_avg,
-                benchmark_metadata['rounded_benchmark_value'],
-                rounded_base_benchmark_int,
-                data_layer_instance.is_reverse,
-            )
+
+            if no_of_entities_measure == 0:
+                live_avg_connectivity = 'unknown'
+            else:
+                live_avg_connectivity = self.resolve_connectivity_bucket(
+                    live_avg,
+                    benchmark_metadata['rounded_benchmark_value'],
+                    rounded_base_benchmark_int,
+                    data_layer_instance.is_reverse,
+                )
 
             if query_labels:
                 connected_entities = {label: query_response.get(label, 0) for label in query_labels}
@@ -2616,17 +2626,26 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         )
 
         if is_live_layer:
-            graph_data, positive_speeds = self.generate_school_graph_data(DataLayerInfoViewSet)
-            live_avg = self.get_live_avg(parameter_col_function.get('name', 'avg'), positive_speeds)
+            no_of_entities_measure = query_response.get('no_of_entities_measure', 0)
+            if no_of_entities_measure == 0:
+                graph_data = []
+                live_avg = 0
+            else:
+                graph_data, positive_speeds = self.generate_school_graph_data(DataLayerInfoViewSet)
+                live_avg = self.get_live_avg(parameter_col_function.get('name', 'avg'), positive_speeds)
 
             rounded_base_benchmark_int = round(
                 eval(unit_agg_str.format(val=core_utilities.convert_to_int(base_benchmark))), 2)
-            live_avg_connectivity = self.resolve_connectivity_bucket(
-                live_avg,
-                benchmark_metadata['rounded_benchmark_value'],
-                rounded_base_benchmark_int,
-                data_layer_instance.is_reverse,
-            )
+
+            if no_of_entities_measure == 0:
+                live_avg_connectivity = 'unknown'
+            else:
+                live_avg_connectivity = self.resolve_connectivity_bucket(
+                    live_avg,
+                    benchmark_metadata['rounded_benchmark_value'],
+                    rounded_base_benchmark_int,
+                    data_layer_instance.is_reverse,
+                )
 
             return {
                 'no_of_entities_measure': query_response.get('no_of_entities_measure', 0),
