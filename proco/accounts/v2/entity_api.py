@@ -1233,7 +1233,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         FROM (
             SELECT "entities_entity"."id" AS entity_id,
                 "entities_entity"."last_weekly_status_id",
-                AVG(t."{col_name}") AS "{col_name}"
+                {col_function} AS "{col_name}"
             FROM "entities_entity"
             INNER JOIN "connection_statistics_entityrealtimeregistration"
                 ON ("entities_entity"."id" = "connection_statistics_entityrealtimeregistration"."entity_id")
@@ -1362,6 +1362,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             """
             kwargs['entity_weekly_condition'] = ' AND ' + kwargs['entity_static_filters']
 
+        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
+
         return query.format(**kwargs)
 
     def get_entity_view_info_query(self):
@@ -1411,7 +1413,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         LEFT JOIN (
             SELECT "entities_entity"."id" AS entity_id,
                 (
-                    SELECT AVG(t."{col_name}")
+                    SELECT {col_function}
                     FROM "connection_statistics_entitydailystatus" t
                     WHERE t."entity_id" = "entities_entity"."id"
                         AND t."date" BETWEEN '{start_date}' AND '{end_date}'
@@ -1502,6 +1504,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     ELSE 'unknown' END AS live_avg_connectivity
                 """.format(**kwargs)
 
+        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
+
         return query.format(**kwargs)
 
     def get_entity_view_statistics_info_query(self, layer_type):
@@ -1556,7 +1560,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
     def get_avg_query(self, **kwargs):
         query = """
         SELECT {entity_selection}t."date" AS date,
-            AVG(t."{col_name}") AS "field_avg"
+            {col_function} AS "field_avg"
         FROM "entities_entity"
         INNER JOIN "connection_statistics_entityrealtimeregistration" ON
             "connection_statistics_entityrealtimeregistration"."entity_id" = "entities_entity"."id"
@@ -1609,6 +1613,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 ON "entities_entity"."last_weekly_status_id" = "connection_statistics_entityweeklystatus"."id"
             """
             kwargs['entity_weekly_condition'] = kwargs['entity_static_filters'] + ' AND '
+
+        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
 
         return query.format(**kwargs)
 
@@ -2406,7 +2412,10 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         for entity_row in sorted_rows:
             if is_live_layer:
                 entity_speeds = positive_speeds.get(str(entity_row['id']), [])
-                entity_row['live_avg'] = round(sum(entity_speeds) / len(entity_speeds), 2) if entity_speeds else 0
+                entity_row['live_avg'] = self.get_live_avg(
+                    parameter_col_function.get('name', 'avg'),
+                    entity_speeds,
+                )
                 entity_row['graph_data'] = graph_data.get(str(entity_row['id']), [])
 
             entity_row['benchmark_metadata'] = self.build_benchmark_metadata(
@@ -2504,7 +2513,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 live_avg = 0
             else:
                 graph_data, positive_speeds = self.generate_graph_data()
-                live_avg = round(sum(positive_speeds) / len(positive_speeds), 2) if positive_speeds else 0
+                live_avg = self.get_live_avg(parameter_col_function.get('name', 'avg'), positive_speeds)
 
             rounded_base_benchmark_int = round(
                 eval(unit_agg_str.format(val=core_utilities.convert_to_int(base_benchmark))), 2)
