@@ -2206,6 +2206,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         unit_agg_str,
         display_unit,
         scoped_query_params,
+        data_layer_instance=None,
     ):
         selected_ids = self.kwargs.get('school_ids', [])
         try:
@@ -2254,6 +2255,10 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 display_unit=display_unit,
                 benchmark_value_from_sql=school_row.get('benchmark_sql_value'),
             )
+
+            # Include layer_name so the frontend can display the heading
+            if data_layer_instance:
+                school_row['layer_name'] = data_layer_instance.name
 
             if include_same_location and sorted_rows:
                 is_legacy = self.kwargs.get('entity_name', '') == 'school'
@@ -2427,6 +2432,10 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 display_unit=display_unit,
                 benchmark_value_from_sql=entity_row.get('benchmark_sql_value'),
             )
+
+            # Include layer_name so the frontend can display the heading
+            if data_layer_instance:
+                entity_row['layer_name'] = data_layer_instance.name
 
         return sorted_rows
 
@@ -2785,6 +2794,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     unit_agg_str=unit_agg_str,
                     display_unit=display_unit,
                     scoped_query_params=entity_query_params,
+                    data_layer_instance=data_layer_instance,
                 )
             else:
                 return self.build_entity_detail_response(

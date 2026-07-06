@@ -2012,6 +2012,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                                 'convert_unit': self.kwargs.get('convert_unit'),
                                 'display_unit': display_unit,
                             }
+                            info_panel_school['layer_name'] = data_layer_instance.name
                             if request.query_params.get('include_same_location_schools') == 'true':
                                 info_panel_school['schools_at_same_location'] = self.get_school_ids_at_same_location(
                                     request,
@@ -2126,6 +2127,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                             info_panel_school['geopoint'] = json.loads(info_panel_school['geopoint'])
                             info_panel_school['statistics'] = list(filter(
                                 lambda s: s['school_id'] == info_panel_school['id'], statistics))[-1]
+                            info_panel_school['layer_name'] = data_layer_instance.name
 
                             if request.query_params.get('include_same_location_schools') == 'true':
                                 info_panel_school['schools_at_same_location'] = self.get_school_ids_at_same_location(
