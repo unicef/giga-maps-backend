@@ -2767,18 +2767,20 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 'is_reverse': data_layer_instance.is_reverse,
                 'legend_configs': legend_configs,
                 'entity_name': data_layer_instance.entity_name,
-                'school_filters': self.kwargs.get('entity_filters', ''),
-                'school_static_filters': self.kwargs.get('entity_static_filters', ''),
             })
+            if not is_legacy:
+                self.kwargs['school_filters'] = self.kwargs.get('entity_filters', '')
+                self.kwargs['school_static_filters'] = self.kwargs.get('entity_static_filters', '')
         else:
             self.kwargs.update({
                 'col_name': parameter_column_name,
                 'legend_configs': legend_configs,
                 'parameter_col': parameter_col,
                 'entity_name': data_layer_instance.entity_name,
-                'school_filters': self.kwargs.get('entity_filters', ''),
-                'school_static_filters': self.kwargs.get('entity_static_filters', ''),
             })
+            if not is_legacy:
+                self.kwargs['school_filters'] = self.kwargs.get('entity_filters', '')
+                self.kwargs['school_static_filters'] = self.kwargs.get('entity_static_filters', '')
 
         if selected_ids:
             if is_legacy:

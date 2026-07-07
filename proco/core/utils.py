@@ -343,17 +343,36 @@ def get_filter_sql(request, filter_key, table_name, entity_type_code=None):
     normalized_query_params = {}
     if entity_type_code:
         entity_type_prefix = '{0}__'.format(entity_type_code)
+        frontend_prefix = 'filter__{0}__'.format(entity_type_code)
+        frontend_prefix_single = 'filter__{0}_'.format(entity_type_code)
         for query_param_key in query_params:
             if query_param_key.startswith(entity_type_prefix):
                 normalized_query_params[query_param_key[len(entity_type_prefix):]] = query_param_key
+            elif query_param_key.startswith(frontend_prefix):
+                normalized_query_params[query_param_key[len(frontend_prefix):]] = query_param_key
+            elif query_param_key.startswith(frontend_prefix_single):
+                normalized_query_params[query_param_key[len(frontend_prefix_single):]] = query_param_key
 
     for query_param_key in query_params:
         normalized_query_params.setdefault(query_param_key, query_param_key)
+        if query_param_key.startswith('filter__'):
+            parts = query_param_key.split('__', 2)
+            if len(parts) == 3:
+                normalized_query_params.setdefault(parts[2], query_param_key)
 
     advance_filters = []
-    for filter_field in filter_fields.get(filter_key, []):
+    filter_fields_list = filter_fields.get(filter_key, [])
+    if entity_type_code == 'school' and filter_key in ('entities', 'entity_static'):
+        legacy_key = 'schools' if filter_key == 'entities' else 'school_static'
+        filter_fields_list += filter_fields.get(legacy_key, [])
+
+    for filter_field in filter_fields_list:
         if filter_field in normalized_query_params:
             advance_filters.append((filter_field, normalized_query_params[filter_field]))
+        else:
+            base_field = filter_field.rsplit('__', 1)[0]
+            if base_field in normalized_query_params:
+                advance_filters.append((filter_field, normalized_query_params[base_field]))
 
     sql_list = []
     for field_filter, query_param_key in advance_filters:
