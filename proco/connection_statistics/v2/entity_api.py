@@ -438,10 +438,10 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
         )
 
         if len(self.school_filters) > 0:
-            is_data_synced_qs = is_data_synced_qs.extra(where=[self.school_filters])
+            is_data_synced_qs = is_data_synced_qs.extra(where=self.school_filters)
 
         if len(self.school_static_filters) > 0:
-            is_data_synced_qs = is_data_synced_qs.extra(where=[self.school_static_filters])
+            is_data_synced_qs = is_data_synced_qs.extra(where=self.school_static_filters)
 
         if admin1_id:
             is_data_synced_qs = is_data_synced_qs.filter(school__admin1_id=admin1_id)
@@ -483,13 +483,13 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
         ).order_by('daily_status__date')
 
         if len(self.school_filters) > 0:
-            avg_daily_connectivity_speed = avg_daily_connectivity_speed.extra(where=[self.school_filters])
+            avg_daily_connectivity_speed = avg_daily_connectivity_speed.extra(where=self.school_filters)
 
         if len(self.school_static_filters) > 0:
             avg_daily_connectivity_speed = avg_daily_connectivity_speed.annotate(
                 total_weekly_schools=Count('last_weekly_status__school_id', distinct=True),
             )
-            avg_daily_connectivity_speed = avg_daily_connectivity_speed.extra(where=[self.school_static_filters])
+            avg_daily_connectivity_speed = avg_daily_connectivity_speed.extra(where=self.school_static_filters)
 
         # Generate the graph data in the desired format
         graph_data = []
@@ -532,10 +532,12 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
             data = cache_manager.get(cache_key)
 
         if not data:
-            self.school_filters = core_utilities.get_filter_sql(
+            school_filters = core_utilities.get_filter_sql(
                 self.request, 'schools', 'schools_school', LEGACY_MODEL)
-            self.school_static_filters = core_utilities.get_filter_sql(
+            self.school_filters = [school_filters] if school_filters else []
+            school_static_filters = core_utilities.get_filter_sql(
                 self.request, 'school_static', 'connection_statistics_schoolweeklystatus', LEGACY_MODEL)
+            self.school_static_filters = [school_static_filters] if school_static_filters else []
 
             country_id = self.request.query_params.get('country_id', None)
             if country_id:
@@ -572,6 +574,28 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
                 if not week_number:
                     # If for any week of the month data is not available then pick last week number
                     week_number = week_numbers_for_month[-1]
+
+            # Fallback to the latest available week in case the calculated week has no data
+            has_data_qs = SchoolWeeklyStatus.objects.filter(
+                year=year_number, week=week_number, school__deleted__isnull=True
+            )
+            if country_id:
+                has_data_qs = has_data_qs.filter(school__country_id=country_id)
+            if admin1_id:
+                has_data_qs = has_data_qs.filter(school__admin1_id=admin1_id)
+
+            if not has_data_qs.exists():
+                latest_weekly_status_qs = SchoolWeeklyStatus.objects.filter(
+                    school__deleted__isnull=True
+                )
+                if country_id:
+                    latest_weekly_status_qs = latest_weekly_status_qs.filter(school__country_id=country_id)
+                if admin1_id:
+                    latest_weekly_status_qs = latest_weekly_status_qs.filter(school__admin1_id=admin1_id)
+                latest_weekly_status = latest_weekly_status_qs.order_by('-year', '-week').first()
+                if latest_weekly_status:
+                    week_number = latest_weekly_status.week
+                    year_number = latest_weekly_status.year
 
             data = self.calculate_country_download_data(start_date, end_date, week_number, year_number)
             cache_manager.set(cache_key, data, request_path=request_path, soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
@@ -892,6 +916,19 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
 
                 if not week_number:
                     week_number = week_numbers_for_month[-1]
+
+            # Fallback to the latest available week in case the calculated week has no data
+            has_data = EntityWeeklyStatus.objects.filter(
+                year=year_number, week=week_number, entity__deleted__isnull=True,
+                entity__entity_type__code=entity_type
+            ).exists()
+            if not has_data:
+                latest_weekly_status = EntityWeeklyStatus.objects.filter(
+                    entity__deleted__isnull=True, entity__entity_type__code=entity_type
+                ).order_by('-year', '-week').first()
+                if latest_weekly_status:
+                    week_number = latest_weekly_status.week
+                    year_number = latest_weekly_status.year
 
             # -------- Compute stats
             data = self.calculate_country_download_entity_data(

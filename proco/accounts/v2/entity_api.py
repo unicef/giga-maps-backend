@@ -358,10 +358,29 @@ class BaseEntityDataLayerAPIViewSet(EntityDetailFilterMixin, APIView):
 
         return benchmark_val, benchmark_unit
 
-    def get_legend_configs(self, data_layer_instance):
-        legend_configs = data_layer_instance.legend_configs
+    def get_legend_configs(self, data_layer_instance, entity_params=None, parameter_column_name=None):
+        import copy
+        from collections import OrderedDict
+        legend_configs = copy.deepcopy(data_layer_instance.legend_configs)
+        
+        if parameter_column_name and hasattr(self, 'request') and self.request:
+            suffix = f"_{parameter_column_name}_fill"
+            selected_values = []
+            for param_name, param_value in self.request.query_params.items():
+                if param_name.endswith(suffix):
+                    selected_values.extend([v.strip().lower() for v in str(param_value).split(',')])
+            
+            if selected_values:
+                filtered_legend_configs = OrderedDict()
+                for k, v in legend_configs.items():
+                    config_values = [str(val).lower() for val in v.get('values', [])]
+                    if any(val in selected_values for val in config_values):
+                        filtered_legend_configs[k] = v
+                    elif 'unknown' in selected_values and str(k).lower() == 'unknown':
+                        filtered_legend_configs[k] = v
+                legend_configs = filtered_legend_configs
 
-        if self.kwargs['benchmark'] == 'national':
+        if self.kwargs.get('benchmark') == 'national':
             country_ids = self.kwargs.get('country_ids', [])
             if len(country_ids) > 0:
                 cache_key = (tuple(country_ids), data_layer_instance.id)
@@ -1006,7 +1025,11 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
             self.update_kwargs_from_dict(country_ids, data_layer_instance, scoped_query_params)
             benchmark_value, _ = self.get_benchmark_value(data_layer_instance)
             global_benchmark = data_layer_instance.global_benchmark.get('value')
-            legend_configs = self.get_legend_configs(data_layer_instance)
+            legend_configs = self.get_legend_configs(
+                data_layer_instance,
+                entity_params=scoped_query_params,
+                parameter_column_name=parameter_column_name
+            )
 
             if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
                 self.kwargs.update({
@@ -1151,7 +1174,11 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
             benchmark_value, _ = self.get_benchmark_value(data_layer_instance)
             global_benchmark = data_layer_instance.global_benchmark.get('value')
 
-            legend_configs = self.get_legend_configs(data_layer_instance)
+            legend_configs = self.get_legend_configs(
+                data_layer_instance,
+                entity_params=scoped_query_params if entity_code else {},
+                parameter_column_name=parameter_column_name
+            )
 
             if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
                 self.kwargs.update({
@@ -2742,7 +2769,11 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
         benchmark_value, benchmark_unit = self.get_benchmark_value(data_layer_instance)
         global_benchmark = data_layer_instance.global_benchmark.get('value')
-        legend_configs = self.get_legend_configs(data_layer_instance)
+        legend_configs = self.get_legend_configs(
+            data_layer_instance,
+            entity_params=entity_query_params,
+            parameter_column_name=parameter_column_name
+        )
 
         unit_agg_str = self.compute_unit_conversion(parameter_column_unit)
         self.kwargs['round_unit_value'] = unit_agg_str
@@ -2997,6 +3028,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     try:
                         entity_response = self.process_entity_without_layer(request, entity_code, params)
                     except Exception as exc:
+                        import traceback; traceback.print_exc()
                         import logging
                         logger = logging.getLogger(__name__)
                         logger.error(f"Failed to process basic info for {entity_code}: {exc}")
