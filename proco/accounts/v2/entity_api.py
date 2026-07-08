@@ -2671,7 +2671,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         )
 
         if is_live_layer:
-            no_of_entities_measure = query_response.get('no_of_entities_measure', 0)
+            no_of_entities_measure = query_response.get('no_of_entities_measure', query_response.get('no_of_schools_measure', 0))
             if no_of_entities_measure == 0:
                 graph_data = []
                 live_avg = 0
@@ -2693,8 +2693,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 )
 
             return {
-                'no_of_entities_measure': query_response.get('no_of_entities_measure', 0),
-                'entity_with_realtime_data': query_response.get('entity_with_realtime_data', 0),
+                'no_of_entities_measure': query_response.get('no_of_entities_measure', query_response.get('no_of_schools_measure', 0)),
+                'entity_with_realtime_data': query_response.get('entity_with_realtime_data', query_response.get('school_with_realtime_data', 0)),
                 'real_time_connected_entities': {
                     'good': query_response.get('good', 0),
                     'moderate': query_response.get('moderate', 0),
@@ -2710,7 +2710,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         else:
             print(f"QUERY_RESPONSE STATIC: {query_response}")
             return {
-                'total_entities': query_response.get('total_entities', 0),
+                'total_entities': query_response.get('total_entities', query_response.get('total_schools', 0)),
                 'connected_entities': {label: query_response.get(label, 0) for label in query_labels},
                 'legend_configs': legend_configs,
                 'benchmark_metadata': {
