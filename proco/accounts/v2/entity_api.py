@@ -2576,7 +2576,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 }
 
             return {
-                'no_of_entities_measure': query_response.get('no_of_entities_measure', 0),
+                'total_entities': query_response.get('no_of_entities_measure', 0),
+                'no_of_entities_measure': query_response.get('entity_with_realtime_data', 0),
                 'entity_with_realtime_data': query_response.get('entity_with_realtime_data', 0),
                 'real_time_connected_entities': connected_entities,
                 'is_data_synced': is_data_synced_qs.exists(),
@@ -2694,7 +2695,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 )
 
             return {
-                'no_of_entities_measure': query_response.get('no_of_entities_measure', query_response.get('no_of_schools_measure', 0)),
+                'total_entities': query_response.get('no_of_entities_measure', query_response.get('no_of_schools_measure', 0)),
+                'no_of_entities_measure': query_response.get('entity_with_realtime_data', query_response.get('school_with_realtime_data', 0)),
                 'entity_with_realtime_data': query_response.get('entity_with_realtime_data', query_response.get('school_with_realtime_data', 0)),
                 'real_time_connected_entities': {
                     'good': query_response.get('good', 0),

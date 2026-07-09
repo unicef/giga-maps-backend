@@ -454,7 +454,8 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
         return {
             'live_avg': live_avg,
             'live_avg_connectivity': live_avg_connectivity,
-            'no_of_entities_measure': weekly_status['no_of_schools_measure'],
+            'total_entities': weekly_status['no_of_schools_measure'],
+            'no_of_entities_measure': weekly_status['school_with_realtime_data'],
             'entity_with_realtime_data': weekly_status['school_with_realtime_data'],
             'countries_with_realtime_data': weekly_status['countries_with_realtime_data'],
             'real_time_connected_entities': real_time_connected_schools,
@@ -751,7 +752,8 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
         return {
             'live_avg': live_avg,
             'live_avg_connectivity': live_avg_connectivity,
-            'no_of_entities_measure': weekly_status['no_of_entities_measure'],
+            'total_entities': weekly_status['no_of_entities_measure'],
+            'no_of_entities_measure': weekly_status['entity_with_realtime_data'],
             'entity_with_realtime_data': weekly_status['entity_with_realtime_data'],
             'countries_with_realtime_data': weekly_status['countries_with_realtime_data'],
             'real_time_connected_entities': real_time_connected_entities,
