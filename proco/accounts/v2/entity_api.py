@@ -1265,6 +1265,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             INNER JOIN "connection_statistics_entityrealtimeregistration"
                 ON ("entities_entity"."id" = "connection_statistics_entityrealtimeregistration"."entity_id")
             {entity_weekly_join}
+            {entity_detail_join}
             LEFT OUTER JOIN "connection_statistics_entitydailystatus" t
                 ON (
                     "entities_entity"."id" = t."entity_id"
@@ -1280,6 +1281,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 {admin1_condition}
                 {entity_condition}
                 {entity_weekly_condition}
+                {entity_detail_condition}
                 AND "connection_statistics_entityrealtimeregistration"."rt_registered" = True
                 AND "connection_statistics_entityrealtimeregistration"."rt_registration_date"::date <= '{end_date}')
             GROUP BY "entities_entity"."id"
@@ -1593,11 +1595,13 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             "connection_statistics_entityrealtimeregistration"."entity_id" = "entities_entity"."id"
         INNER JOIN "connection_statistics_entitydailystatus" t ON "entities_entity"."id" = t."entity_id"
         {entity_weekly_join}
+        {entity_detail_join}
         WHERE (
             {country_condition}
             {admin1_condition}
             {entity_condition}
             {entity_weekly_condition}
+            {entity_detail_condition}
             "connection_statistics_entityrealtimeregistration"."deleted" IS NULL
             AND "connection_statistics_entityrealtimeregistration"."rt_registered" = True
             AND "connection_statistics_entityrealtimeregistration"."rt_registration_date"::date <= '{end_date}'
@@ -1778,6 +1782,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         FROM "entities_entity"
         INNER JOIN entities_{entity_name}_entity ews ON "entities_entity"."id" = ews."entity_id"
         {entity_weekly_join}
+        {entity_detail_join}
         WHERE "entities_entity"."deleted" IS NULL
         -- AND entities_entity.entity_type_id = (SELECT id FROM entities_entity_type WHERE code = '{entity_name}' AND
         -- deleted IS NULL)
@@ -1785,6 +1790,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         {admin1_condition}
         {entity_condition}
         {entity_weekly_condition}
+        {entity_detail_condition}
         """
 
         kwargs = copy.deepcopy(self.kwargs)
