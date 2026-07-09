@@ -57,8 +57,8 @@ ADD Pipfile.lock /code/Pipfile.lock
 
 WORKDIR /code/
 
- # Use the checked-in lock file in CI (no dependency re-resolution)
-RUN pipenv sync --dev --system
+# Install from committed lockfile only (no dependency re-resolution in CI)
+RUN pipenv install --ignore-pipfile --dev --system
 
 ADD . /code/
 # cleanup env files if any
