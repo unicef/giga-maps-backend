@@ -422,11 +422,10 @@ class ConnectivityTileGenerator(BaseTileGenerator):
                 CASE WHEN c.id is NULL AND rt_status.rt_registered = True {rt_date_condition} THEN 'unknown'
                     WHEN c.id is NULL THEN NULL
                     WHEN c.connectivity_speed >  {benchmark} THEN 'good'
-                    WHEN c.connectivity_speed <= {benchmark} and c.connectivity_speed >= 1000000 THEN 'moderate'
-                    WHEN c.connectivity_speed < 1000000  THEN 'bad'
+                    WHEN c.connectivity_speed <= {benchmark} THEN 'moderate'
                     ELSE 'unknown'
                 END AS connectivity,
-                CASE WHEN schools_school.connectivity_status IN ('good', 'moderate', 'bad') THEN 'connected'
+                CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
                     WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
                     ELSE 'unknown'
                 END AS connectivity_status,
@@ -585,7 +584,7 @@ class SchoolStatusConnectivityTileGenerator(BaseTileGenerator):
                         ORDER BY
                             CASE
                                 WHEN rt_status.rt_registered = true THEN 1
-                                WHEN schools_school.connectivity_status IN ('good', 'moderate', 'bad') THEN 2
+                                WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 2
                                 WHEN schools_school.connectivity_status = 'no' THEN 3
                                 ELSE 4
                             END ASC,
@@ -614,7 +613,7 @@ class SchoolStatusConnectivityTileGenerator(BaseTileGenerator):
             mvtgeom AS (
                 SELECT ST_AsMVTGeom(ST_Transform(sampled_schools.geopoint, 3857), bounds.b2d) AS geom,
                 sampled_schools.id,
-                CASE WHEN sampled_schools.connectivity_status IN ('good', 'moderate', 'bad') THEN 'connected'
+                CASE WHEN sampled_schools.connectivity_status IN ('good', 'moderate') THEN 'connected'
                     WHEN sampled_schools.connectivity_status = 'no' THEN 'not_connected'
                     ELSE 'unknown'
                 END AS connectivity_status,

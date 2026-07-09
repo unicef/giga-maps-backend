@@ -407,7 +407,8 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
         real_time_connected_schools = {
             'good': weekly_status['good'],
             'moderate': weekly_status['moderate'],
-            'no_internet': weekly_status['bad'],
+            'bad': weekly_status['bad'],
+            'no': 0,
             'unknown': weekly_status['unknown'],
         }
 
@@ -699,7 +700,8 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
         real_time_connected_entities = {
             'good': weekly_status['good'],
             'moderate': weekly_status['moderate'],
-            'no_internet': weekly_status['bad'],
+            'bad': weekly_status['bad'],
+            'no': 0,
             'unknown': weekly_status['unknown'],
         }
 
