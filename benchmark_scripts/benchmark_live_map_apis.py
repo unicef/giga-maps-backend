@@ -25,7 +25,7 @@ from benchmark_common import (
     summarize,
     write_excel,
 )
-from benchmark_config import API_PATHS, DEFAULT_COUNTRY_CODES, DEFAULT_TIMEOUT_SECONDS
+from benchmark_config import API_PATHS, DEFAULT_COUNTRY_CODES, DEFAULT_MAX_RESPONSE_CHARS, DEFAULT_TIMEOUT_SECONDS
 
 
 DEFAULT_API_KEY = "schools_connectivityconfigs"
@@ -79,8 +79,8 @@ def parse_args(argv: Optional[Sequence[str]] = None):
     parser.add_argument(
         "--max-response-chars",
         type=int,
-        default=3000,
-        help="Maximum response characters stored per row. Use 0 for full response.",
+        default=DEFAULT_MAX_RESPONSE_CHARS,
+        help="Maximum sampled response characters stored per row. Use 0 to skip response body storage.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Print generated URLs without executing benchmark calls")
     parser.add_argument("--count-only", action="store_true", help="Only discover and print possible generated combinations")
