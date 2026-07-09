@@ -53,12 +53,12 @@ ENV PYTHONPATH=/code
 RUN mkdir /code
 
 ADD Pipfile /code/Pipfile
-ADD Pipfile.lock /code/Pipfile.lock
+# ADD Pipfile.lock /code/Pipfile.lock
 
 WORKDIR /code/
 
-# Install from committed lockfile only (no dependency re-resolution in CI)
-RUN pipenv install --ignore-pipfile --dev --system
+ # todo: try to figure out how we can test using dev packages and exclude them from prod build at the same time...
+RUN pipenv install --dev
 
 ADD . /code/
 # cleanup env files if any
