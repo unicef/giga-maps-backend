@@ -21,7 +21,7 @@ from rest_framework.views import APIView
 from proco.accounts.models import DataLayer, DataSource
 from proco.connection_statistics.config import app_config as statistics_configs
 from proco.connection_statistics.models import SchoolWeeklyStatus, EntityWeeklyStatus, EntityDailyStatus, \
-    SchoolDailyStatus
+    SchoolDailyStatus, CountryDailyStatus
 from proco.connection_statistics.utils import get_benchmark_value_for_default_download_layer
 from proco.core import utils as core_utilities
 from proco.entities.constants import LEGACY_MODEL, LEGACY_MODEL_NAME
@@ -980,6 +980,15 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
                 entity_layers[entity_code] = param_value
         return entity_layers
 
+    @staticmethod
+    def can_use_country_daily_status(country_id, admin1_id, school_id, school_ids):
+        """
+        Determine if we can use CountryDailyStatus for date lookups.
+        Only applicable when the query is at the country level
+        (no admin1 or school-specific filters).
+        """
+        return country_id and not admin1_id and not school_id and not school_ids
+
     def get_school_configs(self, request, layer_id=None, **kwargs):
         """
         Build connectivity configuration for school entity type.
@@ -1003,8 +1012,12 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
         if not core_utilities.is_blank_string(school_ids):
             school_ids = [int(school_id.strip()) for school_id in school_ids.split(',')]
             queryset = queryset.filter(school__in=school_ids)
+        else:
+            school_ids = None
 
         effective_layer_id = layer_id
+        live_data_sources = None
+        parameter_column_name = None
 
         if effective_layer_id:
             data_layer_instance = get_object_or_404(
@@ -1032,6 +1045,14 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
                     live_data_source__in=live_data_sources,
                 ).filter(**{parameter_column_name + '__isnull': False})
 
+        date_queryset = queryset
+        if self.can_use_country_daily_status(country_id, admin1_id, school_id, school_ids):
+            date_queryset = CountryDailyStatus.objects.filter(country_id=country_id)
+            if live_data_sources:
+                date_queryset = date_queryset.filter(live_data_source__in=live_data_sources)
+            if parameter_column_name:
+                date_queryset = date_queryset.filter(**{parameter_column_name + '__isnull': False})
+
         today_date = core_utilities.get_current_datetime_object().date()
         monday_date = today_date - timedelta(days=today_date.weekday())
 
@@ -1041,7 +1062,7 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
         monday_on_entry_date = None
         sunday_on_entry_date = None
 
-        last_week_entry = queryset.filter(
+        last_week_entry = date_queryset.filter(
             date__range=(last_week_start, last_week_end)
         ).values_list('date', flat=True).order_by('-date').first()
 
@@ -1049,14 +1070,14 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
             monday_on_entry_date = last_week_start
             sunday_on_entry_date = last_week_end
         else:
-            latest_daily_entry = queryset.values_list('date', flat=True).order_by('-date').first()
+            latest_daily_entry = date_queryset.values_list('date', flat=True).order_by('-date').first()
             if latest_daily_entry:
                 monday_on_entry_date = latest_daily_entry - timedelta(days=latest_daily_entry.weekday())
                 sunday_on_entry_date = monday_on_entry_date + timedelta(days=6)
 
         if monday_on_entry_date:
-            first_date = queryset.order_by('date').values_list('date', flat=True).first()
-            last_date = queryset.order_by('-date').values_list('date', flat=True).first()
+            first_date = date_queryset.order_by('date').values_list('date', flat=True).first()
+            last_date = date_queryset.order_by('-date').values_list('date', flat=True).first()
             years = list(range(first_date.year, last_date.year + 1)) if first_date and last_date else []
             static_data = {
                 'week': {
