@@ -362,14 +362,14 @@ class BaseEntityDataLayerAPIViewSet(EntityDetailFilterMixin, APIView):
         import copy
         from collections import OrderedDict
         legend_configs = copy.deepcopy(data_layer_instance.legend_configs)
-        
+
         if parameter_column_name and hasattr(self, 'request') and self.request:
             suffix = f"_{parameter_column_name}_fill"
             selected_values = []
             for param_name, param_value in self.request.query_params.items():
                 if param_name.endswith(suffix):
                     selected_values.extend([v.strip().lower() for v in str(param_value).split(',')])
-            
+
             if selected_values:
                 filtered_legend_configs = OrderedDict()
                 for k, v in legend_configs.items():
@@ -1508,7 +1508,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
             if 'ews' in str(legend_configs):
                 kwargs['entity_weekly_outer_join'] = """
-                LEFT JOIN "connection_statistics_entityweeklystatus" ews 
+                LEFT JOIN "connection_statistics_entityweeklystatus" ews
                     ON eds."last_weekly_status_id" = ews."id"
                 """
         else:
@@ -2576,8 +2576,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 }
 
             return {
-                'total_entities': query_response.get('no_of_entities_measure', 0),
-                'no_of_entities_measure': query_response.get('entity_with_realtime_data', 0),
+                'no_of_entities_measure': query_response.get('no_of_entities_measure', 0),
                 'entity_with_realtime_data': query_response.get('entity_with_realtime_data', 0),
                 'real_time_connected_entities': connected_entities,
                 'is_data_synced': is_data_synced_qs.exists(),
@@ -2695,8 +2694,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 )
 
             return {
-                'total_entities': query_response.get('no_of_entities_measure', query_response.get('no_of_schools_measure', 0)),
-                'no_of_entities_measure': query_response.get('entity_with_realtime_data', query_response.get('school_with_realtime_data', 0)),
+                'no_of_entities_measure': query_response.get('no_of_entities_measure', query_response.get('no_of_schools_measure', 0)),
                 'entity_with_realtime_data': query_response.get('entity_with_realtime_data', query_response.get('school_with_realtime_data', 0)),
                 'real_time_connected_entities': {
                     'good': query_response.get('good', 0),
@@ -3010,7 +3008,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                             entity_response = self.process_entity_without_layer(request, entity_code, params)
                         except Exception:
                             entity_response = None
-                        
+
                         if entity_response is None:
                             entity_response = {
                                 'total_entities': 0,

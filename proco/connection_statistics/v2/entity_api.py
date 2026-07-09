@@ -357,10 +357,10 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
                        {school_static_t5_max}
                 FROM "connection_statistics_schoolrealtimeregistration" rt
                 INNER JOIN "schools_school" "schools_school" ON "schools_school"."id" = rt."school_id"
-                LEFT JOIN "connection_statistics_schoolweeklystatus" t 
-                    ON t."school_id" = rt."school_id" 
-                   AND t."week" = %s 
-                   AND t."year" = %s 
+                LEFT JOIN "connection_statistics_schoolweeklystatus" t
+                    ON t."school_id" = rt."school_id"
+                   AND t."week" = %s
+                   AND t."year" = %s
                    AND t."deleted" IS NULL
                 {school_static_join_sql}
                 WHERE rt."rt_registered" = true
@@ -454,8 +454,7 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
         return {
             'live_avg': live_avg,
             'live_avg_connectivity': live_avg_connectivity,
-            'total_entities': weekly_status['no_of_schools_measure'],
-            'no_of_entities_measure': weekly_status['school_with_realtime_data'],
+            'no_of_entities_measure': weekly_status['no_of_schools_measure'],
             'entity_with_realtime_data': weekly_status['school_with_realtime_data'],
             'countries_with_realtime_data': weekly_status['countries_with_realtime_data'],
             'real_time_connected_entities': real_time_connected_schools,
@@ -652,10 +651,10 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
                        {entity_static_t5_max}
                 FROM "connection_statistics_entityrealtimeregistration" rt
                 INNER JOIN "entities_entity" "entities_entity" ON "entities_entity"."id" = rt."entity_id"
-                LEFT JOIN "connection_statistics_entityweeklystatus" t 
-                    ON t."entity_id" = rt."entity_id" 
-                   AND t."week" = %s 
-                   AND t."year" = %s 
+                LEFT JOIN "connection_statistics_entityweeklystatus" t
+                    ON t."entity_id" = rt."entity_id"
+                   AND t."week" = %s
+                   AND t."year" = %s
                    AND t."deleted" IS NULL
                 {entity_static_join_sql}
                 WHERE rt."rt_registered" = true
@@ -752,8 +751,7 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
         return {
             'live_avg': live_avg,
             'live_avg_connectivity': live_avg_connectivity,
-            'total_entities': weekly_status['no_of_entities_measure'],
-            'no_of_entities_measure': weekly_status['entity_with_realtime_data'],
+            'no_of_entities_measure': weekly_status['no_of_entities_measure'],
             'entity_with_realtime_data': weekly_status['entity_with_realtime_data'],
             'countries_with_realtime_data': weekly_status['countries_with_realtime_data'],
             'real_time_connected_entities': real_time_connected_entities,
