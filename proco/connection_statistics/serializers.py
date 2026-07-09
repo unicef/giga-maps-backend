@@ -195,7 +195,7 @@ class SchoolConnectivityStatusSerializer(serializers.ModelSerializer):
 
     def get_connectivity_status(self, instance):
         status = instance.connectivity_status
-        if status in ['good', 'moderate']:
+        if status in ['good', 'moderate', 'bad']:
             return 'connected'
         elif status == 'no':
             return 'not_connected'
@@ -295,7 +295,7 @@ class SchoolCoverageStatusSerializer(serializers.ModelSerializer):
 
     def get_connectivity_status(self, instance):
         status = instance.connectivity_status
-        if status in ['good', 'moderate']:
+        if status in ['good', 'moderate', 'bad']:
             return 'connected'
         elif status == 'no':
             return 'not_connected'

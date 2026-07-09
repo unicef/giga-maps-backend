@@ -211,7 +211,7 @@ class EntityStatusConnectivityTileGenerator(RawEntityDetailFilterMixin, BaseTile
                 SELECT ST_AsMVTGeom(ST_Transform(entities_entity.geopoint, 3857), bounds.b2d) AS geom,
                 entities_entity.id,
                 entities_entity_type.code AS entity_type,
-                CASE WHEN entities_entity.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                CASE WHEN entities_entity.connectivity_status IN ('good', 'moderate', 'bad') THEN 'connected'
                     WHEN entities_entity.connectivity_status = 'no' THEN 'not_connected'
                     ELSE 'unknown'
                 END AS connectivity_status
@@ -771,7 +771,7 @@ class EntityConnectivityTileGenerator(RawEntityDetailFilterMixin, EntityTypeCode
                     WHEN c.connectivity_speed < 1000000  THEN 'bad'
                     ELSE 'unknown'
                 END AS connectivity,
-                CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                CASE WHEN schools_school.connectivity_status IN ('good', 'moderate', 'bad') THEN 'connected'
                     WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
                     ELSE 'unknown'
                 END AS connectivity_status,
@@ -803,7 +803,7 @@ class EntityConnectivityTileGenerator(RawEntityDetailFilterMixin, EntityTypeCode
                     WHEN c.connectivity_speed < 1000000  THEN 'bad'
                     ELSE 'unknown'
                 END AS connectivity,
-                CASE WHEN entities_entity.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                CASE WHEN entities_entity.connectivity_status IN ('good', 'moderate', 'bad') THEN 'connected'
                     WHEN entities_entity.connectivity_status = 'no' THEN 'not_connected'
                     ELSE 'unknown'
                 END AS connectivity_status,

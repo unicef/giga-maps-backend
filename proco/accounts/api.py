@@ -750,7 +750,7 @@ class DataLayerPreviewViewSet(APIView):
                     ELSE False
             END AS is_rt_connected,
             {case_conditions}
-            CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
+            CASE WHEN schools_school.connectivity_status IN ('good', 'moderate', 'bad') THEN 'connected'
                 WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
                 ELSE 'unknown'
             END AS connectivity_status,
@@ -1326,7 +1326,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             schools_school."education_level",
             ROUND(sds."{col_name}"::numeric, 2) AS "live_avg",
             sws."download_speed_benchmark",
-            CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
+            CASE WHEN schools_school.connectivity_status IN ('good', 'moderate', 'bad') THEN 'connected'
                 WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
                 ELSE 'unknown'
             END AS connectivity_status,
@@ -1743,10 +1743,10 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             {table_name}."{col_name}" AS field_value,
             {label_case_statements}
             ST_AsGeoJSON(ST_Transform(schools_school."geopoint", 4326)) AS geopoint,
-            CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
+            CASE WHEN schools_school.connectivity_status IN ('good', 'moderate', 'bad') THEN 'connected'
                 WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
                 ELSE 'unknown'
-            END as connectivity_status
+            END AS connectivity_status
         FROM "schools_school"
         INNER JOIN locations_country c ON c.id = schools_school.country_id
         INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
@@ -1857,7 +1857,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         ORDER BY
             CASE
                 WHEN srr.rt_registered = true THEN 1
-                WHEN s.connectivity_status IN ('good', 'moderate') THEN 2
+                WHEN s.connectivity_status IN ('good', 'moderate', 'bad') THEN 2
                 WHEN s.connectivity_status = 'no' THEN 3
                 ELSE 4
             END ASC,
@@ -2389,7 +2389,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     PARTITION BY schools_school.geopoint
                     ORDER BY
                         CASE
-                            WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 1
+                            WHEN schools_school.connectivity_status IN ('good', 'moderate', 'bad') THEN 1
                             WHEN schools_school.connectivity_status = 'no' THEN 2
                             ELSE 3
                         END ASC,

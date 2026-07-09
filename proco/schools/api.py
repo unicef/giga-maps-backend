@@ -426,7 +426,7 @@ class ConnectivityTileGenerator(BaseTileGenerator):
                     WHEN c.connectivity_speed < 1000000  THEN 'bad'
                     ELSE 'unknown'
                 END AS connectivity,
-                CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                CASE WHEN schools_school.connectivity_status IN ('good', 'moderate', 'bad') THEN 'connected'
                     WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
                     ELSE 'unknown'
                 END AS connectivity_status,
@@ -585,7 +585,7 @@ class SchoolStatusConnectivityTileGenerator(BaseTileGenerator):
                         ORDER BY
                             CASE
                                 WHEN rt_status.rt_registered = true THEN 1
-                                WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 2
+                                WHEN schools_school.connectivity_status IN ('good', 'moderate', 'bad') THEN 2
                                 WHEN schools_school.connectivity_status = 'no' THEN 3
                                 ELSE 4
                             END ASC,
@@ -614,7 +614,7 @@ class SchoolStatusConnectivityTileGenerator(BaseTileGenerator):
             mvtgeom AS (
                 SELECT ST_AsMVTGeom(ST_Transform(sampled_schools.geopoint, 3857), bounds.b2d) AS geom,
                 sampled_schools.id,
-                CASE WHEN sampled_schools.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                CASE WHEN sampled_schools.connectivity_status IN ('good', 'moderate', 'bad') THEN 'connected'
                     WHEN sampled_schools.connectivity_status = 'no' THEN 'not_connected'
                     ELSE 'unknown'
                 END AS connectivity_status,

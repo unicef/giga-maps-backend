@@ -104,15 +104,15 @@ class GlobalStatsAPIView(APIView):
         queryset = self.filter_queryset(self.queryset)
         school_connectivity_status_qry = queryset.annotate(
             dummy_group_by=Value(1)).values('dummy_group_by').annotate(
-            connected=Count(Case(When(connectivity_status__in=['good', 'moderate'], then='id')), distinct=True),
+            connected=Count(Case(When(connectivity_status__in=['good', 'moderate', 'bad'], then='id')), distinct=True),
             not_connected=Count(Case(When(connectivity_status='no', then='id')), distinct=True),
             unknown=Count(Case(When(connectivity_status='unknown', then='id')), distinct=True),
             total_schools=Count('id', distinct=True),
             all_countries=Count('country_id', distinct=True),
             schools_with_connectivity_status_mapped=Count(Case(
-                When(connectivity_status__in=['good', 'moderate', 'no'], then='id')), distinct=True),
+                When(connectivity_status__in=['good', 'moderate', 'bad', 'no'], then='id')), distinct=True),
             countries_with_connectivity_status_mapped=Count(Case(
-                When(connectivity_status__in=['good', 'moderate', 'no'], then='country_id')), distinct=True),
+                When(connectivity_status__in=['good', 'moderate', 'bad', 'no'], then='country_id')), distinct=True),
         ).values('connected', 'not_connected', 'unknown', 'total_schools',
                  'all_countries', 'schools_with_connectivity_status_mapped',
                  'countries_with_connectivity_status_mapped').order_by()

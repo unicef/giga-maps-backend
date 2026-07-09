@@ -1414,7 +1414,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             entities_entity."environment",
             ROUND(eds."{col_name}"::numeric, 2) AS "live_avg",
             ews."download_speed_benchmark",
-            CASE WHEN entities_entity.connectivity_status IN ('good', 'moderate') THEN 'connected'
+            CASE WHEN entities_entity.connectivity_status IN ('good', 'moderate', 'bad') THEN 'connected'
                 WHEN entities_entity.connectivity_status = 'no' THEN 'not_connected'
                 ELSE 'unknown'
             END AS connectivity_status,
@@ -1935,7 +1935,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             adm2_metadata."description_ui_label" AS admin2_description_ui_label,
             schools_school."environment",
             ST_AsGeoJSON(ST_Transform(schools_school."geopoint", 4326)) AS geopoint,
-            CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
+            CASE WHEN schools_school.connectivity_status IN ('good', 'moderate', 'bad') THEN 'connected'
                 WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
                 ELSE 'unknown'
             END as connectivity_status
@@ -1977,7 +1977,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             adm2_metadata."description_ui_label" AS admin2_description_ui_label,
             entities_entity."environment",
             ST_AsGeoJSON(ST_Transform(entities_entity."geopoint", 4326)) AS geopoint,
-            CASE WHEN entities_entity.connectivity_status IN ('good', 'moderate') THEN 'connected'
+            CASE WHEN entities_entity.connectivity_status IN ('good', 'moderate', 'bad') THEN 'connected'
                 WHEN entities_entity.connectivity_status = 'no' THEN 'not_connected'
                 ELSE 'unknown'
             END as connectivity_status
@@ -2019,7 +2019,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             {table_name}."{col_name}" AS field_value,
             {label_case_statements}
             ST_AsGeoJSON(ST_Transform(entities_entity."geopoint", 4326)) AS geopoint,
-            CASE WHEN entities_entity.connectivity_status IN ('good', 'moderate') THEN 'connected'
+            CASE WHEN entities_entity.connectivity_status IN ('good', 'moderate', 'bad') THEN 'connected'
                 WHEN entities_entity.connectivity_status = 'no' THEN 'not_connected'
                 ELSE 'unknown'
             END as connectivity_status
@@ -3158,7 +3158,7 @@ class EntityDataLayerPreviewViewSet(APIView):
                     ELSE False
             END AS is_rt_connected,
             {case_conditions}
-            CASE WHEN entities_entity.connectivity_status IN ('good', 'moderate') THEN 'connected'
+            CASE WHEN entities_entity.connectivity_status IN ('good', 'moderate', 'bad') THEN 'connected'
                 WHEN entities_entity.connectivity_status = 'no' THEN 'not_connected'
                 ELSE 'unknown'
             END AS connectivity_status,

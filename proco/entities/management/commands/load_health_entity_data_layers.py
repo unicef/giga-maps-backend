@@ -291,7 +291,7 @@ health_data_source_json = [
                 'unit': '',
                 'display_unit': '',
                 'table_name': 'entities_entity',
-                'count_labels': ['good', 'moderate', 'no', 'unknown'],
+                'count_labels': ['good', 'moderate', 'bad', 'no', 'unknown'],
             },
             {
                 'name': 'coverage_status',
@@ -301,7 +301,7 @@ health_data_source_json = [
                 'unit': '',
                 'display_unit': '',
                 'table_name': 'entities_entity',
-                'count_labels': ['good', 'moderate', 'no', 'unknown'],
+                'count_labels': ['good', 'moderate', 'bad', 'no', 'unknown'],
             },
         ],
         'status': 'PUBLISHED'
@@ -443,7 +443,7 @@ health_data_layer_json = [
                     'unit': '',
                     'display_unit': '',
                     'table_name': 'entities_entity',
-                    'count_labels': ['good', 'moderate', 'no', 'unknown'],
+                    'count_labels': ['good', 'moderate', 'bad', 'no', 'unknown'],
                     'supported_functions': []
                 }
             }
