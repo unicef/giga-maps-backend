@@ -78,16 +78,44 @@ def build_connectivityconfigs_calls(client: ApiClient, scenarios, cache_mode: st
     return tuple(calls)
 
 
-def benchmark_calls(calls: Sequence[FocusedCall], timeout: int, headers, concurrency: int, max_response_chars: int):
+def benchmark_calls(
+    calls: Sequence[FocusedCall],
+    timeout: int,
+    headers,
+    concurrency: int,
+    max_response_chars: int,
+    output_path: str,
+    scenarios,
+):
     metadata_by_url = {call.api_call.url: call for call in calls}
+    benchmark_results = []
+
+    def flush_excel(completed: int, total: int) -> None:
+        plain_results = [result for _, result in benchmark_results]
+        summary = {
+            "overall": summarize(plain_results, api_name=BENCHMARK_KEY),
+            "by_scope": scoped_summary(benchmark_results),
+        }
+        write_excel(output_path, benchmark_results, summary, scenarios)
+        print("Saved partial Excel report after {}/{} calls: {}".format(completed, total, output_path))
+
+    def on_result(result: BenchmarkResult, completed: int, total: int) -> None:
+        benchmark_results.append((metadata_by_url[result.url], result))
+        if completed % 50 == 0 or completed == total:
+            flush_excel(completed, total)
+
     results = execute_api_calls(
         [call.api_call for call in calls],
         timeout=timeout,
         headers=headers,
         max_response_chars=max_response_chars,
         concurrency=concurrency,
+        on_result=on_result,
+        store_results=False,
     )
-    return [(metadata_by_url[result.url], result) for result in results]
+    if results and len(benchmark_results) != len(results):
+        benchmark_results = [(metadata_by_url[result.url], result) for result in results]
+    return benchmark_results
 
 
 def scoped_summary(results: Sequence[Tuple[FocusedCall, BenchmarkResult]]) -> dict:
@@ -229,6 +257,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         headers=headers,
         concurrency=BENCHMARK_CONFIG["concurrency"],
         max_response_chars=BENCHMARK_CONFIG["max_response_chars"],
+        output_path=BENCHMARK_CONFIG["output_path"],
+        scenarios=scenarios,
     )
     benchmark_seconds = time.perf_counter() - benchmark_started
     total_seconds = time.perf_counter() - total_started
@@ -248,7 +278,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print("Total runtime including discovery: {:.2f}s".format(total_seconds))
 
     write_excel(BENCHMARK_CONFIG["output_path"], benchmark_results, summary, scenarios)
-    print("Wrote Excel report: {}".format(BENCHMARK_CONFIG["output_path"]))
+    print("Wrote final Excel report: {}".format(BENCHMARK_CONFIG["output_path"]))
     return 0
 
 

@@ -9,9 +9,9 @@ import statistics
 import sys
 import time
 import zipfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlsplit
 from urllib.request import Request, urlopen
@@ -380,6 +380,8 @@ def repeat_calls(examples: Sequence[ApiCall], count: int, rng: random.Random) ->
 
 
 def compact_json(raw_body: bytes, max_chars: int) -> str:
+    if max_chars <= 0:
+        return ""
     text = raw_body.decode("utf-8", errors="replace")
     try:
         text = json.dumps(json.loads(text), sort_keys=True)
@@ -388,6 +390,24 @@ def compact_json(raw_body: bytes, max_chars: int) -> str:
     if max_chars and len(text) > max_chars:
         return text[:max_chars] + "...<truncated>"
     return text
+
+
+def content_length(response) -> int:
+    raw_value = response.headers.get("Content-Length")
+    try:
+        return int(raw_value) if raw_value else 0
+    except ValueError:
+        return 0
+
+
+def read_response_sample(response, max_response_chars: int) -> Tuple[int, str]:
+    if max_response_chars <= 0:
+        return content_length(response), ""
+
+    body = response.read(max_response_chars + 1)
+    response_json = compact_json(body, max_response_chars)
+    total_bytes = content_length(response) or len(body)
+    return total_bytes, response_json
 
 
 def execute_call(call: ApiCall, timeout: int, headers: Dict[str, str], max_response_chars: int) -> BenchmarkResult:
@@ -400,16 +420,12 @@ def execute_call(call: ApiCall, timeout: int, headers: Dict[str, str], max_respo
     try:
         with urlopen(request, timeout=timeout) as response:
             status = response.getcode()
-            body = response.read()
-            bytes_read = len(body)
-            response_json = compact_json(body, max_response_chars)
+            bytes_read, response_json = read_response_sample(response, max_response_chars)
     except HTTPError as exc:
         status = exc.code
         error = "{} {}".format(exc.__class__.__name__, exc.reason)
         try:
-            body = exc.read()
-            bytes_read = len(body)
-            response_json = compact_json(body, max_response_chars)
+            bytes_read, response_json = read_response_sample(exc, max_response_chars)
         except Exception:
             bytes_read = 0
     except (URLError, TimeoutError, OSError) as exc:
@@ -465,19 +481,40 @@ def execute_api_calls(
     headers: Dict[str, str],
     max_response_chars: int,
     concurrency: int,
+    on_result: Optional[Callable[[BenchmarkResult, int, int], None]] = None,
+    store_results: bool = True,
 ) -> List[BenchmarkResult]:
     results = []
     completed = 0
+    call_iter = iter(calls)
+
+    def submit_next(executor, futures):
+        try:
+            call = next(call_iter)
+        except StopIteration:
+            return False
+        future = executor.submit(execute_call, call, timeout, headers, max_response_chars)
+        futures[future] = call
+        return True
+
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
-        futures = [
-            executor.submit(execute_call, call, timeout, headers, max_response_chars)
-            for call in calls
-        ]
-        for future in as_completed(futures):
-            results.append(future.result())
-            completed += 1
-            if completed % 50 == 0 or completed == len(calls):
-                print("Completed {}/{} calls".format(completed, len(calls)))
+        futures = {}
+        for _ in range(min(concurrency, len(calls))):
+            submit_next(executor, futures)
+
+        while futures:
+            done, _ = wait(futures, return_when=FIRST_COMPLETED)
+            for future in done:
+                futures.pop(future)
+                result = future.result()
+                if store_results:
+                    results.append(result)
+                completed += 1
+                if on_result:
+                    on_result(result, completed, len(calls))
+                if completed % 50 == 0 or completed == len(calls):
+                    print("Completed {}/{} calls".format(completed, len(calls)))
+                submit_next(executor, futures)
     return results
 
 
