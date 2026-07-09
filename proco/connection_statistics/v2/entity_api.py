@@ -424,7 +424,9 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
         rounded_benchmark_value_int = round(speed_benchmark / 1000000, 2)
         rounded_base_benchmark_int = 1
 
-        if live_avg > rounded_benchmark_value_int:
+        if weekly_status['school_with_realtime_data'] == 0:
+            live_avg_connectivity = 'unknown'
+        elif live_avg > rounded_benchmark_value_int:
             live_avg_connectivity = 'good'
         elif rounded_base_benchmark_int <= live_avg <= rounded_benchmark_value_int:
             live_avg_connectivity = 'moderate'
@@ -713,7 +715,9 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
         rounded_benchmark_value_int = round(speed_benchmark / 1000000, 2)
         rounded_base_benchmark_int = 1
 
-        if live_avg > rounded_benchmark_value_int:
+        if weekly_status['entity_with_realtime_data'] == 0:
+            live_avg_connectivity = 'unknown'
+        elif live_avg > rounded_benchmark_value_int:
             live_avg_connectivity = 'good'
         elif rounded_base_benchmark_int <= live_avg <= rounded_benchmark_value_int:
             live_avg_connectivity = 'moderate'

@@ -2554,7 +2554,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             rounded_base_benchmark_int = round(
                 eval(unit_agg_str.format(val=core_utilities.convert_to_int(base_benchmark))), 2)
 
-            if no_of_entities_measure == 0:
+            if query_response.get('entity_with_realtime_data', 0) == 0:
                 live_avg_connectivity = 'unknown'
             else:
                 live_avg_connectivity = self.resolve_connectivity_bucket(
@@ -2683,7 +2683,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             rounded_base_benchmark_int = round(
                 eval(unit_agg_str.format(val=core_utilities.convert_to_int(base_benchmark))), 2)
 
-            if no_of_entities_measure == 0:
+            if query_response.get('entity_with_realtime_data', query_response.get('school_with_realtime_data', 0)) == 0:
                 live_avg_connectivity = 'unknown'
             else:
                 live_avg_connectivity = self.resolve_connectivity_bucket(
