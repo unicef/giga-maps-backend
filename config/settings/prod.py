@@ -26,6 +26,27 @@ DATABASES = {
     GIGA_METER_DB_KEY: env.db_url(var='GIGA_METER_DATABASE_URL'),
 }
 
+# Prometheus DB instrumentation
+# --------------------------------------------------------------------------
+# Wrap each DB connection with django_prometheus so query counts and durations
+# are exported per alias (django_db_execute_total, django_db_query_duration_seconds).
+# The wrappers are thin subclasses of the underlying Django backend: they only
+# time/count queries and never change SQL, connections, or data. Each engine is
+# mapped to its instrumented equivalent so a non-PostGIS connection (e.g. the
+# giga_meter DB) keeps the correct backend. Flag-gated so it can be turned off via
+# env (ENABLED_DB_METRICS=False) without a code change if a wrapper misbehaves.
+ENABLED_DB_METRICS = env.bool('ENABLED_DB_METRICS', default=ENABLED_BACKEND_PROMETHEUS_METRICS)
+if ENABLED_DB_METRICS:
+    _INSTRUMENTED_DB_ENGINES = {
+        'django.contrib.gis.db.backends.postgis': 'django_prometheus.db.backends.postgis',
+        'django.db.backends.postgresql': 'django_prometheus.db.backends.postgresql',
+        'django.db.backends.postgresql_psycopg2': 'django_prometheus.db.backends.postgresql',
+    }
+    for _db_settings in DATABASES.values():
+        _db_settings['ENGINE'] = _INSTRUMENTED_DB_ENGINES.get(
+            _db_settings.get('ENGINE'), _db_settings.get('ENGINE'),
+        )
+
 # Template
 # --------------------------------------------------------------------------
 
