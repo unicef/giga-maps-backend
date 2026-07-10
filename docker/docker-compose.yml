@@ -12,7 +12,7 @@ services:
   backend:
     container_name: proco_prod_backend
     image: rttest/project-connect-api:prod
-    command: bash -c "sleep 10 && /code/scripts/wait-for-it.sh db:5432 && pipenv run python manage.py migrate && pipenv run gunicorn config.wsgi:application -b 0.0.0.0:8000 -w 4 --timeout=3200"
+    command: bash -c "sleep 10 && /code/scripts/wait-for-it.sh db:5432 && pipenv run python manage.py migrate && pipenv run gunicorn config.wsgi:application -c /code/config/gunicorn.py -b 0.0.0.0:8000 -w 4 --timeout=3200"
     ports:
       - "8000:8000"
     environment:
