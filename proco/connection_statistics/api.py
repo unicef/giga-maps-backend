@@ -3,7 +3,7 @@ from datetime import datetime, time, timedelta
 
 from django.conf import settings
 from django.db.models import (
-    Avg, Case, CharField, FilteredRelation, OuterRef, Q, Subquery, Value, When
+    Avg, Case, CharField, FilteredRelation, Max, Min, OuterRef, Q, Subquery, Value, When
 )
 from django.db.models import BooleanField, Count
 from django.db.models.functions.text import Lower
@@ -820,13 +820,17 @@ class ConnectivityConfigurationsViewSet(APIView):
                 date__range=(last_week_start, last_week_end)
             ).values_list('date', flat=True).order_by('-date').first()
 
+            date_boundaries = date_queryset.aggregate(first_date=Min('date'), last_date=Max('date'))
+            first_date = date_boundaries['first_date']
+            last_date = date_boundaries['last_date']
+
             if last_week_entry:
                 # TECH-7453: 1. If last week's data is present use it as default.
                 monday_on_entry_date = last_week_start
                 sunday_on_entry_date = last_week_end
             else:
                 # TECH-7453: 2. If last week data is not present then fallback to the latest available week including the current week as well.
-                latest_daily_entry = date_queryset.values_list('date', flat=True).order_by('-date').first()
+                latest_daily_entry = last_date
 
                 if latest_daily_entry:
                     monday_on_entry_date = latest_daily_entry - timedelta(days=latest_daily_entry.weekday())
@@ -834,10 +838,6 @@ class ConnectivityConfigurationsViewSet(APIView):
 
             # years = list(self.queryset.values_list('date__year', flat=True).order_by('date__year').distinct())
             # Optimizing year extraction Query, TECH - 9945
-            first_date_queryset = date_queryset.order_by('date').values_list('date', flat=True)
-            last_date_queryset = date_queryset.order_by('-date').values_list('date', flat=True)
-            first_date = first_date_queryset.first()
-            last_date = last_date_queryset.first()
             years = list(range(first_date.year, last_date.year + 1)) if first_date and last_date else []
             if monday_on_entry_date:
                 static_data = {
