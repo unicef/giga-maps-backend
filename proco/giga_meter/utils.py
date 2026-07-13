@@ -84,6 +84,7 @@ def sync_school_master_data(
         insert_entries = []
 
         loaded_data_df = sources_utilities.normalize_school_master_data_frame(loaded_data_df)
+        loaded_data_df.drop(columns=['is_verified_school'], inplace=True, errors='ignore')
 
         loaded_data_df['version'] = table_current_version
         loaded_data_df['country'] = country

@@ -52,6 +52,7 @@ class SchoolMasterData(TimeStampedModel, core_models.DataSourceModelMixin):
     education_level_govt = models.CharField(blank=True, null=True, max_length=255)  # School.education_level_govt
     school_area_type = models.CharField(blank=True, null=True, max_length=255)  # School.environment
     school_funding_type = models.CharField(blank=True, null=True, max_length=255)  # School.school_type
+    is_verified_school = models.BooleanField(default=True)  # School.is_verified_school
     school_establishment_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
 
     # SchoolWeeklyStatus Fields

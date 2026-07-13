@@ -309,6 +309,7 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                                 'environment': environment,
                                 'school_type': '' if core_utilities.is_blank_string(
                                     row.school_funding_type) else row.school_funding_type,
+                                'is_verified_school': row.is_verified_school,
                                 'establishment_year': row.school_establishment_year,
                                 'admin1': admin1_instance,
                                 'admin2': admin2_instance,

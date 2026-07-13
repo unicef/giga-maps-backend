@@ -88,6 +88,12 @@ def normalize_school_master_data_frame(df):
             lambda val: str(val).lower()).replace('thisnanwillreplaceback', np.nan)
     else:
         df['school_id_govt'] = None
+
+    if 'verification_status' in list(df.columns.tolist()):
+        df['is_verified_school'] = df['verification_status'].fillna('').apply(
+            lambda val: str(val).strip().lower() != 'unverified')
+    else:
+        df['is_verified_school'] = True
     return df
 
 
