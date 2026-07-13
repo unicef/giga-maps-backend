@@ -150,7 +150,7 @@ class BaseEntityDataLayerAPIViewSet(EntityDetailFilterMixin, APIView):
             self.kwargs['entity_filters'] = core_utilities.get_filter_sql(
                 self.request, 'entities', 'entities_entity', entity_type)
             self.kwargs['entity_static_filters'] = core_utilities.get_filter_sql(
-                self.request, 'entity_static', entity_static_table, entity_type)
+                self.request, 'entity_static', 'connection_statistics_entityweeklystatus', entity_type)
             self.kwargs['entity_real_time_filters'] = core_utilities.get_filter_sql(
                 self.request, 'entity_real_time', 'connection_statistics_entityweeklystatus', entity_type)
             (
@@ -247,7 +247,7 @@ class BaseEntityDataLayerAPIViewSet(EntityDetailFilterMixin, APIView):
             self.kwargs['entity_filters'] = core_utilities.get_filter_sql(
                 self.request, 'entities', 'entities_entity', entity_type)
             self.kwargs['entity_static_filters'] = core_utilities.get_filter_sql(
-                self.request, 'entity_static', entity_static_table, entity_type)
+                self.request, 'entity_static', 'connection_statistics_entityweeklystatus', entity_type)
             self.kwargs['entity_real_time_filters'] = core_utilities.get_filter_sql(
                 self.request, 'entity_real_time', 'connection_statistics_entityweeklystatus', entity_type)
             (
@@ -362,14 +362,14 @@ class BaseEntityDataLayerAPIViewSet(EntityDetailFilterMixin, APIView):
         import copy
         from collections import OrderedDict
         legend_configs = copy.deepcopy(data_layer_instance.legend_configs)
-        
+
         if parameter_column_name and hasattr(self, 'request') and self.request:
             suffix = f"_{parameter_column_name}_fill"
             selected_values = []
             for param_name, param_value in self.request.query_params.items():
                 if param_name.endswith(suffix):
                     selected_values.extend([v.strip().lower() for v in str(param_value).split(',')])
-            
+
             if selected_values:
                 filtered_legend_configs = OrderedDict()
                 for k, v in legend_configs.items():
@@ -729,20 +729,16 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
         if len(kwargs['entity_filters']) > 0:
             kwargs['entity_condition'] += ' AND ' + kwargs['entity_filters']
 
-        if len(kwargs['entity_real_time_filters']) > 0:
+        if len(kwargs['entity_real_time_filters']) > 0 or len(kwargs['entity_static_filters']) > 0:
             kwargs['entity_weekly_join'] = """
             INNER JOIN "connection_statistics_entityweeklystatus"
                 ON "entities_entity"."last_weekly_status_id" = "connection_statistics_entityweeklystatus"."id"
             """
-            kwargs['entity_weekly_condition'] = ' AND ' + kwargs['entity_real_time_filters']
-
-        # if len(kwargs['entity_static_filters']) > 0:
-        #     kwargs['entity_master_table_join'] = """
-        #     INNER JOIN "entities_{entity_name}_entity"
-        #         ON "entities_entity"."last_master_status_id" = "entities_{entity_name}_entity"."id"
-        #     """.format(entity_name=kwargs['entity_name'])
-
-        # kwargs['entity_master_table_condition'] = ' AND ' + kwargs['entity_static_filters']
+            kwargs['entity_weekly_condition'] = ''
+            if len(kwargs['entity_real_time_filters']) > 0:
+                kwargs['entity_weekly_condition'] += ' AND ' + kwargs['entity_real_time_filters']
+            if len(kwargs['entity_static_filters']) > 0:
+                kwargs['entity_weekly_condition'] += ' AND ' + kwargs['entity_static_filters']
 
         if add_random_condition:
             if 'limit' in request.query_params:
@@ -846,20 +842,16 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
         if len(kwargs['entity_filters']) > 0:
             kwargs['entity_condition'] += ' AND ' + kwargs['entity_filters']
 
-        # if len(kwargs['entity_real_time_filters']) > 0:
-        #     kwargs['entity_weekly_join'] = """
-        #     INNER JOIN "connection_statistics_entityweeklystatus"
-        #         ON ews."id" = "connection_statistics_entityweeklystatus"."id"
-        #     """
-        #     kwargs['entity_weekly_condition'] = ' AND ' + kwargs['entity_real_time_filters']
-
-        if len(kwargs['entity_static_filters']) > 0:
-            kwargs['entity_master_table_join'] = """
-            INNER JOIN "entities_{entity_name}_entity"
-                ON "entities_entity"."id" = ews."entity_id"
-            """.format(entity_name=kwargs['entity_name'])
-
-            kwargs['entity_master_table_condition'] = ' AND ' + kwargs['entity_static_filters']
+        if len(kwargs['entity_real_time_filters']) > 0 or len(kwargs['entity_static_filters']) > 0:
+            kwargs['entity_weekly_join'] = """
+            INNER JOIN "connection_statistics_entityweeklystatus"
+                ON "entities_entity"."last_weekly_status_id" = "connection_statistics_entityweeklystatus"."id"
+            """
+            kwargs['entity_weekly_condition'] = ''
+            if len(kwargs['entity_real_time_filters']) > 0:
+                kwargs['entity_weekly_condition'] += ' AND ' + kwargs['entity_real_time_filters']
+            if len(kwargs['entity_static_filters']) > 0:
+                kwargs['entity_weekly_condition'] += ' AND ' + kwargs['entity_static_filters']
 
         legend_configs = kwargs['legend_configs']
         label_cases = []
@@ -1384,12 +1376,16 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         if len(kwargs['entity_filters']) > 0:
             kwargs['entity_condition'] = ' AND ' + kwargs['entity_filters']
 
-        if len(kwargs['entity_static_filters']) > 0:
+        if len(kwargs['entity_real_time_filters']) > 0 or len(kwargs['entity_static_filters']) > 0:
             kwargs['entity_weekly_join'] = """
             INNER JOIN "connection_statistics_entityweeklystatus"
                 ON "entities_entity"."last_weekly_status_id" = "connection_statistics_entityweeklystatus"."id"
             """
-            kwargs['entity_weekly_condition'] = ' AND ' + kwargs['entity_static_filters']
+            kwargs['entity_weekly_condition'] = ''
+            if len(kwargs['entity_real_time_filters']) > 0:
+                kwargs['entity_weekly_condition'] += ' AND ' + kwargs['entity_real_time_filters']
+            if len(kwargs['entity_static_filters']) > 0:
+                kwargs['entity_weekly_condition'] += ' AND ' + kwargs['entity_static_filters']
 
         kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
 
@@ -1510,7 +1506,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
             if 'ews' in str(legend_configs):
                 kwargs['entity_weekly_outer_join'] = """
-                LEFT JOIN "connection_statistics_entityweeklystatus" ews 
+                LEFT JOIN "connection_statistics_entityweeklystatus" ews
                     ON eds."last_weekly_status_id" = ews."id"
                 """
         else:
@@ -1813,8 +1809,16 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         if len(kwargs['entity_filters']) > 0:
             kwargs['entity_condition'] = ' AND ' + kwargs['entity_filters']
 
-        if len(kwargs['entity_static_filters']) > 0:
-            kwargs['entity_weekly_condition'] = ' AND ' + kwargs['entity_static_filters']
+        if len(kwargs['entity_real_time_filters']) > 0 or len(kwargs['entity_static_filters']) > 0:
+            kwargs['entity_weekly_join'] = """
+            INNER JOIN "connection_statistics_entityweeklystatus"
+                ON "entities_entity"."last_weekly_status_id" = "connection_statistics_entityweeklystatus"."id"
+            """
+            kwargs['entity_weekly_condition'] = ''
+            if len(kwargs['entity_real_time_filters']) > 0:
+                kwargs['entity_weekly_condition'] += ' AND ' + kwargs['entity_real_time_filters']
+            if len(kwargs['entity_static_filters']) > 0:
+                kwargs['entity_weekly_condition'] += ' AND ' + kwargs['entity_static_filters']
 
         legend_configs = kwargs['legend_configs']
         label_cases = []
@@ -3016,7 +3020,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                             entity_response = self.process_entity_without_layer(request, entity_code, params)
                         except Exception:
                             entity_response = None
-                        
+
                         if entity_response is None:
                             entity_response = {
                                 'total_entities': 0,

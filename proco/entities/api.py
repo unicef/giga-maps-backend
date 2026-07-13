@@ -178,7 +178,7 @@ class EntityStatusConnectivityTileGenerator(RawEntityDetailFilterMixin, BaseTile
             request, 'entities', 'entities_entity', entity_type_code)
         if entity_type_code and table_configs.get('master_data_table'):
             table_configs['entity_static_filters'] = core_utilities.get_filter_sql(
-                request, 'entity_static', table_configs['master_data_table'], entity_type_code)
+                request, 'entity_static', 'connection_statistics_entityweeklystatus', entity_type_code)
         else:
             table_configs['entity_static_filters'] = ''
         table_configs['entity_real_time_filters'] = core_utilities.get_filter_sql(
@@ -290,21 +290,17 @@ class EntityStatusConnectivityTileGenerator(RawEntityDetailFilterMixin, BaseTile
         if len(tbl['entity_filters']) > 0:
             tbl['entity_condition'] += ' AND ' + tbl['entity_filters']
 
-        if len(tbl['entity_real_time_filters']) > 0:
+        if len(tbl['entity_real_time_filters']) > 0 or len(tbl['entity_static_filters']) > 0:
             tbl['entity_weekly_join'] = """
             INNER JOIN "connection_statistics_entityweeklystatus"
                 ON entities_entity."last_weekly_status_id" = connection_statistics_entityweeklystatus."id"
             """
 
-            tbl['entity_weekly_condition'] = ' AND ' + tbl['entity_real_time_filters']
-
-        if len(tbl['entity_static_filters']) > 0:
-            tbl['entity_master_join'] = """
-            INNER JOIN "{master_data_table}"
-                ON entities_entity."last_master_status_id" = {master_data_table}."id"
-            """.format(master_data_table=tbl['master_data_table'])
-
-            tbl['entity_master_condition'] = ' AND ' + tbl['entity_static_filters']
+            tbl['entity_weekly_condition'] = ''
+            if len(tbl['entity_real_time_filters']) > 0:
+                tbl['entity_weekly_condition'] += ' AND ' + tbl['entity_real_time_filters']
+            if len(tbl['entity_static_filters']) > 0:
+                tbl['entity_weekly_condition'] += ' AND ' + tbl['entity_static_filters']
 
         if add_random_condition:
             if 'limit' in request.query_params:

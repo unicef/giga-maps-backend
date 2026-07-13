@@ -254,6 +254,7 @@ def update_country_related_cache(country_code):
     update_cached_value.delay(url=reverse('locations:countries-list'))
     update_cached_value.delay(url=reverse('connection_statistics:global-stat'))
     update_cached_value.delay(url=reverse('locations:countries-detail', kwargs={'pk': country_code.lower()}))
+    update_cached_value.delay(url=reverse('entities:retrieve-entity-country', kwargs={'pk': country_code.lower()}))
 
     country = Country.objects.annotate(
         code_lower=Lower('code'),
