@@ -312,22 +312,47 @@ health_data_source_json = [
 # Health Entity Data Layers Configuration
 health_data_layer_json = [
     {
-        'code': 'HEALTH_DOWNLOAD',
-        'name': 'Health Facility Download Speed',
+        'code': 'DEFAULT_HEALTH_DOWNLOAD',
+        'name': 'Health Download',
+        'entity_type_code': 'health',
         'icon': """<svg id="icon" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><style>.cls-1 {fill: none;}</style></defs><path d="M26,24v4H6V24H4v4H4a2,2,0,0,0,2,2H26a2,2,0,0,0,2-2h0V24Z"/><polygon points="26 14 24.59 12.59 17 20.17 17 2 15 2 15 20.17 7.41 12.59 6 14 16 24 26 14"/><g id="_Transparent_Rectangle_" data-name="&lt;Transparent Rectangle&gt;"><rect class="cls-1" width="32" height="32"/></g></svg>""",
-        'description': 'Download speed for health facilities',
+        'description': 'System Health Download Layer',
         'version': 'V 1.0',
         'type': 'LIVE',
         'category': 'CONNECTIVITY',
         'applicable_countries': [],
         'global_benchmark': {'value': '20000000', 'unit': 'bps', 'convert_unit': 'mbps'},
-        'legend_configs': [],
+        'legend_configs': {
+            'good': {
+                'color': '#12c45e',
+                'values': ['SQL:{table_name}."{col_name}">=20000000'],
+                'benchmark_value': 20000000
+            },
+            'moderate': {
+                'color': '#ffb939',
+                'values': [
+                    'SQL:{table_name}."{col_name}">=1000000',
+                    'SQL:{table_name}."{col_name}"<20000000'
+                ]
+            },
+            'bad': {
+                'color': '#ff4d4f',
+                'values': [
+                    'SQL:{table_name}."{col_name}"<1000000',
+                    'SQL:{table_name}."{col_name}">0'
+                ]
+            },
+            'unknown': {
+                'color': '#c4c4c4',
+                'values': ['SQL:{table_name}."{col_name}" IS NULL']
+            }
+        },
         'is_reverse': False,
         'status': 'PUBLISHED',
         'data_sources': [
             {
-                'name': 'Health Entity Master',
-                'data_source_type': 'HEALTH_MASTER',
+                'name': 'Daily Check APP and MLab',
+                'data_source_type': 'DAILY_CHECK_APP',
                 'data_source_column': {
                     'name': 'connectivity_speed',
                     'type': 'int',
@@ -336,67 +361,18 @@ health_data_layer_json = [
                     'alias': 'Download Speed',
                     'base_benchmark': 1000000,
                     'display_unit': 'Mbps',
-                    'supported_functions': []
                 }
-            }
-        ]
-    },
-    {
-        'code': 'HEALTH_UPLOAD',
-        'name': 'Health Facility Upload Speed',
-        'icon': """<svg id="icon" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><style>.cls-1 {fill: none;}</style></defs><path d="M26,24v4H6V24H4v4H4a2,2,0,0,0,2,2H26a2,2,0,0,0,2-2h0V24Z"/><polygon points="6 18 7.41 19.41 15 11.83 15 30 17 30 17 11.83 24.59 19.41 26 18 16 8 6 18"/><g id="_Transparent_Rectangle_" data-name="&lt;Transparent Rectangle&gt;"><rect class="cls-1" width="32" height="32"/></g></svg>""",
-        'description': 'Upload speed for health facilities',
-        'version': 'V 1.0',
-        'type': 'LIVE',
-        'category': 'CONNECTIVITY',
-        'applicable_countries': [],
-        'global_benchmark': {'value': '10000000', 'unit': 'bps', 'convert_unit': 'mbps'},
-        'legend_configs': [],
-        'is_reverse': False,
-        'status': 'PUBLISHED',
-        'data_sources': [
-            {
-                'name': 'Health Entity Master',
-                'data_source_type': 'HEALTH_MASTER',
+            }, {
+                'name': 'QoS',
+                'data_source_type': 'QOS',
                 'data_source_column': {
-                    'name': 'connectivity_upload_speed',
+                    'name': 'connectivity_speed',
                     'type': 'int',
                     'unit': 'bps',
                     'is_parameter': True,
-                    'alias': 'Upload Speed',
+                    'alias': 'Download Speed',
                     'base_benchmark': 1000000,
                     'display_unit': 'Mbps',
-                    'supported_functions': []
-                }
-            }
-        ]
-    },
-    {
-        'code': 'HEALTH_LATENCY',
-        'name': 'Health Facility Latency',
-        'icon': """<svg id="icon" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><style>.cls-1 {fill: none;}</style></defs><path d="M16,28A11.0134,11.0134,0,0,1,5,17H7a9,9,0,1,0,9-9V10l-5-5,5-5V2A11.0134,11.0134,0,0,1,27,13,11.0134,11.0134,0,0,1,16,28Z"/><rect id="_Transparent_Rectangle_" data-name="&lt;Transparent Rectangle&gt;" class="cls-1" width="32" height="32"/></svg>""",
-        'description': 'Network latency for health facilities',
-        'version': 'V 1.0',
-        'type': 'LIVE',
-        'category': 'CONNECTIVITY',
-        'applicable_countries': [],
-        'global_benchmark': {'value': '100', 'unit': 'ms', 'convert_unit': 'ms'},
-        'legend_configs': [],
-        'is_reverse': True,
-        'status': 'PUBLISHED',
-        'data_sources': [
-            {
-                'name': 'Health Entity Master',
-                'data_source_type': 'HEALTH_MASTER',
-                'data_source_column': {
-                    'name': 'connectivity_latency',
-                    'type': 'int',
-                    'unit': 'ms',
-                    'is_parameter': True,
-                    'alias': 'Latency',
-                    'base_benchmark': 1,
-                    'display_unit': 'ms',
-                    'supported_functions': []
                 }
             }
         ]
@@ -542,9 +518,11 @@ def load_health_data_layers():
                     },
                 )
                 if created:
-                    sys.stdout.write(f'\n  ✓ Created relationship: {layer_instance.name} <-> {source_id.name}')
+                    sys.stdout.write(
+                        '\nNew Data Source/Data Layer relationship created: {}'.format(relationship_instance.__dict__))
                 else:
-                    sys.stdout.write(f'\n  ✓ Updated relationship: {layer_instance.name} <-> {source_id.name}')
+                    sys.stdout.write(
+                        '\nExisting Source/Data Layer relationship updated: {}'.format(relationship_instance.__dict__))
         except Exception as e:
             sys.stdout.write(f'\n✗ Error processing data layer {row_data["code"]}: {e}')
 
