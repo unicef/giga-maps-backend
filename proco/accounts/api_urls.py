@@ -1,4 +1,4 @@
-from django.urls import path, include
+from django.urls import path
 
 from proco.accounts import api
 
@@ -57,6 +57,7 @@ urlpatterns = [
     path('data_sources/<int:pk>/publish/', api.DataSourcePublishViewSet.as_view({
         'put': 'partial_update',
     }), name='publish-data-source'),
+
     path('layers/', api.DataLayersViewSet.as_view({
         'get': 'list',
         'post': 'create',
