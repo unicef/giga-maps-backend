@@ -37,7 +37,7 @@ ENTITY_TYPES_DATA = [
         'detail_related_name': 'health_entity',
         'master_data_model': 'data_sources.HealthEntityMasterIntermediateData',
         'extra_config': {
-            'tile_cache_prefix': 'HEALTH_STATUS_CONNECTIVITY_TILES_MAP',
+            'tile_cache_prefix': 'V2_ENTITY_TILES_CONNECTIVITY_STATUS',
             'tile_master_data_table': 'data_sources_healthentitymasterintermediatedata',
             'main_table': 'entities_entity',
             'srid': '4326',

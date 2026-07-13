@@ -40,7 +40,7 @@ class EntityGlobalStatsAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, API
     queryset = model.objects.all()
 
     CACHE_KEY = 'cache'
-    CACHE_KEY_PREFIX = 'GLOBAL_STATS_ALL_ENTITIES'
+    CACHE_KEY_PREFIX = 'V2_ENTITY_GLOBAL_STATS'
 
     filter_backends = (
         DjangoFilterBackend,
@@ -267,7 +267,7 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
     permission_classes = (AllowAny,)
 
     CACHE_KEY = 'cache'
-    CACHE_KEY_PREFIX = 'CONNECTIVITY_STATS_ALL_ENTITIES'
+    CACHE_KEY_PREFIX = 'V2_ENTITY_CONNECTIVITY_STATS'
 
     school_filters = []
     school_static_filters = []
@@ -965,7 +965,7 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
     queryset = model.objects.filter(entity__deleted__isnull=True)
 
     CACHE_KEY = 'cache'
-    CACHE_KEY_PREFIX = 'ENTITY_CONNECTIVITY_CONFIGURATIONS_V2_STATS'
+    CACHE_KEY_PREFIX = 'V2_ENTITY_CONNECTIVITY_CONFIGURATIONS'
 
     def get_cache_key(self):
         params = dict(self.request.query_params)

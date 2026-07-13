@@ -53,6 +53,8 @@ urlpatterns = [
         name='metadata-data-layer-entities'),
     path('layers/<int:pk>/', entity_api.EntityDataLayersViewSet.as_view({'put': 'partial_update', 'delete': 'destroy',}),
         name='update-or-delete-data-layer-entities'),
+    path('invalidate-cache-patterns/', entity_api.EntityInvalidateCacheByPattern.as_view(),
+         name='entity-v2-invalidate-cache-based-on-patterns'),
 
     path('layers/<str:status>/', entity_api.PublishedEntityDataLayersViewSet.as_view({'get': 'list',}),
         name='list-published-data-layers-entities'),

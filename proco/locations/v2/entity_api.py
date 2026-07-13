@@ -30,8 +30,8 @@ class EntityCountryViewSet(
     mixins.ListModelMixin,
     viewsets.GenericViewSet,
 ):
-    LIST_CACHE_KEY_PREFIX = 'ENTITY_COUNTRIES_LIST'
-    RETRIEVE_CACHE_KEY_PREFIX = 'ENTITY_COUNTRY_INFO'
+    LIST_CACHE_KEY_PREFIX = 'V2_ENTITY_COUNTRIES_LIST'
+    RETRIEVE_CACHE_KEY_PREFIX = 'V2_ENTITY_COUNTRY_DETAIL'
 
     pagination_class = None
     queryset = Country.objects.all().select_related('last_weekly_status')

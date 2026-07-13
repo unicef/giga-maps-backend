@@ -26,6 +26,8 @@ from proco.connection_statistics.config import app_config as statistics_configs
 from proco.connection_statistics.models import SchoolWeeklyStatus, SchoolDailyStatus, EntityDailyStatus, \
     EntityWeeklyStatus
 from proco.connection_statistics.utils import get_benchmark_value_for_default_download_layer
+from proco.core import permissions as core_permissions
+from proco.core import utils as core_utilities
 from proco.entities.constants import LEGACY_MODEL
 from proco.entities.mixins import EntityDetailFilterMixin, EntityTypeCodeMixin
 from proco.locations.api import BaseSearchMixin
@@ -37,9 +39,8 @@ from proco.entities.serializers import ListEntitySerializer
 from proco.locations.models import Country
 from proco.schools.api import ConnectivityTileRequestHandler, BaseTileGenerator, ConnectivityTileGenerator, \
     SchoolStatusConnectivityTileGenerator
-from proco.utils.cache import custom_cache_control
 from proco.utils.mixins import CachedListMixin
-from proco.core import utils as core_utilities
+from proco.utils.tasks import update_all_entity_cached_values
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -51,7 +52,7 @@ class EntitiesViewSet(
     mixins.ListModelMixin,
     viewsets.GenericViewSet,
 ):
-    LIST_CACHE_KEY_PREFIX = 'ENTITIES'
+    LIST_CACHE_KEY_PREFIX = 'V2_ENTITY_LIST'
 
     queryset = Entity.objects.all().select_related('last_weekly_status')
     pagination_class = None
@@ -377,7 +378,7 @@ class EntityStatusConnectivityCombinedTileGenerator(EntityTypeCodeMixin, BaseTil
 ], name='dispatch')
 class EntityConnectivityTileRequestHandler(APIView):
     CACHE_KEY = 'cache'
-    CACHE_KEY_PREFIX = 'ENTITY_CONNECTIVITY_TILES_MAP'
+    CACHE_KEY_PREFIX = 'V2_ENTITY_TILES_CONNECTIVITY'
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -438,7 +439,7 @@ class EntityConnectivityStatusTileRequestHandler(EntityTypeCodeMixin, EntityConn
                 'srid': '4326',
             }
             self.tile_generator = EntityStatusConnectivityCombinedTileGenerator(table_config)
-            self.CACHE_KEY_PREFIX = 'ENTITY_STATUS_CONNECTIVITY_TILES_MAP'
+            self.CACHE_KEY_PREFIX = 'V2_ENTITY_TILES_CONNECTIVITY_STATUS'
             return super().get(request, *args, **kwargs)
 
         entity = entity_type_codes[0]
@@ -464,7 +465,12 @@ class EntityConnectivityStatusTileRequestHandler(EntityTypeCodeMixin, EntityConn
         else:
             self.tile_generator = EntityStatusConnectivityTileGenerator(table_config)
 
-        self.CACHE_KEY_PREFIX = extra_config.get("tile_cache_prefix")
+        configured_cache_prefix = extra_config.get("tile_cache_prefix")
+        self.CACHE_KEY_PREFIX = (
+            configured_cache_prefix
+            if configured_cache_prefix and configured_cache_prefix.startswith('V2_ENTITY_')
+            else 'V2_ENTITY_TILES_CONNECTIVITY_STATUS'
+        )
 
         return super().get(request, *args, **kwargs)
 
@@ -478,8 +484,30 @@ class EntityConnectivityStatusTileRequestHandler(EntityTypeCodeMixin, EntityConn
         return f"{self.CACHE_KEY_PREFIX}_{entity}_tiles_{param_string}"
 
 
+@method_decorator([
+    custom_cache_control(
+        public=True,
+        max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE,
+        cache_status_codes=[rest_status.HTTP_200_OK, ],
+    )
+], name='dispatch')
 class EntityTypeListAPIView(APIView):
+    CACHE_KEY = 'cache'
+    CACHE_KEY_PREFIX = 'V2_ENTITY_TYPES_LIST'
+
+    def get_cache_key(self):
+        return self.CACHE_KEY_PREFIX
+
     def get(self, request):
+        use_cached_data = request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
+        request_path = remove_query_param(request.get_full_path(), self.CACHE_KEY)
+        cache_key = self.get_cache_key()
+
+        if use_cached_data:
+            response_data = cache_manager.get(cache_key)
+            if response_data:
+                return Response(response_data, status=200)
+
         active_types = EntityType.get_all_active()
 
         response_data = {}
@@ -495,7 +523,60 @@ class EntityTypeListAPIView(APIView):
                 'extra_config': et.extra_config or {},
             }
 
+        cache_manager.set(cache_key, response_data, request_path=request_path)
         return Response(response_data, status=200)
+
+
+class EntityInvalidateCacheByPattern(APIView):
+    permission_classes = (
+        core_permissions.IsUserAuthenticated,
+        core_permissions.CanCleanCache,
+    )
+
+    def delete(self, request, *args, **kwargs):
+        hard_delete = request.query_params.get('hard', settings.INVALIDATE_CACHE_HARD).lower() == 'true'
+        payload = request.data
+        cache_key_name = payload.get('key', 'all') if payload else 'all'
+
+        if cache_key_name == 'all':
+            keys = ["*V2_ENTITY_*"]
+        elif cache_key_name == 'country':
+            country_id = payload.get('id', None)
+            country_code = payload.get('code', None)
+            country_code = str(country_code).lower() if country_code else country_code
+            keys = [
+                "*V2_ENTITY_COUNTRIES_LIST_",
+                "*V2_ENTITY_LAYERS_LIST_*",
+                "*V2_ENTITY_FILTERS_LIST_*",
+                "*V2_ENTITY_COUNTRY_DETAIL_pk_{0}".format(country_code),
+                "*V2_ENTITY_LIST_{0}_*".format(country_code),
+                "*V2_ENTITY_*_country_id_\\['{0}'\\]*".format(country_id),
+                "*V2_ENTITY_*_country_id_{0}*".format(country_id),
+            ]
+        elif cache_key_name == 'layer':
+            layer_id = payload.get('id', None)
+            keys = [
+                "*V2_ENTITY_LAYERS_LIST_*",
+                "*V2_ENTITY_LAYER_INFO_{0}*".format(layer_id),
+                "*V2_ENTITY_LAYER_MAP_{0}*".format(layer_id),
+                "*V2_ENTITY_LAYER_*_{0}*".format(layer_id),
+                "*V2_ENTITY_LAYER_*_layer_id_\\['{0}'\\]*".format(layer_id),
+                "*V2_ENTITY_LAYER_*_layer_id_{0}*".format(layer_id),
+            ]
+        else:
+            keys = []
+
+        cache_manager.invalidate_many(keys=keys, hard=hard_delete)
+
+        if cache_key_name == 'all':
+            update_all_entity_cached_values.delay()
+
+        message = (
+            'Cache cleared. Map is updated in real time.'
+            if hard_delete
+            else 'Cache invalidation started. Maps will be updated in a few minutes.'
+        )
+        return Response(data={'message': message})
 
 
 class AggregateSearchEntityViewSet(EntityTypeCodeMixin, BaseSearchMixin, ListAPIView):
@@ -564,7 +645,7 @@ class AggregateSearchEntityViewSet(EntityTypeCodeMixin, BaseSearchMixin, ListAPI
         if search_fields:
             # Replace giga_id_school with giga_id since the unified index uses giga_id
             search_fields = ['giga_id' if f == 'giga_id_school' else f for f in search_fields]
-            
+
             # Filter out any invalid fields that aren't in the index
             valid_fields = self.index_class.Meta.searchable_fields
             search_fields = [f for f in search_fields if f in valid_fields]
@@ -901,7 +982,7 @@ class EntityConnectivityTileGenerator(RawEntityDetailFilterMixin, EntityTypeCode
 ], name='dispatch')
 class EntityGlobalConnectivityTileRequestHandler(APIView):
     CACHE_KEY = 'cache'
-    CACHE_KEY_PREFIX = 'CONNECTIVITY_GLOBAL_TILES_MAP_V2'
+    CACHE_KEY_PREFIX = 'V2_ENTITY_TILES_CONNECTIVITY_GLOBAL'
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

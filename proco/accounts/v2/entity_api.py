@@ -455,7 +455,7 @@ class BaseEntityDataLayerAPIViewSet(EntityDetailFilterMixin, APIView):
 ], name='dispatch')
 class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewSet, account_utilities.BaseTileGenerator):
     CACHE_KEY = 'cache'
-    CACHE_KEY_PREFIX = 'ENTITY_DATA_LAYER_MAP'
+    CACHE_KEY_PREFIX = 'V2_ENTITY_LAYER_MAP'
     LAYER_ID_QUERY_PARAM = 'layer_id'
 
     def get_cache_key(self):
@@ -1220,7 +1220,7 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
 ], name='dispatch')
 class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
     CACHE_KEY = 'cache'
-    CACHE_KEY_PREFIX = 'ENTITY_DATA_LAYER_INFO'
+    CACHE_KEY_PREFIX = 'V2_ENTITY_LAYER_INFO'
 
     def get_cache_key(self):
         params = dict(self.request.query_params)
@@ -3398,7 +3398,7 @@ class PublishedEntityDataLayersViewSet(EntityTypeCodeMixin, CachedListMixin, Bas
         Auto Cache: Not required
         Call Cache: Yes
     """
-    LIST_CACHE_KEY_PREFIX = 'PUBLISHED_LAYERS_LIST_ENTITIES'
+    LIST_CACHE_KEY_PREFIX = 'V2_ENTITY_LAYERS_LIST'
 
     model = accounts_models.DataLayer
     serializer_class = entity_serializers.EntityDataLayersListSerializer

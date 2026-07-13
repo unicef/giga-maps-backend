@@ -130,7 +130,7 @@ class PublishedEntityAdvanceFiltersViewSet(EntityTypeCodeMixin, CachedListMixin,
         Auto Cache: Not required
         Call Cache: Yes
     """
-    LIST_CACHE_KEY_PREFIX = 'PUBLISHED_ENTITY_FILTERS_LIST'
+    LIST_CACHE_KEY_PREFIX = 'V2_ENTITY_FILTERS_LIST'
 
     model = accounts_models.AdvanceFilter
     serializer_class = serializers.PublishedEntityAdvanceFiltersListSerializer
