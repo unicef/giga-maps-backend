@@ -147,6 +147,7 @@ class HealthEntityMasterIntermediateData(TimeStampedModel, core_models.MasterDat
     admin_4 = models.CharField(blank=True, null=True, max_length=255)
 
     connectivity_type = models.CharField(blank=True, null=True, max_length=255)
+    coverage_type = models.CharField(blank=True, null=True, max_length=255, default='unknown')
 
     num_community_health_workers = models.PositiveIntegerField(blank=True, default=None, null=True)
     num_community_health_workers_within_5km = models.PositiveIntegerField(blank=True, default=None, null=True)

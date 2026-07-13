@@ -51,6 +51,28 @@ from proco.utils.tasks import populate_school_new_fields_task
 logger = logging.getLogger('gigamaps.' + __name__)
 
 
+def normalize_coverage_type(value):
+    coverage_type = statistics_models.SchoolWeeklyStatus.COVERAGE_UNKNOWN
+    if not core_utilities.is_blank_string(value):
+        coverage_type_in_lower = str(value).lower().strip()
+        coverage_type_choices = dict(statistics_models.SchoolWeeklyStatus.COVERAGE_TYPES).keys()
+        if coverage_type_in_lower in coverage_type_choices:
+            coverage_type = coverage_type_in_lower
+        elif coverage_type_in_lower in ['no service', 'no coverage', 'no']:
+            coverage_type = statistics_models.SchoolWeeklyStatus.COVERAGE_NO
+    return coverage_type
+
+
+def get_coverage_status_from_type(coverage_type):
+    return {
+        statistics_models.SchoolWeeklyStatus.COVERAGE_5G: 'good',
+        statistics_models.SchoolWeeklyStatus.COVERAGE_4G: 'good',
+        statistics_models.SchoolWeeklyStatus.COVERAGE_3G: 'moderate',
+        statistics_models.SchoolWeeklyStatus.COVERAGE_2G: 'moderate',
+        statistics_models.SchoolWeeklyStatus.COVERAGE_NO: 'no',
+    }.get(coverage_type, 'unknown')
+
+
 @app.task
 def finalize_task():
     return 'Done'
@@ -208,7 +230,6 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
         'rural': 'rural',
     }
     change_summary = {}
-    coverage_type_choices = dict(statistics_models.SchoolWeeklyStatus.COVERAGE_TYPES).keys()
 
     if country_ids and len(country_ids) > 0:
         task_key = 'handle_published_school_master_data_row_status_{current_time}_country_ids_{ids}'.format(
@@ -387,15 +408,7 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                             school_weekly.coverage_availability = str(
                                 row.cellular_coverage_availability).lower() in core_configs.true_choices
 
-                        coverage_type = statistics_models.SchoolWeeklyStatus.COVERAGE_UNKNOWN
-                        if not core_utilities.is_blank_string(row.cellular_coverage_type):
-                            coverage_type_in_lower = str(row.cellular_coverage_type).lower()
-                            if coverage_type_in_lower in coverage_type_choices:
-                                coverage_type = coverage_type_in_lower
-                            elif coverage_type_in_lower in ['no service', 'no coverage', 'no']:
-                                coverage_type = statistics_models.SchoolWeeklyStatus.COVERAGE_NO
-
-                        school_weekly.coverage_type = coverage_type
+                        school_weekly.coverage_type = normalize_coverage_type(row.cellular_coverage_type)
 
                         school_weekly.download_speed_contracted = row.download_speed_contracted
                         school_weekly.num_computers_desired = row.num_computers_desired
@@ -1607,6 +1620,11 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
                     entity_defaults['admin2'] = admin2_instance
                     entity_defaults['external_id'] = row.facility_id_govt
                     entity_defaults['name'] = row.facility_name
+                    entity_defaults['connectivity_type'] = (
+                        'unknown' if core_utilities.is_blank_string(row.connectivity_type) else row.connectivity_type
+                    )
+                    entity_defaults['coverage_type'] = normalize_coverage_type(getattr(row, 'coverage_type', None))
+                    entity_defaults['coverage_status'] = get_coverage_status_from_type(entity_defaults['coverage_type'])
 
                     # Map connectivity/connectivity_govt to connectivity_status for Entity
                     connectivity_govt = str(getattr(row, 'connectivity_govt', '') or '').lower().strip()
@@ -1655,7 +1673,8 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
             # Perform Entity bulk update
             if entities_to_update:
                 entity_fields_to_update = [
-                    'geopoint', 'admin1', 'admin2', 'external_id', 'name', 'name_lower', 'connectivity_status'
+                    'geopoint', 'admin1', 'admin2', 'external_id', 'name', 'name_lower',
+                    'connectivity_status', 'coverage_status',
                 ]
                 # Also include dynamic fields
                 dummy_row = data_chunk[0]

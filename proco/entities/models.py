@@ -246,6 +246,8 @@ class Entity(core_models.BaseModelMixin):
 
     connectivity_status = models.CharField(max_length=10, blank=True, default='unknown')
     coverage_status = models.CharField(max_length=10, blank=True, default='unknown')
+    connectivity_type = models.CharField(blank=True, null=True, max_length=255)
+    coverage_type = models.CharField(blank=True, null=True, max_length=8, default='unknown')
 
     # Common Infrastructure Fields
     water_availability = models.BooleanField(null=True, blank=True, default=None)

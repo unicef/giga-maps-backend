@@ -284,14 +284,24 @@ health_data_source_json = [
                 'count_labels': ['good', 'moderate', 'bad'],
             },
             {
-                'name': 'connectivity_status',
+                'name': 'connectivity_type',
                 'type': 'str',
                 'is_parameter': True,
-                'alias': 'Connectivity Status (connectivity_status)',
+                'alias': 'Connectivity Type (connectivity_type)',
                 'unit': '',
                 'display_unit': '',
                 'table_name': 'entities_entity',
-                'count_labels': ['good', 'moderate', 'bad', 'no', 'unknown'],
+                'count_labels': ['fiber', 'xdsl', 'wired', 'cellular', 'wireless', 'satellite', 'other', 'unknown'],
+            },
+            {
+                'name': 'coverage_type',
+                'type': 'str',
+                'is_parameter': True,
+                'alias': 'Coverage Type (coverage_type)',
+                'unit': '',
+                'display_unit': '',
+                'table_name': 'entities_entity',
+                'count_labels': ['5g', '4g', '3g', '2g', 'no', 'unknown'],
             },
             {
                 'name': 'coverage_status',
@@ -389,12 +399,12 @@ health_data_layer_json = [
         'global_benchmark': {},
         'legend_configs': {
             'good': {
-                'values': ['good'],
-                'labels': 'Covered'
+                'values': ['5g', '4g'],
+                'labels': '5G/4G'
             },
             'moderate': {
-                'values': ['moderate'],
-                'labels': 'Moderate'
+                'values': ['3g', '2g'],
+                'labels': '3G/2G'
             },
             'bad': {
                 'values': ['no'],
@@ -412,14 +422,14 @@ health_data_layer_json = [
                 'name': 'Health Entity Master',
                 'data_source_type': 'HEALTH_MASTER',
                 'data_source_column': {
-                    'name': 'coverage_status',
+                    'name': 'coverage_type',
                     'type': 'str',
                     'is_parameter': True,
-                    'alias': 'Coverage Status',
+                    'alias': 'Coverage Type',
                     'unit': '',
                     'display_unit': '',
                     'table_name': 'entities_entity',
-                    'count_labels': ['good', 'moderate', 'bad', 'no', 'unknown'],
+                    'count_labels': ['5g', '4g', '3g', '2g', 'no', 'unknown'],
                     'supported_functions': []
                 }
             }
