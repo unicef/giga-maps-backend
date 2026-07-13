@@ -1292,12 +1292,16 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         if len(kwargs['school_filters']) > 0:
             kwargs['school_condition'] = ' AND ' + kwargs['school_filters']
 
-        if len(kwargs['school_static_filters']) > 0:
+        if len(kwargs.get('school_real_time_filters', '')) > 0 or len(kwargs['school_static_filters']) > 0:
             kwargs['school_weekly_join'] = """
             INNER JOIN "connection_statistics_schoolweeklystatus"
                 ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
             """
-            kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
+            kwargs['school_weekly_condition'] = ''
+            if len(kwargs.get('school_real_time_filters', '')) > 0:
+                kwargs['school_weekly_condition'] += ' AND ' + kwargs['school_real_time_filters']
+            if len(kwargs['school_static_filters']) > 0:
+                kwargs['school_weekly_condition'] += ' AND ' + kwargs['school_static_filters']
 
         kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
 
@@ -2342,12 +2346,16 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         if len(kwargs['school_filters']) > 0:
             kwargs['school_condition'] += ' AND ' + kwargs['school_filters']
 
-        if len(kwargs['school_static_filters']) > 0:
+        if len(kwargs.get('school_real_time_filters', '')) > 0 or len(kwargs['school_static_filters']) > 0:
             kwargs['school_weekly_join'] = """
             INNER JOIN "connection_statistics_schoolweeklystatus"
                 ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
             """
-            kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
+            kwargs['school_weekly_condition'] = ''
+            if len(kwargs.get('school_real_time_filters', '')) > 0:
+                kwargs['school_weekly_condition'] += ' AND ' + kwargs['school_real_time_filters']
+            if len(kwargs['school_static_filters']) > 0:
+                kwargs['school_weekly_condition'] += ' AND ' + kwargs['school_static_filters']
 
         if add_random_condition:
             if 'limit' in request.query_params:
