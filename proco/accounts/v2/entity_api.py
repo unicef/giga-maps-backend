@@ -2580,8 +2580,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 connected_entities = {
                     'good': query_response.get('good', 0),
                     'moderate': query_response.get('moderate', 0),
-                    'bad': query_response.get('bad', 0),
-                    'no': query_response.get('no', 0),
+                    'no_internet': query_response.get('bad', 0),
                     'unknown': query_response.get('unknown', 0),
                 }
 
@@ -2709,8 +2708,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 'real_time_connected_entities': {
                     'good': query_response.get('good', 0),
                     'moderate': query_response.get('moderate', 0),
-                    'bad': query_response.get('bad', 0),
-                    'no': query_response.get('no', 0),
+                    'no_internet': query_response.get('bad', 0),
                     'unknown': query_response.get('unknown', 0),
                 },
                 'is_data_synced': is_data_synced_qs.exists(),
