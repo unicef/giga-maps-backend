@@ -582,7 +582,7 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                 INNER JOIN (
                     SELECT "entities_entity"."id" AS entity_id,
                         "entities_entity"."last_weekly_status_id",
-                        AVG(t."{col_name}") AS "{col_name}"
+                        {col_function} AS "{col_name}"
                     FROM "entities_entity"
                     INNER JOIN bounds ON ST_Intersects("entities_entity".geopoint, ST_Transform(bounds.geom, 4326))
                     INNER JOIN connection_statistics_entityrealtimeregistration rt_status ON
@@ -598,6 +598,7 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                         "entities_entity"."deleted" IS NULL
                         AND rt_status."deleted" IS NULL
                         AND entities_entity.entity_type_id = (SELECT id FROM entities_entity_type WHERE code = '{entity_name}' AND deleted IS NULL)
+
                         {country_condition}
                         {admin1_condition}
                         {entity_condition}
@@ -652,6 +653,7 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
             kwargs['col_name'],
             kwargs['entity_name']
         )
+        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
         if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE:
             kwargs['table_name'] = 'eds'
         else:
@@ -1593,11 +1595,6 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         {entity_weekly_join}
         {entity_detail_join}
         WHERE (
-            {country_condition}
-            {admin1_condition}
-            {entity_condition}
-            {entity_weekly_condition}
-            {entity_detail_condition}
             "connection_statistics_entityrealtimeregistration"."deleted" IS NULL
             AND "connection_statistics_entityrealtimeregistration"."rt_registered" = True
             AND "connection_statistics_entityrealtimeregistration"."rt_registration_date"::date <= '{end_date}'
@@ -1605,6 +1602,11 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             AND t."live_data_source" IN ({live_source_types})
             AND t."deleted" IS NULL
             AND t."{col_name}" IS NOT NULL
+            {country_condition}
+            {admin1_condition}
+            {entity_condition}
+            {entity_weekly_condition}
+            {entity_detail_condition}
         )
         GROUP BY t."date"{entity_group_by}
         ORDER BY t."date" ASC
@@ -1619,27 +1621,27 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         kwargs['entity_weekly_condition'] = ''
 
         if len(kwargs.get('entity_ids', [])) > 0:
-            kwargs['entity_condition'] = '"entities_entity"."id" IN ({0}) AND '.format(','.join(kwargs['entity_ids']))
+            kwargs['entity_condition'] = ' AND "entities_entity"."id" IN ({0})'.format(','.join(kwargs['entity_ids']))
             kwargs['entity_selection'] = '"entities_entity"."id", '
             kwargs['entity_group_by'] = ', "entities_entity"."id"'
         elif len(kwargs.get('admin1_ids', [])) > 0:
-            kwargs['admin1_condition'] = '"entities_entity"."admin1_id" IN ({0}) AND'.format(
+            kwargs['admin1_condition'] = ' AND "entities_entity"."admin1_id" IN ({0})'.format(
                 ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
             )
         elif len(kwargs.get('country_ids', [])) > 0:
-            kwargs['country_condition'] = '"entities_entity"."country_id" IN ({0}) AND'.format(
+            kwargs['country_condition'] = ' AND "entities_entity"."country_id" IN ({0})'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
 
         if len(kwargs['entity_filters']) > 0:
-            kwargs['entity_condition'] += kwargs['entity_filters'] + ' AND '
+            kwargs['entity_condition'] += ' AND ' + kwargs['entity_filters']
 
         if len(kwargs['entity_static_filters']) > 0:
             kwargs['entity_weekly_join'] = """
             INNER JOIN "connection_statistics_entityweeklystatus"
                 ON "entities_entity"."last_weekly_status_id" = "connection_statistics_entityweeklystatus"."id"
             """
-            kwargs['entity_weekly_condition'] = kwargs['entity_static_filters'] + ' AND '
+            kwargs['entity_weekly_condition'] = ' AND ' + kwargs['entity_static_filters']
 
         kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
 
