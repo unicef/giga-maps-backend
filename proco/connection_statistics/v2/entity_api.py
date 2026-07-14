@@ -424,9 +424,7 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
         rounded_benchmark_value_int = round(speed_benchmark / 1000000, 2)
         rounded_base_benchmark_int = 1
 
-        if weekly_status['school_with_realtime_data'] == 0:
-            live_avg_connectivity = 'unknown'
-        elif live_avg > rounded_benchmark_value_int:
+        if live_avg > rounded_benchmark_value_int:
             live_avg_connectivity = 'good'
         elif rounded_base_benchmark_int <= live_avg <= rounded_benchmark_value_int:
             live_avg_connectivity = 'moderate'
@@ -454,8 +452,7 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
         return {
             'live_avg': live_avg,
             'live_avg_connectivity': live_avg_connectivity,
-            'total_entities': weekly_status['no_of_schools_measure'],
-            'no_of_entities_measure': weekly_status['school_with_realtime_data'],
+            'no_of_entities_measure': weekly_status['no_of_schools_measure'],
             'entity_with_realtime_data': weekly_status['school_with_realtime_data'],
             'countries_with_realtime_data': weekly_status['countries_with_realtime_data'],
             'real_time_connected_entities': real_time_connected_schools,
@@ -716,9 +713,7 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
         rounded_benchmark_value_int = round(speed_benchmark / 1000000, 2)
         rounded_base_benchmark_int = 1
 
-        if weekly_status['entity_with_realtime_data'] == 0:
-            live_avg_connectivity = 'unknown'
-        elif live_avg > rounded_benchmark_value_int:
+        if live_avg > rounded_benchmark_value_int:
             live_avg_connectivity = 'good'
         elif rounded_base_benchmark_int <= live_avg <= rounded_benchmark_value_int:
             live_avg_connectivity = 'moderate'
@@ -752,8 +747,7 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
         return {
             'live_avg': live_avg,
             'live_avg_connectivity': live_avg_connectivity,
-            'total_entities': weekly_status['no_of_entities_measure'],
-            'no_of_entities_measure': weekly_status['entity_with_realtime_data'],
+            'no_of_entities_measure': weekly_status['no_of_entities_measure'],
             'entity_with_realtime_data': weekly_status['entity_with_realtime_data'],
             'countries_with_realtime_data': weekly_status['countries_with_realtime_data'],
             'real_time_connected_entities': real_time_connected_entities,
