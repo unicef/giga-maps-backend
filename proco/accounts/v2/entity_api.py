@@ -574,7 +574,7 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                     "entities_entity".id,
                     '{entity_name}' AS entity_type,
                     True AS is_rt_connected,
-                    eds.{col_name} AS field_avg,
+                    {field_avg_sql} AS field_avg,
                     {case_conditions}
                     'connected' AS connectivity_status
                 FROM entities_entity
@@ -866,6 +866,12 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
         )
         parameter_col_type = kwargs['parameter_col'].get('type', 'str').lower()
         kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'ews')
+        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
+
+        if parameter_col_type in ['int', 'float', 'number']:
+            kwargs['field_avg_sql'] = 'ROUND(eds."{col_name}"::numeric, 2)::real'.format(**kwargs)
+        else:
+            kwargs['field_avg_sql'] = 'eds."{col_name}"'.format(**kwargs)
 
         for title, values_and_label in legend_configs.items():
             values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
@@ -1183,6 +1189,9 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                     'base_benchmark': base_benchmark,
                     'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                     'parameter_col': parameter_col,
+                    'parameter_col_function_sql': self.get_column_function_sql(
+                        data_sources.first().data_source_column_function
+                    ),
                     'layer_type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                     'legend_configs': legend_configs,
                     'entity_name': data_layer_instance.entity_name,
