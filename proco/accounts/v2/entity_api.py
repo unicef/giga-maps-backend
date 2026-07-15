@@ -654,6 +654,13 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
             kwargs['entity_name']
         )
         kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
+
+        parameter_col_type = kwargs['parameter_col'].get('type', 'str').lower()
+        if parameter_col_type in ['int', 'float', 'number']:
+            kwargs['field_avg_sql'] = 'ROUND(eds."{col_name}"::numeric, 2)::double precision'.format(**kwargs)
+        else:
+            kwargs['field_avg_sql'] = 'eds."{col_name}"'.format(**kwargs)
+
         if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE:
             kwargs['table_name'] = 'eds'
         else:
@@ -770,7 +777,7 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                 {random_select_list}
                 entities_entity.id,
                 '{entity_name}' AS entity_type,
-                {table_name}."{col_name}" AS field_value,
+                {field_value_sql} AS field_value,
                 'connected' AS connectivity_status,
                 {label_case_statements}
             FROM entities_entity
@@ -866,12 +873,11 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
         )
         parameter_col_type = kwargs['parameter_col'].get('type', 'str').lower()
         kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'ews')
-        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
 
         if parameter_col_type in ['int', 'float', 'number']:
-            kwargs['field_avg_sql'] = 'ROUND(eds."{col_name}"::numeric, 2)::real'.format(**kwargs)
+            kwargs['field_value_sql'] = 'ROUND({table_name}."{col_name}"::numeric, 2)::double precision'.format(**kwargs)
         else:
-            kwargs['field_avg_sql'] = 'eds."{col_name}"'.format(**kwargs)
+            kwargs['field_value_sql'] = '{table_name}."{col_name}"'.format(**kwargs)
 
         for title, values_and_label in legend_configs.items():
             values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
