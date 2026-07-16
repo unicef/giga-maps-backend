@@ -2479,9 +2479,9 @@ def update_entity_qos_data(entity_type_code='health', today=True):
                     live_data_source=statistics_configs.QOS_SOURCE,
                     entity__entity_type__code=entity_type_code,
                     entity__deleted__isnull=True,
-                ).order_by('entity__country_id').values_list(
+                ).values_list(
                     'entity__country_id', flat=True
-                ).distinct('entity__country_id')
+                ).distinct().order_by('entity__country_id')
             )
 
             logger.info('Entity QoS - Found %d countries with %s QoS data.', len(countries_ids), entity_type_code)
