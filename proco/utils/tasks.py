@@ -557,7 +557,6 @@ def populate_entity_registration_data():
 
 @app.task(soft_time_limit=10 * 60 * 60, time_limit=10 * 60 * 60)
 def update_entity_records():
-    from proco.entities.models import Entity
     from proco.connection_statistics.models import EntityWeeklyStatus
     from proco.schools.constants import statuses_schema
     from datetime import timedelta

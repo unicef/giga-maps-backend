@@ -1,3 +1,4 @@
+from django.core.cache import cache
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
@@ -11,11 +12,11 @@ from model_utils.models import TimeStampedModel
 from proco.connection_statistics.config import app_config as statistics_configs
 from proco.core import models as core_models
 from proco.core.managers import BaseManager
+from proco.entities.models import Entity
 from proco.locations.models import Country
 from proco.schools.constants import statuses_schema
 from proco.schools.models import School
 from proco.utils.dates import get_current_week, get_current_year
-from proco.entities.models import Entity
 
 
 class ConnectivityStatistics(models.Model):
@@ -401,7 +402,10 @@ class SchoolRealTimeRegistration(core_models.BaseModelMixin):
 # ######################################## Entity Models ########################################
 
 class EntityRealTimeConnectivity(ConnectivityStatistics, TimeStampedModel, models.Model):
+    DATA_VERSION_CACHE_KEY = 'entity_qos_data_last_version_{0}'
+
     entity = models.ForeignKey(Entity, related_name='realtime_status', on_delete=models.CASCADE)
+    version = models.PositiveIntegerField(blank=True, default=None, null=True)
 
     objects = BaseManager()
 
@@ -421,6 +425,25 @@ class EntityRealTimeConnectivity(ConnectivityStatistics, TimeStampedModel, model
         else:
             self.deleted = timezone.now()
             self.save()
+
+    @classmethod
+    def get_last_version(cls, iso3_format):
+        """Get last pulled version: check cache first, fall back to DB query.
+        Mirrors QoSData.get_last_version()."""
+        last_data_version = cache.get(cls.DATA_VERSION_CACHE_KEY.format(iso3_format))
+        if not last_data_version:
+            latest_record = cls.objects.filter(
+                entity__country__iso3_format=iso3_format,
+                version__isnull=False,
+            ).order_by('-version').first()
+            if latest_record:
+                last_data_version = latest_record.version
+        return last_data_version
+
+    @classmethod
+    def set_last_version(cls, value, iso3_format):
+        """Cache the last pulled version. Mirrors QoSData.set_last_version()."""
+        cache.set(cls.DATA_VERSION_CACHE_KEY.format(iso3_format), value)
 
 
 class EntityRealTimeRegistration(core_models.BaseModelMixin):

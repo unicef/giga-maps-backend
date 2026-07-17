@@ -4,7 +4,7 @@ import os
 import uuid
 from collections import defaultdict
 from datetime import timedelta, datetime
-
+from django.utils import timezone
 import requests
 from celery import chain, chord, group, current_task
 from celery.exceptions import SoftTimeLimitExceeded
@@ -14,6 +14,7 @@ from django.contrib.gis.geos import Point
 from django.core.exceptions import ImproperlyConfigured
 from django.core.management import call_command
 from django.db import connection, transaction
+from django.db.models import Max
 from django.db.utils import DataError
 from requests.exceptions import HTTPError
 from rest_framework import status
@@ -1077,19 +1078,37 @@ def clean_old_live_data():
         logger.debug(
             'Deleting all the rows from "DailyCheckAppMeasurementData" Data Table which is older than: {0}'.format(
                 older_then_date))
-        # Delete all entries from DailyCheckApp Data Table which is older than 7 days
+        # Delete all entries from DailyCheckApp Data Table which is older than 30 days
         sources_models.DailyCheckAppMeasurementData.objects.filter(created_at__lt=older_then_date).delete()
         task_instance.info('"DailyCheckAppMeasurementData" data table completed')
 
         logger.debug('Deleting all the rows from "QoSData" Data Table which is older than: {0}'.format(older_then_date))
-        # Delete all entries from QoS Data Table which is older than 30 days
-        sources_models.QoSData.objects.filter(timestamp__lt=older_then_date).delete()
+        qos_latest_ids = list(sources_models.QoSData.objects.filter(
+            version__isnull=False
+        ).order_by('country_id', '-version').distinct('country_id').values_list('id', flat=True))
+        # Delete all entries from QoS Data Table but keep latest version per country
+        sources_models.QoSData.objects.exclude(id__in=qos_latest_ids).delete()
         task_instance.info('"QoSData" data table completed')
 
-        logger.debug('Deleting all the rows from "EntityRealTimeConnectivity" Data Table which is older than: '
-                     '{0}'.format(older_then_date))
-        # Delete all entries from Entity RealTime Connectivity Table which is older than 30 days
-        statistics_models.EntityRealTimeConnectivity.objects.filter(created__lt=older_then_date).delete()
+        logger.debug('Deleting all the rows from "EntityRealTimeConnectivity" Data Table')
+        # We need to find the ID of the max version per country
+        entity_qos_latest_qs = statistics_models.EntityRealTimeConnectivity.objects.filter(
+            version__isnull=False
+        ).values('entity__country_id').annotate(
+            max_v=Max('version')
+        ).order_by().values_list('entity__country_id', 'max_v')
+
+        entity_qos_latest_ids = []
+        for country_id, max_version in entity_qos_latest_qs:
+            # Get ALL IDs per country that match its max version
+            match_ids = list(statistics_models.EntityRealTimeConnectivity.objects.filter(
+                entity__country_id=country_id, version=max_version
+            ).values_list('id', flat=True))
+            if match_ids:
+                entity_qos_latest_ids.extend(match_ids)
+
+        # Delete old entries but keep latest version per country
+        statistics_models.EntityRealTimeConnectivity.objects.exclude(id__in=entity_qos_latest_ids).delete()
         task_instance.info('"EntityRealTimeConnectivity" data table completed')
 
         logger.debug('Deleting all the rows from "BackgroundTask" Data Table which is older than: '
@@ -1101,9 +1120,9 @@ def clean_old_live_data():
         task_instance.info('"BackgroundTask" data table completed')
 
         # Purge soft-deleted schools and related statuses to reclaim DB space and prevent bloat
-        logger.info('Purging soft-deleted schools and statuses...')
+        task_instance.info('Purging soft-deleted schools and statuses...')
         deleted_school_ids = list(School.objects.all_records().filter(deleted__isnull=False).values_list('id', flat=True)[:50000])
-        logger.info('Found {0} soft-deleted schools to purge.'.format(len(deleted_school_ids)))
+        task_instance.info('Found {0} soft-deleted schools to purge.'.format(len(deleted_school_ids)))
         for i in range(0, len(deleted_school_ids), 5000):
             chunk = deleted_school_ids[i:i+5000]
             School.objects.all_records().filter(id__in=chunk).update(last_weekly_status=None)
@@ -1114,7 +1133,7 @@ def clean_old_live_data():
             statistics_models.SchoolRealTimeRegistration.objects.all_records().filter(school_id__in=chunk)._raw_delete(connection.alias)
             sources_models.QoSData.objects.filter(school_id__in=chunk)._raw_delete(connection.alias)
             School.objects.all_records().filter(id__in=chunk)._raw_delete(connection.alias)
-        logger.info('Purged soft-deleted schools successfully.')
+        task_instance.info('Purged soft-deleted schools successfully.')
 
         # Purge any orphan soft-deleted school statuses
         statistics_models.SchoolDailyStatus.objects.all_records().filter(deleted__isnull=False)._raw_delete(connection.alias)
@@ -1124,9 +1143,9 @@ def clean_old_live_data():
         statistics_models.SchoolWeeklyStatus.objects.all_records().filter(deleted__isnull=False)._raw_delete(connection.alias)
 
         # Purge soft-deleted entities and related statuses
-        logger.info('Purging soft-deleted entities and statuses...')
+        task_instance.info('Purging soft-deleted entities and statuses...')
         deleted_entity_ids = list(Entity.objects.all_records().filter(deleted__isnull=False).values_list('id', flat=True)[:50000])
-        logger.info('Found {0} soft-deleted entities to purge.'.format(len(deleted_entity_ids)))
+        task_instance.info('Found {0} soft-deleted entities to purge.'.format(len(deleted_entity_ids)))
         for i in range(0, len(deleted_entity_ids), 5000):
             chunk = deleted_entity_ids[i:i+5000]
             Entity.objects.all_records().filter(id__in=chunk).update(last_weekly_status=None)
@@ -1139,7 +1158,7 @@ def clean_old_live_data():
             from proco.entities.models import HealthEntity
             HealthEntity.objects.all_records().filter(entity_id__in=chunk)._raw_delete(connection.alias)
             Entity.objects.all_records().filter(id__in=chunk)._raw_delete(connection.alias)
-        logger.info('Purged soft-deleted entities successfully.')
+        task_instance.info('Purged soft-deleted entities successfully.')
 
         # Purge any orphan soft-deleted entity statuses
         statistics_models.EntityDailyStatus.objects.all_records().filter(deleted__isnull=False)._raw_delete(connection.alias)
@@ -1895,9 +1914,8 @@ def fetch_entity_giga_meter_ping_data(entity_type_code, start_date, end_date, co
     }
     headers = source_utilities.get_request_headers(request_config, api_code=api_code)
 
-    # Filter value: start of the date range in ISO 8601 format
-    filter_value = '{date}T00:00:00Z'.format(date=start_date.strftime('%Y-%m-%d'))
-
+    # Use lte end_date so the API (which sorts by -timestamp) starts returning from our end_date downwards
+    filter_value = '{date}T23:59:59Z'.format(date=end_date.strftime('%Y-%m-%d'))
     page = 0
 
     while True:
@@ -1905,7 +1923,7 @@ def fetch_entity_giga_meter_ping_data(entity_type_code, start_date, end_date, co
             'entity_type': entity_type_code,
             'country_iso3_code': country_iso3,
             'filterBy': 'timestamp',
-            'filterCondition': 'gt',
+            'filterCondition': 'lte',
             'filterValue': filter_value,
             'orderBy': '-timestamp',
             'size': page_size,
@@ -1949,9 +1967,7 @@ def fetch_entity_giga_meter_ping_data(entity_type_code, start_date, end_date, co
                 giga_id = (
                     record.get('giga_id')
                     or record.get('entity_id_giga')
-                    or record.get('giga_id_health')
-                    or record.get('giga_id_school')
-                    or record.get('school_id')
+                    or record.get(f'giga_id_{entity_type_code}')
                 )
                 if not giga_id:
                     continue
@@ -1968,9 +1984,14 @@ def fetch_entity_giga_meter_ping_data(entity_type_code, start_date, end_date, co
                 else:
                     record_date = start_date
 
-                # Respect the end_date bound (the API filterCondition=gt only bounds the start)
+                # Respect the end_date bound (though the API filterCondition=lte handles this mostly)
                 if record_date > end_date:
                     continue
+
+                if record_date < start_date:
+                    # Because it's ordered by -timestamp, all subsequent records will also be < start_date
+                    # We can safely break out of the record loop, and we'll break pagination below
+                    break
 
                 yield {
                     'timestamp_date__date': record_date,
@@ -1983,6 +2004,10 @@ def fetch_entity_giga_meter_ping_data(entity_type_code, start_date, end_date, co
 
             # If we received fewer records than page_size, there's no more data
             if len(data) < page_size:
+                break
+                
+            # If the last record we processed is older than our start date, we can stop fetching pages
+            if data and record_date < start_date:
                 break
 
             page += 1
@@ -2256,14 +2281,15 @@ def run_entity_ping_aggregation(entity_type_code, start_date, end_date, task_ins
             # Auto-aggregate to WeeklyStatus and ensure RealTimeRegistration
             country_obj = Country.objects.get(iso3_format=country_iso3)
             current_date = start_date
-            while current_date <= end_date:
+            while current_date < end_date:
                 finalize_previous_day_entity_data.delay(None, country_obj.id, current_date, entity_type_code)
                 current_date += timedelta(days=7)
+            
             # Ensure the final week is covered
             finalize_previous_day_entity_data.delay(None, country_obj.id, end_date, entity_type_code)
 
             # Auto-register entities for realtime data
-            from django.utils import timezone
+
             existing_regs = {
                 reg.entity_id: reg
                 for reg in statistics_models.EntityRealTimeRegistration.objects.all_records().filter(
@@ -2479,9 +2505,9 @@ def update_entity_qos_data(entity_type_code='health', today=True):
                     live_data_source=statistics_configs.QOS_SOURCE,
                     entity__entity_type__code=entity_type_code,
                     entity__deleted__isnull=True,
-                ).order_by('entity__country_id').values_list(
+                ).order_by().values_list(
                     'entity__country_id', flat=True
-                ).distinct('entity__country_id')
+                ).distinct()
             )
 
             logger.info('Entity QoS - Found %d countries with %s QoS data.', len(countries_ids), entity_type_code)
