@@ -1,6 +1,9 @@
 import json
 import logging
 import os
+
+from datetime import datetime as dt_class
+from django.utils import timezone
 from datetime import timedelta
 from typing import Optional, Any
 
@@ -924,15 +927,15 @@ def sort_and_modify_dataframe(loaded_data_df, health_master_fields, changes_for_
 def sync_health_data(loaded_data_df, cols_to_delete, country, deleted_entities):
     insert_entries = []
     remove_entries = []
-    
+
     chunk_size = 5000
     for start in range(0, len(loaded_data_df), chunk_size):
         chunk_df = loaded_data_df.iloc[start:start + chunk_size]
         giga_ids = chunk_df['health_id_giga'].dropna().unique().tolist()
-        
+
         entities = Entity.objects.filter(country=country, giga_id__in=giga_ids)
         entity_map = {e.giga_id: e for e in entities}
-        
+
         for _, row in chunk_df.iterrows():
             change_type = row[DeltaSharingReader._change_type_col_name()]
             row.drop(
@@ -1141,6 +1144,7 @@ def load_entity_qos_data_source_response_to_model(entity_type_code='health'):
                     table_last_data_version = int(max(-1, table_current_version - 10))
 
                 version_list = list(range(table_last_data_version + 1, table_current_version + 1))
+
                 for version in version_list:
                     loaded_data_df = delta_sharing.load_table_changes_as_pandas(
                         table_url, version, version, None, None,
@@ -1259,6 +1263,7 @@ def bulk_create_entity_realtime_connectivity(entries):
             jitter_upload=entry.get('jitter_upload'),
             rtt_packet_loss_pct=entry.get('rtt_packet_loss_pct'),
             entity=entry['entity'],
+            version=entry.get('version'),
             live_data_source=statistics_configs.QOS_SOURCE,
         ))
 
@@ -1297,7 +1302,7 @@ def sync_entity_qos_realtime_data(country_id, entity_type_code='health', start_d
             last_entry_date = (current_datetime - timedelta(days=1)).date()
 
         filter_kwargs = {
-            'created__date__gt': last_entry_date,
+            'created__date__gte': last_entry_date,
             'created__date__lte': current_datetime.date(),
         }
 
@@ -1320,43 +1325,83 @@ def sync_entity_qos_realtime_data(country_id, entity_type_code='health', start_d
         rtt_packet_loss_pct_avg=Avg('rtt_packet_loss_pct'),
     ).order_by('created__date')
 
-    daily_records = []
     processed_entity_ids = set()
     processed_dates = set()
 
+    # Pre-fetch existing records
+    existing_qs = EntityDailyStatus.objects.filter(
+        live_data_source=statistics_configs.QOS_SOURCE,
+        entity__country_id=country_id,
+        entity__entity_type__code=entity_type_code,
+        **filter_kwargs
+    )
+    existing_map = {(obj.entity_id, obj.date): obj for obj in existing_qs}
+
+    daily_records_to_create = []
+    daily_records_to_update = []
+
     for record in realtime_records:
-        daily_records.append(EntityDailyStatus(
-            entity_id=record['entity_id'],
-            date=record['created__date'],
-            connectivity_speed=record.get('connectivity_speed_avg'),
-            connectivity_upload_speed=record.get('connectivity_upload_speed_avg'),
-            connectivity_latency=record.get('connectivity_latency_avg'),
-            roundtrip_time=record.get('roundtrip_time_avg'),
-            jitter_download=record.get('jitter_download_avg'),
-            jitter_upload=record.get('jitter_upload_avg'),
-            rtt_packet_loss_pct=record.get('rtt_packet_loss_pct_avg'),
-            live_data_source=statistics_configs.QOS_SOURCE,
-        ))
-        processed_entity_ids.add(record['entity_id'])
-        if record.get('created__date'):
-            processed_dates.add(record['created__date'])
+        entity_id = record['entity_id']
+        date = record['created__date']
+        key = (entity_id, date)
 
-        if len(daily_records) == 5000:
-            logger.info('Entity QoS - Bulk creating 5000 EntityDailyStatus records.')
-            EntityDailyStatus.objects.bulk_create(daily_records, ignore_conflicts=True)
-            daily_records = []
+        if key in existing_map:
+            obj = existing_map[key]
+            obj.connectivity_speed = record.get('connectivity_speed_avg')
+            obj.connectivity_upload_speed = record.get('connectivity_upload_speed_avg')
+            obj.connectivity_latency = record.get('connectivity_latency_avg')
+            obj.roundtrip_time = record.get('roundtrip_time_avg')
+            obj.jitter_download = record.get('jitter_download_avg')
+            obj.jitter_upload = record.get('jitter_upload_avg')
+            obj.rtt_packet_loss_pct = record.get('rtt_packet_loss_pct_avg')
+            daily_records_to_update.append(obj)
+        else:
+            daily_records_to_create.append(EntityDailyStatus(
+                entity_id=entity_id,
+                date=date,
+                connectivity_speed=record.get('connectivity_speed_avg'),
+                connectivity_upload_speed=record.get('connectivity_upload_speed_avg'),
+                connectivity_latency=record.get('connectivity_latency_avg'),
+                roundtrip_time=record.get('roundtrip_time_avg'),
+                jitter_download=record.get('jitter_download_avg'),
+                jitter_upload=record.get('jitter_upload_avg'),
+                rtt_packet_loss_pct=record.get('rtt_packet_loss_pct_avg'),
+                live_data_source=statistics_configs.QOS_SOURCE,
+            ))
 
-    if daily_records:
-        logger.info('Entity QoS - Bulk creating remaining %d EntityDailyStatus records.', len(daily_records))
-        EntityDailyStatus.objects.bulk_create(daily_records, ignore_conflicts=True)
+        processed_entity_ids.add(entity_id)
+        if date:
+            processed_dates.add(date)
+
+        if len(daily_records_to_create) >= 5000:
+            EntityDailyStatus.objects.bulk_create(daily_records_to_create, ignore_conflicts=True)
+            logger.info('Entity QoS - Bulk created %d EntityDailyStatus records.', len(daily_records_to_create))
+            daily_records_to_create = []
+
+        if len(daily_records_to_update) >= 5000:
+            EntityDailyStatus.objects.bulk_update(
+                daily_records_to_update,
+                ['connectivity_speed', 'connectivity_upload_speed', 'connectivity_latency',
+                 'roundtrip_time', 'jitter_download', 'jitter_upload', 'rtt_packet_loss_pct'],
+            )
+            logger.info('Entity QoS - Bulk updated %d EntityDailyStatus records.', len(daily_records_to_update))
+            daily_records_to_update = []
+
+    if daily_records_to_create:
+        EntityDailyStatus.objects.bulk_create(daily_records_to_create, ignore_conflicts=True)
+        logger.info('Entity QoS - Bulk created %d EntityDailyStatus records.', len(daily_records_to_create))
+
+    if daily_records_to_update:
+        EntityDailyStatus.objects.bulk_update(
+            daily_records_to_update,
+            ['connectivity_speed', 'connectivity_upload_speed', 'connectivity_latency',
+             'roundtrip_time', 'jitter_download', 'jitter_upload', 'rtt_packet_loss_pct'],
+        )
+        logger.info('Entity QoS - Bulk updated %d EntityDailyStatus records.', len(daily_records_to_update))
 
     if not processed_entity_ids:
         logger.info('Entity QoS - No entities processed, skipping registration and weekly aggregation.')
         return
-
-    # --- Auto-register entities in EntityRealTimeRegistration ---
-    from datetime import datetime as dt_class
-    from django.utils import timezone
 
     min_date = min(processed_dates) if processed_dates else (
         start_date or current_datetime.date()
@@ -1418,7 +1463,7 @@ def sync_entity_qos_realtime_data(country_id, entity_type_code='health', start_d
 
     country_obj = Country.objects.get(id=country_id)
     current_date = min_date
-    while current_date <= max_date:
+    while current_date < max_date:
         finalize_previous_day_entity_data.delay(None, country_obj.id, current_date, entity_type_code)
         current_date += timedelta(days=7)
     # Ensure the final week is covered

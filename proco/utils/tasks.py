@@ -557,7 +557,6 @@ def populate_entity_registration_data():
 
 @app.task(soft_time_limit=10 * 60 * 60, time_limit=10 * 60 * 60)
 def update_entity_records():
-    from proco.entities.models import Entity
     from proco.connection_statistics.models import EntityWeeklyStatus
     from proco.schools.constants import statuses_schema
     from datetime import timedelta
@@ -576,18 +575,20 @@ def update_entity_records():
 
         updated_weekly_statuses = EntityWeeklyStatus.objects.filter(
             modified__gte=time_threshold
-        ).select_related('entity')
+        ).select_related('entity', 'entity__last_weekly_status')
 
-        for status in updated_weekly_statuses:
+        entities_to_update = {}
+
+        for status in updated_weekly_statuses.iterator(chunk_size=5000):
             entity = status.entity
             if not entity:
                 continue
 
-            update_fields = []
+            needs_update = False
 
             if not entity.last_weekly_status or entity.last_weekly_status.date < status.date:
                 entity.last_weekly_status = status
-                update_fields.append('last_weekly_status')
+                needs_update = True
 
             if entity.last_weekly_status_id == status.id:
                 connectivity_status = 'unknown'
@@ -598,14 +599,23 @@ def update_entity_records():
 
                 if entity.connectivity_status != connectivity_status:
                     entity.connectivity_status = connectivity_status
-                    update_fields.append('connectivity_status')
+                    needs_update = True
 
                 if entity.coverage_status != 'unknown':
                     entity.coverage_status = 'unknown'
-                    update_fields.append('coverage_status')
+                    needs_update = True
 
-            if update_fields:
-                entity.save(update_fields=update_fields)
+            if needs_update:
+                entities_to_update[entity.id] = entity
+
+        if entities_to_update:
+            from proco.entities.models import Entity
+            Entity.objects.bulk_update(
+                list(entities_to_update.values()),
+                ['last_weekly_status', 'connectivity_status', 'coverage_status'],
+                batch_size=5000
+            )
+            logger.info('Bulk updated {0} entities.'.format(len(entities_to_update)))
 
         background_task_utilities.task_on_complete(task_instance)
     else:

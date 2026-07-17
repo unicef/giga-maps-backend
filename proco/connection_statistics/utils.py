@@ -278,7 +278,6 @@ def aggregate_entity_daily_status_to_entity_weekly_status(country, date, entity_
 
     for entity_id in entity_ids:
         updated = True
-        created = False
 
         entity_weekly = EntityWeeklyStatus.objects.filter(
             entity_id=entity_id, week=monday_week_no, year=monday_year,
@@ -291,13 +290,10 @@ def aggregate_entity_daily_status_to_entity_weekly_status(country, date, entity_
                 week=monday_week_no,
                 date=monday_date,
             )
-            created = True
 
-        aggregate_qs = EntityDailyStatus.objects.all().filter(
+        aggregate_qs = EntityDailyStatus.objects.filter(
             entity_id=entity_id, date__range=[monday_date, sunday_date],
         )
-        if date_utilities.get_year_from_date(date) >= 2024:
-            aggregate_qs = aggregate_qs.filter(entity__deleted__isnull=True)
 
         aggregate = aggregate_qs.aggregate(
             Avg('connectivity_speed'), Avg('connectivity_upload_speed'), Avg('connectivity_latency'),
@@ -324,20 +320,20 @@ def aggregate_entity_daily_status_to_entity_weekly_status(country, date, entity_
         # Update the entity's last_weekly_status and connectivity_status
         entity = entity_weekly.entity
         update_fields = []
-        
+
         status = 'unknown'
         if entity_weekly.connectivity_speed is not None:
             status = statuses_schema.get_connectivity_status_by_connectivity_speed(entity_weekly.connectivity_speed)
-            
+
         if entity.connectivity_status != status:
             entity.connectivity_status = status
             update_fields.append('connectivity_status')
-            
+
         if entity.last_weekly_status_id != entity_weekly.id:
             if not entity.last_weekly_status or entity.last_weekly_status.date < entity_weekly.date:
                 entity.last_weekly_status = entity_weekly
                 update_fields.append('last_weekly_status')
-                
+
         if update_fields:
             entity.save(update_fields=update_fields)
 
