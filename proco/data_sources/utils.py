@@ -1111,6 +1111,10 @@ def load_entity_qos_data_source_response_to_model(entity_type_code='health'):
                     )
                     continue
 
+                if not Entity.objects.filter(country=country, entity_type=entity_type, deleted__isnull=True).exists():
+                    logger.info("Skipping %s - no %s entities exist locally for this country", table_name, entity_type_code)
+                    continue
+
                 if country_codes_for_exclusion and table_name in country_codes_for_exclusion:
                     logger.warning(
                         'Country (%s) excluded from entity QoS data pull. Skipping.', table_name
@@ -1164,15 +1168,24 @@ def load_entity_qos_data_source_response_to_model(entity_type_code='health'):
                         logger.info('Entity QoS - No data to update for table: %s.', table_name)
                         continue
 
+                    # Pre-fetch local entities for this country into memory
+                    local_entities = {
+                        str(e.giga_id): e for e in Entity.objects.filter(
+                            country=country,
+                            entity_type__code=entity_type_code,
+                            deleted__isnull=True,
+                        )
+                    }
+
                     insert_entries = []
 
                     for _, row in loaded_data_df.iterrows():
-                        # Look up entity by giga_id instead of school by giga_id_school
                         giga_id = (
                             row.get('giga_id')
                             or row.get('entity_id_giga')
                             or row.get('giga_id_health')
                             or row.get('health_id_giga')
+                            or row.get('school_id_giga')
                             or row.get('giga_id_school')
                             or row.get('school_id')
                         )
@@ -1180,17 +1193,9 @@ def load_entity_qos_data_source_response_to_model(entity_type_code='health'):
                             logger.warning('Entity QoS - Row missing giga_id. Skipping.')
                             continue
 
-                        entity = Entity.objects.filter(
-                            country=country,
-                            giga_id=giga_id,
-                            entity_type__code=entity_type_code,
-                            deleted__isnull=True,
-                        ).first()
+                        entity = local_entities.get(str(giga_id))
 
                         if not entity:
-                            logger.warning(
-                                'Entity with giga_id (%s) not found in DB. Skipping.', giga_id
-                            )
                             continue
 
                         row_dict = row.replace({np.nan: None, pd.NaT: None}).to_dict()
@@ -1198,6 +1203,14 @@ def load_entity_qos_data_source_response_to_model(entity_type_code='health'):
                         speed_download = row_dict.get('speed_download')
                         speed_upload = row_dict.get('speed_upload')
                         latency = row_dict.get('latency')
+                        
+                        speed_download_probe = row_dict.get('speed_download_probe')
+                        speed_upload_probe = row_dict.get('speed_upload_probe')
+                        latency_probe = row_dict.get('latency_probe')
+                        
+                        speed_download_mean = row_dict.get('speed_download_mean')
+                        speed_upload_mean = row_dict.get('speed_upload_mean')
+                        
                         timestamp = row_dict.get('timestamp', pull_datetime)
 
                         # Convert Mbps to bps if present
@@ -1205,6 +1218,14 @@ def load_entity_qos_data_source_response_to_model(entity_type_code='health'):
                             speed_download = speed_download * 1000 * 1000
                         if speed_upload is not None:
                             speed_upload = speed_upload * 1000 * 1000
+                        if speed_download_probe is not None:
+                            speed_download_probe = speed_download_probe * 1000 * 1000
+                        if speed_upload_probe is not None:
+                            speed_upload_probe = speed_upload_probe * 1000 * 1000
+                        if speed_download_mean is not None:
+                            speed_download_mean = speed_download_mean * 1000 * 1000
+                        if speed_upload_mean is not None:
+                            speed_upload_mean = speed_upload_mean * 1000 * 1000
 
                         insert_entries.append({
                             'entity': entity,
@@ -1212,6 +1233,11 @@ def load_entity_qos_data_source_response_to_model(entity_type_code='health'):
                             'speed_download': speed_download,
                             'speed_upload': speed_upload,
                             'latency': latency,
+                            'speed_download_probe': speed_download_probe,
+                            'speed_upload_probe': speed_upload_probe,
+                            'latency_probe': latency_probe,
+                            'speed_download_mean': speed_download_mean,
+                            'speed_upload_mean': speed_upload_mean,
                             'roundtrip_time': row_dict.get('roundtrip_time'),
                             'jitter_download': row_dict.get('jitter_download'),
                             'jitter_upload': row_dict.get('jitter_upload'),
@@ -1258,6 +1284,11 @@ def bulk_create_entity_realtime_connectivity(entries):
             connectivity_speed=entry.get('speed_download'),
             connectivity_upload_speed=entry.get('speed_upload'),
             connectivity_latency=entry.get('latency'),
+            connectivity_speed_probe=entry.get('speed_download_probe'),
+            connectivity_upload_speed_probe=entry.get('speed_upload_probe'),
+            connectivity_latency_probe=entry.get('latency_probe'),
+            connectivity_speed_mean=entry.get('speed_download_mean'),
+            connectivity_upload_speed_mean=entry.get('speed_upload_mean'),
             roundtrip_time=entry.get('roundtrip_time'),
             jitter_download=entry.get('jitter_download'),
             jitter_upload=entry.get('jitter_upload'),
@@ -1319,6 +1350,11 @@ def sync_entity_qos_realtime_data(country_id, entity_type_code='health', start_d
         connectivity_speed_avg=Avg('connectivity_speed'),
         connectivity_upload_speed_avg=Avg('connectivity_upload_speed'),
         connectivity_latency_avg=Avg('connectivity_latency'),
+        connectivity_speed_probe_avg=Avg('connectivity_speed_probe'),
+        connectivity_upload_speed_probe_avg=Avg('connectivity_upload_speed_probe'),
+        connectivity_latency_probe_avg=Avg('connectivity_latency_probe'),
+        connectivity_speed_mean_avg=Avg('connectivity_speed_mean'),
+        connectivity_upload_speed_mean_avg=Avg('connectivity_upload_speed_mean'),
         roundtrip_time_avg=Avg('roundtrip_time'),
         jitter_download_avg=Avg('jitter_download'),
         jitter_upload_avg=Avg('jitter_upload'),
@@ -1350,6 +1386,11 @@ def sync_entity_qos_realtime_data(country_id, entity_type_code='health', start_d
             obj.connectivity_speed = record.get('connectivity_speed_avg')
             obj.connectivity_upload_speed = record.get('connectivity_upload_speed_avg')
             obj.connectivity_latency = record.get('connectivity_latency_avg')
+            obj.connectivity_speed_probe = record.get('connectivity_speed_probe_avg')
+            obj.connectivity_upload_speed_probe = record.get('connectivity_upload_speed_probe_avg')
+            obj.connectivity_latency_probe = record.get('connectivity_latency_probe_avg')
+            obj.connectivity_speed_mean = record.get('connectivity_speed_mean_avg')
+            obj.connectivity_upload_speed_mean = record.get('connectivity_upload_speed_mean_avg')
             obj.roundtrip_time = record.get('roundtrip_time_avg')
             obj.jitter_download = record.get('jitter_download_avg')
             obj.jitter_upload = record.get('jitter_upload_avg')
@@ -1362,6 +1403,11 @@ def sync_entity_qos_realtime_data(country_id, entity_type_code='health', start_d
                 connectivity_speed=record.get('connectivity_speed_avg'),
                 connectivity_upload_speed=record.get('connectivity_upload_speed_avg'),
                 connectivity_latency=record.get('connectivity_latency_avg'),
+                connectivity_speed_probe=record.get('connectivity_speed_probe_avg'),
+                connectivity_upload_speed_probe=record.get('connectivity_upload_speed_probe_avg'),
+                connectivity_latency_probe=record.get('connectivity_latency_probe_avg'),
+                connectivity_speed_mean=record.get('connectivity_speed_mean_avg'),
+                connectivity_upload_speed_mean=record.get('connectivity_upload_speed_mean_avg'),
                 roundtrip_time=record.get('roundtrip_time_avg'),
                 jitter_download=record.get('jitter_download_avg'),
                 jitter_upload=record.get('jitter_upload_avg'),
@@ -1382,6 +1428,8 @@ def sync_entity_qos_realtime_data(country_id, entity_type_code='health', start_d
             EntityDailyStatus.objects.bulk_update(
                 daily_records_to_update,
                 ['connectivity_speed', 'connectivity_upload_speed', 'connectivity_latency',
+                 'connectivity_speed_probe', 'connectivity_upload_speed_probe', 'connectivity_latency_probe',
+                 'connectivity_speed_mean', 'connectivity_upload_speed_mean',
                  'roundtrip_time', 'jitter_download', 'jitter_upload', 'rtt_packet_loss_pct'],
             )
             logger.info('Entity QoS - Bulk updated %d EntityDailyStatus records.', len(daily_records_to_update))
@@ -1395,6 +1443,8 @@ def sync_entity_qos_realtime_data(country_id, entity_type_code='health', start_d
         EntityDailyStatus.objects.bulk_update(
             daily_records_to_update,
             ['connectivity_speed', 'connectivity_upload_speed', 'connectivity_latency',
+             'connectivity_speed_probe', 'connectivity_upload_speed_probe', 'connectivity_latency_probe',
+             'connectivity_speed_mean', 'connectivity_upload_speed_mean',
              'roundtrip_time', 'jitter_download', 'jitter_upload', 'rtt_packet_loss_pct'],
         )
         logger.info('Entity QoS - Bulk updated %d EntityDailyStatus records.', len(daily_records_to_update))

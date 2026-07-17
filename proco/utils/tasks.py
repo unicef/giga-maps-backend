@@ -580,7 +580,6 @@ def update_entity_records():
         entities_to_update = {}
 
         for status in updated_weekly_statuses.iterator(chunk_size=5000):
-            # Crucial corner case fix: reuse the in-memory entity if we've already modified it in this batch!
             entity = entities_to_update.get(status.entity_id) or status.entity
             if not entity:
                 continue

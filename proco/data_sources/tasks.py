@@ -1107,8 +1107,16 @@ def clean_old_live_data():
             if match_ids:
                 entity_qos_latest_ids.extend(match_ids)
 
-        # Delete old entries but keep latest version per country
-        statistics_models.EntityRealTimeConnectivity.objects.exclude(id__in=entity_qos_latest_ids).delete()
+        # Delete old entries for QoS (keep latest version per country)
+        statistics_models.EntityRealTimeConnectivity.objects.filter(
+            live_data_source=statistics_configs.QOS_SOURCE
+        ).exclude(id__in=entity_qos_latest_ids).delete()
+        
+        # For non-QoS sources (like Giga Meter), just delete older than 30 days
+        statistics_models.EntityRealTimeConnectivity.objects.exclude(
+            live_data_source=statistics_configs.QOS_SOURCE
+        ).filter(created__lt=older_then_date).delete()
+        
         task_instance.info('"EntityRealTimeConnectivity" data table completed')
 
         logger.debug('Deleting all the rows from "BackgroundTask" Data Table which is older than: '

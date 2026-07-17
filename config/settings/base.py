@@ -444,7 +444,7 @@ DATA_SOURCE_CONFIG = {
     'QOS': {
         'SHARE_NAME': env('QOS_SHARE_NAME', default='gold'),
         'SCHEMA_NAME': env('QOS_SCHEMA_NAME', default='qos'),
-        'ENTITY_SCHEMA_NAME': env('QOS_ENTITY_SCHEMA_NAME', default='health-master'),
+        'ENTITY_SCHEMA_NAME': env('QOS_ENTITY_SCHEMA_NAME', default='qos'),
         'SHARE_CREDENTIALS_VERSION': env('QOS_SHARE_CREDENTIALS_VERSION', default=1),
         'ENDPOINT': env('QOS_ENDPOINT', default=None),
         'BEARER_TOKEN': env('QOS_BEARER_TOKEN', default=None),
