@@ -150,13 +150,13 @@ def finalize_setup(sender, **kwargs):
             'schedule': crontab(minute=30, hour='10,16,22'),
             'args': (),
         },
-        'proco.data_sources.tasks.update_entity_qos_data': {
-            'task': 'proco.data_sources.tasks.update_entity_qos_data',
-            # Executes once a day at 5:00 AM
-            'schedule': crontab(hour=5, minute=0),
-            'args': (),
-            'kwargs': {'today': False},
-        },
+        # 'proco.data_sources.tasks.update_entity_qos_data': {
+        #     'task': 'proco.data_sources.tasks.update_entity_qos_data',
+        #     # Executes once a day at 5:00 AM
+        #     'schedule': crontab(hour=5, minute=0),
+        #     'args': (),
+        #     'kwargs': {'today': False},
+        # },
         'proco.utils.tasks.populate_entity_registration_data': {
             'task': 'proco.utils.tasks.populate_entity_registration_data',
             # Executes 4 times daily (offset from school equivalent by 5 minutes)

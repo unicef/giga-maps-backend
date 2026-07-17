@@ -1112,11 +1112,6 @@ def clean_old_live_data():
             live_data_source=statistics_configs.QOS_SOURCE
         ).exclude(id__in=entity_qos_latest_ids).delete()
         
-        # For non-QoS sources (like Giga Meter), just delete older than 30 days
-        statistics_models.EntityRealTimeConnectivity.objects.exclude(
-            live_data_source=statistics_configs.QOS_SOURCE
-        ).filter(created__lt=older_then_date).delete()
-        
         task_instance.info('"EntityRealTimeConnectivity" data table completed')
 
         logger.debug('Deleting all the rows from "BackgroundTask" Data Table which is older than: '
@@ -1864,27 +1859,21 @@ class EntityAggregationOngoingException(Exception):
 ENTITY_GIGA_METER_MAX_RETRIES = 3
 
 
-def fetch_entity_giga_meter_ping_data(entity_type_code, start_date, end_date, country_iso3, logger):
+def fetch_entity_giga_meter_ping_data(entity_type_code, country_iso3, logger):
     """
     Fetch live measurement data from the entity Giga Meter API for a specific country.
-    Iterates through pages and yields records.
+    Iterates through pages and yields all available records.
 
     Endpoint format:
         {BASE_URL}/api/v1/measurements/v2/sandbox
             ?entity_type={entity_type_code}
             &country_iso3_code={country_iso3}
-            &filterBy=timestamp&filterCondition=gt&filterValue={start_date}T00:00:00Z
             &orderBy=-timestamp
             &size={page_size}
             &page={page}
 
-    This mirrors sync_dailycheckapp_realtime_data() query parameter pattern from
-    data_sources/utils.py but adapted for the entity endpoint.
-
     Args:
         entity_type_code: The entity type code (e.g. 'health').
-        start_date: Start date for the data range.
-        end_date: End date for the data range.
         country_iso3: ISO3 country code (e.g. 'KEN').
         logger: Logger instance.
 
@@ -1922,17 +1911,12 @@ def fetch_entity_giga_meter_ping_data(entity_type_code, start_date, end_date, co
     }
     headers = source_utilities.get_request_headers(request_config, api_code=api_code)
 
-    # Use lte end_date so the API (which sorts by -timestamp) starts returning from our end_date downwards
-    filter_value = '{date}T23:59:59Z'.format(date=end_date.strftime('%Y-%m-%d'))
     page = 0
 
     while True:
         params = {
             'entity_type': entity_type_code,
             'country_iso3_code': country_iso3,
-            'filterBy': 'timestamp',
-            'filterCondition': 'lte',
-            'filterValue': filter_value,
             'orderBy': '-timestamp',
             'size': page_size,
             'page': page,
@@ -1978,6 +1962,7 @@ def fetch_entity_giga_meter_ping_data(entity_type_code, start_date, end_date, co
                     or record.get(f'giga_id_{entity_type_code}')
                 )
                 if not giga_id:
+                    logger.error(f"Missing giga_id in record! Keys available: {list(record.keys())}")
                     continue
 
                 # Parse timestamp to date
@@ -1988,18 +1973,9 @@ def fetch_entity_giga_meter_ping_data(entity_type_code, start_date, end_date, co
                             timestamp_raw.replace('Z', '+00:00')
                         ).date()
                     except (ValueError, AttributeError):
-                        record_date = start_date
+                        record_date = core_utilities.get_current_datetime_object().date()
                 else:
-                    record_date = start_date
-
-                # Respect the end_date bound (though the API filterCondition=lte handles this mostly)
-                if record_date > end_date:
-                    continue
-
-                if record_date < start_date:
-                    # Because it's ordered by -timestamp, all subsequent records will also be < start_date
-                    # We can safely break out of the record loop, and we'll break pagination below
-                    break
+                    record_date = core_utilities.get_current_datetime_object().date()
 
                 yield {
                     'timestamp_date__date': record_date,
@@ -2012,10 +1988,6 @@ def fetch_entity_giga_meter_ping_data(entity_type_code, start_date, end_date, co
 
             # If we received fewer records than page_size, there's no more data
             if len(data) < page_size:
-                break
-                
-            # If the last record we processed is older than our start date, we can stop fetching pages
-            if data and record_date < start_date:
                 break
 
             page += 1
@@ -2206,7 +2178,7 @@ def bulk_upsert_entity_daily_status(batch):
             )
 
 
-def run_entity_ping_aggregation(entity_type_code, start_date, end_date, task_instance, logger):
+def run_entity_ping_aggregation(entity_type_code, task_instance, logger):
     """
     Run entity ping aggregation: fetch measurements per-country from the Giga Meter API,
     aggregate by (entity, date), and upsert into EntityDailyStatus.
@@ -2216,15 +2188,11 @@ def run_entity_ping_aggregation(entity_type_code, start_date, end_date, task_ins
 
     Args:
         entity_type_code: Entity type code (e.g. 'health').
-        start_date: Start date.
-        end_date: End date.
         task_instance: Background task instance for logging.
         logger: Logger instance.
     """
-    logger.info('Entity Giga Meter - Aggregating measurement data from %s to %s', start_date, end_date)
-    task_instance.info('Entity Giga Meter - Aggregating {0} data from {1} to {2}'.format(
-        entity_type_code, start_date, end_date,
-    ))
+    logger.info('Entity Giga Meter - Aggregating measurement data for %s', entity_type_code)
+    task_instance.info('Entity Giga Meter - Aggregating {0} data'.format(entity_type_code))
 
     # Get all countries that have entities of this type
     country_iso3_list = list(
@@ -2243,11 +2211,13 @@ def run_entity_ping_aggregation(entity_type_code, start_date, end_date, task_ins
     task_instance.info('Entity Giga Meter - Processing {0} countries'.format(len(country_iso3_list)))
 
     total_upserted = 0
+    current_datetime = core_utilities.get_current_datetime_object()
+    current_date = current_datetime.date()
 
     for country_iso3 in country_iso3_list:
         try:
             raw_rows = list(fetch_entity_giga_meter_ping_data(
-                entity_type_code, start_date, end_date, country_iso3, logger,
+                entity_type_code, country_iso3, logger,
             ))
 
             if not raw_rows:
@@ -2268,6 +2238,7 @@ def run_entity_ping_aggregation(entity_type_code, start_date, end_date, task_ins
 
             # Convert to EntityDailyStatus instances
             batch = []
+            unique_dates = set()
             for data in aggregated_records:
                 batch.append(statistics_models.EntityDailyStatus(
                     entity=data['entity'],
@@ -2279,22 +2250,18 @@ def run_entity_ping_aggregation(entity_type_code, start_date, end_date, task_ins
                     is_connected_true=data['is_connected'],
                     is_connected_all=data['is_connected'],
                 ))
+                unique_dates.add(data['date'])
 
             # Upsert
             bulk_upsert_entity_daily_status(batch)
             total_upserted += len(batch)
 
-            logger.info('Entity Giga Meter - Country %s: upserted %d records', country_iso3, len(batch))
+            logger.info('Entity Giga Meter - Country %s: upserted %d records across %d dates', country_iso3, len(batch), len(unique_dates))
 
-            # Auto-aggregate to WeeklyStatus and ensure RealTimeRegistration
+            # Auto-aggregate to WeeklyStatus
             country_obj = Country.objects.get(iso3_format=country_iso3)
-            current_date = start_date
-            while current_date < end_date:
-                finalize_previous_day_entity_data.delay(None, country_obj.id, current_date, entity_type_code)
-                current_date += timedelta(days=7)
-            
-            # Ensure the final week is covered
-            finalize_previous_day_entity_data.delay(None, country_obj.id, end_date, entity_type_code)
+            for aggregate_date in unique_dates:
+                finalize_previous_day_entity_data.delay(None, country_obj.id, aggregate_date, entity_type_code)
 
             # Auto-register entities for realtime data
 
@@ -2317,11 +2284,11 @@ def run_entity_ping_aggregation(entity_type_code, start_date, end_date, task_ins
                     if reg.rt_source != statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE:
                         reg.rt_source = statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE
                         updated = True
-                    if not reg.rt_registration_date or reg.rt_registration_date.date() != start_date:
+                    if not reg.rt_registration_date or reg.rt_registration_date.date() != current_date:
                         if reg.rt_registration_date and timezone.is_aware(reg.rt_registration_date):
-                            start_datetime = timezone.make_aware(datetime.combine(start_date, datetime.min.time()))
+                            start_datetime = timezone.make_aware(datetime.combine(current_date, datetime.min.time()))
                         else:
-                            start_datetime = datetime.combine(start_date, datetime.min.time())
+                            start_datetime = datetime.combine(current_date, datetime.min.time())
                         reg.rt_registration_date = start_datetime
                         updated = True
 
@@ -2329,9 +2296,9 @@ def run_entity_ping_aggregation(entity_type_code, start_date, end_date, task_ins
                         to_update.append(reg)
                 else:
                     if settings.USE_TZ:
-                        start_datetime = timezone.make_aware(datetime.combine(start_date, datetime.min.time()))
+                        start_datetime = timezone.make_aware(datetime.combine(current_date, datetime.min.time()))
                     else:
-                        start_datetime = datetime.combine(start_date, datetime.min.time())
+                        start_datetime = datetime.combine(current_date, datetime.min.time())
 
                     to_create.append(statistics_models.EntityRealTimeRegistration(
                         entity=entity_obj,
@@ -2366,7 +2333,6 @@ def run_entity_ping_aggregation(entity_type_code, start_date, end_date, task_ins
 )
 def update_entity_live_data_from_giga_meter(
     entity_type_code='health',
-    date_str=None,
     force_tasks=False,
     retry_attempt=0,
 ):
@@ -2378,7 +2344,6 @@ def update_entity_live_data_from_giga_meter(
 
     Args:
         entity_type_code: The entity type code (e.g. 'health', 'library'). Default: 'health'.
-        date_str: Optional date string in YYYY-MM-DD format. Defaults to today.
         force_tasks: If True, generates a unique task key to bypass deduplication.
         retry_attempt: Current retry attempt count (for internal retry logic).
 
@@ -2410,23 +2375,14 @@ def update_entity_live_data_from_giga_meter(
         logger.error(f'Found running job with key "{task_key}", skipping.')
         return
 
-    if date_str:
-        target_date = core_utilities.get_timezone_converted_value(
-            datetime.strptime(date_str, '%Y-%m-%d')
-        ).date()
-    else:
-        target_date = core_utilities.get_current_datetime_object().date()
-
     try:
         logger.info(
-            f"Entity Giga Meter - Starting {entity_type_code} ping aggregation for {target_date} "
+            f"Entity Giga Meter - Starting {entity_type_code} ping aggregation "
             f"(attempt {retry_attempt}/{ENTITY_GIGA_METER_MAX_RETRIES})"
         )
 
         run_entity_ping_aggregation(
             entity_type_code=entity_type_code,
-            start_date=target_date,
-            end_date=target_date,
             task_instance=task_instance,
             logger=logger,
         )
@@ -2450,15 +2406,13 @@ def update_entity_live_data_from_giga_meter(
             kwargs={
                 'entity_type_code': entity_type_code,
                 'force_tasks': force_tasks,
-                'retry_attempt': next_attempt,
+                'retry_attempt': next_attempt
             },
-            countdown=15 * 60,
+            countdown=60 * 5
         )
-        return
-
-    except Exception as exc:
-        logger.exception("Entity Giga Meter - Error during ping aggregation")
-        task_instance.info(f"Entity Giga Meter - Error occurred: {exc}")
+    except Exception as e:
+        logger.error(f"Entity Giga Meter - Error during ping aggregation for {entity_type_code}: {e}")
+        task_instance.info(f"Entity Giga Meter - Error: {e}")
         raise
 
     finally:
