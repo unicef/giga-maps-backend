@@ -11,7 +11,7 @@ from model_utils.models import TimeStampedModel
 from proco.connection_statistics.config import app_config as statistics_configs
 from proco.core import models as core_models
 from proco.core.managers import BaseManager
-from proco.locations.models import Country
+from proco.locations.models import Country, CountryAdminMetadata
 from proco.schools.constants import statuses_schema
 from proco.schools.models import School
 from proco.utils.dates import get_current_week, get_current_year
@@ -346,6 +346,14 @@ class SchoolDailyStatus(ConnectivityStatistics, TimeStampedModel, models.Model):
                              condition=Q(deleted=None),
                              name='schooldailystatus_unique_without_deleted'),
         ]
+        indexes = [
+            # P1 (perf): drives the live data-layer join/graph predicate
+            # (school_id = X AND date BETWEEN a AND b AND live_data_source IN (...)); partial on the
+            # live (non-deleted) rows the queries read.
+            models.Index(fields=['school', 'date', 'live_data_source'],
+                         condition=Q(deleted__isnull=True),
+                         name='sds_school_date_source_idx'),
+        ]
 
     def __str__(self):
         year, week, weekday = self.date.isocalendar()
@@ -359,6 +367,98 @@ class SchoolDailyStatus(ConnectivityStatistics, TimeStampedModel, models.Model):
         else:
             self.deleted = timezone.now()
             self.save()
+
+
+# P1 (perf): numeric metric columns from ConnectivityStatistics that the data-layer aggregation
+# reduces on the fly. The weekly rollup stores decomposable partials (SUM/COUNT/MIN/MAX) for each,
+# so AVG = SUM/COUNT and MIN/MAX/SUM recombine exactly across any set of whole weeks. Kept generic
+# (driven by this list) so new QoS columns only need to be appended here, not hardcoded per column.
+ROLLUP_METRIC_COLUMNS = (
+    'connectivity_speed',
+    'connectivity_upload_speed',
+    'connectivity_latency',
+    'connectivity_speed_probe',
+    'connectivity_upload_speed_probe',
+    'connectivity_latency_probe',
+    'connectivity_speed_mean',
+    'connectivity_upload_speed_mean',
+    'roundtrip_time',
+    'jitter_download',
+    'jitter_upload',
+    'rtt_packet_loss_pct',
+    'uptime',
+    'is_connected_true',
+    'is_connected_all',
+)
+
+
+def rollup_partial_field_names(column):
+    """Return the (sum, count, min, max) partial column names for a metric column."""
+    return (
+        '{0}_sum'.format(column),
+        '{0}_count'.format(column),
+        '{0}_min'.format(column),
+        '{0}_max'.format(column),
+    )
+
+
+class SchoolWeeklyRollup(TimeStampedModel, models.Model):
+    """
+    P1 (perf): Per-(school, ISO week, live_data_source) rollup of SchoolDailyStatus that stores
+    decomposable partials for every numeric metric column. The data-layer aggregation reads one row
+    per school per week instead of scanning the daily rows over the window, then recombines:
+      AVG(col)  = SUM(col_sum) / SUM(col_count)
+      MIN(col)  = MIN(col_min)
+      MAX(col)  = MAX(col_max)
+      SUM(col)  = SUM(col_sum)
+    Non-decomposable functions (median/percentile/custom-SQL) keep the live daily path.
+    """
+    school = models.ForeignKey(School, related_name='weekly_rollup', on_delete=models.CASCADE)
+    country = models.ForeignKey(Country, related_name='school_weekly_rollup', on_delete=models.CASCADE)
+    admin1 = models.ForeignKey(
+        CountryAdminMetadata, related_name='school_weekly_rollup', null=True, blank=True,
+        on_delete=models.SET_NULL,
+    )
+    year = models.PositiveSmallIntegerField()
+    week = models.PositiveSmallIntegerField()
+    # Monday of the ISO week; enables range filtering (date BETWEEN start AND end) for whole-week windows.
+    date = models.DateField()
+    live_data_source = models.CharField(max_length=50, default=statistics_configs.UNKNOWN_SOURCE)
+
+    # Derived/upserted data with no soft-delete column, so use a plain manager (not BaseManager,
+    # which would inject a deleted__isnull filter).
+    objects = models.Manager()
+
+    class Meta:
+        verbose_name = _('School Weekly Rollup')
+        verbose_name_plural = _('School Weekly Rollup')
+        ordering = ('id',)
+        constraints = [
+            UniqueConstraint(fields=['school', 'year', 'week', 'live_data_source'],
+                             name='schoolweeklyrollup_unique'),
+        ]
+        indexes = [
+            # Drives the country/admin1 window read: filter by geo + source + date range, group by school.
+            models.Index(fields=['country', 'live_data_source', 'date'],
+                         name='swr_country_source_date_idx'),
+            models.Index(fields=['admin1', 'live_data_source', 'date'],
+                         name='swr_admin1_source_date_idx'),
+            models.Index(fields=['school', 'live_data_source', 'date'],
+                         name='swr_school_source_date_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.year}W{self.week} school={self.school_id} {self.live_data_source}'
+
+
+# Attach the per-column partial fields generically so adding a metric to ROLLUP_METRIC_COLUMNS is
+# the only change required (makemigrations then picks them up).
+for _rollup_col in ROLLUP_METRIC_COLUMNS:
+    _sum_f, _count_f, _min_f, _max_f = rollup_partial_field_names(_rollup_col)
+    SchoolWeeklyRollup.add_to_class(_sum_f, models.FloatField(null=True, blank=True, default=None))
+    SchoolWeeklyRollup.add_to_class(_count_f, models.PositiveIntegerField(default=0))
+    SchoolWeeklyRollup.add_to_class(_min_f, models.FloatField(null=True, blank=True, default=None))
+    SchoolWeeklyRollup.add_to_class(_max_f, models.FloatField(null=True, blank=True, default=None))
 
 
 class RealTimeConnectivity(ConnectivityStatistics, TimeStampedModel, models.Model):

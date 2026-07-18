@@ -373,6 +373,11 @@ CONSTANCE_CONFIG = {
 CACHE_CONTROL_MAX_AGE = 24 * 60 * 60
 CACHE_CONTROL_MAX_AGE_FOR_FE = env('CACHE_CONTROL_MAX_AGE_FOR_FE', default=CACHE_CONTROL_MAX_AGE)
 
+# P1 (perf): enable reading the pre-aggregated SchoolWeeklyRollup for decomposable, whole-week
+# data-layer aggregation. Keep False until the rollup has been fully backfilled for all countries;
+# flip to True to serve reads from the rollup.
+USE_SCHOOL_WEEKLY_ROLLUP = env.bool('USE_SCHOOL_WEEKLY_ROLLUP', default=True)
+
 NOCODB_API_URL = env('NOCODB_API_URL', default=None)
 NOCODB_API_TOKEN = env('NOCODB_API_TOKEN', default=None)
 NOCODB_TABLE_ID = env('NOCODB_TABLE_ID', default=None)

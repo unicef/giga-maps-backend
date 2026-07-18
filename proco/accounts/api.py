@@ -1150,6 +1150,71 @@ class BaseDataLayerAPIViewSet(APIView):
             return parameter_col_function.get('sql').format(col_name='t."{col_name}"')
         return 'AVG(t."{col_name}")'
 
+    def use_weekly_rollup(self, kwargs):
+        """
+        P1 (perf): decide whether the country/admin1 aggregation can read the pre-aggregated
+        SchoolWeeklyRollup instead of scanning SchoolDailyStatus. Only the decomposable default-AVG
+        path, over a rollup metric column, for a whole-ISO-week window, without SQL-based
+        benchmark/legend, recombines exactly (AVG = SUM/COUNT). Everything else keeps the daily path.
+        """
+        # Operational guard: only serve from the rollup once it has been fully backfilled (flag can be
+        # kept off until then, so partially-populated geographies never return wrong all-unknown counts).
+        if not getattr(settings, 'USE_SCHOOL_WEEKLY_ROLLUP', False):
+            return False
+        if kwargs.get('parameter_col_function_sql') != 'AVG(t."{col_name}")':
+            return False
+        if kwargs.get('col_name') not in statistics_models.ROLLUP_METRIC_COLUMNS:
+            return False
+        start_date = kwargs.get('start_date')
+        end_date = kwargs.get('end_date')
+        # start_date/end_date are date objects; rollup rows are keyed on the Monday of each ISO week,
+        # so a window is exact only when it spans whole weeks (Monday .. Sunday).
+        if not (start_date and end_date):
+            return False
+        if getattr(start_date, 'weekday', None) is None or getattr(end_date, 'weekday', None) is None:
+            return False
+        if start_date.weekday() != 0 or end_date.weekday() != 6:
+            return False
+        if 'SQL:' in str(kwargs.get('benchmark_value')) or 'SQL:' in str(kwargs.get('legend_configs')):
+            return False
+        return True
+
+    def get_measure_join_and_col_function(self, kwargs):
+        """Return (measure_join_sql, col_function_sql) for either the rollup or the live daily path.
+
+        The measure_join is pre-formatted with the date/source values because the caller's
+        query.format(**kwargs) is a single pass and would not recurse into placeholders we inject.
+        """
+        join_fmt = {
+            'start_date': kwargs['start_date'],
+            'end_date': kwargs['end_date'],
+            'live_source_types': kwargs['live_source_types'],
+        }
+        if self.use_weekly_rollup(kwargs):
+            measure_join = """
+            LEFT OUTER JOIN "connection_statistics_schoolweeklyrollup" t
+                ON (
+                    "schools_school"."id" = t."school_id"
+                    AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
+                    AND t."live_data_source" IN ({live_source_types})
+                )
+            """.format(**join_fmt)
+            col_function = 'SUM(t."{col_name}_sum") / NULLIF(SUM(t."{col_name}_count"), 0)'.format(
+                col_name=kwargs['col_name'])
+            return measure_join, col_function
+
+        measure_join = """
+            LEFT OUTER JOIN "connection_statistics_schooldailystatus" t
+                ON (
+                    "schools_school"."id" = t."school_id"
+                    AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
+                    AND t."live_data_source" IN ({live_source_types})
+                    AND t."deleted" IS NULL
+                )
+        """.format(**join_fmt)
+        col_function = kwargs['parameter_col_function_sql'].format(**kwargs)
+        return measure_join, col_function
+
 
 @method_decorator([
     custom_cache_control(
@@ -1187,13 +1252,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             INNER JOIN "connection_statistics_schoolrealtimeregistration"
                 ON ("schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id")
             {school_weekly_join}
-            LEFT OUTER JOIN "connection_statistics_schooldailystatus" t
-                ON (
-                    "schools_school"."id" = t."school_id"
-                    AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
-                    AND t."live_data_source" IN ({live_source_types})
-                    AND t."deleted" IS NULL
-                )
+            {measure_join}
             WHERE (
                 "schools_school"."deleted" IS NULL
                 AND "connection_statistics_schoolrealtimeregistration"."deleted" IS NULL
@@ -1285,7 +1344,9 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             """
             kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
 
-        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
+        # P1 (perf): read the pre-aggregated weekly rollup when the layer/window allow exact
+        # recombination; otherwise fall back to the live daily-status scan.
+        kwargs['measure_join'], kwargs['col_function'] = self.get_measure_join_and_col_function(kwargs)
 
         return query.format(**kwargs)
 

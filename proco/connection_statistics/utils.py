@@ -2,6 +2,7 @@ import json
 import re
 from datetime import timedelta
 
+from django.db import connection
 from django.db.models import Avg, Q
 
 from proco.accounts.models import DataLayer
@@ -17,6 +18,7 @@ from proco.connection_statistics.models import (
     CountryDailyStatus,
     CountryWeeklyStatus,
     RealTimeConnectivity,
+    ROLLUP_METRIC_COLUMNS,
     SchoolDailyStatus,
     SchoolWeeklyStatus,
 )
@@ -122,6 +124,53 @@ def aggregate_school_daily_to_country_daily(country, date) -> bool:
         updated = True
 
     return updated
+
+
+def refresh_school_weekly_rollup(country, date) -> int:
+    """
+    P1 (perf): Upsert the SchoolWeeklyRollup partials for the ISO week containing `date`, scoped to
+    `country`. Mirrors aggregate_school_daily_to_country_daily and is meant to run alongside it so the
+    rollup stays consistent as new daily data lands. Returns the number of upserted rollup rows.
+    """
+    monday = date - timedelta(days=date.weekday())
+    sunday = monday + timedelta(days=6)
+
+    select_partials = []
+    insert_cols = []
+    update_sets = []
+    for col in ROLLUP_METRIC_COLUMNS:
+        select_partials.append(
+            'SUM(sds.{c})::float, COUNT(sds.{c}), MIN(sds.{c})::float, MAX(sds.{c})::float'.format(c=col))
+        for suffix in ('sum', 'count', 'min', 'max'):
+            insert_cols.append('{0}_{1}'.format(col, suffix))
+            update_sets.append('{0}_{1} = EXCLUDED.{0}_{1}'.format(col, suffix))
+
+    sql = """
+    INSERT INTO connection_statistics_schoolweeklyrollup
+        (created, modified, school_id, country_id, admin1_id, year, week, date, live_data_source, {insert_cols})
+    SELECT now(), now(), sds.school_id, s.country_id, s.admin1_id,
+           EXTRACT(isoyear FROM sds.date)::int, EXTRACT(week FROM sds.date)::int,
+           date_trunc('week', sds.date)::date, sds.live_data_source,
+           {select_partials}
+    FROM connection_statistics_schooldailystatus sds
+    INNER JOIN schools_school s ON s.id = sds.school_id
+    WHERE sds.deleted IS NULL AND s.deleted IS NULL AND s.country_id = %s
+      AND sds.date BETWEEN %s AND %s
+    GROUP BY sds.school_id, s.country_id, s.admin1_id,
+             EXTRACT(isoyear FROM sds.date), EXTRACT(week FROM sds.date),
+             date_trunc('week', sds.date), sds.live_data_source
+    ON CONFLICT (school_id, year, week, live_data_source)
+    DO UPDATE SET modified = now(), country_id = EXCLUDED.country_id, admin1_id = EXCLUDED.admin1_id,
+                  date = EXCLUDED.date, {update_sets}
+    """.format(
+        insert_cols=', '.join(insert_cols),
+        select_partials=',\n           '.join(select_partials),
+        update_sets=', '.join(update_sets),
+    )
+
+    with connection.cursor() as cursor:
+        cursor.execute(sql, [country.id, monday, sunday])
+        return cursor.rowcount
 
 
 def aggregate_school_daily_status_to_school_weekly_status(country, date) -> bool:

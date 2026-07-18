@@ -21,6 +21,7 @@ from proco.connection_statistics.utils import (
     aggregate_real_time_data_to_school_daily_status,
     aggregate_school_daily_status_to_school_weekly_status,
     aggregate_school_daily_to_country_daily,
+    refresh_school_weekly_rollup,
     update_country_weekly_status,
 )
 from proco.core import utils as core_utilities
@@ -873,6 +874,8 @@ def finalize_previous_day_data(_prev_result, country_id, date, *args):
 
     aggregate_real_time_data_to_school_daily_status(country, date)
     aggregate_school_daily_to_country_daily(country, date)
+    # P1 (perf): keep the per-school weekly rollup consistent with the new daily data.
+    refresh_school_weekly_rollup(country, date)
 
     weekly_data_available = aggregate_school_daily_status_to_school_weekly_status(country, date)
     if weekly_data_available:
