@@ -575,12 +575,12 @@ def update_entity_records():
 
         updated_weekly_statuses = EntityWeeklyStatus.objects.filter(
             modified__gte=time_threshold
-        ).select_related('entity', 'entity__last_weekly_status')
+        ).select_related('entity', 'entity__last_weekly_status').order_by('date')
 
         entities_to_update = {}
 
         for status in updated_weekly_statuses.iterator(chunk_size=5000):
-            entity = status.entity
+            entity = entities_to_update.get(status.entity_id) or status.entity
             if not entity:
                 continue
 
@@ -590,7 +590,7 @@ def update_entity_records():
                 entity.last_weekly_status = status
                 needs_update = True
 
-            if entity.last_weekly_status_id == status.id:
+            if getattr(entity.last_weekly_status, 'id', entity.last_weekly_status_id) == status.id:
                 connectivity_status = 'unknown'
                 if status.connectivity_speed is not None:
                     connectivity_status = statuses_schema.get_connectivity_status_by_connectivity_speed(
@@ -605,7 +605,7 @@ def update_entity_records():
                     entity.coverage_status = 'unknown'
                     needs_update = True
 
-            if needs_update:
+            if needs_update or status.entity_id in entities_to_update:
                 entities_to_update[entity.id] = entity
 
         if entities_to_update:

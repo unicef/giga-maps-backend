@@ -1,10 +1,8 @@
 import logging
-from datetime import timedelta, datetime
 
 from django.core.management.base import BaseCommand
-from proco.core.utils import get_current_datetime_object
+
 from proco.data_sources.tasks import run_entity_ping_aggregation
-from proco.utils import dates as date_utilities
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -18,16 +16,6 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
-            '-start_date', dest='start_date', type=str,
-            default=get_current_datetime_object().date().strftime('%Y-%m-%d'),
-            help='Start date in YYYY-MM-DD format. Default is today.'
-        )
-        parser.add_argument(
-            '-end_date', dest='end_date', type=str,
-            default=get_current_datetime_object().date().strftime('%Y-%m-%d'),
-            help='End date in YYYY-MM-DD format. Default is today.'
-        )
-        parser.add_argument(
             '-entity_type', dest='entity_type', type=str,
             default='health',
             help='Entity type code to process (e.g. health).'
@@ -35,26 +23,14 @@ class Command(BaseCommand):
 
     def handle(self, **options):
         logger.info('Executing Giga Meter sync for entities...')
-        try:
-            start_date = datetime.strptime(options.get('start_date'), '%Y-%m-%d').date() if isinstance(options.get('start_date'), str) else options.get('start_date')
-            end_date = datetime.strptime(options.get('end_date'), '%Y-%m-%d').date() if isinstance(options.get('end_date'), str) else options.get('end_date')
-        except ValueError:
-            logger.error('Invalid date format. Please use YYYY-MM-DD.')
-            return
         entity_type_code = options.get('entity_type')
-        
-        if start_date > end_date:
-            logger.error('Start date value can not be greater than end_date.')
-            return
 
-        # run_entity_ping_aggregation inherently handles date ranges and paginates through all data.
-        logger.info(f"Running Giga Meter sync from {start_date} to {end_date} for entity type {entity_type_code}")
-        
+        # run_entity_ping_aggregation inherently handles pagination through all available data.
+        logger.info(f"Running Giga Meter sync for entity type {entity_type_code}")
+
         try:
             run_entity_ping_aggregation(
                 entity_type_code=entity_type_code,
-                start_date=start_date.date() if hasattr(start_date, 'date') else start_date,
-                end_date=end_date.date() if hasattr(end_date, 'date') else end_date,
                 task_instance=MockTaskInstance(),
                 logger=logger,
             )
