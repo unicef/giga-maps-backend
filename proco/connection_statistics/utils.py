@@ -279,6 +279,21 @@ def aggregate_entity_daily_status_to_entity_weekly_status(country, date, entity_
     for entity_id in entity_ids:
         updated = True
 
+        aggregate_qs = EntityDailyStatus.objects.filter(
+            entity_id=entity_id, date__range=[monday_date, sunday_date],
+        )
+
+        daily_sources = set(aggregate_qs.values_list('live_data_source', flat=True))
+        from proco.connection_statistics.config import app_config as statistics_configs
+        if statistics_configs.QOS_SOURCE in daily_sources and statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE in daily_sources:
+            live_data_source = statistics_configs.DAILY_CHECK_APP_MLAB_QOS_SOURCE
+        elif statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE in daily_sources:
+            live_data_source = statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE
+        elif statistics_configs.QOS_SOURCE in daily_sources:
+            live_data_source = statistics_configs.QOS_SOURCE
+        else:
+            live_data_source = statistics_configs.UNKNOWN_SOURCE
+
         entity_weekly = EntityWeeklyStatus.objects.filter(
             entity_id=entity_id, week=monday_week_no, year=monday_year,
         ).last()
@@ -289,11 +304,11 @@ def aggregate_entity_daily_status_to_entity_weekly_status(country, date, entity_
                 year=monday_year,
                 week=monday_week_no,
                 date=monday_date,
+                live_data_source=live_data_source,
             )
-
-        aggregate_qs = EntityDailyStatus.objects.filter(
-            entity_id=entity_id, date__range=[monday_date, sunday_date],
-        )
+        else:
+            if entity_weekly.live_data_source != live_data_source:
+                entity_weekly.live_data_source = live_data_source
 
         aggregate = aggregate_qs.aggregate(
             Avg('connectivity_speed'), Avg('connectivity_upload_speed'), Avg('connectivity_latency'),

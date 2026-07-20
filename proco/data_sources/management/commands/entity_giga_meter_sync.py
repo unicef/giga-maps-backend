@@ -12,7 +12,7 @@ class MockTaskInstance:
 
 
 class Command(BaseCommand):
-    help = 'Run Giga Meter API data sync for entities.'
+    help = 'Run Giga Meter API data sync for entities (full backfill - fetches ALL data).'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -22,18 +22,19 @@ class Command(BaseCommand):
         )
 
     def handle(self, **options):
-        logger.info('Executing Giga Meter sync for entities...')
+        logger.info('Executing Giga Meter FULL sync for entities...')
         entity_type_code = options.get('entity_type')
 
-        # run_entity_ping_aggregation inherently handles pagination through all available data.
-        logger.info(f"Running Giga Meter sync for entity type {entity_type_code}")
+        logger.info(f"Running Giga Meter full sync for entity type {entity_type_code}")
 
         try:
             run_entity_ping_aggregation(
                 entity_type_code=entity_type_code,
                 task_instance=MockTaskInstance(),
                 logger=logger,
+                full_sync=True,
             )
-            logger.info("Completed Giga Meter sync command successfully.")
+            logger.info("Completed Giga Meter full sync command successfully.")
         except Exception as e:
             logger.error(f"Error executing command: {e}")
+

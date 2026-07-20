@@ -11,8 +11,9 @@ from celery.exceptions import SoftTimeLimitExceeded
 from django.apps import apps
 from django.conf import settings
 from django.contrib.gis.geos import Point
-from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.core.management import call_command
+from django.core.cache import cache
 from django.db import connection, transaction
 from django.db.models import Max
 from django.db.utils import DataError
@@ -1859,10 +1860,15 @@ class EntityAggregationOngoingException(Exception):
 ENTITY_GIGA_METER_MAX_RETRIES = 3
 
 
-def fetch_entity_giga_meter_ping_data(entity_type_code, country_iso3, logger):
+def fetch_entity_giga_meter_ping_data(entity_type_code, country_iso3, logger, last_measurement_date=None):
     """
     Fetch live measurement data from the entity Giga Meter API for a specific country.
     Iterates through pages and yields all available records.
+
+    When last_measurement_date is provided, the API is called with timestamp filtering
+    so that only records newer than the given date are returned. This enables incremental
+    fetching — on subsequent runs the task only processes new data instead of re-reading
+    every page from scratch.
 
     Endpoint format:
         {BASE_URL}/api/v1/measurements/v2/sandbox
@@ -1871,11 +1877,14 @@ def fetch_entity_giga_meter_ping_data(entity_type_code, country_iso3, logger):
             &orderBy=-timestamp
             &size={page_size}
             &page={page}
+            [&filterBy=timestamp&filterCondition=gt&filterValue={last_measurement_date}]
 
     Args:
         entity_type_code: The entity type code (e.g. 'health').
         country_iso3: ISO3 country code (e.g. 'KEN').
         logger: Logger instance.
+        last_measurement_date: Optional ISO 8601 datetime string (e.g. '2026-06-22T00:00:00Z').
+            When provided, only records with timestamp > this value are fetched.
 
     Yields:
         dict: Record dicts with entity giga_id and connectivity metrics.
@@ -1921,6 +1930,12 @@ def fetch_entity_giga_meter_ping_data(entity_type_code, country_iso3, logger):
             'size': page_size,
             'page': page,
         }
+
+        # Apply incremental timestamp filter when a watermark date is available
+        if last_measurement_date:
+            params['filterBy'] = 'timestamp'
+            params['filterCondition'] = 'gt'
+            params['filterValue'] = last_measurement_date
 
         try:
             # Build full URL for logging so parameters are visible
@@ -2178,7 +2193,7 @@ def bulk_upsert_entity_daily_status(batch):
             )
 
 
-def run_entity_ping_aggregation(entity_type_code, task_instance, logger):
+def run_entity_ping_aggregation(entity_type_code, task_instance, logger, full_sync=False):
     """
     Run entity ping aggregation: fetch measurements per-country from the Giga Meter API,
     aggregate by (entity, date), and upsert into EntityDailyStatus.
@@ -2190,6 +2205,8 @@ def run_entity_ping_aggregation(entity_type_code, task_instance, logger):
         entity_type_code: Entity type code (e.g. 'health').
         task_instance: Background task instance for logging.
         logger: Logger instance.
+        full_sync: If True, skip incremental filtering and fetch all available data
+            from the API. Used by the management command for backfilling.
     """
     logger.info('Entity Giga Meter - Aggregating measurement data for %s', entity_type_code)
     task_instance.info('Entity Giga Meter - Aggregating {0} data'.format(entity_type_code))
@@ -2216,13 +2233,65 @@ def run_entity_ping_aggregation(entity_type_code, task_instance, logger):
 
     for country_iso3 in country_iso3_list:
         try:
+            # Compute the last known measurement date for this country to enable
+            # incremental fetching — only records newer than this date will be
+            # returned by the API.  On the very first run (no existing data),
+            # last_measurement_date is None and no filter is applied.
+            # When full_sync=True (management command backfill), always fetch everything.
+            last_measurement_date = None
+            cache_key = f'entity_gm_watermark_{entity_type_code}_{country_iso3}'
+
+            if not full_sync:
+                cached_date_str = cache.get(cache_key)
+                db_date_str = None
+
+                try:
+                    country_obj_for_watermark = Country.objects.filter(iso3_format=country_iso3).first()
+                    if country_obj_for_watermark:
+                        last_daily_date = statistics_models.EntityDailyStatus.objects.filter(
+                            entity__country=country_obj_for_watermark,
+                            entity__entity_type__code=entity_type_code,
+                            live_data_source=statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE,
+                        ).order_by('-date').values_list('date', flat=True).first()
+
+                        if last_daily_date:
+                            db_date_str = last_daily_date.strftime('%Y-%m-%dT00:00:00Z')
+                except Exception as e:
+                    logger.warning(f"Error checking DB watermark for country {country_iso3}: {e}")
+
+                if db_date_str and cached_date_str:
+                    last_measurement_date = max(db_date_str, cached_date_str)
+                else:
+                    last_measurement_date = db_date_str or cached_date_str
+
+                if last_measurement_date:
+                    logger.info(
+                        'Entity Giga Meter - Country %s: incremental fetch from %s (db=%s, cache=%s)',
+                        country_iso3, last_measurement_date, db_date_str, cached_date_str
+                    )
+                else:
+                    logger.info(
+                        'Entity Giga Meter - Country %s: no existing data, fetching all records',
+                        country_iso3,
+                    )
+            else:
+                logger.info(
+                    'Entity Giga Meter - Country %s: full_sync mode, fetching all records',
+                    country_iso3,
+                )
+
             raw_rows = list(fetch_entity_giga_meter_ping_data(
                 entity_type_code, country_iso3, logger,
+                last_measurement_date=last_measurement_date,
             ))
 
             if not raw_rows:
                 logger.info('Entity Giga Meter - No records for country %s.', country_iso3)
                 continue
+
+            # Update cache watermark so we don't fetch these records again next time
+            max_fetched_date = max(r['timestamp_date__date'] for r in raw_rows)
+            cache.set(cache_key, max_fetched_date.strftime('%Y-%m-%dT00:00:00Z'), timeout=None)
 
             # Build entity map from the fetched giga_ids
             giga_ids = list(set(r.get('giga_id') for r in raw_rows if r.get('giga_id')))
@@ -2259,9 +2328,11 @@ def run_entity_ping_aggregation(entity_type_code, task_instance, logger):
             logger.info('Entity Giga Meter - Country %s: upserted %d records across %d dates', country_iso3, len(batch), len(unique_dates))
 
             # Auto-aggregate to WeeklyStatus
-            country_obj = Country.objects.get(iso3_format=country_iso3)
-            for aggregate_date in unique_dates:
-                finalize_previous_day_entity_data.delay(None, country_obj.id, aggregate_date, entity_type_code)
+            country_obj = Country.objects.filter(iso3_format=country_iso3).first()
+            if country_obj:
+                from proco.connection_statistics.utils import aggregate_entity_daily_status_to_entity_weekly_status
+                for aggregate_date in unique_dates:
+                    aggregate_entity_daily_status_to_entity_weekly_status(country_obj, aggregate_date, entity_type_code)
 
             # Auto-register entities for realtime data
 
@@ -2274,6 +2345,11 @@ def run_entity_ping_aggregation(entity_type_code, task_instance, logger):
 
             to_create = []
             to_update = []
+            if unique_dates:
+                min_ping_date = min(unique_dates)
+            else:
+                min_ping_date = current_date
+
             for entity_obj in entity_map.values():
                 reg = existing_regs.get(entity_obj.id)
                 if reg:
@@ -2284,11 +2360,11 @@ def run_entity_ping_aggregation(entity_type_code, task_instance, logger):
                     if reg.rt_source != statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE:
                         reg.rt_source = statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE
                         updated = True
-                    if not reg.rt_registration_date or reg.rt_registration_date.date() != current_date:
+                    if not reg.rt_registration_date or reg.rt_registration_date.date() > min_ping_date:
                         if reg.rt_registration_date and timezone.is_aware(reg.rt_registration_date):
-                            start_datetime = timezone.make_aware(datetime.combine(current_date, datetime.min.time()))
+                            start_datetime = timezone.make_aware(datetime.combine(min_ping_date, datetime.min.time()))
                         else:
-                            start_datetime = datetime.combine(current_date, datetime.min.time())
+                            start_datetime = datetime.combine(min_ping_date, datetime.min.time())
                         reg.rt_registration_date = start_datetime
                         updated = True
 
@@ -2296,9 +2372,9 @@ def run_entity_ping_aggregation(entity_type_code, task_instance, logger):
                         to_update.append(reg)
                 else:
                     if settings.USE_TZ:
-                        start_datetime = timezone.make_aware(datetime.combine(current_date, datetime.min.time()))
+                        start_datetime = timezone.make_aware(datetime.combine(min_ping_date, datetime.min.time()))
                     else:
-                        start_datetime = datetime.combine(current_date, datetime.min.time())
+                        start_datetime = datetime.combine(min_ping_date, datetime.min.time())
 
                     to_create.append(statistics_models.EntityRealTimeRegistration(
                         entity=entity_obj,
@@ -2325,6 +2401,14 @@ def run_entity_ping_aggregation(entity_type_code, task_instance, logger):
 
     logger.info('Entity Giga Meter - Total upserted: %d EntityDailyStatus records', total_upserted)
     task_instance.info('Entity Giga Meter - Total upserted: {0} records'.format(total_upserted))
+
+    try:
+        from proco.utils.tasks import update_entity_records
+        logger.info('Entity Giga Meter - Triggering update_entity_records() to safely update last_weekly_status')
+        update_entity_records()
+    except Exception as ex:
+        logger.error('Entity Giga Meter - Error executing update_entity_records: %s', ex)
+        task_instance.info('Entity Giga Meter - Error executing update_entity_records: {0}'.format(ex))
 
 
 @app.task(
