@@ -478,7 +478,11 @@ class DetailCountrySerializer(BaseCountrySerializer):
                 entity_code = entity_type.code
                 if entity_counts.get(entity_code, 0) == 0:
                     is_applicable = False
-                elif integration_status == 0:
+                elif integration_status in (
+                    CountryWeeklyStatus.JOINED,
+                    CountryWeeklyStatus.COUNTRY_CREATED,
+                    CountryWeeklyStatus.SCHOOL_OSM_MAPPED,
+                ):
                     is_applicable = False
 
             active_layers_list.append({
