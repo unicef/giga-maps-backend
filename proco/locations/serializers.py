@@ -473,16 +473,12 @@ class DetailCountrySerializer(BaseCountrySerializer):
 
         for relationship_instance in linked_layers:
             entity_type = relationship_instance.data_layer.entity_type
-            print(entity_type)
             is_applicable = relationship_instance.is_applicable
-            print(is_applicable)
             if entity_type:
                 entity_code = entity_type.code
-                print(entity_code)
-                print(entity_counts.get(entity_code, 0))
                 if entity_counts.get(entity_code, 0) == 0:
                     is_applicable = False
-                elif entity_type.is_legacy and integration_status == 0:
+                elif integration_status == 0:
                     is_applicable = False
 
             active_layers_list.append({
