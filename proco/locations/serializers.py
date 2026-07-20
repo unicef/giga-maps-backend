@@ -467,13 +467,29 @@ class DetailCountrySerializer(BaseCountrySerializer):
     def get_active_layers_list(self, instance):
         active_layers_list = []
         linked_layers = instance.active_layers.select_related('data_layer__entity_type').all()
+        
+        entity_counts = self.get_entity_counts(instance)
+        integration_status = instance.last_weekly_status.integration_status if instance.last_weekly_status else None
+
         for relationship_instance in linked_layers:
             entity_type = relationship_instance.data_layer.entity_type
+            print(entity_type)
+            is_applicable = relationship_instance.is_applicable
+            print(is_applicable)
+            if entity_type:
+                entity_code = entity_type.code
+                print(entity_code)
+                print(entity_counts.get(entity_code, 0))
+                if entity_counts.get(entity_code, 0) == 0:
+                    is_applicable = False
+                elif entity_type.is_legacy and integration_status == 0:
+                    is_applicable = False
+
             active_layers_list.append({
                 'data_layer_id': relationship_instance.data_layer_id,
                 'is_default': relationship_instance.is_default,
                 'data_sources': relationship_instance.data_sources,
-                'is_applicable': relationship_instance.is_applicable,
+                'is_applicable': is_applicable,
                 'legend_configs': relationship_instance.legend_configs,
                 'entity_type': entity_type.code if entity_type else None,
             })
