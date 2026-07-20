@@ -1430,13 +1430,32 @@ class DataLayersListSerializer(FlexFieldsModelSerializer):
             if relationship_instance.data_source_column_function:
                 data_source_column_functions[relationship_instance.data_source.id] = relationship_instance.data_source_column_function
 
-        linked_countries = data_layer.active_countries.all()
+        linked_countries = data_layer.active_countries.select_related('country__last_weekly_status').all()
         for relationship_instance in linked_countries:
-            active_countries_list.append({
-                'country': relationship_instance.country_id,
-                'is_default': relationship_instance.is_default,
-                'data_sources': relationship_instance.data_sources,
-            })
+            is_applicable = relationship_instance.is_applicable
+            
+            country = relationship_instance.country
+            integration_status = country.last_weekly_status.integration_status if country.last_weekly_status else None
+            from proco.connection_statistics.models import CountryWeeklyStatus
+            if integration_status in (
+                CountryWeeklyStatus.JOINED,
+                CountryWeeklyStatus.COUNTRY_CREATED,
+                CountryWeeklyStatus.SCHOOL_OSM_MAPPED,
+            ):
+                is_applicable = False
+            elif data_layer.entity_type:
+                if not country.entities.filter(entity_type=data_layer.entity_type).exists():
+                    is_applicable = False
+            else:
+                if not country.schools.exists():
+                    is_applicable = False
+            
+            if is_applicable:
+                active_countries_list.append({
+                    'country': relationship_instance.country_id,
+                    'is_default': relationship_instance.is_default,
+                    'data_sources': relationship_instance.data_sources,
+                })
 
         setattr(data_layer, 'data_sources_list', data_sources_list)
         setattr(data_layer, 'data_source_column', data_source_columns)
