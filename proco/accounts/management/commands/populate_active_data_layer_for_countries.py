@@ -84,8 +84,8 @@ class Command(BaseCommand):
                 applicable_country_ids = data_layer_instance.applicable_countries
                 parameter_col = data_sources.first().data_source_column
 
-                parameter_column_name = str(parameter_col['name'])
-                parameter_column_type = str(parameter_col['type'])
+                parameter_column_name = str(parameter_col.get('name', '')) if parameter_col else ''
+                parameter_column_type = str(parameter_col.get('type', '')) if parameter_col else ''
 
                 accounts_models.DataLayerCountryRelationship.objects.filter(
                     data_layer=data_layer_instance,

@@ -1442,27 +1442,34 @@ class EntityDataLayersListSerializer(FlexFieldsModelSerializer):
             data_source_columns[relationship_instance.data_source.id] = relationship_instance.data_source_column
             if relationship_instance.data_source_column_function:
                 data_source_column_functions[relationship_instance.data_source.id] = relationship_instance.data_source_column_function
-        linked_countries = data_layer.active_countries.select_related('country__last_weekly_status').all()
-        for relationship_instance in linked_countries:
-            is_applicable = relationship_instance.is_applicable
-            
-            country = relationship_instance.country
-            integration_status = country.last_weekly_status.integration_status if country.last_weekly_status else None
-            from proco.connection_statistics.models import CountryWeeklyStatus
-            if integration_status in (
-                CountryWeeklyStatus.JOINED,
-                CountryWeeklyStatus.COUNTRY_CREATED,
-                CountryWeeklyStatus.SCHOOL_OSM_MAPPED,
-            ):
-                is_applicable = False
-            elif data_layer.entity_type:
-                if not country.entities.filter(entity_type=data_layer.entity_type).exists():
-                    is_applicable = False
-            else:
-                if not country.schools.exists():
-                    is_applicable = False
-            
-            if is_applicable:
+
+        linked_countries = data_layer.active_countries.all()
+        is_entity_live_layer = (
+            data_layer.type == accounts_models.DataLayer.LAYER_TYPE_LIVE
+            and data_layer.entity_type is not None
+            and not data_layer.entity_type.is_legacy
+        )
+
+        if is_entity_live_layer:
+            from proco.connection_statistics.models import EntityRealTimeRegistration
+            countries_with_rt_data = set(
+                EntityRealTimeRegistration.objects.filter(
+                    rt_registered=True,
+                    deleted__isnull=True,
+                    entity__deleted__isnull=True,
+                    entity__entity_type=data_layer.entity_type,
+                ).values_list('entity__country_id', flat=True).distinct()
+            )
+
+            for relationship_instance in linked_countries:
+                if relationship_instance.country_id in countries_with_rt_data:
+                    active_countries_list.append({
+                        'country': relationship_instance.country_id,
+                        'is_default': relationship_instance.is_default,
+                        'data_sources': relationship_instance.data_sources,
+                    })
+        else:
+            for relationship_instance in linked_countries:
                 active_countries_list.append({
                     'country': relationship_instance.country_id,
                     'is_default': relationship_instance.is_default,
