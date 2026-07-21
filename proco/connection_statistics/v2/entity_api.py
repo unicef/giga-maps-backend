@@ -138,9 +138,8 @@ class EntityGlobalStatsAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, API
             },
             'connected_entities': {
                 'connected': school_connectivity_status['connected'],
-                'not_connected': school_connectivity_status['not_connected'],
-                'unknown': school_connectivity_status['unknown'],
-            }
+                'total': school_connectivity_status['total_schools'],
+            },
         }
 
     def calculate_entity_global_statistic(self, entity_type):
@@ -234,8 +233,7 @@ class EntityGlobalStatsAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, API
             },
             'connected_entities': {
                 'connected': stats['connected'],
-                'not_connected': stats['not_connected'],
-                'unknown': stats['unknown'],
+                'total': stats['total_entities'],
             }
         }
 
@@ -379,6 +377,20 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
             cursor.execute(query, [week_number, year_number, end_date])
             row = cursor.fetchone()
 
+        total_query = f"""
+            SELECT COUNT("id")
+            FROM "schools_school"
+            WHERE "deleted" IS NULL
+              {school_filters_sql}
+              {country_filter_sql}
+              {admin1_filter_sql}
+        """
+        with connection.cursor() as cursor:
+            cursor.execute(total_query)
+            total_row = cursor.fetchone()
+        
+        schools_total = total_row[0] if total_row else 0
+
         if row:
             weekly_status = {
                 'good': row[0] or 0,
@@ -409,6 +421,7 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
             'moderate': weekly_status['moderate'],
             'no_internet': weekly_status['bad'],
             'unknown': weekly_status['unknown'],
+            'total': schools_total,
         }
 
         if weekly_status['no_of_schools_measure'] == 0:
@@ -671,6 +684,21 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
             cursor.execute(query, [week_number, year_number, self.entity_type_obj.id, end_date])
             row = cursor.fetchone()
 
+        total_query = f"""
+            SELECT COUNT("id")
+            FROM "entities_entity"
+            WHERE "deleted" IS NULL
+              AND "entity_type_id" = %s
+              {entity_filters_sql}
+              {country_filter_sql}
+              {admin1_filter_sql}
+        """
+        with connection.cursor() as cursor:
+            cursor.execute(total_query, [self.entity_type_obj.id])
+            total_row = cursor.fetchone()
+        
+        entities_total = total_row[0] if total_row else 0
+
         if row:
             weekly_status = {
                 'good': row[0] or 0,
@@ -701,6 +729,7 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
             'moderate': weekly_status['moderate'],
             'no_internet': weekly_status['bad'],
             'unknown': weekly_status['unknown'],
+            'total': entities_total,
         }
 
         graph_data, positive_speeds = self.generate_country_graph_entity_data(start_date, end_date)
