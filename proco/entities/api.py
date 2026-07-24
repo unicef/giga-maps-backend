@@ -924,7 +924,7 @@ class EntityConnectivityTileGenerator(RawEntityDetailFilterMixin, EntityTypeCode
         tbl['entity_weekly_join'] = ''
         tbl['entity_weekly_condition'] = ''
 
-        school_filters = core_utilities.get_filter_sql(request, 'schools', 'schools_school')
+        school_filters = core_utilities.get_filter_sql(request, 'schools', 'schools_school', LEGACY_MODEL)
         requested_entity_type_codes = self.get_entity_type_code_params(request=request)
         single_entity_type_code = None
         if requested_entity_type_codes is not None and len(requested_entity_type_codes) == 1:
@@ -949,7 +949,7 @@ class EntityConnectivityTileGenerator(RawEntityDetailFilterMixin, EntityTypeCode
             ) = self.get_entity_detail_filter_sql(request, single_entity_type_code)
 
         school_static_filters = core_utilities.get_filter_sql(request, 'school_static',
-                                                              'connection_statistics_schoolweeklystatus')
+                                                              'connection_statistics_schoolweeklystatus', LEGACY_MODEL)
         entity_static_filters = core_utilities.get_filter_sql(
             request,
             'entity_static',

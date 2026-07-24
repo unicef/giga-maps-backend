@@ -5,6 +5,7 @@ from django.db.models import Count, Q
 from rest_flex_fields.serializers import FlexFieldsModelSerializer
 from rest_framework import serializers
 
+from proco.accounts import models as accounts_models
 from proco.core import utils as core_utilities
 from proco.entities.models import Entity, EntityType
 from proco.locations.models import Country
@@ -139,3 +140,41 @@ class EntityAwareDetailCountrySerializer(DetailCountrySerializer):
             entity_counts[entity_type.code] = count
 
         return entity_counts
+
+    def get_active_layers_list(self, instance):
+        active_layers_list = []
+        linked_layers = instance.active_layers.select_related('data_layer__entity_type').filter(
+            deleted__isnull=True,
+            data_layer__deleted__isnull=True,
+            data_layer__status=accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
+        )
+        for relationship_instance in linked_layers:
+            entity_type = relationship_instance.data_layer.entity_type
+            active_layers_list.append({
+                'data_layer_id': relationship_instance.data_layer_id,
+                'is_default': relationship_instance.is_default,
+                'data_sources': relationship_instance.data_sources,
+                'is_applicable': relationship_instance.is_applicable,
+                'legend_configs': relationship_instance.legend_configs,
+                'entity_type': entity_type.code if entity_type else None,
+            })
+
+        return active_layers_list
+
+    def get_active_filters_list(self, instance):
+        active_filters_list = []
+        linked_filters = instance.active_filters.select_related('advance_filter__entity_type').filter(
+            deleted__isnull=True,
+            advance_filter__deleted__isnull=True,
+            advance_filter__status=accounts_models.AdvanceFilter.FILTER_STATUS_PUBLISHED,
+        )
+        for relationship_instance in linked_filters:
+            entity_type = relationship_instance.advance_filter.entity_type
+            active_filters_list.append({
+                'advance_filter_id': relationship_instance.advance_filter_id,
+                'is_default': relationship_instance.is_default,
+                'default_filter_values': relationship_instance.default_filter_values,
+                'entity_type': entity_type.code if entity_type else None,
+            })
+
+        return active_filters_list

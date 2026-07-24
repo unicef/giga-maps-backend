@@ -3,7 +3,7 @@ from datetime import timedelta, datetime, time
 from django.conf import settings
 from django.db import connection
 from django.db.models import (
-    Avg, Case, FilteredRelation, Q, Value, When
+    Avg, Case, Value, When
 )
 from django.db.models import Count
 from django.db.models import (
@@ -138,7 +138,8 @@ class EntityGlobalStatsAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, API
             },
             'connected_entities': {
                 'connected': school_connectivity_status['connected'],
-                'total': school_connectivity_status['total_schools'],
+                'not_connected': school_connectivity_status['not_connected'],
+                'unknown': school_connectivity_status['unknown'],
             },
         }
 
@@ -355,10 +356,10 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
                        {school_static_t5_max}
                 FROM "connection_statistics_schoolrealtimeregistration" rt
                 INNER JOIN "schools_school" "schools_school" ON "schools_school"."id" = rt."school_id"
-                LEFT JOIN "connection_statistics_schoolweeklystatus" t 
-                    ON t."school_id" = rt."school_id" 
-                   AND t."week" = %s 
-                   AND t."year" = %s 
+                LEFT JOIN "connection_statistics_schoolweeklystatus" t
+                    ON t."school_id" = rt."school_id"
+                   AND t."week" = %s
+                   AND t."year" = %s
                    AND t."deleted" IS NULL
                 {school_static_join_sql}
                 WHERE rt."rt_registered" = true
@@ -376,20 +377,6 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
         with connection.cursor() as cursor:
             cursor.execute(query, [week_number, year_number, end_date])
             row = cursor.fetchone()
-
-        total_query = f"""
-            SELECT COUNT("id")
-            FROM "schools_school"
-            WHERE "deleted" IS NULL
-              {school_filters_sql}
-              {country_filter_sql}
-              {admin1_filter_sql}
-        """
-        with connection.cursor() as cursor:
-            cursor.execute(total_query)
-            total_row = cursor.fetchone()
-        
-        schools_total = total_row[0] if total_row else 0
 
         if row:
             weekly_status = {
@@ -421,7 +408,6 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
             'moderate': weekly_status['moderate'],
             'no_internet': weekly_status['bad'],
             'unknown': weekly_status['unknown'],
-            'total': schools_total,
         }
 
         if weekly_status['no_of_schools_measure'] == 0:
@@ -661,10 +647,10 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
                        {entity_static_t5_max}
                 FROM "connection_statistics_entityrealtimeregistration" rt
                 INNER JOIN "entities_entity" "entities_entity" ON "entities_entity"."id" = rt."entity_id"
-                LEFT JOIN "connection_statistics_entityweeklystatus" t 
-                    ON t."entity_id" = rt."entity_id" 
-                   AND t."week" = %s 
-                   AND t."year" = %s 
+                LEFT JOIN "connection_statistics_entityweeklystatus" t
+                    ON t."entity_id" = rt."entity_id"
+                   AND t."week" = %s
+                   AND t."year" = %s
                    AND t."deleted" IS NULL
                 {entity_static_join_sql}
                 WHERE rt."rt_registered" = true
@@ -683,21 +669,6 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
         with connection.cursor() as cursor:
             cursor.execute(query, [week_number, year_number, self.entity_type_obj.id, end_date])
             row = cursor.fetchone()
-
-        total_query = f"""
-            SELECT COUNT("id")
-            FROM "entities_entity"
-            WHERE "deleted" IS NULL
-              AND "entity_type_id" = %s
-              {entity_filters_sql}
-              {country_filter_sql}
-              {admin1_filter_sql}
-        """
-        with connection.cursor() as cursor:
-            cursor.execute(total_query, [self.entity_type_obj.id])
-            total_row = cursor.fetchone()
-        
-        entities_total = total_row[0] if total_row else 0
 
         if row:
             weekly_status = {
@@ -729,7 +700,6 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
             'moderate': weekly_status['moderate'],
             'no_internet': weekly_status['bad'],
             'unknown': weekly_status['unknown'],
-            'total': entities_total,
         }
 
         graph_data, positive_speeds = self.generate_country_graph_entity_data(start_date, end_date)
@@ -993,6 +963,7 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
         params.pop(self.CACHE_KEY, None)
         return '{0}_{1}'.format(self.CACHE_KEY_PREFIX,
                                 '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))), )
+
     @staticmethod
     def extract_entity_layer_params(request):
         """

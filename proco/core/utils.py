@@ -340,6 +340,10 @@ def get_filter_sql(request, filter_key, table_name, entity_type_code=None):
 
     filter_fields = get_giga_filter_fields(request)
 
+    if not entity_type_code and filter_key in ('schools', 'school_static', 'school_real_time'):
+        from proco.entities.constants import LEGACY_MODEL
+        entity_type_code = LEGACY_MODEL
+
     normalized_query_params = {}
     if entity_type_code:
         entity_type_prefix = '{0}__'.format(entity_type_code)
@@ -361,10 +365,18 @@ def get_filter_sql(request, filter_key, table_name, entity_type_code=None):
                 normalized_query_params.setdefault(parts[2], query_param_key)
 
     advance_filters = []
-    filter_fields_list = filter_fields.get(filter_key, [])
-    if entity_type_code == 'school' and filter_key in ('entities', 'entity_static'):
-        legacy_key = 'schools' if filter_key == 'entities' else 'school_static'
-        filter_fields_list += filter_fields.get(legacy_key, [])
+    raw_filter_fields = list(filter_fields.get(filter_key, []))
+    if entity_type_code:
+        from proco.entities.constants import LEGACY_MODEL
+        if entity_type_code == LEGACY_MODEL:
+            if filter_key in ('entities', 'schools'):
+                raw_filter_fields += filter_fields.get(entity_type_code, [])
+                raw_filter_fields += filter_fields.get('schools', [])
+            elif filter_key in ('entity_static', 'school_static'):
+                raw_filter_fields += filter_fields.get(f'{entity_type_code}_static', [])
+                raw_filter_fields += filter_fields.get('school_static', [])
+
+    filter_fields_list = list(dict.fromkeys(raw_filter_fields))
 
     for filter_field in filter_fields_list:
         if filter_field in normalized_query_params:

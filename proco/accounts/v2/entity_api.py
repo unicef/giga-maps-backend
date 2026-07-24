@@ -3132,11 +3132,13 @@ class EntityDataLayersViewSet(BaseModelViewSet):
             queryset = queryset.filter(
                 active_countries__country=query_params['country_id'],
                 active_countries__deleted__isnull=True,
+                active_countries__is_applicable=True,
             )
         elif 'country_id__in' in query_param_keys:
             queryset = queryset.filter(
                 active_countries__country_id__in=[c_id.strip() for c_id in query_params['country_id__in'].split(',')],
                 active_countries__deleted__isnull=True,
+                active_countries__is_applicable=True,
             )
 
         if 'is_default' in query_param_keys:
@@ -3452,11 +3454,13 @@ class PublishedEntityDataLayersViewSet(EntityTypeCodeMixin, CachedListMixin, Bas
             queryset = queryset.filter(
                 active_countries__country=query_params['country_id'],
                 active_countries__deleted__isnull=True,
+                active_countries__is_applicable=True,
             )
         elif 'country_id__in' in query_param_keys:
             queryset = queryset.filter(
                 active_countries__country_id__in=[c_id.strip() for c_id in query_params['country_id__in'].split(',')],
                 active_countries__deleted__isnull=True,
+                active_countries__is_applicable=True,
             )
 
         if 'is_default' in query_param_keys:
