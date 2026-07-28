@@ -1162,13 +1162,14 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
         if admin1_id:
             queryset = queryset.filter(entity__admin1_id=admin1_id)
 
-        entity_id = self.request.query_params.get('entity_id', None)
+        entity_id = self.request.query_params.get('entity_id') or self.request.query_params.get(f'{entity_type_code}_id')
         if entity_id:
             queryset = queryset.filter(entity=entity_id)
 
-        entity_ids = self.request.query_params.get('entity_ids', '')
-        if not core_utilities.is_blank_string(entity_ids):
-            entity_ids = [int(eid.strip()) for eid in entity_ids.split(',')]
+        entity_ids = self.request.query_params.get('entity_ids') or self.request.query_params.get(f'{entity_type_code}_ids')
+        if entity_ids:
+            if isinstance(entity_ids, str):
+                entity_ids = [int(eid.strip()) for eid in entity_ids.split(',') if eid.strip()]
             queryset = queryset.filter(entity__in=entity_ids)
 
         effective_layer_id = layer_id

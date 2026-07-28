@@ -163,6 +163,17 @@ class EntityStatusConnectivityTileGenerator(RawEntityDetailFilterMixin, BaseTile
         elif 'entity_id__in' in query_param_keys:
             table_configs['entity_ids'] = [s_id.strip() for s_id in query_params['entity_id__in'].split(',')]
 
+        # Support exclude_entities_same_coords_except_id and
+        # {entity_code}_exclude_same_coords_except_id variants.
+        exclude_id = query_params.get('exclude_entities_same_coords_except_id')
+        if not exclude_id:
+            for key in query_param_keys:
+                if key.endswith('_exclude_same_coords_except_id'):
+                    exclude_id = query_params[key]
+                    break
+        if exclude_id:
+            table_configs['exclude_entities_same_coords_except_id'] = str(exclude_id).strip()
+
         entity_type_codes = EntityTypeCodeMixin.parse_entity_type_code_params(request)
         if entity_type_codes is not None:
             table_configs['entity_types'] = [
@@ -198,6 +209,7 @@ class EntityStatusConnectivityTileGenerator(RawEntityDetailFilterMixin, BaseTile
         tbl['admin1_condition'] = ''
         tbl['entity_condition'] = ''
         tbl['random_order'] = ''
+        tbl['same_entity_coords_condition'] = ''
         tbl['mvt_layer'] = self.table_config.get('mvt_layer', 'default')
 
         self.update_kwargs(request, tbl)
@@ -230,6 +242,7 @@ class EntityStatusConnectivityTileGenerator(RawEntityDetailFilterMixin, BaseTile
                     {entity_detail_condition}
                     {entity_weekly_condition}
                     {entity_master_condition}
+                    {same_entity_coords_condition}
                     {random_order}
                     {limit_condition}
             )
@@ -315,6 +328,17 @@ class EntityStatusConnectivityTileGenerator(RawEntityDetailFilterMixin, BaseTile
                 tbl['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
 
             tbl['limit_condition'] = 'LIMIT ' + str(limit)
+
+        if tbl.get('exclude_entities_same_coords_except_id'):
+            tbl['same_entity_coords_condition'] = f"""
+                            AND (
+                                entities_entity.id = {tbl['exclude_entities_same_coords_except_id']}
+                                OR NOT ST_Equals(
+                                    entities_entity.geopoint,
+                                    (SELECT geopoint FROM entities_entity WHERE id = {tbl['exclude_entities_same_coords_except_id']})
+                                )
+                            )
+                        """
         return sql_tmpl.format(**tbl)
 
 
