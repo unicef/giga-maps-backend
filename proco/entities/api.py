@@ -163,17 +163,6 @@ class EntityStatusConnectivityTileGenerator(RawEntityDetailFilterMixin, BaseTile
         elif 'entity_id__in' in query_param_keys:
             table_configs['entity_ids'] = [s_id.strip() for s_id in query_params['entity_id__in'].split(',')]
 
-        # Support exclude_entities_same_coords_except_id and
-        # {entity_code}_exclude_same_coords_except_id variants.
-        exclude_id = query_params.get('exclude_entities_same_coords_except_id')
-        if not exclude_id:
-            for key in query_param_keys:
-                if key.endswith('_exclude_same_coords_except_id'):
-                    exclude_id = query_params[key]
-                    break
-        if exclude_id:
-            table_configs['exclude_entities_same_coords_except_id'] = str(exclude_id).strip()
-
         entity_type_codes = EntityTypeCodeMixin.parse_entity_type_code_params(request)
         if entity_type_codes is not None:
             table_configs['entity_types'] = [
@@ -181,6 +170,17 @@ class EntityStatusConnectivityTileGenerator(RawEntityDetailFilterMixin, BaseTile
                 for entity_type_code in entity_type_codes
                 if entity_type_code != LEGACY_MODEL
             ]
+
+        exclude_id = query_params.get('exclude_entities_same_coords_except_id')
+        if not exclude_id:
+            non_legacy_codes = table_configs.get('entity_types', [])
+            for entity_code in non_legacy_codes:
+                prefixed_key = f'{entity_code}_exclude_same_coords_except_id'
+                if prefixed_key in query_param_keys:
+                    exclude_id = query_params[prefixed_key]
+                    break
+        if exclude_id:
+            table_configs['exclude_entities_same_coords_except_id'] = str(exclude_id).strip()
 
         entity_type_code = table_configs.get('entity')
         if len(table_configs.get('entity_types', [])) == 1:
