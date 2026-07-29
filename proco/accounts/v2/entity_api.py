@@ -1275,7 +1275,6 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             INNER JOIN "connection_statistics_entityrealtimeregistration"
                 ON ("entities_entity"."id" = "connection_statistics_entityrealtimeregistration"."entity_id")
             {entity_weekly_join}
-            {entity_detail_join}
             LEFT OUTER JOIN "connection_statistics_entitydailystatus" t
                 ON (
                     "entities_entity"."id" = t."entity_id"
@@ -1291,13 +1290,16 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 {admin1_condition}
                 {entity_condition}
                 {entity_weekly_condition}
-                {entity_detail_condition}
                 AND "connection_statistics_entityrealtimeregistration"."rt_registered" = True
                 AND "connection_statistics_entityrealtimeregistration"."rt_registration_date"::date <= '{end_date}')
             GROUP BY "entities_entity"."id"
             ORDER BY "entities_entity"."id" ASC
         ) AS eds
+        INNER JOIN "entities_entity" ON "entities_entity"."id" = eds.entity_id
         {entity_weekly_outer_join}
+        {entity_detail_join}
+        WHERE "entities_entity"."deleted" IS NULL
+            {entity_detail_condition}
         """
 
         kwargs = copy.deepcopy(self.kwargs)
