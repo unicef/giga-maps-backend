@@ -147,6 +147,7 @@ class EntityAwareDetailCountrySerializer(DetailCountrySerializer):
             deleted__isnull=True,
             data_layer__deleted__isnull=True,
             data_layer__status=accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
+            is_applicable=True,
         )
         for relationship_instance in linked_layers:
             entity_type = relationship_instance.data_layer.entity_type

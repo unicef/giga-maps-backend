@@ -1443,7 +1443,10 @@ class EntityDataLayersListSerializer(FlexFieldsModelSerializer):
             if relationship_instance.data_source_column_function:
                 data_source_column_functions[relationship_instance.data_source.id] = relationship_instance.data_source_column_function
 
-        linked_countries = data_layer.active_countries.all()
+        linked_countries = data_layer.active_countries.filter(
+            deleted__isnull=True,
+            is_applicable=True,
+        )
         is_entity_live_layer = (
             data_layer.type == accounts_models.DataLayer.LAYER_TYPE_LIVE
             and data_layer.entity_type is not None

@@ -391,6 +391,7 @@ class BaseEntityDataLayerAPIViewSet(EntityDetailFilterMixin, APIView):
                     self._legend_configs_cache[cache_key] = Country.objects.all().filter(
                         id__in=country_ids,
                         active_layers__deleted__isnull=True,
+                        active_layers__is_applicable=True,
                         active_layers__data_layer_id=data_layer_instance.id,
                     ).order_by('id').values_list('active_layers__legend_configs', flat=True).first()
 
