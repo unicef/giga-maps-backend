@@ -1,7 +1,7 @@
 import os
 import requests
 
-from flask import Flask
+from flask import Flask, Response
 
 app = Flask(__name__)
 
@@ -10,7 +10,15 @@ app = Flask(__name__)
 def hello_world():
     return 'Hello, World!'
 
-@app.route("/metrics")
+@app.route('/metrics')
 def metrics():
-    response = requests.get('http://localhost:{port}/metrics'.format(port=os.environ.get('FLOWER_PORT', 6543)))
-    return response.text
+    port = os.environ.get('FLOWER_PORT', '6543')
+    url = f'http://localhost:{port}/metrics'
+    try:
+        resp = requests.get(url, timeout=2)
+        resp.raise_for_status()
+    except requests.RequestException:
+        return 'Metrics unavailable', 503
+
+    content_type = resp.headers.get('Content-Type', 'text/plain')
+    return Response(resp.text, content_type=content_type)
