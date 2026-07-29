@@ -3,7 +3,7 @@ from datetime import timedelta, datetime, time
 from django.conf import settings
 from django.db import connection
 from django.db.models import (
-    Avg, Case, Value, When
+    Avg, Case, Value, When, Q
 )
 from django.db.models import Count
 from django.db.models import (
@@ -94,7 +94,7 @@ class EntityGlobalStatsAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, API
             dummy_group_by=Value(1)).values('dummy_group_by').annotate(
             connected=Count(Case(When(connectivity_status__in=['good', 'moderate', 'bad'], then='id')), distinct=True),
             not_connected=Count(Case(When(connectivity_status='no', then='id')), distinct=True),
-            unknown=Count(Case(When(connectivity_status='unknown', then='id')), distinct=True),
+            unknown=Count(Case(When(Q(connectivity_status='unknown') | Q(connectivity_status__isnull=True) | Q(connectivity_status=''), then='id')), distinct=True),
             total_schools=Count('id', distinct=True),
             all_countries=Count('country_id', distinct=True),
             schools_with_connectivity_status_mapped=Count(Case(
@@ -168,7 +168,10 @@ class EntityGlobalStatsAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, API
                 ),
                 unknown=Count(
                     Case(
-                        When(connectivity_status='unknown', then='id')
+                        When(
+                            Q(connectivity_status='unknown') | Q(connectivity_status__isnull=True) | Q(connectivity_status=''),
+                            then='id'
+                        )
                     ),
                     distinct=True
                 ),
