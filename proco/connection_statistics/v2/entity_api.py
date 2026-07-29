@@ -237,6 +237,8 @@ class EntityGlobalStatsAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, API
             },
             'connected_entities': {
                 'connected': stats['connected'],
+                'not_connected': stats['not_connected'],
+                'unknown': stats['unknown'],
                 'total': stats['total_entities'],
             }
         }
