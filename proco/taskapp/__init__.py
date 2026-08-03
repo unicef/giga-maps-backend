@@ -97,6 +97,16 @@ def finalize_setup(sender, **kwargs):
             'schedule': crontab(hour=5, minute=10),
             'args': (),
         },
+        'proco.connection_statistics.tasks.populate_current_school_live_weekly_metrics': {
+            'task': 'proco.connection_statistics.tasks.populate_current_school_live_weekly_metrics',
+            'schedule': crontab(hour=5, minute=40),
+            'args': (),
+        },
+        'proco.connection_statistics.tasks.cleanup_old_school_live_weekly_metrics': {
+            'task': 'proco.connection_statistics.tasks.cleanup_old_school_live_weekly_metrics',
+            'schedule': crontab(hour=6, minute=10),
+            'args': (),
+        },
         'proco.data_sources.tasks.clean_historic_data': {
             'task': 'proco.data_sources.tasks.clean_historic_data',
             'schedule': crontab(day_of_week='0,6', hour=5, minute=20),
