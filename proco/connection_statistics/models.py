@@ -406,6 +406,10 @@ class SchoolRealTimeWeeklyMetric(TimeStampedModel, models.Model):
                 name='srtwm_school_lookup_idx',
             ),
             models.Index(
+                fields=['school', 'country', 'year', 'week', 'config_hash'],
+                name='srtwm_map_lookup_idx',
+            ),
+            models.Index(
                 fields=['country', 'year', 'week', 'config_hash'],
                 name='srtwm_country_lookup_idx',
             ),

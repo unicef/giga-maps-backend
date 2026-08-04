@@ -46,6 +46,10 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name='schoolrealtimeweeklymetric',
+            index=models.Index(fields=['school', 'country', 'year', 'week', 'config_hash'], name='srtwm_map_lookup_idx'),
+        ),
+        migrations.AddIndex(
+            model_name='schoolrealtimeweeklymetric',
             index=models.Index(fields=['country', 'year', 'week', 'config_hash'], name='srtwm_country_lookup_idx'),
         ),
         migrations.AddIndex(
