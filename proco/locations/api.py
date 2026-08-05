@@ -9,7 +9,7 @@ from azure.search.documents.indexes import SearchIndexClient
 from azure.search.documents.indexes.models import SearchFieldDataType
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db.models import Case, Count, IntegerField, Value, When
+from django.db.models import Count, Exists, OuterRef
 from django.db.models.functions.text import Lower
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
@@ -330,50 +330,118 @@ class CountrySearchStatListAPIView(CachedListMixin, ListAPIView):
     LIST_CACHE_KEY_PREFIX = 'GLOBAL_COUNTRY_SEARCH_MAPPING'
 
     def get_queryset(self):
-        queryset = self.model.objects.all().filter(schools__deleted__isnull=True)
+        queryset = School.objects.filter(deleted__isnull=True)
 
-        qs = queryset.values(
-            'id', 'name', 'code', 'last_weekly_status__integration_status',
-            'schools__admin1__id', 'schools__admin1__name', 'schools__admin1__description', 'schools__admin1__description_ui_label',
-            'schools__admin1__giga_id_admin',
-            'schools__admin2__id', 'schools__admin2__name', 'schools__admin2__description', 'schools__admin2__description_ui_label',
-            'schools__admin2__giga_id_admin',
+        return queryset.values(
+            'country_id', 'admin1_id', 'admin2_id',
         ).annotate(
-            school_count=Count('schools__id'),
-        ).order_by('name', 'schools__admin1__name', 'schools__admin2__name')
+            school_count=Count('id'),
+        ).order_by()
 
-        qs = qs.annotate(
-            custom_order=Case(
-                When(last_weekly_status__integration_status=3, school_count__gt=0, then=Value(1)),
-                When(last_weekly_status__integration_status=2, school_count__gt=0, then=Value(2)),
-                When(last_weekly_status__integration_status=1, school_count__gt=0, then=Value(3)),
-                When(last_weekly_status__integration_status=0, school_count__gt=0, then=Value(4)),
-                When(last_weekly_status__integration_status=5, school_count__gt=0, then=Value(5)),
-                When(last_weekly_status__integration_status=4, school_count__gt=0, then=Value(6)),
-                default=Value(7),
-                output_field=IntegerField(),
-            ),
-        ).order_by('custom_order', 'name', 'schools__admin1__name', 'schools__admin2__name')
+    def _get_country_custom_order(self, integration_status):
+        custom_order_mapping = {
+            3: 1,
+            2: 2,
+            1: 3,
+            0: 4,
+            5: 5,
+            4: 6,
+        }
+        return custom_order_mapping.get(integration_status, 7)
 
-        return qs
+    def _get_order_by_value(self, value):
+        return core_utilities.is_blank_string(value), value or ''
+
+    def _hydrate_school_count_rows(self, school_count_data):
+        country_ids = {row.get('country_id') for row in school_count_data if row.get('country_id')}
+        admin_ids = {
+            admin_id
+            for row in school_count_data
+            for admin_id in (row.get('admin1_id'), row.get('admin2_id'))
+            if admin_id
+        }
+
+        countries = {
+            row.get('id'): row
+            for row in self.model.objects.filter(id__in=country_ids).values(
+                'id', 'name', 'code', 'last_weekly_status__integration_status',
+            )
+        }
+        admins = {
+            row.get('id'): row
+            for row in CountryAdminMetadata.objects.filter(id__in=admin_ids).values(
+                'id', 'name', 'description', 'description_ui_label', 'giga_id_admin',
+            )
+        }
+
+        hydrated_data = []
+        for resp_data in school_count_data:
+            country = countries.get(resp_data.get('country_id'), {})
+            admin1 = admins.get(resp_data.get('admin1_id'), {})
+            admin2 = admins.get(resp_data.get('admin2_id'), {})
+
+            hydrated_data.append({
+                'id': country.get('id'),
+                'name': country.get('name'),
+                'code': country.get('code'),
+                'last_weekly_status__integration_status': country.get(
+                    'last_weekly_status__integration_status',
+                ),
+                'schools__admin1__id': resp_data.get('admin1_id'),
+                'schools__admin1__name': admin1.get('name'),
+                'schools__admin1__description': admin1.get('description'),
+                'schools__admin1__description_ui_label': admin1.get('description_ui_label'),
+                'schools__admin1__giga_id_admin': admin1.get('giga_id_admin'),
+                'schools__admin2__id': resp_data.get('admin2_id'),
+                'schools__admin2__name': admin2.get('name'),
+                'schools__admin2__description': admin2.get('description'),
+                'schools__admin2__description_ui_label': admin2.get('description_ui_label'),
+                'schools__admin2__giga_id_admin': admin2.get('giga_id_admin'),
+                'school_count': resp_data.get('school_count', 0),
+            })
+
+        hydrated_data.sort(key=lambda row: (
+            self._get_country_custom_order(row.get('last_weekly_status__integration_status')),
+            self._get_order_by_value(row.get('name')),
+            self._get_order_by_value(row.get('schools__admin1__name')),
+            self._get_order_by_value(row.get('schools__admin2__name')),
+        ))
+
+        return hydrated_data
 
     def get_queryset_to_list_countries_with_no_schools(self):
-        queryset = self.model.objects.all().exclude(
-            id__in=list(School.objects.all().values_list('country_id', flat=True).order_by('country_id').distinct(
-                'country_id')),
+        live_school_qs = School.objects.filter(country_id=OuterRef('pk'))
+
+        queryset = self.model.objects.all().annotate(
+            has_live_schools=Exists(live_school_qs),
+        ).filter(
+            has_live_schools=False,
         )
 
         qs = queryset.values(
             'id', 'name', 'code', 'last_weekly_status__integration_status',
-            'schools__admin1__id', 'schools__admin1__name', 'schools__admin1__description',
-            'schools__admin1__description_ui_label',
-            'schools__admin1__giga_id_admin',
-            'schools__admin2__id', 'schools__admin2__name', 'schools__admin2__description',
-            'schools__admin2__description_ui_label',
-            'schools__admin2__giga_id_admin',
-        ).order_by('name', 'schools__admin1__name', 'schools__admin2__name')
+        ).order_by('name')
 
         return qs
+
+    def _format_countries_with_no_schools(self, country_data):
+        return [
+            {
+                **resp_data,
+                'schools__admin1__id': None,
+                'schools__admin1__name': None,
+                'schools__admin1__description': None,
+                'schools__admin1__description_ui_label': None,
+                'schools__admin1__giga_id_admin': None,
+                'schools__admin2__id': None,
+                'schools__admin2__name': None,
+                'schools__admin2__description': None,
+                'schools__admin2__description_ui_label': None,
+                'schools__admin2__giga_id_admin': None,
+                'school_count': 0,
+            }
+            for resp_data in country_data
+        ]
 
     def _format_result(self, qry_data):
         data = OrderedDict()
@@ -436,7 +504,12 @@ class CountrySearchStatListAPIView(CachedListMixin, ListAPIView):
         queryset = self.get_queryset()
         qs_for_remaining_countries = self.get_queryset_to_list_countries_with_no_schools()
 
-        queryset_data = list(queryset) + list(qs_for_remaining_countries)
+        school_count_data = list(queryset)
+        queryset_data = self._hydrate_school_count_rows(school_count_data)
+
+        remaining_country_data = self._format_countries_with_no_schools(list(qs_for_remaining_countries))
+
+        queryset_data += remaining_country_data
         data = self._format_result(queryset_data)
 
         request_path = remove_query_param(request.get_full_path(), self.CACHE_KEY)
