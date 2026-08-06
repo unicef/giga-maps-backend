@@ -41,6 +41,7 @@ class Country(GeometryMixin, TimeStampedModel):
     description = models.TextField(max_length=1000, blank=True, default='')
     data_source = models.TextField(max_length=500, blank=True, default='')
     data_source_description = models.TextField(max_length=500, blank=True, default='')
+    health_data_source = models.TextField(max_length=500, blank=True, default='')
 
     date_of_join = models.DateField(null=True, blank=True, default=None)
     date_schools_mapped = models.DateField(null=True, blank=True, default=None)
