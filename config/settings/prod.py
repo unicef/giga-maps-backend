@@ -130,6 +130,7 @@ if SENTRY_ENABLED:
         SENTRY_DSN,
         # traces_sample_rate=0.2,
         release=get_git_hash(),
+        environment=APP_ENVIRONMENT,
         integrations=[DjangoIntegration(), CeleryIntegration()],
     )
 
