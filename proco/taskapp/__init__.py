@@ -23,18 +23,19 @@ app.conf.redbeat_lock_timeout = 36000
 def finalize_setup(sender, **kwargs):
 
     app.conf.beat_schedule.update({
-        # Old cache task, kept for reference but disabled
-        # 'proco.utils.tasks.update_all_cached_values': {
-        #     'task': 'proco.utils.tasks.update_all_cached_values',
-        #     'schedule': crontab(hour=4, minute=45),
-        #     'args': (),
-        #     'kwargs': {'clean_cache': True},
-        # },
-        # 'proco.utils.tasks.rebuild_school_index': {
-        #     'task': 'proco.utils.tasks.rebuild_school_index',
-        #     'schedule': crontab(hour=2, minute=0),
-        #     'args': (),
-        # },
+        # TODO: Comment out once entity code is deployed with new FE
+        # Old cache and rebuild school index task
+        'proco.utils.tasks.update_all_cached_values': {
+            'task': 'proco.utils.tasks.update_all_cached_values',
+            'schedule': crontab(hour=4, minute=45),
+            'args': (),
+            'kwargs': {'clean_cache': True},
+        },
+        'proco.utils.tasks.rebuild_school_index': {
+            'task': 'proco.utils.tasks.rebuild_school_index',
+            'schedule': crontab(hour=2, minute=0),
+            'args': (),
+        },
         'proco.schools.tasks.update_school_records': {
             'task': 'proco.schools.tasks.update_school_records',
             'schedule': crontab(hour=1, minute=0),
@@ -150,13 +151,13 @@ def finalize_setup(sender, **kwargs):
             'schedule': crontab(minute=30, hour='10,16,22'),
             'args': (),
         },
-        # 'proco.data_sources.tasks.update_entity_qos_data': {
-        #     'task': 'proco.data_sources.tasks.update_entity_qos_data',
-        #     # Executes once a day at 5:00 AM
-        #     'schedule': crontab(hour=5, minute=0),
-        #     'args': (),
-        #     'kwargs': {'today': False},
-        # },
+        'proco.data_sources.tasks.update_entity_qos_data': {
+            'task': 'proco.data_sources.tasks.update_entity_qos_data',
+            # Executes once a day at 5:00 AM
+            'schedule': crontab(hour=5, minute=0),
+            'args': (),
+            'kwargs': {'today': False},
+        },
         'proco.utils.tasks.populate_entity_registration_data': {
             'task': 'proco.utils.tasks.populate_entity_registration_data',
             # Executes 4 times daily (offset from school equivalent by 5 minutes)

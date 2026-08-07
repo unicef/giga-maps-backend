@@ -490,6 +490,7 @@ class InvalidateCache(APIView):
             cache_manager.invalidate()
             message = 'Cache invalidation started. Maps will be updated in a few minutes.'
 
+        update_all_cached_values.delay()
         update_all_entity_cached_values.delay()
         return Response(data={'message': message})
 
@@ -516,6 +517,7 @@ class InvalidateCacheByPattern(APIView):
                 cache_manager.invalidate()
                 message = 'Cache invalidation started. Maps will be updated in a few minutes.'
 
+            update_all_cached_values.delay()
             update_all_entity_cached_values.delay()
         else:
             keys = []

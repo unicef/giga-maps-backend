@@ -98,13 +98,23 @@ class BaseEntityDataLayerAPIViewSet(EntityDetailFilterMixin, APIView):
         query_param_keys = query_params.keys()
 
         if 'start_date' in query_param_keys:
-            self.kwargs['start_date'] = date_utilities.to_date(query_params['start_date']).date()
+            start_date_val = self.parse_date(query_params['start_date'], 'start_date') if hasattr(self, 'parse_date') else (date_utilities.to_date(query_params['start_date']).date() if date_utilities.to_date(query_params['start_date']) else None)
+            if start_date_val:
+                self.kwargs['start_date'] = start_date_val
+            elif layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+                date = core_utilities.get_current_datetime_object() - timedelta(days=7)
+                self.kwargs['start_date'] = (date - timedelta(days=date.weekday())).date()
         elif layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
             date = core_utilities.get_current_datetime_object() - timedelta(days=7)
             self.kwargs['start_date'] = (date - timedelta(days=date.weekday())).date()
 
         if 'end_date' in query_param_keys:
-            self.kwargs['end_date'] = date_utilities.to_date(query_params['end_date']).date()
+            end_date_val = self.parse_date(query_params['end_date'], 'end_date') if hasattr(self, 'parse_date') else (date_utilities.to_date(query_params['end_date']).date() if date_utilities.to_date(query_params['end_date']) else None)
+            if end_date_val:
+                self.kwargs['end_date'] = end_date_val
+            elif layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+                date = core_utilities.get_current_datetime_object() - timedelta(days=7)
+                self.kwargs['end_date'] = ((date - timedelta(days=date.weekday())) + timedelta(days=6)).date()
         elif layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
             date = core_utilities.get_current_datetime_object() - timedelta(days=7)
             self.kwargs['end_date'] = ((date - timedelta(days=date.weekday())) + timedelta(days=6)).date()
@@ -166,7 +176,9 @@ class BaseEntityDataLayerAPIViewSet(EntityDetailFilterMixin, APIView):
 
     @staticmethod
     def parse_date(value, param_name):
-        """Parse a date string using DATE_FORMAT; raise ValueError on failure."""
+        """Parse a date string using DATE_FORMAT; return None for 'undefined'/'null'/empty, raise ValueError on invalid date format."""
+        if not value or str(value).lower().strip() in ('undefined', 'null', 'none', ''):
+            return None
         parsed = date_utilities.to_date(value)
         if parsed is None:
             from django.conf import settings
@@ -195,13 +207,23 @@ class BaseEntityDataLayerAPIViewSet(EntityDetailFilterMixin, APIView):
         query_param_keys = query_params.keys()
 
         if 'start_date' in query_param_keys:
-            self.kwargs['start_date'] = self.parse_date(query_params['start_date'], 'start_date')
+            start_date_val = self.parse_date(query_params['start_date'], 'start_date')
+            if start_date_val:
+                self.kwargs['start_date'] = start_date_val
+            elif layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+                date = core_utilities.get_current_datetime_object() - timedelta(days=7)
+                self.kwargs['start_date'] = (date - timedelta(days=date.weekday())).date()
         elif layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
             date = core_utilities.get_current_datetime_object() - timedelta(days=7)
             self.kwargs['start_date'] = (date - timedelta(days=date.weekday())).date()
 
         if 'end_date' in query_param_keys:
-            self.kwargs['end_date'] = self.parse_date(query_params['end_date'], 'end_date')
+            end_date_val = self.parse_date(query_params['end_date'], 'end_date')
+            if end_date_val:
+                self.kwargs['end_date'] = end_date_val
+            elif layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+                date = core_utilities.get_current_datetime_object() - timedelta(days=7)
+                self.kwargs['end_date'] = ((date - timedelta(days=date.weekday())) + timedelta(days=6)).date()
         elif layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
             date = core_utilities.get_current_datetime_object() - timedelta(days=7)
             self.kwargs['end_date'] = ((date - timedelta(days=date.weekday())) + timedelta(days=6)).date()
