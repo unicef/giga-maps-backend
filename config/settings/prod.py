@@ -123,14 +123,22 @@ if CELERY_ENABLED:
 # -------------
 
 SENTRY_DSN = env('SENTRY_DSN', default='')
-SENTRY_ENABLED = True if SENTRY_DSN else False
+CELERY_SENTRY_DSN = env('CELERY_SENTRY_DSN', default='')
+
+# Celery deployments set CELERY_SENTRY_DSN to route events to the Celery Sentry project.
+SENTRY_ACTIVE_DSN = CELERY_SENTRY_DSN or SENTRY_DSN
+SENTRY_INTEGRATIONS = (
+    [CeleryIntegration()] if CELERY_SENTRY_DSN else [DjangoIntegration()]
+)
+SENTRY_ENABLED = True if SENTRY_ACTIVE_DSN else False
 
 if SENTRY_ENABLED:
     sentry_sdk.init(
-        SENTRY_DSN,
+        SENTRY_ACTIVE_DSN,
         # traces_sample_rate=0.2,
         release=get_git_hash(),
-        integrations=[DjangoIntegration(), CeleryIntegration()],
+        environment=APP_ENVIRONMENT,
+        integrations=SENTRY_INTEGRATIONS,
     )
 
 # Mapbox
