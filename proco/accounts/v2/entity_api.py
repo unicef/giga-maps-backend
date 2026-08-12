@@ -1,6 +1,7 @@
 import copy
 import json
 import logging
+import re
 from datetime import timedelta
 
 from django.conf import settings
@@ -699,6 +700,12 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
                         sql_statement = str(' AND '.join(values)).replace('SQL:', '').format(**kwargs)
+                        sql_statement = re.sub(
+                            r'\b(eds|sds)\."?download_speed_benchmark"?',
+                            lambda m: 'sws.download_speed_benchmark' if kwargs.get('entity_name') == 'school' else 'ews.download_speed_benchmark',
+                            sql_statement
+                        )
+                        sql_statement = re.sub(r'\bsds\.', 'eds.', sql_statement)
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
                     label_cases.append("ELSE '{label}'".format(label=title))
@@ -708,11 +715,20 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                 alias='field_status',
                 trailing_comma=True,
             )
-            if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+            uses_school_weekly_status = 'sws' in str(legend_configs) or 'sws.' in kwargs.get('case_conditions', '')
+            uses_entity_weekly_status = 'ews' in str(legend_configs) or 'ews.' in kwargs.get('case_conditions', '')
+            
+            joins = []
+            if uses_school_weekly_status:
+                joins.append('INNER JOIN "connection_statistics_schoolweeklystatus" sws ON "entities_entity"."last_weekly_status_id" = sws."id"')
+            if uses_entity_weekly_status:
+                joins.append('INNER JOIN "connection_statistics_entityweeklystatus" ews ON "entities_entity"."last_weekly_status_id" = ews."id"')
+
+            if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE and not joins:
                 kwargs['entity_weekly_outer_join'] = ''
             else:
-                kwargs['entity_weekly_outer_join'] = """
-                INNER JOIN "connection_statistics_entityweeklystatus" ews ON eds."last_weekly_status_id" = ews."id"
+                kwargs['entity_weekly_outer_join'] = '\n'.join(joins) if joins else """
+                INNER JOIN "connection_statistics_entityweeklystatus" ews ON "entities_entity"."last_weekly_status_id" = ews."id"
                 """
         else:
             kwargs['case_conditions'] = """
@@ -1338,6 +1354,12 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         if benchmark_value is not None and isinstance(benchmark_value, str) and 'SQL:' in benchmark_value:
             kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(
                 **kwargs) + ' AS benchmark_sql_value,'
+            kwargs['benchmark_value_sql'] = re.sub(
+                r'\b(eds|sds)\."?download_speed_benchmark"?',
+                lambda m: 'sws.download_speed_benchmark' if kwargs.get('entity_name') == 'school' else 'ews.download_speed_benchmark',
+                kwargs['benchmark_value_sql']
+            )
+            kwargs['benchmark_value_sql'] = re.sub(r'\bsds\.', 'eds.', kwargs['benchmark_value_sql'])
 
         legend_configs = kwargs['legend_configs']
         entity_type_obj = get_entity_type_config(kwargs['entity_name'])
@@ -1371,6 +1393,12 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
                         sql_statement = str(' AND '.join(values)).replace('SQL:', '').format(**kwargs)
+                        sql_statement = re.sub(
+                            r'\b(eds|sds)\."?download_speed_benchmark"?',
+                            lambda m: 'sws.download_speed_benchmark' if kwargs.get('entity_name') == 'school' else 'ews.download_speed_benchmark',
+                            sql_statement
+                        )
+                        sql_statement = re.sub(r'\bsds\.', 'eds.', sql_statement)
                         label_cases.append(
                             'COUNT(DISTINCT CASE WHEN {sql} THEN eds.entity_id ELSE NULL END) AS "{label}",'.format(
                                 sql=sql_statement, label=label))
@@ -1382,10 +1410,19 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
             kwargs['case_conditions'] = ' '.join(label_cases)
 
-            if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+            uses_school_weekly_status = 'sws' in str(legend_configs) or 'sws.' in kwargs.get('case_conditions', '') or 'sws.' in kwargs.get('benchmark_value_sql', '')
+            uses_entity_weekly_status = 'ews' in str(legend_configs) or 'ews.' in kwargs.get('case_conditions', '') or 'ews.' in kwargs.get('benchmark_value_sql', '')
+
+            joins = []
+            if uses_school_weekly_status:
+                joins.append('INNER JOIN "connection_statistics_schoolweeklystatus" sws ON "entities_entity"."last_weekly_status_id" = sws."id"')
+            if uses_entity_weekly_status:
+                joins.append('INNER JOIN "connection_statistics_entityweeklystatus" ews ON "entities_entity"."last_weekly_status_id" = ews."id"')
+
+            if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE and not joins:
                 kwargs['entity_weekly_outer_join'] = ''
             else:
-                kwargs['entity_weekly_outer_join'] = """
+                kwargs['entity_weekly_outer_join'] = '\n'.join(joins) if joins else """
                 INNER JOIN "connection_statistics_entityweeklystatus" ews ON eds."last_weekly_status_id" = ews."id"
                 """
         else:
@@ -1512,6 +1549,11 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         if benchmark_value is not None and isinstance(benchmark_value, str) and 'SQL:' in benchmark_value:
             kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(
                 **kwargs) + ' AS benchmark_sql_value,'
+            kwargs['benchmark_value_sql'] = re.sub(
+                r'\b(eds|sds)\."?download_speed_benchmark"?',
+                lambda m: 'ews.download_speed_benchmark' if m.group(1) == 'eds' else 'sws.download_speed_benchmark',
+                kwargs['benchmark_value_sql']
+            )
 
         legend_configs = kwargs['legend_configs']
         entity_type_obj = get_entity_type_config(kwargs['entity_name'])
@@ -1540,13 +1582,19 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
                         sql_statement = str(' AND '.join(values)).replace('SQL:', '').format(**kwargs)
+                        sql_statement = re.sub(
+                            r'\b(eds|sds)\."?download_speed_benchmark"?',
+                            lambda m: 'ews.download_speed_benchmark' if m.group(1) == 'eds' else 'sws.download_speed_benchmark',
+                            sql_statement
+                        )
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
                     label_cases.append("ELSE '{label}'".format(label=title))
 
             kwargs['case_conditions'] = self.build_case_expression(label_cases, alias='live_avg_connectivity')
 
-            if 'ews' in str(legend_configs):
+            uses_entity_weekly_status = 'ews' in str(legend_configs) or 'ews.' in kwargs.get('case_conditions', '') or 'ews.' in kwargs.get('benchmark_value_sql', '')
+            if uses_entity_weekly_status:
                 kwargs['entity_weekly_outer_join'] = """
                 LEFT JOIN "connection_statistics_entityweeklystatus" ews
                     ON eds."last_weekly_status_id" = ews."id"
@@ -3256,6 +3304,11 @@ class EntityDataLayerPreviewViewSet(APIView):
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
                         sql_statement = str(' AND '.join(values)).replace('SQL:', '').format(**kwargs)
+                        sql_statement = re.sub(
+                            r'\b(eds|sds)\."?download_speed_benchmark"?',
+                            lambda m: 'ews.download_speed_benchmark' if m.group(1) == 'eds' else 'sws.download_speed_benchmark',
+                            sql_statement
+                        )
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
                     label_cases.append("ELSE '{label}'".format(label=title))
