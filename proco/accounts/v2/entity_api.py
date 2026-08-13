@@ -717,7 +717,7 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
             )
             uses_school_weekly_status = 'sws' in str(legend_configs) or 'sws.' in kwargs.get('case_conditions', '')
             uses_entity_weekly_status = 'ews' in str(legend_configs) or 'ews.' in kwargs.get('case_conditions', '')
-            
+
             joins = []
             if uses_school_weekly_status:
                 joins.append('INNER JOIN "connection_statistics_schoolweeklystatus" sws ON "entities_entity"."last_weekly_status_id" = sws."id"')
@@ -2566,6 +2566,84 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
         return sorted_rows
 
+    def has_legacy_summary_filters(self):
+        return any(
+            self.kwargs.get(filter_key, '')
+            for filter_key in ('school_filters', 'school_static_filters', 'school_real_time_filters')
+        )
+
+    def fetch_legacy_total_summary(self, is_live_layer):
+        if not self.has_legacy_summary_filters():
+            return None
+
+        original_kwargs = copy.deepcopy(self.kwargs)
+        total_query_labels = []
+        try:
+            self.kwargs['school_filters'] = ''
+            self.kwargs['school_static_filters'] = ''
+            self.kwargs['school_real_time_filters'] = ''
+
+            if is_live_layer:
+                query = DataLayerInfoViewSet.get_info_query(self)
+            else:
+                query = DataLayerInfoViewSet.get_static_info_query(self, total_query_labels)
+
+            query_result = db_utilities.sql_to_response(
+                query,
+                label=self.__class__.__name__,
+                db_var=settings.READ_ONLY_DB_KEY,
+                raise_exception=True,
+            )
+            return query_result[-1] if query_result else None
+        except Exception:
+            logger.error('Failed to fetch unfiltered school total metrics for layer info.', exc_info=True)
+            return None
+        finally:
+            self.kwargs = original_kwargs
+
+    def has_entity_summary_filters(self):
+        return any(
+            self.kwargs.get(filter_key, '')
+            for filter_key in (
+                'entity_filters',
+                'entity_static_filters',
+                'entity_real_time_filters',
+                'entity_detail_join',
+                'entity_detail_condition',
+            )
+        )
+
+    def fetch_entity_total_summary(self, is_live_layer):
+        if not self.has_entity_summary_filters():
+            return None
+
+        original_kwargs = copy.deepcopy(self.kwargs)
+        total_query_labels = []
+        try:
+            self.kwargs['entity_filters'] = ''
+            self.kwargs['entity_static_filters'] = ''
+            self.kwargs['entity_real_time_filters'] = ''
+            self.kwargs['entity_detail_join'] = ''
+            self.kwargs['entity_detail_condition'] = ''
+
+            if is_live_layer:
+                query = self.get_info_query(total_query_labels)
+            else:
+                query = self.get_static_info_query(total_query_labels)
+
+            query_result = db_utilities.sql_to_response(
+                query,
+                label=self.__class__.__name__,
+                db_var=settings.READ_ONLY_DB_KEY,
+                raise_exception=True,
+            )
+            return query_result[-1] if query_result else None
+        except Exception:
+            logger.error('Failed to fetch unfiltered entity total metrics for layer info.', exc_info=True)
+            return None
+        finally:
+            self.kwargs = original_kwargs
+
     def build_entity_summary_response(
         self,
         is_live_layer,
@@ -2615,6 +2693,9 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     'no_of_entities_measure': 0,
                     'entity_with_realtime_data': 0,
                     'real_time_connected_entities': {},
+                    'total_metrics': {
+                        'no_of_entities_measure': 0,
+                    },
                     'is_data_synced': is_data_synced_qs.exists(),
                     'live_avg': 0,
                     'live_avg_connectivity': 'unknown',
@@ -2630,6 +2711,9 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 }
 
         query_response = query_result[-1]
+        total_query_response = self.fetch_entity_total_summary(is_live_layer)
+        if total_query_response is None:
+            total_query_response = query_response
 
         benchmark_metadata = self.build_benchmark_metadata(
             benchmark_value=benchmark_value,
@@ -2678,6 +2762,9 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 'no_of_entities_measure': query_response.get('no_of_entities_measure', 0),
                 'entity_with_realtime_data': query_response.get('entity_with_realtime_data', 0),
                 'real_time_connected_entities': connected_entities,
+                'total_metrics': {
+                    'no_of_entities_measure': total_query_response.get('no_of_entities_measure', 0),
+                },
                 'is_data_synced': is_data_synced_qs.exists(),
                 'live_avg': live_avg,
                 'live_avg_connectivity': live_avg_connectivity,
@@ -2744,6 +2831,9 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     'no_of_entities_measure': 0,
                     'entity_with_realtime_data': 0,
                     'real_time_connected_entities': {},
+                    'total_metrics': {
+                        'no_of_entities_measure': 0,
+                    },
                     'is_data_synced': is_data_synced_qs.exists(),
                     'live_avg': 0,
                     'live_avg_connectivity': 'unknown',
@@ -2759,6 +2849,9 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 }
 
         query_response = query_result[-1]
+        total_query_response = self.fetch_legacy_total_summary(is_live_layer)
+        if total_query_response is None:
+            total_query_response = query_response
 
         benchmark_metadata = self.build_benchmark_metadata(
             benchmark_value=benchmark_value,
@@ -2800,6 +2893,9 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     'moderate': query_response.get('moderate', 0),
                     'no_internet': query_response.get('bad', 0),
                     'unknown': query_response.get('unknown', 0),
+                },
+                'total_metrics': {
+                    'no_of_entities_measure': total_query_response.get('no_of_entities_measure', total_query_response.get('no_of_schools_measure', 0)),
                 },
                 'is_data_synced': is_data_synced_qs.exists(),
                 'live_avg': live_avg,

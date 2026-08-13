@@ -214,6 +214,7 @@ class EntityGlobalStatsAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, API
             )
             .order_by()
         )
+        total_stats_qs = stats_qs
 
         entity_filters = core_utilities.get_filter_sql(
             self.request, 'entities', 'entities_entity', entity_type
@@ -221,7 +222,12 @@ class EntityGlobalStatsAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, API
         if len(entity_filters) > 0:
             stats_qs = stats_qs.extra(where=[entity_filters])
 
-        stats_qs = self.apply_entity_detail_filters(stats_qs, entity_type_obj)
+        entity_detail_filter_extra = self.get_entity_detail_filter_extra(self.request, entity_type_obj)
+        if entity_detail_filter_extra['where']:
+            stats_qs = stats_qs.extra(
+                tables=entity_detail_filter_extra['tables'],
+                where=entity_detail_filter_extra['where'],
+            )
 
         entity_static_filters = core_utilities.get_filter_sql(
             self.request, 'entity_static', 'connection_statistics_entityweeklystatus', entity_type)
@@ -239,6 +245,10 @@ class EntityGlobalStatsAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, API
         )
 
         stats = list(stats_qs)[0]
+        if entity_filters or entity_static_filters or entity_detail_filter_extra['where']:
+            total_stats = list(total_stats_qs)[0]
+        else:
+            total_stats = stats
 
         return {
             'no_of_countries': stats['all_countries'],
@@ -256,7 +266,13 @@ class EntityGlobalStatsAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, API
                 'not_connected': stats['not_connected'],
                 'unknown': stats['unknown'],
                 'total': stats['total_entities'],
-            }
+            },
+            'total_metrics': {
+                'entities_total': total_stats['total_entities'],
+                'connected_entities': {
+                    'connected': total_stats['connected'],
+                },
+            },
         }
 
     def calculate_global_statistic(self):
