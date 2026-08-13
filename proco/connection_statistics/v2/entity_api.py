@@ -125,6 +125,16 @@ class EntityGlobalStatsAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, API
 
         school_connectivity_status = list(school_connectivity_status_qry)[0]
 
+        if school_filters or school_static_filters:
+            total_school_connectivity_status = list(queryset.annotate(
+                dummy_group_by=Value(1)).values('dummy_group_by').annotate(
+                connected=Count(Case(When(connectivity_status__in=['good', 'moderate', 'bad'], then='id')),
+                                distinct=True),
+                total_schools=Count('id', distinct=True),
+            ).values('connected', 'total_schools').order_by())[0]
+        else:
+            total_school_connectivity_status = school_connectivity_status
+
         return {
             'no_of_countries': school_connectivity_status['all_countries'],
             'countries_with_connectivity_status_mapped': school_connectivity_status[
@@ -140,6 +150,12 @@ class EntityGlobalStatsAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, API
                 'connected': school_connectivity_status['connected'],
                 'not_connected': school_connectivity_status['not_connected'],
                 'unknown': school_connectivity_status['unknown'],
+            },
+            'total_metrics': {
+                'entities_total': total_school_connectivity_status['total_schools'],
+                'connected_entities': {
+                    'connected': total_school_connectivity_status['connected'],
+                },
             },
         }
 
