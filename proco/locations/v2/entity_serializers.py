@@ -105,9 +105,10 @@ class EntityAwareDetailCountrySerializer(DetailCountrySerializer):
     Entity-aware country detail serializer.
     """
     entity_counts = serializers.SerializerMethodField()
+    connected_entities = serializers.SerializerMethodField()
 
     class Meta(DetailCountrySerializer.Meta):
-        fields = DetailCountrySerializer.Meta.fields + ('entity_counts',)
+        fields = DetailCountrySerializer.Meta.fields + ('entity_counts', 'connected_entities')
 
     def get_entity_counts(self, instance):
         """
@@ -140,6 +141,57 @@ class EntityAwareDetailCountrySerializer(DetailCountrySerializer):
             entity_counts[entity_type.code] = count
 
         return entity_counts
+
+    def get_connected_entities(self, instance):
+        connected_entities = {}
+        active_entity_types = EntityType.objects.filter(
+            deleted__isnull=True,
+            is_active=True
+        ).order_by('display_order', 'code')
+
+        legacy_codes = {entity_type.code for entity_type in active_entity_types if entity_type.is_legacy}
+        non_legacy_codes = {entity_type.code for entity_type in active_entity_types if not entity_type.is_legacy}
+
+        if non_legacy_codes:
+            rows = (
+                Entity.objects
+                .filter(
+                    country=instance,
+                    entity_type__code__in=non_legacy_codes,
+                    deleted__isnull=True,
+                )
+                .values('entity_type__code')
+                .annotate(
+                    connected=Count(
+                        'id',
+                        filter=Q(connectivity_status__in=['good', 'moderate', 'bad']),
+                        distinct=True,
+                    )
+                )
+                .order_by()
+            )
+            connected_entities.update({
+                row['entity_type__code']: {'connected': row['connected']}
+                for row in rows
+            })
+            for code in non_legacy_codes - set(connected_entities.keys()):
+                connected_entities[code] = {'connected': 0}
+
+        if legacy_codes:
+            connected_schools = School.objects.filter(
+                country=instance,
+                deleted__isnull=True,
+            ).aggregate(
+                connected=Count(
+                    'id',
+                    filter=Q(connectivity_status__in=['good', 'moderate', 'bad']),
+                    distinct=True,
+                )
+            )['connected'] or 0
+            for code in legacy_codes:
+                connected_entities[code] = {'connected': connected_schools}
+
+        return connected_entities
 
     def get_active_layers_list(self, instance):
         active_layers_list = []
