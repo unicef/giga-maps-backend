@@ -53,6 +53,11 @@ AZURE_CONTAINER = env('AZURE_CONTAINER')  # noqa: F405
 AZURE_SSL = True
 AZURE_URL_EXPIRATION_SECS = None
 
+# Written onto every newly uploaded blob as its Cache-Control header. Safe to keep long-lived
+# because get_random_name_image() names uploads after a UUID, so a given URL never changes
+# content. Existing blobs keep their current (absent) header until they are re-uploaded.
+AZURE_OBJECT_PARAMETERS = {'cache_control': 'public, max-age=31536000, immutable'}
+
 if AZURE_ACCOUNT_NAME and AZURE_ACCOUNT_KEY and AZURE_CONTAINER:
     DEFAULT_FILE_STORAGE = 'storages.backends.azure_storage.AzureStorage'
     STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
