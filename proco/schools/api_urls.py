@@ -2,6 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import SimpleRouter
 
 from proco.schools import api
+from proco.schools.country_config_api import CountryConfigAPIView
 
 country_schools = SimpleRouter()
 country_schools.register(r'countries/(?P<country_code>\w+)/schools', api.SchoolsViewSet, basename='schools')
@@ -9,6 +10,7 @@ country_schools.register(r'countries/(?P<country_code>\w+)/schools', api.Schools
 app_name = 'schools'
 
 urlpatterns = [
+    path('country-config/', CountryConfigAPIView.as_view(), name='country-config'),
     path('', include(country_schools.urls)),
     path('schools/random/', api.RandomSchoolsListAPIView.as_view(), name='random-schools'),
     path('schools/tiles/', api.SchoolTileRequestHandler.as_view(), name='tiles-view'),
