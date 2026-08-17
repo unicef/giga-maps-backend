@@ -1,5 +1,8 @@
 from django.contrib.postgres.fields import JSONField
+from django.core.validators import FileExtensionValidator
 from django.db import models
+
+from proco.about_us.config import app_config
 from proco.locations.utils import get_random_name_image
 
 
@@ -22,7 +25,17 @@ class AboutUs(models.Model):
 
 class SliderImage(models.Model):
     name = models.CharField(max_length=200, null=True)
-    image = models.ImageField(upload_to=get_random_name_image, blank=True, null=True)
+    # FileField rather than ImageField: the landing page sections carry short videos as well as
+    # stills, and ImageField rejects them at Pillow verification. The field name stays `image`
+    # because the About Us payload exposes it as `image` on every section.
+    image = models.FileField(
+        upload_to=get_random_name_image,
+        blank=True,
+        null=True,
+        validators=[
+            FileExtensionValidator(allowed_extensions=app_config.slide_media_allowed_extensions),
+        ],
+    )
 
     objects = models.Manager()
 
