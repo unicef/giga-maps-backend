@@ -1,6 +1,7 @@
 import copy
 import re
 from datetime import timedelta
+from math import floor, ceil
 
 from django.apps import apps
 from django.conf import settings
@@ -8,8 +9,8 @@ from django.contrib.admin.models import LogEntry
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.validators import validate_email
-from django.db import transaction
-from django.db.models import Q
+from django.db import transaction, connection
+from django.db.models import Q, Min, F, Max
 from django.db.models.functions.text import Lower
 from rest_flex_fields.serializers import FlexFieldsModelSerializer
 from rest_framework import serializers
@@ -22,12 +23,14 @@ from proco.accounts.v2.entity_filter_serializers import (
     PublishedEntityAdvanceFiltersListSerializer,
     EntityColumnConfigurationChoicesSerializer,
 )
+from proco.connection_statistics.models import SchoolWeeklyStatus
 from proco.core import utils as core_utilities
 from proco.core import db_utils as db_utilities
 from proco.custom_auth import models as auth_models
 from proco.custom_auth.serializers import ExpandUserSerializer
 from proco.custom_auth.utils import get_user_emails_for_permissions
 from proco.locations import models as locations_models
+from proco.schools.models import School
 from proco.utils import dates as date_utilities
 
 
