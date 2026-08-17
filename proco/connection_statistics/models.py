@@ -361,6 +361,79 @@ class SchoolDailyStatus(ConnectivityStatistics, TimeStampedModel, models.Model):
             self.save()
 
 
+class SchoolRealTimeWeeklyMetric(TimeStampedModel, models.Model):
+    AGG_FUNCTION_AVG = 'avg'
+    AGG_FUNCTION_MIN = 'min'
+    AGG_FUNCTION_MAX = 'max'
+    AGG_FUNCTION_SUM = 'sum'
+    AGG_FUNCTION_MEDIAN_50 = 'median|50'
+    AGG_FUNCTION_MEDIAN_90 = 'median|90'
+
+    AGG_FUNCTION_CHOICES = Choices(
+        (AGG_FUNCTION_AVG, _('Average')),
+        (AGG_FUNCTION_MIN, _('Minimum')),
+        (AGG_FUNCTION_MAX, _('Maximum')),
+        (AGG_FUNCTION_SUM, _('Sum')),
+        (AGG_FUNCTION_MEDIAN_50, _('Median 50')),
+        (AGG_FUNCTION_MEDIAN_90, _('Median 90')),
+    )
+
+    school = models.ForeignKey(School, related_name='realtime_weekly_metrics', on_delete=models.CASCADE)
+    country = models.ForeignKey(Country, related_name='school_realtime_weekly_metrics', on_delete=models.CASCADE)
+    year = models.PositiveSmallIntegerField(default=get_current_year)
+    week = models.PositiveSmallIntegerField(default=get_current_week)
+    date = models.DateField()
+    config_hash = models.CharField(max_length=64, db_index=True)
+    live_data_sources = models.CharField(max_length=255)
+    metric_name = models.CharField(max_length=64)
+    agg_function = models.CharField(max_length=32, choices=AGG_FUNCTION_CHOICES)
+    agg_value = models.FloatField(blank=True, null=True, default=None)
+    sample_count = models.PositiveIntegerField(blank=True, default=0)
+
+    class Meta:
+        verbose_name = _('School Real Time Weekly Metric')
+        verbose_name_plural = _('School Real Time Weekly Metrics')
+        ordering = ('id',)
+        constraints = [
+            UniqueConstraint(
+                fields=['school', 'year', 'week', 'config_hash'],
+                name='schoolrealtimeweeklymetric_unique',
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=['school', 'year', 'week', 'config_hash'],
+                name='srtwm_school_lookup_idx',
+            ),
+            models.Index(
+                fields=['school', 'country', 'year', 'week', 'config_hash'],
+                name='srtwm_map_lookup_idx',
+            ),
+            models.Index(
+                fields=['country', 'year', 'week', 'config_hash'],
+                name='srtwm_country_lookup_idx',
+            ),
+            models.Index(
+                fields=['config_hash', 'year', 'week'],
+                name='srtwm_hash_week_idx',
+            ),
+            models.Index(
+                fields=['date'],
+                name='srtwm_date_idx',
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f'{self.year} Week {self.week} School {self.school_id} '
+            f'{self.metric_name} {self.agg_function} - {self.agg_value}'
+        )
+
+    def save(self, **kwargs):
+        self.date = Week(self.year, self.week).monday()
+        super().save(**kwargs)
+
+
 class RealTimeConnectivity(ConnectivityStatistics, TimeStampedModel, models.Model):
     school = models.ForeignKey(School, related_name='realtime_status', on_delete=models.CASCADE)
 
