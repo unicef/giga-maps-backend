@@ -1,7 +1,6 @@
 import copy
 import json
 import logging
-import re
 import uuid
 from datetime import timedelta
 
@@ -796,11 +795,6 @@ class DataLayerPreviewViewSet(APIView):
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
                         sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
-                        sql_statement = re.sub(
-                            r'\b(sds|eds)\."?download_speed_benchmark"?',
-                            lambda m: 'ews.download_speed_benchmark' if m.group(1) == 'eds' else 'sws.download_speed_benchmark',
-                            sql_statement
-                        )
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
                     if not any(c.startswith("ELSE ") for c in label_cases):
@@ -1237,11 +1231,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         benchmark_value = kwargs['benchmark_value']
         if benchmark_value is not None and isinstance(benchmark_value, str) and 'SQL:' in benchmark_value:
             kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(**kwargs) + ' AS benchmark_sql_value,'
-            kwargs['benchmark_value_sql'] = re.sub(
-                r'\b(sds|eds)\."?download_speed_benchmark"?',
-                lambda m: 'ews.download_speed_benchmark' if m.group(1) == 'eds' else 'sws.download_speed_benchmark',
-                kwargs['benchmark_value_sql']
-            )
 
         legend_configs = kwargs['legend_configs']
         if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE:
@@ -1257,11 +1246,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
                         sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
-                        sql_statement = re.sub(
-                            r'\b(sds|eds)\."?download_speed_benchmark"?',
-                            lambda m: 'ews.download_speed_benchmark' if m.group(1) == 'eds' else 'sws.download_speed_benchmark',
-                            sql_statement
-                        )
                         label_cases.append(
                             'COUNT(DISTINCT CASE WHEN {sql} THEN sds.school_id ELSE NULL END) AS "{label}",'.format(
                                 sql=sql_statement, label=title))
@@ -1273,7 +1257,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
             kwargs['case_conditions'] = ' '.join(label_cases)
 
-            uses_school_weekly_status = 'sws' in str(legend_configs) or 'sws.' in kwargs.get('case_conditions', '') or 'sws.' in kwargs.get('benchmark_value_sql', '')
+            uses_school_weekly_status = 'sws' in str(legend_configs)
             if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE and not uses_school_weekly_status:
                 kwargs['school_weekly_outer_join'] = ''
             else:
@@ -1409,11 +1393,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         if benchmark_value is not None and isinstance(benchmark_value, str) and 'SQL:' in benchmark_value:
             kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(
                 **kwargs) + ' AS benchmark_sql_value,'
-            kwargs['benchmark_value_sql'] = re.sub(
-                r'\b(sds|eds)\."?download_speed_benchmark"?',
-                lambda m: 'ews.download_speed_benchmark' if m.group(1) == 'eds' else 'sws.download_speed_benchmark',
-                kwargs['benchmark_value_sql']
-            )
 
         legend_configs = kwargs['legend_configs']
         if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
@@ -1426,11 +1405,6 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
                         sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
-                        sql_statement = re.sub(
-                            r'\b(sds|eds)\."?download_speed_benchmark"?',
-                            lambda m: 'ews.download_speed_benchmark' if m.group(1) == 'eds' else 'sws.download_speed_benchmark',
-                            sql_statement
-                        )
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
                     if not any(c.startswith("ELSE ") for c in label_cases):
@@ -2302,11 +2276,6 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
                         sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
-                        sql_statement = re.sub(
-                            r'\b(sds|eds)\."?download_speed_benchmark"?',
-                            lambda m: 'ews.download_speed_benchmark' if m.group(1) == 'eds' else 'sws.download_speed_benchmark',
-                            sql_statement
-                        )
                         uses_school_weekly_status = uses_school_weekly_status or 'sws.' in sql_statement
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
@@ -2788,11 +2757,6 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
                         sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
-                        sql_statement = re.sub(
-                            r'\b(sds|eds)\."?download_speed_benchmark"?',
-                            lambda m: 'ews.download_speed_benchmark' if m.group(1) == 'eds' else 'sws.download_speed_benchmark',
-                            sql_statement
-                        )
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
                     if not any(c.startswith("ELSE ") for c in label_cases):

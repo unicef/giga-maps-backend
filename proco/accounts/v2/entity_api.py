@@ -700,9 +700,10 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
                         sql_statement = str(' AND '.join(values)).replace('SQL:', '').format(**kwargs)
+                        sql_statement = re.sub(r'^\s*WHEN\s+', '', sql_statement, flags=re.IGNORECASE)
                         sql_statement = re.sub(
-                            r'\b(eds|sds)\."?download_speed_benchmark"?',
-                            lambda m: 'sws.download_speed_benchmark' if kwargs.get('entity_name') == 'school' else 'ews.download_speed_benchmark',
+                            r'\b(eds|sds)\."?(num_students\w*|num_teachers|num_classrooms?|download_speed_benchmark|latency|uptime)"?',
+                            lambda m: ('sws.' if kwargs.get('entity_name') == 'school' else 'ews.') + f'"{m.group(2)}"',
                             sql_statement
                         )
                         sql_statement = re.sub(r'\bsds\.', 'eds.', sql_statement)
@@ -1355,8 +1356,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(
                 **kwargs) + ' AS benchmark_sql_value,'
             kwargs['benchmark_value_sql'] = re.sub(
-                r'\b(eds|sds)\."?download_speed_benchmark"?',
-                lambda m: 'sws.download_speed_benchmark' if kwargs.get('entity_name') == 'school' else 'ews.download_speed_benchmark',
+                r'\b(eds|sds)\."?(num_students\w*|num_teachers|num_classrooms?|download_speed_benchmark|latency|uptime)"?',
+                lambda m: ('sws.' if kwargs.get('entity_name') == 'school' else 'ews.') + f'"{m.group(2)}"',
                 kwargs['benchmark_value_sql']
             )
             kwargs['benchmark_value_sql'] = re.sub(r'\bsds\.', 'eds.', kwargs['benchmark_value_sql'])
@@ -1393,9 +1394,10 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
                         sql_statement = str(' AND '.join(values)).replace('SQL:', '').format(**kwargs)
+                        sql_statement = re.sub(r'^\s*WHEN\s+', '', sql_statement, flags=re.IGNORECASE)
                         sql_statement = re.sub(
-                            r'\b(eds|sds)\."?download_speed_benchmark"?',
-                            lambda m: 'sws.download_speed_benchmark' if kwargs.get('entity_name') == 'school' else 'ews.download_speed_benchmark',
+                            r'\b(eds|sds)\."?(num_students\w*|num_teachers|num_classrooms?|download_speed_benchmark|latency|uptime)"?',
+                            lambda m: ('sws.' if kwargs.get('entity_name') == 'school' else 'ews.') + f'"{m.group(2)}"',
                             sql_statement
                         )
                         sql_statement = re.sub(r'\bsds\.', 'eds.', sql_statement)
@@ -1550,8 +1552,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(
                 **kwargs) + ' AS benchmark_sql_value,'
             kwargs['benchmark_value_sql'] = re.sub(
-                r'\b(eds|sds)\."?download_speed_benchmark"?',
-                lambda m: 'ews.download_speed_benchmark' if m.group(1) == 'eds' else 'sws.download_speed_benchmark',
+                r'\b(eds|sds)\."?(num_students\w*|num_teachers|num_classrooms?|download_speed_benchmark|latency|uptime)"?',
+                lambda m: ('ews.' if m.group(1) == 'eds' else 'sws.') + f'"{m.group(2)}"',
                 kwargs['benchmark_value_sql']
             )
 
@@ -1582,9 +1584,10 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
                         sql_statement = str(' AND '.join(values)).replace('SQL:', '').format(**kwargs)
+                        sql_statement = re.sub(r'^\s*WHEN\s+', '', sql_statement, flags=re.IGNORECASE)
                         sql_statement = re.sub(
-                            r'\b(eds|sds)\."?download_speed_benchmark"?',
-                            lambda m: 'ews.download_speed_benchmark' if m.group(1) == 'eds' else 'sws.download_speed_benchmark',
+                            r'\b(eds|sds)\."?(num_students\w*|num_teachers|num_classrooms?|download_speed_benchmark|latency|uptime)"?',
+                            lambda m: ('ews.' if m.group(1) == 'eds' else 'sws.') + f'"{m.group(2)}"',
                             sql_statement
                         )
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
@@ -3400,9 +3403,10 @@ class EntityDataLayerPreviewViewSet(APIView):
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
                         sql_statement = str(' AND '.join(values)).replace('SQL:', '').format(**kwargs)
+                        sql_statement = re.sub(r'^\s*WHEN\s+', '', sql_statement, flags=re.IGNORECASE)
                         sql_statement = re.sub(
-                            r'\b(eds|sds)\."?download_speed_benchmark"?',
-                            lambda m: 'ews.download_speed_benchmark' if m.group(1) == 'eds' else 'sws.download_speed_benchmark',
+                            r'\b(eds|sds)\."?(num_students\w*|num_teachers|num_classrooms?|download_speed_benchmark|latency|uptime)"?',
+                            lambda m: ('ews.' if m.group(1) == 'eds' else 'sws.') + f'"{m.group(2)}"',
                             sql_statement
                         )
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
