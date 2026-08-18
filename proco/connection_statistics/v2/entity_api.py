@@ -3,7 +3,7 @@ from datetime import timedelta, datetime, time
 from django.conf import settings
 from django.db import connection
 from django.db.models import (
-    Avg, Case, Value, When, Q
+    Avg, Case, Max, Min, Value, When, Q
 )
 from django.db.models import Count
 from django.db.models import (
@@ -1103,18 +1103,20 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
             date__range=(last_week_start, last_week_end)
         ).values_list('date', flat=True).order_by('-date').first()
 
+        date_boundaries = date_queryset.aggregate(first_date=Min('date'), last_date=Max('date'))
+        first_date = date_boundaries['first_date']
+        last_date = date_boundaries['last_date']
+
         if last_week_entry:
             monday_on_entry_date = last_week_start
             sunday_on_entry_date = last_week_end
         else:
-            latest_daily_entry = date_queryset.values_list('date', flat=True).order_by('-date').first()
+            latest_daily_entry = last_date
             if latest_daily_entry:
                 monday_on_entry_date = latest_daily_entry - timedelta(days=latest_daily_entry.weekday())
                 sunday_on_entry_date = monday_on_entry_date + timedelta(days=6)
 
         if monday_on_entry_date:
-            first_date = date_queryset.order_by('date').values_list('date', flat=True).first()
-            last_date = date_queryset.order_by('-date').values_list('date', flat=True).first()
             years = list(range(first_date.year, last_date.year + 1)) if first_date and last_date else []
             static_data = {
                 'week': {
@@ -1249,17 +1251,21 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
             date__range=(last_week_start, last_week_end)
         ).values_list('date', flat=True).order_by('-date').first()
 
+        date_boundaries = queryset.aggregate(first_date=Min('date'), last_date=Max('date'))
+        first_date = date_boundaries['first_date']
+        last_date = date_boundaries['last_date']
+
         if last_week_entry:
             monday_on_entry_date = last_week_start
             sunday_on_entry_date = last_week_end
         else:
-            latest_daily_entry = queryset.values_list('date', flat=True).order_by('-date').first()
+            latest_daily_entry = last_date
             if latest_daily_entry:
                 monday_on_entry_date = latest_daily_entry - timedelta(days=latest_daily_entry.weekday())
                 sunday_on_entry_date = monday_on_entry_date + timedelta(days=6)
 
         if monday_on_entry_date:
-            years = list(range(2020, datetime.now().year + 1))
+            years = list(range(first_date.year, last_date.year + 1)) if first_date and last_date else []
             static_data = {
                 'week': {
                     'start_date': date_utilities.format_date(monday_on_entry_date),
