@@ -1341,7 +1341,7 @@ def validate_config(config: dict, parent: str, *children: str):
 
 
 def validate_schema_and_sync_schema_table_data(profile_file, schema_name, share_name, country_iso3_format,
-                                               country_codes_for_exclusion, errors):
+                                               country_codes_for_inclusion, country_codes_for_exclusion, errors):
     # Create a SharingClient.
     client = source_utilities.ProcoSharingClient(profile_file)
     health_master_share = client.get_share(share_name)
@@ -1356,11 +1356,17 @@ def validate_schema_and_sync_schema_table_data(profile_file, schema_name, share_
             health_master_fields = [f.name for f in
                                     sources_models.HealthEntityMasterIntermediateData._meta.get_fields()]
             for schema_table in schema_tables:
+                schema_country_code = schema_table.name.strip().upper()
                 logger.debug('#' * 10)
                 logger.debug('Table: %s', schema_table)
-                if country_iso3_format and country_iso3_format != schema_table.name:
+                if country_iso3_format and country_iso3_format.strip().upper() != schema_country_code:
                     continue
-                if len(country_codes_for_exclusion) > 0 and schema_table.name in country_codes_for_exclusion:
+                if len(country_codes_for_inclusion) > 0 and schema_country_code not in country_codes_for_inclusion:
+                    logger.warning('Country with ISO3 Format ({0}) is not configured in Health Master country '
+                                   'inclusion list. Hence skipping the load for this country code.'.format(
+                                       schema_table.name))
+                    continue
+                if len(country_codes_for_exclusion) > 0 and schema_country_code in country_codes_for_exclusion:
                     logger.warning('Country with ISO3 Format ({0}) configured to exclude from Health Master data pull. '
                                    'Hence skipping the load for this country code.'.format(schema_table.name))
                     continue
@@ -1392,13 +1398,22 @@ def load_entity_data_from_health_master_apis(country_iso3_format=None):
     errors = []
     ds_settings = validate_config(settings.DATA_SOURCE_CONFIG,
                                   "HEALTH_MASTER", "SHARE_NAME", "SCHEMA_NAME", "DASHBOARD_URL",
-                                  "COUNTRY_EXCLUSION_LIST",
+                                  "COUNTRY_INCLUSION_LIST", "COUNTRY_EXCLUSION_LIST",
                                   "SHARE_CREDENTIALS_VERSION", "ENDPOINT", "BEARER_TOKEN", "EXPIRATION_TIME"
                                   )
     share_name = ds_settings['SHARE_NAME']
     schema_name = ds_settings['SCHEMA_NAME']
     dashboard_url = ds_settings['DASHBOARD_URL']
-    country_codes_for_exclusion = ds_settings['COUNTRY_EXCLUSION_LIST']
+    country_codes_for_inclusion = [
+        country_code.strip().upper()
+        for country_code in ds_settings['COUNTRY_INCLUSION_LIST']
+        if country_code.strip()
+    ]
+    country_codes_for_exclusion = [
+        country_code.strip().upper()
+        for country_code in ds_settings['COUNTRY_EXCLUSION_LIST']
+        if country_code.strip()
+    ]
     profile_json = {
         'shareCredentialsVersion': ds_settings.get('SHARE_CREDENTIALS_VERSION', 1),
         'endpoint': ds_settings.get('ENDPOINT'),
@@ -1417,6 +1432,7 @@ def load_entity_data_from_health_master_apis(country_iso3_format=None):
                                                                                                  schema_name,
                                                                                                  share_name,
                                                                                                  country_iso3_format,
+                                                                                                 country_codes_for_inclusion,
                                                                                                  country_codes_for_exclusion,
                                                                                                  errors)
 

@@ -444,6 +444,7 @@ DATA_SOURCE_CONFIG = {
         'ENDPOINT': env('HEALTH_MASTER_ENDPOINT', default=None),
         'BEARER_TOKEN': env('HEALTH_MASTER_BEARER_TOKEN', default=None),
         'EXPIRATION_TIME': env('HEALTH_MASTER_EXPIRATION_TIME', default=None),
+        'COUNTRY_INCLUSION_LIST': env('HEALTH_MASTER_COUNTRY_INCLUSION_LIST', default='').split(','),
         'COUNTRY_EXCLUSION_LIST': env('HEALTH_MASTER_COUNTRY_EXCLUSION_LIST', default='').split(','),
     },
     'QOS': {
