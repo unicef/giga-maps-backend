@@ -575,11 +575,21 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
             finally:
                 self.kwargs = original_kwargs
 
-            return "SELECT {0};".format(
-                " || ".join([
-                    "COALESCE(({0}), ''::bytea)".format(sql)
-                    for sql in sql_parts
-                ])
+            # Each sql_part is a full query with a CTE (WITH bounds AS ...).
+            # PostgreSQL does NOT allow CTEs inside scalar subexpressions
+            # like COALESCE((...), ''::bytea). However, CTEs ARE allowed
+            # inside FROM-clause derived tables. So we place each query in
+            # the FROM clause and reference the result columns in SELECT.
+            from_clauses = []
+            select_parts = []
+            for i, sql in enumerate(sql_parts):
+                alias = "layer_{0}".format(i)
+                from_clauses.append("({0}) {1}(result)".format(sql, alias))
+                select_parts.append("COALESCE({0}.result, ''::bytea)".format(alias))
+
+            return "SELECT {0} FROM {1};".format(
+                " || ".join(select_parts),
+                ", ".join(from_clauses),
             )
 
         if self.kwargs['layer_type'] == accounts_models.DataLayer.LAYER_TYPE_LIVE:
