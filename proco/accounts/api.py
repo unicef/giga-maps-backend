@@ -2328,6 +2328,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
                         sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
+                        sql_statement = account_utilities.rewrite_weekly_status_sql(sql_statement, entity_name='school')
                         uses_school_weekly_status = uses_school_weekly_status or 'sws.' in sql_statement
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:

@@ -1386,15 +1386,24 @@ class EntityDataLayersListSerializer(FlexFieldsModelSerializer):
         }
 
     def get_benchmark_metadata(self, instance):
-        parameter_col = instance.data_sources.all().first().data_source_column
+        first_data_source = instance.data_sources.all().first()
+        if not first_data_source or not first_data_source.data_source_column:
+            return {
+                'parameter_column_unit': '',
+                'display_unit': '',
+                'benchmark_name': instance.global_benchmark.get('benchmark_name', 'Global') if instance.global_benchmark else 'Global',
+                'benchmark_type': instance.global_benchmark.get('benchmark_type', 'global') if instance.global_benchmark else 'global',
+            }
+
+        parameter_col = first_data_source.data_source_column
         parameter_column_unit = str(parameter_col.get('unit', '')).lower()
         display_unit = parameter_col.get('display_unit', '')
 
         benchmark_metadata = {
             'parameter_column_unit': parameter_column_unit,
             'display_unit': display_unit,
-            'benchmark_name': instance.global_benchmark.get('benchmark_name', 'Global'),
-            'benchmark_type': instance.global_benchmark.get('benchmark_type', 'global'),
+            'benchmark_name': instance.global_benchmark.get('benchmark_name', 'Global') if instance.global_benchmark else 'Global',
+            'benchmark_type': instance.global_benchmark.get('benchmark_type', 'global') if instance.global_benchmark else 'global',
         }
 
         if instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
