@@ -1,4 +1,26 @@
-"""Prepare Prometheus multiprocess storage once, then run a command."""
+"""Prepare Prometheus multiprocess storage once, then run a command.
+
+Startup flow::
+
+    web-worker.sh
+      -> validate the approved container-local path
+      -> remove mmap files left by the previous Gunicorn run
+      -> set PROMETHEUS_MULTIPROC_DIR
+      -> exec Gunicorn
+      -> workers create new mmap files
+
+The helper runs only for a full application/container startup. It does not run
+for a Gunicorn HUP or worker replacement, so counters and histograms survive
+those events. ``config.gunicorn.child_exit`` marks dead workers and lets
+``prometheus_client`` remove their live-gauge files. A new application startup
+intentionally resets counters for the new process lifecycle.
+
+Aggregation is limited to Gunicorn workers within one App Service instance;
+each scaled-out App Service instance has separate storage. With the currently
+pinned django-prometheus/prometheus-client behavior, the multiprocess exporter
+also omits ``process_*``, ``python_gc_*``, and ``python_info``. Review dependent
+dashboards and alerts before enabling this mode in production.
+"""
 
 import argparse
 import os
@@ -25,6 +47,26 @@ def _validate_environment():
         )
 
 
+def _open_directory(directory):
+    """Open ``directory`` without following a final-component symlink."""
+    try:
+        directory.mkdir(mode=0o700)
+    except FileExistsError:
+        pass
+
+    flags = os.O_RDONLY | os.O_DIRECTORY
+    if hasattr(os, 'O_NOFOLLOW'):
+        flags |= os.O_NOFOLLOW
+    try:
+        return os.open(str(directory), flags)
+    except OSError as error:
+        raise RuntimeError(
+            'Prometheus multiprocess path must be a real directory: {0}'.format(
+                directory,
+            ),
+        ) from error
+
+
 def _open_approved_directory():
     if (
         not PROMETHEUS_MULTIPROC_DIR.is_absolute()
@@ -33,22 +75,34 @@ def _open_approved_directory():
     ):
         raise RuntimeError('Refusing to use an unapproved multiprocess path')
 
-    try:
-        PROMETHEUS_MULTIPROC_DIR.mkdir(mode=0o700)
-    except FileExistsError:
-        pass
+    return _open_directory(PROMETHEUS_MULTIPROC_DIR)
 
-    flags = os.O_RDONLY | os.O_DIRECTORY
-    if hasattr(os, 'O_NOFOLLOW'):
-        flags |= os.O_NOFOLLOW
-    try:
-        return os.open(str(PROMETHEUS_MULTIPROC_DIR), flags)
-    except OSError as error:
+
+def _clean_metric_files(directory_fd):
+    """Remove recognized mmap files through an already-approved directory."""
+    file_names = os.listdir(directory_fd)
+    unexpected_entries = []
+    for file_name in file_names:
+        file_stat = os.stat(
+            file_name,
+            dir_fd=directory_fd,
+            follow_symlinks=False,
+        )
+        if (
+            not stat.S_ISREG(file_stat.st_mode)
+            or not _EXPECTED_METRIC_FILE.fullmatch(file_name)
+        ):
+            unexpected_entries.append(file_name)
+
+    if unexpected_entries:
         raise RuntimeError(
-            'Prometheus multiprocess path must be a real directory: {0}'.format(
-                PROMETHEUS_MULTIPROC_DIR,
+            'Refusing to clean unexpected multiprocess entries: {0}'.format(
+                ', '.join(sorted(unexpected_entries)),
             ),
-        ) from error
+        )
+
+    for file_name in file_names:
+        os.unlink(file_name, dir_fd=directory_fd)
 
 
 def prepare_prometheus_multiproc_dir():
@@ -56,29 +110,7 @@ def prepare_prometheus_multiproc_dir():
     _validate_environment()
     directory_fd = _open_approved_directory()
     try:
-        file_names = os.listdir(directory_fd)
-        unexpected_entries = []
-        for file_name in file_names:
-            file_stat = os.stat(
-                file_name,
-                dir_fd=directory_fd,
-                follow_symlinks=False,
-            )
-            if (
-                not stat.S_ISREG(file_stat.st_mode)
-                or not _EXPECTED_METRIC_FILE.fullmatch(file_name)
-            ):
-                unexpected_entries.append(file_name)
-
-        if unexpected_entries:
-            raise RuntimeError(
-                'Refusing to clean unexpected multiprocess entries: {0}'.format(
-                    ', '.join(sorted(unexpected_entries)),
-                ),
-            )
-
-        for file_name in file_names:
-            os.unlink(file_name, dir_fd=directory_fd)
+        _clean_metric_files(directory_fd)
     finally:
         os.close(directory_fd)
 

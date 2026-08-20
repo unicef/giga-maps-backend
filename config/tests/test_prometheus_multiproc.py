@@ -1,14 +1,14 @@
 import os
 import re
-import shutil
 import signal
+import socket
 import subprocess  # noqa: S404
 import sys
 import tempfile
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from unittest import TestCase
+from unittest import TestCase, skipUnless
 from unittest.mock import patch
 from urllib.error import URLError
 from urllib.request import urlopen
@@ -16,17 +16,49 @@ from urllib.request import urlopen
 from config import gunicorn, prometheus_multiproc
 
 
-class PrometheusMultiprocessPreparationTestCase(TestCase):
-    directory = prometheus_multiproc.PROMETHEUS_MULTIPROC_DIR
+def _assert_isolated_test_directory(directory):
+    production_directory = prometheus_multiproc.PROMETHEUS_MULTIPROC_DIR
+    if (
+        not directory.is_absolute()
+        or directory == production_directory
+        or production_directory in directory.parents
+        or directory in production_directory.parents
+    ):
+        raise AssertionError(
+            'Test directory must be isolated from {0}'.format(
+                production_directory,
+            ),
+        )
 
+
+def _isolated_temporary_directory():
+    production_directory = prometheus_multiproc.PROMETHEUS_MULTIPROC_DIR
+    temporary_directory = tempfile.TemporaryDirectory(
+        prefix='giga-prometheus-test-',
+        dir=str(production_directory.parent),
+    )
+    directory = Path(temporary_directory.name)
+    try:
+        _assert_isolated_test_directory(directory)
+    except AssertionError:
+        temporary_directory.cleanup()
+        raise
+    return temporary_directory, directory
+
+
+class PrometheusMultiprocessPreparationTestCase(TestCase):
     def setUp(self):
         self.previous_environment = os.environ.pop(
             'PROMETHEUS_MULTIPROC_DIR', None,
         )
-        self._remove_test_directory()
+        self.temporary_directory, temporary_path = (
+            _isolated_temporary_directory()
+        )
+        self.directory = temporary_path / 'prometheus_multiproc'
+        _assert_isolated_test_directory(self.directory)
 
     def tearDown(self):
-        self._remove_test_directory()
+        self.temporary_directory.cleanup()
         if self.previous_environment is not None:
             os.environ['PROMETHEUS_MULTIPROC_DIR'] = (
                 self.previous_environment
@@ -34,11 +66,27 @@ class PrometheusMultiprocessPreparationTestCase(TestCase):
         else:
             os.environ.pop('PROMETHEUS_MULTIPROC_DIR', None)
 
-    def _remove_test_directory(self):
-        if self.directory.is_symlink():
-            self.directory.unlink()
-        elif self.directory.exists():
-            shutil.rmtree(str(self.directory))
+    def _prepare_test_directory(self):
+        open_directory = prometheus_multiproc._open_directory
+
+        def open_isolated_directory(directory):
+            self.assertEqual(
+                directory,
+                prometheus_multiproc.PROMETHEUS_MULTIPROC_DIR,
+            )
+            return open_directory(self.directory)
+
+        with patch.object(
+            prometheus_multiproc,
+            '_open_directory',
+            side_effect=open_isolated_directory,
+        ) as open_directory_mock:
+            try:
+                prometheus_multiproc.prepare_prometheus_multiproc_dir()
+            finally:
+                open_directory_mock.assert_called_once_with(
+                    prometheus_multiproc.PROMETHEUS_MULTIPROC_DIR,
+                )
 
     def test_cleans_only_expected_metric_files(self):
         self.directory.mkdir()
@@ -51,21 +99,68 @@ class PrometheusMultiprocessPreparationTestCase(TestCase):
         for file_name in expected_files:
             (self.directory / file_name).touch()
 
-        prometheus_multiproc.prepare_prometheus_multiproc_dir()
+        self._prepare_test_directory()
 
         self.assertEqual(list(self.directory.iterdir()), [])
         self.assertEqual(
             os.environ['PROMETHEUS_MULTIPROC_DIR'],
-            str(self.directory),
+            str(prometheus_multiproc.PROMETHEUS_MULTIPROC_DIR),
         )
 
     def test_rejects_a_different_environment_path(self):
         os.environ['PROMETHEUS_MULTIPROC_DIR'] = '/'
 
-        with self.assertRaisesRegex(RuntimeError, 'must be exactly'):
-            prometheus_multiproc.prepare_prometheus_multiproc_dir()
+        with patch.object(
+            prometheus_multiproc,
+            '_open_approved_directory',
+        ) as open_approved_directory:
+            with self.assertRaisesRegex(RuntimeError, 'must be exactly'):
+                prometheus_multiproc.prepare_prometheus_multiproc_dir()
+
+        open_approved_directory.assert_not_called()
 
         self.assertFalse(self.directory.exists())
+
+    def test_production_path_remains_fixed_and_approved(self):
+        self.assertEqual(
+            prometheus_multiproc.PROMETHEUS_MULTIPROC_DIR,
+            Path('/tmp/prometheus_multiproc'),  # noqa: S108
+        )
+
+        with patch.object(
+            prometheus_multiproc,
+            '_open_directory',
+        ) as open_directory:
+            with patch.object(
+                prometheus_multiproc,
+                'PROMETHEUS_MULTIPROC_DIR',
+                self.directory,
+            ):
+                with self.assertRaisesRegex(RuntimeError, 'unapproved'):
+                    prometheus_multiproc._open_approved_directory()
+
+        open_directory.assert_not_called()
+
+    def test_main_prepares_storage_before_execing_gunicorn(self):
+        events = []
+        command = ['gunicorn', 'config.wsgi:application']
+
+        with patch.object(
+            prometheus_multiproc,
+            'prepare_prometheus_multiproc_dir',
+            side_effect=lambda: events.append('prepare'),
+        ) as prepare_directory, patch.object(
+            prometheus_multiproc.os,
+            'execvpe',
+            side_effect=lambda *args: events.append('exec'),
+        ) as execvpe:
+            prometheus_multiproc.main(['--'] + command)
+
+        self.assertEqual(events, ['prepare', 'exec'])
+        prepare_directory.assert_called_once_with()
+        execvpe.assert_called_once()
+        self.assertEqual(execvpe.call_args.args[:2], ('gunicorn', command))
+        self.assertIsInstance(execvpe.call_args.args[2], dict)
 
     def test_rejects_unexpected_entries_before_deleting_anything(self):
         self.directory.mkdir()
@@ -75,21 +170,22 @@ class PrometheusMultiprocessPreparationTestCase(TestCase):
         unexpected_file.touch()
 
         with self.assertRaisesRegex(RuntimeError, 'unexpected'):
-            prometheus_multiproc.prepare_prometheus_multiproc_dir()
+            self._prepare_test_directory()
 
         self.assertTrue(expected_file.exists())
         self.assertTrue(unexpected_file.exists())
 
     def test_rejects_a_symlink_at_the_approved_path(self):
-        with tempfile.TemporaryDirectory(  # noqa: S108
-            dir='/tmp',  # noqa: S108
-        ) as target_directory:
+        target_temporary_directory, target_directory = (
+            _isolated_temporary_directory()
+        )
+        with target_temporary_directory:
             marker = Path(target_directory) / 'marker'
             marker.touch()
             self.directory.symlink_to(target_directory, target_is_directory=True)
 
             with self.assertRaisesRegex(RuntimeError, 'real directory'):
-                prometheus_multiproc.prepare_prometheus_multiproc_dir()
+                self._prepare_test_directory()
 
             self.assertTrue(marker.exists())
 
@@ -105,54 +201,63 @@ class GunicornChildExitTestCase(TestCase):
         mark_process_dead.assert_called_once_with(worker.pid)
 
 
+@skipUnless(
+    sys.platform.startswith('linux') and Path(
+        '/proc/{0}/task/{0}/children'.format(os.getpid()),
+    ).is_file(),
+    'requires Linux /proc worker inspection',
+)
 class GunicornMultiprocessLifecycleTestCase(TestCase):
-    address = 'http://127.0.0.1:18043'
+    address = None
+    server = None
+    temporary_directory = None
     metric_name = 'giga_test_worker_requests_total'
 
     @classmethod
     def setUpClass(cls):
         environment = os.environ.copy()
-        environment.pop('PROMETHEUS_MULTIPROC_DIR', None)
-        cls.server = subprocess.Popen(  # noqa: S603
-            [
-                sys.executable,
-                '-m',
-                'config.prometheus_multiproc',
-                '--',
-                sys.executable,
-                '-m',
-                'gunicorn',
-                'config.tests.multiprocess_wsgi:application',
-                '-c',
-                'config/gunicorn.py',
-                '--bind',
-                '127.0.0.1:18043',
-                '--workers',
-                '2',
-                '--log-level',
-                'warning',
-            ],
-            env=environment,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
+        cls.temporary_directory, cls.directory = (
+            _isolated_temporary_directory()
         )
-        try:
-            cls._wait_until(cls._server_is_ready, 'Gunicorn did not start')
-        except AssertionError:
-            cls._stop_server()
-            raise
+        cls.addClassCleanup(cls.temporary_directory.cleanup)
+        _assert_isolated_test_directory(cls.directory)
+        environment['PROMETHEUS_MULTIPROC_DIR'] = str(cls.directory)
 
-    @classmethod
-    def tearDownClass(cls):
-        cls._stop_server()
-        directory = prometheus_multiproc.PROMETHEUS_MULTIPROC_DIR
-        if directory.exists():
-            shutil.rmtree(str(directory))
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind(('127.0.0.1', 0))
+            listener.listen()
+            port = listener.getsockname()[1]
+            cls.address = 'http://127.0.0.1:{0}'.format(port)
+
+            cls.server = subprocess.Popen(  # noqa: S603
+                [
+                    sys.executable,
+                    '-m',
+                    'gunicorn',
+                    'config.tests.multiprocess_wsgi:application',
+                    '-c',
+                    'config/gunicorn.py',
+                    '--bind',
+                    'fd://{0}'.format(listener.fileno()),
+                    '--workers',
+                    '2',
+                    '--log-level',
+                    'warning',
+                ],
+                env=environment,
+                pass_fds=(listener.fileno(),),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            cls.addClassCleanup(cls._stop_server)
+
+        cls._wait_until(cls._server_is_ready, 'Gunicorn did not start')
 
     @classmethod
     def _stop_server(cls):
-        if cls.server.poll() is None:
+        if cls.server is not None and cls.server.poll() is None:
             cls.server.terminate()
             try:
                 cls.server.wait(timeout=10)
@@ -162,7 +267,7 @@ class GunicornMultiprocessLifecycleTestCase(TestCase):
 
     @classmethod
     def _server_output(cls):
-        if cls.server.stdout is None:
+        if cls.server is None or cls.server.stdout is None:
             return ''
         return cls.server.stdout.read()
 
@@ -225,6 +330,10 @@ class GunicornMultiprocessLifecycleTestCase(TestCase):
         return worker_pids
 
     def test_two_worker_metrics_survive_replacement_and_hup_reload(self):
+        self.assertNotEqual(
+            self.directory,
+            prometheus_multiproc.PROMETHEUS_MULTIPROC_DIR,
+        )
         initial_workers = self._wait_until(
             lambda: self._workers() if len(self._workers()) == 2 else None,
             'Gunicorn did not start two workers',
