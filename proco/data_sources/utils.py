@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import pytz
 import requests
+from requests.exceptions import HTTPError
 from delta_sharing.protocol import Schema, Share
 from delta_sharing.reader import DeltaSharingReader
 from django.conf import settings
@@ -251,9 +252,9 @@ def sync_school_master_data(profile_file, share_name, schema_name, table_name, c
     logger.debug('Country object: {0}'.format(country))
 
     if not country:
-        logger.error('Country with ISO3 Format ({0}) not found in DB. '
-                     'Hence skipping the load for current table.'.format(table_name))
-        raise ValueError(f"Invalid 'iso3_format': {table_name}")
+        logger.warning('Country with ISO3 Format ({0}) not found in DB. '
+                       'Hence skipping the load for current table.'.format(table_name))
+        return
 
     table_last_data_version = sources_models.SchoolMasterData.get_last_version(table_name)
     logger.debug('Table last data version present in DB: {0}'.format(table_last_data_version))
@@ -268,7 +269,18 @@ def sync_school_master_data(profile_file, share_name, schema_name, table_name, c
     )
     logger.debug('Table URL: %s', table_url)
 
-    table_current_version = delta_sharing.get_table_version(table_url)
+    try:
+        table_current_version = delta_sharing.get_table_version(table_url)
+    except HTTPError as ex:
+        if ex.response is not None and ex.response.status_code == 404:
+            logger.warning('Table version not found (404) for country ({0}). Skipping.'.format(table_name))
+            return
+        logger.warning('HTTP error getting table version for country ({0}): {1}. Skipping.'.format(table_name, ex))
+        return
+    except Exception as ex:
+        logger.warning('Failed to get table version for country ({0}): {1}. Skipping.'.format(table_name, ex))
+        return
+
     logger.debug('Table current version from API: {0}'.format(table_current_version))
 
     if table_last_data_version == table_current_version:
@@ -276,13 +288,32 @@ def sync_school_master_data(profile_file, share_name, schema_name, table_name, c
                     'Hence skipping the data update for current country ({0}).'.format(country))
         return
 
-    loaded_data_df = delta_sharing.load_table_changes_as_pandas(
-        table_url,
-        table_last_data_version,
-        table_current_version,
-        None,
-        None,
-    )
+    if table_last_data_version is not None and table_current_version is not None and table_last_data_version > table_current_version:
+        logger.warning(
+            'School Master start version ({0}) in DB is greater than remote table version ({1}) for country ({2}). '
+            'Pulling full data from version 0.'.format(table_last_data_version, table_current_version, table_name)
+        )
+        table_last_data_version = 0
+
+    try:
+        loaded_data_df = delta_sharing.load_table_changes_as_pandas(
+            table_url,
+            table_last_data_version,
+            table_current_version,
+            None,
+            None,
+        )
+    except HTTPError as ex:
+        if ex.response is not None and ex.response.status_code in (400, 404):
+            logger.warning('Failed to load table changes for country ({0}) [HTTP {1}]: {2}. Skipping.'.format(
+                table_name, ex.response.status_code, ex))
+            return
+        logger.warning('HTTP error loading table changes for country ({0}): {1}. Skipping.'.format(table_name, ex))
+        return
+    except Exception as ex:
+        logger.warning('Failed to load table changes for country ({0}): {1}. Skipping.'.format(table_name, ex))
+        return
+
     logger.debug('Total count of rows in the data: {0}'.format(len(loaded_data_df)))
     pull_datetime = core_utilities.get_current_datetime_object()
 
@@ -447,6 +478,7 @@ def load_daily_check_app_data_source_response_to_model(model, request_configs):
 
     insert_entries = []
     new_params = {}
+    model_field_names = {f.name for f in model._meta.fields} | {f.attname for f in model._meta.fields}
 
     while has_more_data:
         logger.debug('#' * 10)
@@ -479,7 +511,8 @@ def load_daily_check_app_data_source_response_to_model(model, request_configs):
                 if not data.get('created_at', None):
                     data['created_at'] = data.get('timestamp')
                 data['pulled_at'] = pull_datetime
-                insert_entries.append(model(**data))
+                filtered_data = {k: v for k, v in data.items() if k in model_field_names}
+                insert_entries.append(model(**filtered_data))
 
         if len(insert_entries) >= 5000:
             logger.info('Loading the data to "{0}" table as it has reached 5000 benchmark.'.format(model.__name__))
@@ -667,8 +700,8 @@ def load_qos_data_source_response_to_model(changes_for_countries):
                     logger.debug('Country object: {0}'.format(country))
 
                     if not country:
-                        logger.error('Country with ISO3 Format ({0}) not found in DB. '
-                                     'Hence skipping the load for current table.'.format(table_name))
+                        logger.warning('Country with ISO3 Format ({0}) not found in DB. '
+                                       'Hence skipping the load for current table.'.format(table_name))
                         continue
 
                     if len(country_codes_for_exclusion) > 0 and table_name in country_codes_for_exclusion:
@@ -689,7 +722,18 @@ def load_qos_data_source_response_to_model(changes_for_countries):
                     )
                     logger.debug('Table URL: %s', table_url)
 
-                    table_current_version = delta_sharing.get_table_version(table_url)
+                    try:
+                        table_current_version = delta_sharing.get_table_version(table_url)
+                    except HTTPError as ex:
+                        if ex.response is not None and ex.response.status_code == 404:
+                            logger.warning('QoS table version not found (404) for country ({0}). Skipping.'.format(table_name))
+                            continue
+                        logger.warning('HTTP error getting QoS table version for country ({0}): {1}. Skipping.'.format(table_name, ex))
+                        continue
+                    except Exception as ex:
+                        logger.warning('Failed to get QoS table version for country ({0}): {1}. Skipping.'.format(table_name, ex))
+                        continue
+
                     logger.debug('Table current version from API: {0}'.format(table_current_version))
 
                     if table_last_data_version == table_current_version:
@@ -697,20 +741,32 @@ def load_qos_data_source_response_to_model(changes_for_countries):
                                     'Hence skipping the data update for current country ({0}).'.format(country))
                         continue
 
-                    if not table_last_data_version:
+                    if not table_last_data_version or (table_current_version is not None and table_last_data_version > table_current_version):
                         # In case if its 1st pull, then pull only last 10 version's data at max
                         # This is the case when we have restored the DB dump and running the task first time
                         table_last_data_version = int(max(-1, table_current_version - 10))
 
                     version_list = list(range(table_last_data_version + 1, table_current_version + 1))
                     for version in version_list:
-                        loaded_data_df = delta_sharing.load_table_changes_as_pandas(
-                            table_url,
-                            version,
-                            version,
-                            None,
-                            None,
-                        )
+                        try:
+                            loaded_data_df = delta_sharing.load_table_changes_as_pandas(
+                                table_url,
+                                version,
+                                version,
+                                None,
+                                None,
+                            )
+                        except HTTPError as ex:
+                            if ex.response is not None and ex.response.status_code in (400, 404):
+                                logger.warning('Failed to load QoS table changes for country ({0}) version {1} [HTTP {2}]: {3}. Skipping.'.format(
+                                    table_name, version, ex.response.status_code, ex))
+                                continue
+                            logger.warning('HTTP error loading QoS table changes for country ({0}) version {1}: {2}. Skipping.'.format(table_name, version, ex))
+                            continue
+                        except Exception as ex:
+                            logger.warning('Failed to load QoS table changes for country ({0}) version {1}: {2}. Skipping.'.format(table_name, version, ex))
+                            continue
+
                         logger.debug(
                             'Total count of rows in the {0} version data: {1}'.format(version, len(loaded_data_df)))
                         pull_datetime = core_utilities.get_current_datetime_object()
@@ -778,11 +834,11 @@ def load_qos_data_source_response_to_model(changes_for_countries):
                     else:
                         logger.info('No data to update in current table: {0}.'.format(table_name))
                 except Exception as ex:
-                    logger.error('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
+                    logger.warning('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
         else:
-            logger.error('QoS schema ({0}) does not exist to use for share ({1}).'.format(schema_name, share_name))
+            logger.warning('QoS schema ({0}) does not exist to use for share ({1}).'.format(schema_name, share_name))
     else:
-        logger.error('QoS share ({0}) does not exist to use.'.format(share_name))
+        logger.warning('QoS share ({0}) does not exist to use.'.format(share_name))
 
     try:
         os.remove(profile_file)
@@ -995,9 +1051,9 @@ def vaildate_master_version_and_sync_health_master_data(profile_file, share_name
     logger.debug('Country object: {0}'.format(country))
 
     if not country:
-        logger.error('Country with ISO3 Format ({0}) not found in DB. '
-                     'Hence skipping the load for current table.'.format(table_name))
-        raise ValueError(f"Invalid 'iso3_format': {table_name}")
+        logger.warning('Country with ISO3 Format ({0}) not found in DB. '
+                       'Hence skipping the load for current table.'.format(table_name))
+        return
 
     table_last_data_version = sources_models.HealthEntityMasterIntermediateData.get_last_version(table_name)
     logger.debug('Table last data version present in DB: {0}'.format(table_last_data_version))
@@ -1012,7 +1068,18 @@ def vaildate_master_version_and_sync_health_master_data(profile_file, share_name
     )
     logger.debug('Table URL: %s', table_url)
 
-    table_current_version = delta_sharing.get_table_version(table_url)
+    try:
+        table_current_version = delta_sharing.get_table_version(table_url)
+    except HTTPError as ex:
+        if ex.response is not None and ex.response.status_code == 404:
+            logger.warning('Health Master table version not found (404) for country ({0}). Skipping.'.format(table_name))
+            return
+        logger.warning('HTTP error getting Health Master table version for country ({0}): {1}. Skipping.'.format(table_name, ex))
+        return
+    except Exception as ex:
+        logger.warning('Failed to get Health Master table version for country ({0}): {1}. Skipping.'.format(table_name, ex))
+        return
+
     logger.debug('Table current version from API: {0}'.format(table_current_version))
 
     if table_last_data_version == table_current_version:
@@ -1020,13 +1087,32 @@ def vaildate_master_version_and_sync_health_master_data(profile_file, share_name
                     'Hence skipping the data update for current country ({0}).'.format(country))
         return
 
-    loaded_data_df = delta_sharing.load_table_changes_as_pandas(
-        table_url,
-        table_last_data_version,
-        table_current_version,
-        None,
-        None,
-    )
+    if table_last_data_version is not None and table_current_version is not None and table_last_data_version > table_current_version:
+        logger.warning(
+            'Health Master start version ({0}) in DB is greater than remote table version ({1}) for country ({2}). '
+            'Pulling full data from version 0.'.format(table_last_data_version, table_current_version, table_name)
+        )
+        table_last_data_version = 0
+
+    try:
+        loaded_data_df = delta_sharing.load_table_changes_as_pandas(
+            table_url,
+            table_last_data_version,
+            table_current_version,
+            None,
+            None,
+        )
+    except HTTPError as ex:
+        if ex.response is not None and ex.response.status_code in (400, 404):
+            logger.warning('Failed to load Health Master table changes for country ({0}) [HTTP {1}]: {2}. Skipping.'.format(
+                table_name, ex.response.status_code, ex))
+            return
+        logger.warning('HTTP error loading Health Master table changes for country ({0}): {1}. Skipping.'.format(table_name, ex))
+        return
+    except Exception as ex:
+        logger.warning('Failed to load Health Master table changes for country ({0}): {1}. Skipping.'.format(table_name, ex))
+        return
+
     logger.debug('Total count of rows in the data: {0}'.format(len(loaded_data_df)))
     pull_datetime = core_utilities.get_current_datetime_object()
 
@@ -1082,19 +1168,19 @@ def load_entity_qos_data_source_response_to_model(entity_type_code='health'):
     try:
         entity_type = EntityType.objects.filter(code=entity_type_code, deleted__isnull=True).first()
         if not entity_type:
-            logger.error('EntityType with code "%s" not found. Skipping entity QoS data load.', entity_type_code)
+            logger.warning('EntityType with code "%s" not found. Skipping entity QoS data load.', entity_type_code)
             return
 
         client = ProcoSharingClient(profile_file)
         qos_share = client.get_share(share_name)
 
         if not qos_share:
-            logger.error('Entity QoS share (%s) does not exist.', share_name)
+            logger.warning('Entity QoS share (%s) does not exist.', share_name)
             return
 
         qos_schema = client.get_schema(qos_share, schema_name)
         if not qos_schema:
-            logger.error('Entity QoS schema (%s) does not exist for share (%s).', schema_name, share_name)
+            logger.warning('Entity QoS schema (%s) does not exist for share (%s).', schema_name, share_name)
             return
 
         schema_tables = client.list_tables(qos_schema)
@@ -1106,7 +1192,7 @@ def load_entity_qos_data_source_response_to_model(entity_type_code='health'):
             try:
                 country = Country.objects.filter(iso3_format=table_name).first()
                 if not country:
-                    logger.error(
+                    logger.warning(
                         'Country with ISO3 Format (%s) not found in DB. Skipping entity QoS load.', table_name
                     )
                     continue
@@ -1135,7 +1221,18 @@ def load_entity_qos_data_source_response_to_model(entity_type_code='health'):
                     table_name=table_name,
                 )
 
-                table_current_version = delta_sharing.get_table_version(table_url)
+                try:
+                    table_current_version = delta_sharing.get_table_version(table_url)
+                except HTTPError as ex:
+                    if ex.response is not None and ex.response.status_code == 404:
+                        logger.warning('Entity QoS table version not found (404) for country (%s). Skipping.', table_name)
+                        continue
+                    logger.warning('HTTP error getting Entity QoS table version for country (%s): %s. Skipping.', table_name, ex)
+                    continue
+                except Exception as ex:
+                    logger.warning('Failed to get Entity QoS table version for country (%s): %s. Skipping.', table_name, ex)
+                    continue
+
                 logger.debug('Entity QoS - Table version from API: %s', table_current_version)
 
                 if table_last_data_version == table_current_version:
@@ -1144,15 +1241,27 @@ def load_entity_qos_data_source_response_to_model(entity_type_code='health'):
                     )
                     continue
 
-                if not table_last_data_version:
+                if not table_last_data_version or (table_current_version is not None and table_last_data_version > table_current_version):
                     table_last_data_version = int(max(-1, table_current_version - 10))
 
                 version_list = list(range(table_last_data_version + 1, table_current_version + 1))
 
                 for version in version_list:
-                    loaded_data_df = delta_sharing.load_table_changes_as_pandas(
-                        table_url, version, version, None, None,
-                    )
+                    try:
+                        loaded_data_df = delta_sharing.load_table_changes_as_pandas(
+                            table_url, version, version, None, None,
+                        )
+                    except HTTPError as ex:
+                        if ex.response is not None and ex.response.status_code in (400, 404):
+                            logger.warning('Failed to load Entity QoS table changes for country (%s) version %s [HTTP %s]: %s. Skipping.',
+                                table_name, version, ex.response.status_code, ex)
+                            continue
+                        logger.warning('HTTP error loading Entity QoS table changes for country (%s) version %s: %s. Skipping.', table_name, version, ex)
+                        continue
+                    except Exception as ex:
+                        logger.warning('Failed to load Entity QoS table changes for country (%s) version %s: %s. Skipping.', table_name, version, ex)
+                        continue
+
                     logger.debug(
                         'Entity QoS - %s version data row count: %d', version, len(loaded_data_df)
                     )
@@ -1264,7 +1373,7 @@ def load_entity_qos_data_source_response_to_model(entity_type_code='health'):
                 cache.set(cache_key, table_current_version)
 
             except Exception as ex:
-                logger.error('Entity QoS - Exception for "%s": %s', schema_table.name, str(ex))
+                logger.warning('Entity QoS - Exception for "%s": %s', schema_table.name, str(ex))
 
     finally:
         try:

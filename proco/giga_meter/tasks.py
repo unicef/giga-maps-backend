@@ -62,8 +62,16 @@ def giga_meter_load_data_from_school_master_apis(country_iso3_format=None):
     open(profile_file, 'w').write(json.dumps(profile_json))
 
     # Create a SharingClient.
-    client = data_sources_utilities.ProcoSharingClient(profile_file)
-    school_master_share = client.get_share(share_name)
+    try:
+        client = data_sources_utilities.ProcoSharingClient(profile_file)
+        school_master_share = client.get_share(share_name)
+    except HTTPError as ex:
+        logger.warning('Failed to get School Master share for Giga Meter [HTTP {0}]: {1}'.format(
+            getattr(ex.response, 'status_code', 'error'), ex))
+        school_master_share = None
+    except Exception as ex:
+        logger.warning('Failed to get School Master share for Giga Meter: {0}'.format(ex))
+        school_master_share = None
 
     if school_master_share:
         school_master_schema = client.get_schema(school_master_share, schema_name)
@@ -91,15 +99,15 @@ def giga_meter_load_data_from_school_master_apis(country_iso3_format=None):
                     giga_meter_utilities.sync_school_master_data(
                         profile_file, share_name, schema_name, schema_table.name, school_master_fields)
                 except (HTTPError, DataError, ValueError) as ex:
-                    logger.error('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
+                    logger.warning('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
                 except Exception as ex:
-                    logger.error('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
+                    logger.warning('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
 
         else:
-            logger.error('School Master schema ({0}) does not exist to use for share ({1}).'.format(schema_name,
+            logger.warning('School Master schema ({0}) does not exist to use for share ({1}).'.format(schema_name,
                                                                                                     share_name))
     else:
-        logger.error('School Master share ({0}) does not exist to use.'.format(share_name))
+        logger.warning('School Master share ({0}) does not exist to use.'.format(share_name))
 
     try:
         os.remove(profile_file)
@@ -290,7 +298,7 @@ def giga_meter_handle_published_school_master_data_row(*args, country_ids=None, 
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=10 * 55 * 60, time_limit=10 * 55 * 60)
@@ -352,7 +360,7 @@ def giga_meter_handle_deleted_school_master_data_row(*args, country_ids=None, fo
         task_instance.info('Remaining records: {}'.format(new_deleted_records.count()))
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=6 * 60 * 60, time_limit=6 * 60 * 60)
@@ -400,7 +408,7 @@ def giga_meter_update_static_data(*args, country_iso3_format=None, force_tasks=F
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=10 * 60 * 60, time_limit=10 * 60 * 60)
@@ -423,7 +431,7 @@ def handle_giga_meter_school_master_data_sync(*args):
 
             background_task_utilities.task_on_complete(task_instance)
         else:
-            logger.error('Found Job with "{0}" name so skipping current iteration'.format(task_key))
+            logger.info('Found Job with "{0}" name so skipping current iteration'.format(task_key))
     else:
         logger.warning('Giga Meter - School Master data synch disabled from config. '
                      'To enable it, please update "GIGA_METER_ENABLE_AUTO_SYNC" configuration.')
@@ -451,7 +459,7 @@ def scheduler_for_populate_school_geopoint_field(country_iso3_format):
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 class AggregationOngoingException(Exception):
@@ -908,4 +916,4 @@ def scheduler_for_backup_giga_meter_connectivity_ping_data(*args, start_date=Non
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
