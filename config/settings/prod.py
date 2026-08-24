@@ -137,6 +137,33 @@ SENTRY_INTEGRATIONS = (
 )
 SENTRY_ENABLED = True if SENTRY_ACTIVE_DSN else False
 
+def sentry_before_send(event, hint):
+    """
+    Filter out known non-actionable external data source errors and routine task messages
+    so they are not reported to Sentry as issues.
+    """
+    ignored_patterns = [
+        'Provided Start version',
+        'Could not find version for table',
+        'Could not find version for',
+        'Country with ISO3 Format',
+        'not found in DB',
+        'skipping current iteration',
+        'does not exist to use for share',
+        'does not exist to use',
+    ]
+    if 'logentry' in event:
+        msg = event['logentry'].get('message', '') or event['logentry'].get('formatted', '')
+        if any(pattern in msg for pattern in ignored_patterns):
+            return None
+    if 'exc_info' in hint:
+        exc_type, exc_value, tb = hint['exc_info']
+        exc_str = str(exc_value)
+        if any(pattern in exc_str for pattern in ignored_patterns):
+            return None
+    return event
+
+
 if SENTRY_ENABLED:
     sentry_sdk.init(
         SENTRY_ACTIVE_DSN,
@@ -144,6 +171,7 @@ if SENTRY_ENABLED:
         release=get_git_hash(),
         environment=APP_ENVIRONMENT,
         integrations=SENTRY_INTEGRATIONS,
+        before_send=sentry_before_send,
     )
 
 # Mapbox

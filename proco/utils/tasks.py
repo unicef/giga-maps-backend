@@ -243,7 +243,7 @@ def update_all_cached_values(*args, clean_cache=False):
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task
@@ -294,7 +294,7 @@ def rebuild_school_index():
         call_command('index_rebuild_schools', *cmd_args)
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=1 * 60 * 60, time_limit=1 * 60 * 60)
@@ -353,7 +353,7 @@ def populate_school_registration_data():
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=10 * 60 * 60, time_limit=10 * 60 * 60)
@@ -393,7 +393,7 @@ def redo_aggregations_task(country_id, year, week_no, *args):
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=10 * 60 * 60, time_limit=10 * 60 * 60)
@@ -434,7 +434,7 @@ def redo_entity_aggregations_task(country_id, year, week_no, entity_type_code=No
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 
@@ -477,7 +477,7 @@ def populate_school_new_fields_task(start_school_id, end_school_id, country_id, 
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)
@@ -501,7 +501,7 @@ def rebuild_unified_index():
         call_command('build_unified_index', *cmd_args)
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=1 * 60 * 60, time_limit=1 * 60 * 60)
@@ -552,7 +552,7 @@ def populate_entity_registration_data():
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=10 * 60 * 60, time_limit=10 * 60 * 60)
@@ -619,7 +619,7 @@ def update_entity_records():
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=1 * 50 * 60, time_limit=1 * 50 * 60)
@@ -664,7 +664,7 @@ def handle_deleted_entity_master_data_row(deleted_row_id=None, country_ids=None)
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=120 * 60, time_limit=125 * 60)
@@ -683,7 +683,7 @@ def update_all_entity_cached_values(*args, clean_cache=False):
         task_id, task_key, 'Update the Entity Redis cache, allowed once in a hour')
 
     if not task_instance:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
         return
 
     logger.info('Not found running job: {}'.format(task_key))

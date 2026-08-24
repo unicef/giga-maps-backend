@@ -39,6 +39,48 @@ def get_empty_mvt_layer_sql(layer_name, extent=4096):
     return "decode('{0}', 'hex')".format(tile.hex())
 
 
+def rewrite_weekly_status_sql(sql_statement, entity_name='school'):
+    """
+    Dynamically rewrite daily status table aliases (sds/eds) to weekly status table
+    aliases (sws/ews) for all columns that belong to the weekly status model.
+    This dynamically inspects Django model metadata so any new columns added in the future
+    are automatically supported without hardcoding.
+    """
+    from proco.connection_statistics.models import SchoolWeeklyStatus, SchoolDailyStatus
+    try:
+        from proco.connection_statistics.models import EntityWeeklyStatus, EntityDailyStatus
+    except ImportError:
+        EntityWeeklyStatus = None
+        EntityDailyStatus = None
+
+    if entity_name == 'school' or EntityWeeklyStatus is None:
+        weekly_model = SchoolWeeklyStatus
+        daily_model = SchoolDailyStatus
+        target_alias = 'sws.'
+    else:
+        weekly_model = EntityWeeklyStatus
+        daily_model = EntityDailyStatus
+        target_alias = 'ews.'
+
+    weekly_cols = {f.name for f in weekly_model._meta.get_fields() if hasattr(f, 'column')}
+    daily_cols = {f.name for f in daily_model._meta.get_fields() if hasattr(f, 'column')}
+    sws_only_fields = weekly_cols - daily_cols
+    sws_only_fields.update({'latency', 'uptime', 'download_speed_benchmark'})
+
+    if sws_only_fields:
+        sorted_fields = sorted(sws_only_fields, key=len, reverse=True)
+        pattern = r'\b(eds|sds)\."?(?:' + '|'.join(sorted_fields) + r')\b"?'
+
+        def repl(m):
+            full = m.group(0)
+            col = full.split('.')[-1].strip('"')
+            return f'{target_alias}"{col}"'
+
+        sql_statement = re.sub(pattern, repl, sql_statement)
+
+    return sql_statement
+
+
 def send_standard_email(user, data):
     """
     A standard email is sent to user by Application, containing message, Signature by using MailJet creds.

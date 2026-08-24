@@ -110,8 +110,16 @@ def load_data_from_school_master_apis(country_iso3_format=None):
     open(profile_file, 'w').write(json.dumps(profile_json))
 
     # Create a SharingClient.
-    client = source_utilities.ProcoSharingClient(profile_file)
-    school_master_share = client.get_share(share_name)
+    try:
+        client = source_utilities.ProcoSharingClient(profile_file)
+        school_master_share = client.get_share(share_name)
+    except HTTPError as ex:
+        logger.warning('Failed to get School Master share [HTTP {0}]: {1}'.format(
+            getattr(ex.response, 'status_code', 'error'), ex))
+        school_master_share = None
+    except Exception as ex:
+        logger.warning('Failed to get School Master share: {0}'.format(ex))
+        school_master_share = None
 
     changes_for_countries = {}
     deleted_schools = []
@@ -143,17 +151,15 @@ def load_data_from_school_master_apis(country_iso3_format=None):
                         profile_file, share_name, schema_name, schema_table.name, changes_for_countries,
                         deleted_schools, school_master_fields)
                 except (HTTPError, DataError, ValueError) as ex:
-                    logger.error('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
-                    errors.append('{0} : {1} - {2}'.format(schema_table.name, type(ex).__name__, str(ex)))
+                    logger.warning('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
                 except Exception as ex:
-                    logger.error('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
-                    errors.append('{0} : {1} - {2}'.format(schema_table.name, type(ex).__name__, str(ex)))
+                    logger.warning('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
 
         else:
-            logger.error('School Master schema ({0}) does not exist to use for share ({1}).'.format(schema_name,
+            logger.warning('School Master schema ({0}) does not exist to use for share ({1}).'.format(schema_name,
                                                                                                     share_name))
     else:
-        logger.error('School Master share ({0}) does not exist to use.'.format(share_name))
+        logger.warning('School Master share ({0}) does not exist to use.'.format(share_name))
 
     try:
         os.remove(profile_file)
@@ -527,7 +533,7 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
         except Exception as e:
             raise
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=2 * 55 * 60, time_limit=2 * 55 * 60)
@@ -615,7 +621,7 @@ def handle_deleted_school_master_data_row(deleted_row=None, country_ids=None, pu
         send_slack_notifications(change_summary, publish_source=publish_source)
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task
@@ -755,7 +761,7 @@ def email_reminder_to_editor_and_publisher_for_review_waiting_records():
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=60 * 60, time_limit=60 * 60)
@@ -842,7 +848,7 @@ def cleanup_school_master_rows():
         task_instance.info('Deleted duplicate rows for same School GIGA ID chunked by country')
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=2 * 60 * 60, time_limit=2 * 60 * 60)
@@ -906,7 +912,7 @@ def cleanup_health_entity_master_rows():
         task_instance.info('Deleted duplicate rows for same Health GIGA ID chunked by country')
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=6 * 60 * 60, time_limit=6 * 60 * 60)
@@ -932,7 +938,7 @@ def update_static_data(*args, country_iso3_format=None):
         task_instance.info('Scheduled cleanup school master rows')
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=60 * 60, time_limit=60 * 60)
@@ -1015,7 +1021,7 @@ def update_live_data(*args, today=True):
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=2 * 60 * 60, time_limit=2 * 60 * 60)
@@ -1055,7 +1061,7 @@ def update_qos_data(*args, today=True):
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=1 * 60 * 60, time_limit=1 * 60 * 60)
@@ -1173,7 +1179,7 @@ def clean_old_live_data():
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=10 * 60 * 60, time_limit=10 * 60 * 60)
@@ -1211,7 +1217,7 @@ def data_loss_recovery_for_pcdc_weekly_task(start_week_no, end_week_no, year, pu
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=1 * 60 * 60, time_limit=1 * 60 * 60)
@@ -1241,7 +1247,7 @@ def clean_historic_data():
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=2 * 60 * 60, time_limit=2 * 60 * 60)
@@ -1283,7 +1289,7 @@ def scheduler_for_data_loss_recovery_for_qos_dates(
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)
@@ -1318,7 +1324,7 @@ def scheduler_for_data_loss_recovery_for_school_master_version(
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 def validate_config(config: dict, parent: str, *children: str):
@@ -1343,8 +1349,17 @@ def validate_config(config: dict, parent: str, *children: str):
 def validate_schema_and_sync_schema_table_data(profile_file, schema_name, share_name, country_iso3_format,
                                                country_codes_for_inclusion, country_codes_for_exclusion, errors):
     # Create a SharingClient.
-    client = source_utilities.ProcoSharingClient(profile_file)
-    health_master_share = client.get_share(share_name)
+    try:
+        client = source_utilities.ProcoSharingClient(profile_file)
+        health_master_share = client.get_share(share_name)
+    except HTTPError as ex:
+        logger.warning('Failed to get Health Master share [HTTP {0}]: {1}'.format(
+            getattr(ex.response, 'status_code', 'error'), ex))
+        health_master_share = None
+    except Exception as ex:
+        logger.warning('Failed to get Health Master share: {0}'.format(ex))
+        health_master_share = None
+
     changes_for_countries = {}
     deleted_entities = []
     if health_master_share:
@@ -1375,17 +1390,15 @@ def validate_schema_and_sync_schema_table_data(profile_file, schema_name, share_
                         profile_file, share_name, schema_name, schema_table.name, changes_for_countries,
                         deleted_entities, health_master_fields)
                 except (HTTPError, DataError, ValueError) as ex:
-                    logger.error('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
-                    errors.append('{0} : {1} - {2}'.format(schema_table.name, type(ex).__name__, str(ex)))
+                    logger.warning('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
                 except Exception as ex:
-                    logger.error('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
-                    errors.append('{0} : {1} - {2}'.format(schema_table.name, type(ex).__name__, str(ex)))
+                    logger.warning('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
             return changes_for_countries, deleted_entities, errors
         else:
-            logger.error('Health Master schema ({0}) does not exist to use for share ({1}).'.format(schema_name,
+            logger.warning('Health Master schema ({0}) does not exist to use for share ({1}).'.format(schema_name,
                                                                                                     share_name))
     else:
-        logger.error('Health Master share ({0}) does not exist to use.'.format(share_name))
+        logger.warning('Health Master share ({0}) does not exist to use.'.format(share_name))
 
 
 def load_entity_data_from_health_master_apis(country_iso3_format=None):
@@ -1511,7 +1524,7 @@ def update_entity_static_data(*args, country_iso3_format=None):
         task_instance.info('Scheduled cleanup health master rows')
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=3 * 55 * 60, time_limit=3 * 55 * 60)
@@ -1797,7 +1810,7 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=2 * 60 * 60, time_limit=2 * 60 * 60)
@@ -1820,7 +1833,7 @@ def send_school_master_data_change_slack_notification(country_iso3_format):
 
             country = Country.objects.filter(iso3_format=country_iso3_format).first()
             if not country:
-                logger.error(f'Country with ISO3 Format ({country_iso3_format}) not found in DB.')
+                logger.warning(f'Country with ISO3 Format ({country_iso3_format}) not found in DB.')
                 return None
 
             # Get New SchoolMasterData rows
@@ -1852,7 +1865,7 @@ def send_school_master_data_change_slack_notification(country_iso3_format):
             task_instance.error(f'Failed to send notification: {str(e)}')
             background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error(f'Found running Job with "{task_key}" name so skipping current iteration')
+        logger.info(f'Found running Job with "{task_key}" name so skipping current iteration')
 
 
 def send_slack_notifications(change_summary, publish_source='auto_publish'):
@@ -2472,7 +2485,7 @@ def update_entity_live_data_from_giga_meter(
     )
 
     if not task_instance:
-        logger.error(f'Found running job with key "{task_key}", skipping.')
+        logger.info(f'Found running job with key "{task_key}", skipping.')
         return
 
     try:
@@ -2597,4 +2610,4 @@ def update_entity_qos_data(entity_type_code='health', today=True):
         finally:
             background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "%s" name so skipping current iteration', task_key)
+        logger.info('Found running Job with "%s" name so skipping current iteration', task_key)

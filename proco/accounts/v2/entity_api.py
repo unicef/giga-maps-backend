@@ -575,11 +575,21 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
             finally:
                 self.kwargs = original_kwargs
 
-            return "SELECT {0};".format(
-                " || ".join([
-                    "COALESCE(({0}), ''::bytea)".format(sql)
-                    for sql in sql_parts
-                ])
+            # Each sql_part is a full query with a CTE (WITH bounds AS ...).
+            # PostgreSQL does NOT allow CTEs inside scalar subexpressions
+            # like COALESCE((...), ''::bytea). However, CTEs ARE allowed
+            # inside FROM-clause derived tables. So we place each query in
+            # the FROM clause and reference the result columns in SELECT.
+            from_clauses = []
+            select_parts = []
+            for i, sql in enumerate(sql_parts):
+                alias = "layer_{0}".format(i)
+                from_clauses.append("({0}) {1}(result)".format(sql, alias))
+                select_parts.append("COALESCE({0}.result, ''::bytea)".format(alias))
+
+            return "SELECT {0} FROM {1};".format(
+                " || ".join(select_parts),
+                ", ".join(from_clauses),
             )
 
         if self.kwargs['layer_type'] == accounts_models.DataLayer.LAYER_TYPE_LIVE:
@@ -701,11 +711,7 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                     if is_sql_value:
                         sql_statement = str(' AND '.join(values)).replace('SQL:', '').format(**kwargs)
                         sql_statement = re.sub(r'^\s*WHEN\s+', '', sql_statement, flags=re.IGNORECASE)
-                        sql_statement = re.sub(
-                            r'\b(eds|sds)\."?(num_students\w*|num_teachers|num_classrooms?|download_speed_benchmark|latency|uptime)"?',
-                            lambda m: ('sws.' if kwargs.get('entity_name') == 'school' else 'ews.') + f'"{m.group(2)}"',
-                            sql_statement
-                        )
+                        sql_statement = account_utilities.rewrite_weekly_status_sql(sql_statement, entity_name=kwargs.get('entity_name', 'school'))
                         sql_statement = re.sub(r'\bsds\.', 'eds.', sql_statement)
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
@@ -1355,10 +1361,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         if benchmark_value is not None and isinstance(benchmark_value, str) and 'SQL:' in benchmark_value:
             kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(
                 **kwargs) + ' AS benchmark_sql_value,'
-            kwargs['benchmark_value_sql'] = re.sub(
-                r'\b(eds|sds)\."?(num_students\w*|num_teachers|num_classrooms?|download_speed_benchmark|latency|uptime)"?',
-                lambda m: ('sws.' if kwargs.get('entity_name') == 'school' else 'ews.') + f'"{m.group(2)}"',
-                kwargs['benchmark_value_sql']
+            kwargs['benchmark_value_sql'] = account_utilities.rewrite_weekly_status_sql(
+                kwargs['benchmark_value_sql'], entity_name=kwargs.get('entity_name', 'school')
             )
             kwargs['benchmark_value_sql'] = re.sub(r'\bsds\.', 'eds.', kwargs['benchmark_value_sql'])
 
@@ -1395,10 +1399,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     if is_sql_value:
                         sql_statement = str(' AND '.join(values)).replace('SQL:', '').format(**kwargs)
                         sql_statement = re.sub(r'^\s*WHEN\s+', '', sql_statement, flags=re.IGNORECASE)
-                        sql_statement = re.sub(
-                            r'\b(eds|sds)\."?(num_students\w*|num_teachers|num_classrooms?|download_speed_benchmark|latency|uptime)"?',
-                            lambda m: ('sws.' if kwargs.get('entity_name') == 'school' else 'ews.') + f'"{m.group(2)}"',
-                            sql_statement
+                        sql_statement = account_utilities.rewrite_weekly_status_sql(
+                            sql_statement, entity_name=kwargs.get('entity_name', 'school')
                         )
                         sql_statement = re.sub(r'\bsds\.', 'eds.', sql_statement)
                         label_cases.append(
@@ -1551,10 +1553,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         if benchmark_value is not None and isinstance(benchmark_value, str) and 'SQL:' in benchmark_value:
             kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(
                 **kwargs) + ' AS benchmark_sql_value,'
-            kwargs['benchmark_value_sql'] = re.sub(
-                r'\b(eds|sds)\."?(num_students\w*|num_teachers|num_classrooms?|download_speed_benchmark|latency|uptime)"?',
-                lambda m: ('ews.' if m.group(1) == 'eds' else 'sws.') + f'"{m.group(2)}"',
-                kwargs['benchmark_value_sql']
+            kwargs['benchmark_value_sql'] = account_utilities.rewrite_weekly_status_sql(
+                kwargs['benchmark_value_sql'], entity_name=kwargs.get('entity_name', 'school')
             )
 
         legend_configs = kwargs['legend_configs']
@@ -1585,10 +1585,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                     if is_sql_value:
                         sql_statement = str(' AND '.join(values)).replace('SQL:', '').format(**kwargs)
                         sql_statement = re.sub(r'^\s*WHEN\s+', '', sql_statement, flags=re.IGNORECASE)
-                        sql_statement = re.sub(
-                            r'\b(eds|sds)\."?(num_students\w*|num_teachers|num_classrooms?|download_speed_benchmark|latency|uptime)"?',
-                            lambda m: ('ews.' if m.group(1) == 'eds' else 'sws.') + f'"{m.group(2)}"',
-                            sql_statement
+                        sql_statement = account_utilities.rewrite_weekly_status_sql(
+                            sql_statement, entity_name=kwargs.get('entity_name', 'school')
                         )
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
@@ -3404,10 +3402,8 @@ class EntityDataLayerPreviewViewSet(APIView):
                     if is_sql_value:
                         sql_statement = str(' AND '.join(values)).replace('SQL:', '').format(**kwargs)
                         sql_statement = re.sub(r'^\s*WHEN\s+', '', sql_statement, flags=re.IGNORECASE)
-                        sql_statement = re.sub(
-                            r'\b(eds|sds)\."?(num_students\w*|num_teachers|num_classrooms?|download_speed_benchmark|latency|uptime)"?',
-                            lambda m: ('ews.' if m.group(1) == 'eds' else 'sws.') + f'"{m.group(2)}"',
-                            sql_statement
+                        sql_statement = account_utilities.rewrite_weekly_status_sql(
+                            sql_statement, entity_name='school'
                         )
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
