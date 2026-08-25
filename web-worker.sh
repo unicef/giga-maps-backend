@@ -13,7 +13,7 @@ service ssh start
 
 # pipenv run python manage.py migrate
 pipenv run python manage.py collectstatic --noinput
-pipenv run gunicorn config.wsgi:application -b 0.0.0.0:8000 -w 8 --timeout=300
+pipenv run python -m config.prometheus_multiproc -- gunicorn config.wsgi:application -c /code/config/gunicorn.py -b 0.0.0.0:8000 -w 8 --timeout=300
 
 
 # pipenv run python manage.py load_api_data --api-file /code/proco/core/resources/all_apis.tsv
