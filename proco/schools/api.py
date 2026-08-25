@@ -740,6 +740,31 @@ class DownloadSchoolsViewSet(BaseModelViewSet, core_mixins.DownloadAPIDataToCSVM
 
     permit_list_expands = ['country', 'last_weekly_status', 'admin1', 'admin2']
 
+    def get_queryset(self):
+        return super().get_queryset().select_related(
+            'country',
+            'last_weekly_status',
+        ).only(
+            'id',
+            'name',
+            'name_lower',
+            'geopoint',
+            'education_level',
+            'country_id',
+            'external_id',
+            'last_weekly_status_id',
+            'giga_id_school',
+            'education_level_regional',
+            'admin1_id',
+            'admin2_id',
+            'country__id',
+            'country__name',
+            'country__code',
+            'country__iso3_format',
+            'last_weekly_status__id',
+            'last_weekly_status__school_data_source',
+        )
+
     def list(self, request, *args, **kwargs):
         if core_utilities.is_export(request, self.action):
             return self.list_export(request, *args, **kwargs)
