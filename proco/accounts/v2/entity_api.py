@@ -1443,7 +1443,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 COUNT(DISTINCT CASE WHEN eds.{col_name} < {benchmark_value} THEN eds.entity_id ELSE NULL END) AS "good",
                 COUNT(DISTINCT CASE WHEN (eds.{col_name} >= {benchmark_value} AND eds.{col_name} <= {base_benchmark})
                     THEN eds.entity_id ELSE NULL END) AS "moderate",
-                COUNT(DISTINCT CASE WHEN eds.{col_name} > {base_benchmark} THEN eds.entity_id ELSE NULL END) AS "bad",
+                COUNT(DISTINCT CASE WHEN eds.{col_name} >= {benchmark_value} THEN eds.entity_id ELSE NULL END) AS "bad",
                 COUNT(DISTINCT CASE WHEN eds.{col_name} IS NULL THEN eds.entity_id ELSE NULL END) AS "unknown",
                 """.format(**kwargs)
 
@@ -3351,45 +3351,56 @@ class EntityDataLayerPreviewViewSet(APIView):
     )
 
     def get_map_query(self, kwargs):
-        query = """
-        SELECT entities_entity.id,
-            CASE WHEN rt_status.rt_registered = True AND rt_status.rt_registration_date <= '{end_date}' THEN True
+        is_legacy = kwargs.get('is_legacy', False)
+        main_table = 'schools_school' if is_legacy else 'entities_entity'
+        entity_id_col = 'school_id' if is_legacy else 'entity_id'
+        weekly_table = 'connection_statistics_schoolweeklystatus' if is_legacy else 'connection_statistics_entityweeklystatus'
+        rt_table = 'connection_statistics_schoolrealtimeregistration' if is_legacy else 'connection_statistics_entityrealtimeregistration'
+        daily_table = 'connection_statistics_schooldailystatus' if is_legacy else 'connection_statistics_entitydailystatus'
+        entity_type_condition = '' if is_legacy else f'AND "{main_table}"."entity_type_id" = {kwargs["entity_type_id"]}'
+        entity_type_condition_outer = '' if is_legacy else f'AND {main_table}."entity_type_id" = {kwargs["entity_type_id"]}'
+
+        query = f"""
+        SELECT {main_table}.id,
+            CASE WHEN rt_status.rt_registered = True AND rt_status.rt_registration_date <= '{{end_date}}' THEN True
                     ELSE False
             END AS is_rt_connected,
-            {case_conditions}
-            CASE WHEN entities_entity.connectivity_status IN ('good', 'moderate', 'bad') THEN 'connected'
-                WHEN entities_entity.connectivity_status = 'no' THEN 'not_connected'
+            {{case_conditions}}
+            CASE WHEN {main_table}.connectivity_status IN ('good', 'moderate', 'bad') THEN 'connected'
+                WHEN {main_table}.connectivity_status = 'no' THEN 'not_connected'
                 ELSE 'unknown'
             END AS connectivity_status,
-            ST_AsGeoJSON(ST_Transform(entities_entity.geopoint, 4326)) AS geopoint
-        FROM entities_entity
-        INNER JOIN connection_statistics_entityweeklystatus sws ON entities_entity.last_weekly_status_id = sws.id
-        INNER JOIN connection_statistics_entityrealtimeregistration rt_status ON rt_status.entity_id =
-        entities_entity.id
+            ST_AsGeoJSON(ST_Transform({main_table}.geopoint, 4326)) AS geopoint
+        FROM {main_table}
+        INNER JOIN {weekly_table} sws ON {main_table}.last_weekly_status_id = sws.id
+        INNER JOIN {rt_table} rt_status ON rt_status.{entity_id_col} = {main_table}.id
         LEFT JOIN (
-            SELECT "entities_entity"."id" AS entity_id,
-                AVG(t."{col_name}") AS "{col_name}"
-            FROM "entities_entity"
-            INNER JOIN "connection_statistics_entitydailystatus" t ON "entities_entity"."id" = t."entity_id"
+            SELECT "{main_table}"."id" AS entity_id,
+                AVG(t."{{col_name}}") AS "{{col_name}}"
+            FROM "{main_table}"
+            INNER JOIN "{daily_table}" t ON "{main_table}"."id" = t."{entity_id_col}"
             WHERE (
-                {country_condition}
-                "entities_entity"."deleted" IS NULL
+                {{country_condition}}
+                "{main_table}"."deleted" IS NULL
+                {entity_type_condition}
                 AND t."deleted" IS NULL
-                AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
-                AND t."live_data_source" IN ({live_source_types})
+                AND (t."date" BETWEEN '{{start_date}}' AND '{{end_date}}')
+                AND t."live_data_source" IN ({{live_source_types}})
             )
-            GROUP BY "entities_entity"."id"
-            ORDER BY "entities_entity"."id" ASC
-        ) AS sds ON sds.entity_id = entities_entity.id
-        WHERE entities_entity."deleted" IS NULL
+            GROUP BY "{main_table}"."id"
+            ORDER BY "{main_table}"."id" ASC
+        ) AS sds ON sds.entity_id = {main_table}.id
+        WHERE {main_table}."deleted" IS NULL
+            {entity_type_condition_outer}
             AND rt_status."deleted" IS NULL
             AND rt_status."rt_registered" = True
-            AND rt_status."rt_registration_date"::date <= '{end_date}'
-        {country_condition_outer}
+            AND rt_status."rt_registration_date"::date <= '{{end_date}}'
+        {{country_condition_outer}}
         ORDER BY random()
         LIMIT 1000
         """
 
+        kwargs.setdefault('table_name', 'sds')
         legend_configs = kwargs['legend_configs']
         if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
             label_cases = []
@@ -3403,7 +3414,7 @@ class EntityDataLayerPreviewViewSet(APIView):
                         sql_statement = str(' AND '.join(values)).replace('SQL:', '').format(**kwargs)
                         sql_statement = re.sub(r'^\s*WHEN\s+', '', sql_statement, flags=re.IGNORECASE)
                         sql_statement = account_utilities.rewrite_weekly_status_sql(
-                            sql_statement, entity_name='school'
+                            sql_statement, entity_name='school' if is_legacy else 'entity'
                         )
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
@@ -3427,16 +3438,16 @@ class EntityDataLayerPreviewViewSet(APIView):
                 kwargs['case_conditions'] = """
                             CASE WHEN sds.{col_name} < {benchmark_value}  THEN 'good'
                                 WHEN sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark} THEN 'moderate'
-                                WHEN sds.{col_name} > {base_benchmark} THEN 'bad'
+                                WHEN sds.{col_name} >= {benchmark_value} THEN 'bad'
                                 ELSE 'unknown'
                             END AS connectivity,
                         """.format(**kwargs)
 
         if len(kwargs['country_ids']) > 0:
-            kwargs['country_condition'] = '"entities_entity"."country_id" IN ({0}) AND'.format(
+            kwargs['country_condition'] = f'"{main_table}"."country_id" IN ({0}) AND'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
-            kwargs['country_condition_outer'] = 'AND entities_entity."country_id" IN ({0})'.format(
+            kwargs['country_condition_outer'] = f'AND {main_table}."country_id" IN ({0})'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
         else:
@@ -3446,16 +3457,23 @@ class EntityDataLayerPreviewViewSet(APIView):
         return query.format(**kwargs)
 
     def get_static_map_query(self, kwargs):
-        query = """
+        is_legacy = kwargs.get('is_legacy', False)
+        main_table = 'schools_school' if is_legacy else 'entities_entity'
+        weekly_table = 'connection_statistics_schoolweeklystatus' if is_legacy else 'connection_statistics_entityweeklystatus'
+        entity_type_condition = '' if is_legacy else f'AND {main_table}."entity_type_id" = {kwargs["entity_type_id"]}'
+
+        query = f"""
             SELECT
-                entities_entity.id,
-                entities_entity.name,
-                {table_name}."{col_name}",
-                ST_AsGeoJSON(ST_Transform(entities_entity.geopoint, 4326)) as geopoint,
-                {label_case_statements}
-            FROM entities_entity
-            INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
-            WHERE entities_entity."deleted" IS NULL {country_condition}
+                {main_table}.id,
+                {main_table}.name,
+                {{table_name}}."{{col_name}}",
+                ST_AsGeoJSON(ST_Transform({main_table}.geopoint, 4326)) as geopoint,
+                {{label_case_statements}}
+            FROM {main_table}
+            INNER JOIN {weekly_table} sws ON {main_table}.last_weekly_status_id = sws.id
+            WHERE {main_table}."deleted" IS NULL
+                {entity_type_condition}
+                {{country_condition}}
             ORDER BY random()
             LIMIT 1000
             """
@@ -3463,7 +3481,7 @@ class EntityDataLayerPreviewViewSet(APIView):
         kwargs['country_condition'] = ''
 
         if len(kwargs['country_ids']) > 0:
-            kwargs['country_condition'] = 'AND entities_entity.country_id IN ({0})'.format(
+            kwargs['country_condition'] = f'AND {main_table}.country_id IN ({0})'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
 
@@ -3516,12 +3534,16 @@ class EntityDataLayerPreviewViewSet(APIView):
     def get(self, request, *args, **kwargs):
         data_layer_instance = get_object_or_404(accounts_models.DataLayer.objects.all(), pk=self.kwargs.get('pk'))
         data_sources = data_layer_instance.data_sources.all()
+        if not data_sources.exists():
+            return Response({'map': []}, status=rest_status.HTTP_200_OK)
 
         country_ids = data_layer_instance.applicable_countries
         parameter_col = data_sources.first().data_source_column
 
         parameter_column_name = str(parameter_col['name'])
         legend_configs = data_layer_instance.legend_configs
+        is_legacy = data_layer_instance.entity_type is None or data_layer_instance.entity_type.is_legacy
+        entity_type_id = data_layer_instance.entity_type_id if data_layer_instance.entity_type else None
 
         if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
             live_data_sources = ['UNKNOWN']
@@ -3535,15 +3557,20 @@ class EntityDataLayerPreviewViewSet(APIView):
             global_benchmark = data_layer_instance.global_benchmark.get('value')
             benchmark_base = str(parameter_col.get('base_benchmark', 1))
 
-            data_layer_qs = statistics_models.SchoolDailyStatus.objects.all()
-            if len(country_ids) > 0:
-                data_layer_qs = data_layer_qs.filter(school__country__in=country_ids)
+            if is_legacy:
+                data_layer_qs = statistics_models.SchoolDailyStatus.objects.all()
+                if len(country_ids) > 0:
+                    data_layer_qs = data_layer_qs.filter(school__country__in=country_ids)
+            else:
+                data_layer_qs = statistics_models.EntityDailyStatus.objects.filter(entity__entity_type=data_layer_instance.entity_type)
+                if len(country_ids) > 0:
+                    data_layer_qs = data_layer_qs.filter(entity__country__in=country_ids)
 
             date = core_utilities.get_current_datetime_object().date() - timedelta(days=6)
 
-            latest_school_daily_instance = data_layer_qs.order_by('-date').first()
-            if latest_school_daily_instance:
-                date = latest_school_daily_instance.date
+            latest_daily_instance = data_layer_qs.order_by('-date').first()
+            if latest_daily_instance:
+                date = latest_daily_instance.date
 
             start_date = date - timedelta(days=date.weekday())
             end_date = start_date + timedelta(days=6)
@@ -3559,6 +3586,8 @@ class EntityDataLayerPreviewViewSet(APIView):
                 'parameter_col': parameter_col,
                 'is_reverse': data_layer_instance.is_reverse,
                 'legend_configs': legend_configs,
+                'is_legacy': is_legacy,
+                'entity_type_id': entity_type_id,
             }
 
             map_points = db_utilities.sql_to_response(self.get_map_query(query_kwargs), label=self.__class__.__name__)
@@ -3568,6 +3597,8 @@ class EntityDataLayerPreviewViewSet(APIView):
                 'legend_configs': legend_configs,
                 'country_ids': country_ids,
                 'parameter_col': parameter_col,
+                'is_legacy': is_legacy,
+                'entity_type_id': entity_type_id,
             }
 
             map_points = db_utilities.sql_to_response(self.get_static_map_query(query_kwargs),

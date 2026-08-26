@@ -1056,6 +1056,8 @@ class ConnectivityConfigurationsAPITestCase(TestAPIViewSetMixin, TestCase):
 
         cls.stat_one = SchoolDailyStatusFactory(school=cls.school_one, live_data_source='DAILY_CHECK_APP_MLAB')
         cls.stat_two = SchoolDailyStatusFactory(school=cls.school_two, live_data_source='QOS')
+        CountryDailyStatusFactory(country=cls.country_one, date=cls.stat_one.date, connectivity_speed=1000000, live_data_source='DAILY_CHECK_APP_MLAB')
+        CountryDailyStatusFactory(country=cls.country_one, date=cls.stat_two.date, connectivity_speed=1000000, live_data_source='QOS')
 
         args = ['--delete_data_sources', '--update_data_sources', '--update_data_layers']
         call_command('load_system_data_layers', *args)
@@ -1067,7 +1069,7 @@ class ConnectivityConfigurationsAPITestCase(TestAPIViewSetMixin, TestCase):
     def test_global_latest_configurations(self):
         url, _, view = statistics_url((), {}, view_name='get-latest-week-and-month')
 
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(3):
             response = self.forced_auth_req('get', url, view=view)
             self.assertEqual(response.status_code, status.HTTP_200_OK)
 
@@ -1082,7 +1084,7 @@ class ConnectivityConfigurationsAPITestCase(TestAPIViewSetMixin, TestCase):
     def test_country_with_schools_latest_configurations(self):
         url, _, view = statistics_url((), {'country_id': self.country_one.id}, view_name='get-latest-week-and-month')
 
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(3):
             response = self.forced_auth_req('get', url, view=view)
             self.assertEqual(response.status_code, status.HTTP_200_OK)
 
@@ -1104,7 +1106,7 @@ class ConnectivityConfigurationsAPITestCase(TestAPIViewSetMixin, TestCase):
         url, _, view = statistics_url((), {'country_id': self.country_one.id, 'layer_id': layer.id},
                                       view_name='get-latest-week-and-month')
 
-        with self.assertNumQueries(6):
+        with self.assertNumQueries(7):
             response = self.forced_auth_req('get', url, view=view)
             self.assertEqual(response.status_code, status.HTTP_200_OK)
 
@@ -1116,18 +1118,18 @@ class ConnectivityConfigurationsAPITestCase(TestAPIViewSetMixin, TestCase):
     def test_country_without_schools_latest_configurations(self):
         url, _, view = statistics_url((), {'country_id': self.country_two.id}, view_name='get-latest-week-and-month')
 
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(2):
             response = self.forced_auth_req('get', url, view=view)
             self.assertEqual(response.status_code, status.HTTP_200_OK)
             self.assertEqual(len(response.data), 0)
 
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(2):
             self.forced_auth_req('get', url, view=view)
 
     def test_admin1_latest_configurations(self):
         url, _, view = statistics_url((), {'admin1_id': self.admin1_one.id}, view_name='get-latest-week-and-month')
 
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(3):
             response = self.forced_auth_req('get', url, view=view)
             self.assertEqual(response.status_code, status.HTTP_200_OK)
             response_data = response.data
@@ -1141,7 +1143,7 @@ class ConnectivityConfigurationsAPITestCase(TestAPIViewSetMixin, TestCase):
     def test_school_latest_configurations(self):
         url, _, view = statistics_url((), {'school_id': self.school_one.id}, view_name='get-latest-week-and-month')
 
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(3):
             response = self.forced_auth_req('get', url, view=view)
             self.assertEqual(response.status_code, status.HTTP_200_OK)
 
@@ -1158,7 +1160,7 @@ class ConnectivityConfigurationsAPITestCase(TestAPIViewSetMixin, TestCase):
             'school_ids': ','.join([str(s) for s in [self.school_one.id, self.school_two.id]])
         }, view_name='get-latest-week-and-month')
 
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(3):
             response = self.forced_auth_req('get', url, view=view)
             self.assertEqual(response.status_code, status.HTTP_200_OK)
 

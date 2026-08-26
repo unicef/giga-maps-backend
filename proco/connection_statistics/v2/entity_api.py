@@ -374,9 +374,16 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
         if len(self.school_static_filters) > 0:
             school_static_filters_sql = f' AND ({" AND ".join(self.school_static_filters)}) '
 
-        country_filter_sql = f' AND "schools_school"."country_id" = {country_id} ' if country_id else ''
+        try:
+            country_filter_sql = f' AND "schools_school"."country_id" = {int(country_id)} ' if country_id else ''
+        except (ValueError, TypeError):
+            country_filter_sql = ''
+
         admin1_id = self.request.query_params.get('admin1_id', None)
-        admin1_filter_sql = f' AND "schools_school"."admin1_id" = {admin1_id} ' if admin1_id else ''
+        try:
+            admin1_filter_sql = f' AND "schools_school"."admin1_id" = {int(admin1_id)} ' if admin1_id else ''
+        except (ValueError, TypeError):
+            admin1_filter_sql = ''
 
         query = f"""
             SELECT
@@ -665,9 +672,16 @@ class EntityConnectivityAPIView(EntityDetailFilterMixin, EntityTypeCodeMixin, AP
         if len(self.entity_static_filters) > 0:
             entity_static_filters_sql = f' AND ({" AND ".join(self.entity_static_filters)}) '
 
-        country_filter_sql = f' AND "entities_entity"."country_id" = {country_id} ' if country_id else ''
+        try:
+            country_filter_sql = f' AND "entities_entity"."country_id" = {int(country_id)} ' if country_id else ''
+        except (ValueError, TypeError):
+            country_filter_sql = ''
+
         admin1_id = self.request.query_params.get('admin1_id', None)
-        admin1_filter_sql = f' AND "entities_entity"."admin1_id" = {admin1_id} ' if admin1_id else ''
+        try:
+            admin1_filter_sql = f' AND "entities_entity"."admin1_id" = {int(admin1_id)} ' if admin1_id else ''
+        except (ValueError, TypeError):
+            admin1_filter_sql = ''
 
         query = f"""
             SELECT
@@ -1007,24 +1021,42 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
         Extract all entity layer parameters from the request.
         Looks for parameters matching pattern: {entity_code}_layer_id
         e.g., school_layer_id, health_layer_id, hospital_layer_id
+        Also supports generic layer_id.
 
         Returns a dict mapping entity_code -> layer_id
         """
         entity_layers = {}
         for param_name, param_value in request.query_params.items():
-            if param_name.endswith('_layer_id') and param_value:
-                entity_code = param_name.replace('_layer_id', '')
-                entity_layers[entity_code] = param_value
+            if (
+                param_name.endswith('_layer_id')
+                and not core_utilities.is_blank_string(param_value)
+                and param_value not in ['null', 'undefined', 'None']
+            ):
+                entity_code = param_name[:-9]
+                if entity_code:
+                    entity_layers[entity_code] = param_value
+
+        generic_layer_id = request.query_params.get('layer_id')
+        if (
+            generic_layer_id
+            and not core_utilities.is_blank_string(generic_layer_id)
+            and generic_layer_id not in ['null', 'undefined', 'None']
+        ):
+            requested_codes = request.query_params.get('entity_type__code')
+            entity_type_code = requested_codes if requested_codes else LEGACY_MODEL
+            if entity_type_code not in entity_layers:
+                entity_layers[entity_type_code] = generic_layer_id
+
         return entity_layers
 
     @staticmethod
-    def can_use_country_daily_status(country_id, admin1_id, school_id, school_ids):
+    def can_use_country_daily_status(country_id, admin1_id, school_id, school_ids, school_filters=None, school_static_filters=None):
         """
         Determine if we can use CountryDailyStatus for date lookups.
         Only applicable when the query is at the country level
         (no admin1 or school-specific filters).
         """
-        return country_id and not admin1_id and not school_id and not school_ids
+        return country_id and not admin1_id and not school_id and not school_ids and not school_filters and not school_static_filters
 
     def get_school_configs(self, request, layer_id=None, **kwargs):
         """
@@ -1082,8 +1114,45 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
                     live_data_source__in=live_data_sources,
                 ).filter(**{parameter_column_name + '__isnull': False})
 
+        school_filters = ''
+        school_static_filters = ''
+        has_filter_params = any(
+            (('__' in k and not k.startswith(('school_id__', 'entity_id__', 'country_id__', 'admin1_id__', 'date__', 'entity_type__')))
+            or k.startswith('filter__'))
+            and not core_utilities.is_blank_string(v)
+            and v not in ['null', 'undefined', 'None']
+            for k, v in self.request.query_params.items()
+        )
+        if has_filter_params:
+            school_filters = core_utilities.get_filter_sql(self.request, 'schools', 'schools_school', LEGACY_MODEL)
+            school_static_filters = core_utilities.get_filter_sql(
+                self.request, 'school_static', 'connection_statistics_schoolweeklystatus', LEGACY_MODEL
+            )
+
+        if school_filters or school_static_filters:
+            school_qs = School.objects.filter(deleted__isnull=True)
+            if country_id:
+                school_qs = school_qs.filter(country_id=country_id)
+            if admin1_id:
+                school_qs = school_qs.filter(admin1_id=admin1_id)
+            if school_id:
+                school_qs = school_qs.filter(id=school_id)
+            if school_ids:
+                school_qs = school_qs.filter(id__in=school_ids)
+            if school_filters:
+                school_qs = school_qs.extra(where=[school_filters])
+            if school_static_filters:
+                school_qs = school_qs.extra(
+                    tables=['connection_statistics_schoolweeklystatus'],
+                    where=[
+                        'schools_school.last_weekly_status_id = connection_statistics_schoolweeklystatus.id',
+                        school_static_filters
+                    ]
+                )
+            queryset = queryset.filter(school__in=school_qs)
+
         date_queryset = queryset
-        if self.can_use_country_daily_status(country_id, admin1_id, school_id, school_ids):
+        if self.can_use_country_daily_status(country_id, admin1_id, school_id, school_ids, school_filters, school_static_filters):
             date_queryset = CountryDailyStatus.objects.filter(country_id=country_id)
             if live_data_sources:
                 date_queryset = date_queryset.filter(live_data_source__in=live_data_sources)
@@ -1111,11 +1180,14 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
             if latest_daily_entry:
                 monday_on_entry_date = latest_daily_entry - timedelta(days=latest_daily_entry.weekday())
                 sunday_on_entry_date = monday_on_entry_date + timedelta(days=6)
+            else:
+                monday_on_entry_date = last_week_start
+                sunday_on_entry_date = last_week_end
 
         if monday_on_entry_date:
             first_date = date_queryset.order_by('date').values_list('date', flat=True).first()
             last_date = date_queryset.order_by('-date').values_list('date', flat=True).first()
-            years = list(range(first_date.year, last_date.year + 1)) if first_date and last_date else []
+            years = list(range(first_date.year, last_date.year + 1)) if first_date and last_date else list(range(2020, today_date.year + 1))
             static_data = {
                 'week': {
                     'start_date': date_utilities.format_date(monday_on_entry_date),
@@ -1236,6 +1308,43 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
                     live_data_source__in=live_data_sources,
                 ).filter(**{parameter_column_name + '__isnull': False})
 
+        entity_filters = ''
+        entity_static_filters = ''
+        has_filter_params = any(
+            (('__' in k and not k.startswith(('school_id__', 'entity_id__', 'country_id__', 'admin1_id__', 'date__', 'entity_type__')))
+            or k.startswith('filter__'))
+            and not core_utilities.is_blank_string(v)
+            and v not in ['null', 'undefined', 'None']
+            for k, v in self.request.query_params.items()
+        )
+        if has_filter_params:
+            entity_filters = core_utilities.get_filter_sql(self.request, 'entities', 'entities_entity', entity_type_code)
+            entity_static_filters = core_utilities.get_filter_sql(
+                self.request, 'entity_static', 'connection_statistics_entityweeklystatus', entity_type_code
+            )
+
+        if entity_filters or entity_static_filters:
+            entity_qs = Entity.objects.filter(deleted__isnull=True, entity_type=entity_type_obj)
+            if country_id:
+                entity_qs = entity_qs.filter(country_id=country_id)
+            if admin1_id:
+                entity_qs = entity_qs.filter(admin1_id=admin1_id)
+            if entity_id:
+                entity_qs = entity_qs.filter(id=entity_id)
+            if entity_ids:
+                entity_qs = entity_qs.filter(id__in=entity_ids)
+            if entity_filters:
+                entity_qs = entity_qs.extra(where=[entity_filters])
+            if entity_static_filters:
+                entity_qs = entity_qs.extra(
+                    tables=['connection_statistics_entityweeklystatus'],
+                    where=[
+                        'entities_entity.last_weekly_status_id = connection_statistics_entityweeklystatus.id',
+                        entity_static_filters
+                    ]
+                )
+            queryset = queryset.filter(entity__in=entity_qs)
+
         today_date = core_utilities.get_current_datetime_object().date()
         monday_date = today_date - timedelta(days=today_date.weekday())
 
@@ -1257,9 +1366,14 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
             if latest_daily_entry:
                 monday_on_entry_date = latest_daily_entry - timedelta(days=latest_daily_entry.weekday())
                 sunday_on_entry_date = monday_on_entry_date + timedelta(days=6)
+            else:
+                monday_on_entry_date = last_week_start
+                sunday_on_entry_date = last_week_end
 
         if monday_on_entry_date:
-            years = list(range(2020, datetime.now().year + 1))
+            first_date = queryset.order_by('date').values_list('date', flat=True).first()
+            last_date = queryset.order_by('-date').values_list('date', flat=True).first()
+            years = list(range(first_date.year, last_date.year + 1)) if first_date and last_date else list(range(2020, today_date.year + 1))
             static_data = {
                 'week': {
                     'start_date': date_utilities.format_date(monday_on_entry_date),
