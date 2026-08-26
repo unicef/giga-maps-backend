@@ -748,9 +748,9 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
 
             if kwargs['is_reverse'] is True:
                 kwargs['case_conditions'] = """
-                CASE WHEN eds.{col_name} < {benchmark_value}  THEN 'good'
-                    WHEN eds.{col_name} >= {benchmark_value} AND eds.{col_name} <= {base_benchmark} THEN 'moderate'
-                    WHEN eds.{col_name} > {base_benchmark} THEN 'bad'
+                CASE WHEN eds.{col_name} < {base_benchmark}  THEN 'good'
+                    WHEN eds.{col_name} >= {base_benchmark} AND eds.{col_name} < {benchmark_value} THEN 'moderate'
+                    WHEN eds.{col_name} >= {benchmark_value} THEN 'bad'
                     ELSE 'unknown'
                 END AS field_status,
                 """.format(**kwargs)
@@ -1440,8 +1440,8 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
             if kwargs['is_reverse'] is True:
                 kwargs['case_conditions'] = """
-                COUNT(DISTINCT CASE WHEN eds.{col_name} < {benchmark_value} THEN eds.entity_id ELSE NULL END) AS "good",
-                COUNT(DISTINCT CASE WHEN (eds.{col_name} >= {benchmark_value} AND eds.{col_name} <= {base_benchmark})
+                COUNT(DISTINCT CASE WHEN eds.{col_name} < {base_benchmark} THEN eds.entity_id ELSE NULL END) AS "good",
+                COUNT(DISTINCT CASE WHEN (eds.{col_name} >= {base_benchmark} AND eds.{col_name} < {benchmark_value})
                     THEN eds.entity_id ELSE NULL END) AS "moderate",
                 COUNT(DISTINCT CASE WHEN eds.{col_name} >= {benchmark_value} THEN eds.entity_id ELSE NULL END) AS "bad",
                 COUNT(DISTINCT CASE WHEN eds.{col_name} IS NULL THEN eds.entity_id ELSE NULL END) AS "unknown",
@@ -1613,10 +1613,10 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             if kwargs['is_reverse'] is True:
                 kwargs['case_conditions'] = """
                 CASE
-                    WHEN eds."{col_name}" < {benchmark_value} THEN 'good'
-                    WHEN (eds."{col_name}" >= {benchmark_value} AND eds."{col_name}" <= {base_benchmark})
+                    WHEN eds."{col_name}" < {base_benchmark} THEN 'good'
+                    WHEN (eds."{col_name}" >= {base_benchmark} AND eds."{col_name}" < {benchmark_value})
                         THEN 'moderate'
-                    WHEN eds."{col_name}" > {base_benchmark} THEN 'bad'
+                    WHEN eds."{col_name}" >= {benchmark_value} THEN 'bad'
                     ELSE 'unknown' END AS live_avg_connectivity
                 """.format(**kwargs)
 
@@ -2240,11 +2240,11 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
     @staticmethod
     def resolve_connectivity_bucket(live_avg, rounded_benchmark_value, rounded_base_benchmark, is_reverse):
         if is_reverse:
-            if live_avg < rounded_benchmark_value:
+            if live_avg < rounded_base_benchmark:
                 return 'good'
-            if rounded_benchmark_value <= live_avg <= rounded_base_benchmark:
+            if rounded_base_benchmark <= live_avg < rounded_benchmark_value:
                 return 'moderate'
-            if live_avg > rounded_base_benchmark:
+            if live_avg >= rounded_benchmark_value:
                 return 'bad'
             return 'unknown'
 
@@ -3436,8 +3436,8 @@ class EntityDataLayerPreviewViewSet(APIView):
 
             if kwargs['is_reverse'] is True:
                 kwargs['case_conditions'] = """
-                            CASE WHEN sds.{col_name} < {benchmark_value}  THEN 'good'
-                                WHEN sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark} THEN 'moderate'
+                            CASE WHEN sds.{col_name} < {base_benchmark}  THEN 'good'
+                                WHEN sds.{col_name} >= {base_benchmark} AND sds.{col_name} < {benchmark_value} THEN 'moderate'
                                 WHEN sds.{col_name} >= {benchmark_value} THEN 'bad'
                                 ELSE 'unknown'
                             END AS connectivity,

@@ -859,9 +859,9 @@ class DataLayerPreviewViewSet(APIView):
 
             if kwargs['is_reverse'] is True:
                 kwargs['case_conditions'] = """
-                            CASE WHEN sds.{col_name} < {benchmark_value}  THEN 'good'
-                                WHEN sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark} THEN 'moderate'
-                                WHEN sds.{col_name} > {base_benchmark} THEN 'bad'
+                            CASE WHEN sds.{col_name} < {base_benchmark}  THEN 'good'
+                                WHEN sds.{col_name} >= {base_benchmark} AND sds.{col_name} < {benchmark_value} THEN 'moderate'
+                                WHEN sds.{col_name} >= {benchmark_value} THEN 'bad'
                                 ELSE 'unknown'
                             END AS connectivity,
                         """.format(**kwargs)
@@ -1324,8 +1324,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
             if kwargs['is_reverse'] is True:
                 kwargs['case_conditions'] = """
-                COUNT(DISTINCT CASE WHEN sds.{col_name} < {benchmark_value} THEN sds.school_id ELSE NULL END) AS "good",
-                COUNT(DISTINCT CASE WHEN (sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark})
+                COUNT(DISTINCT CASE WHEN sds.{col_name} < {base_benchmark} THEN sds.school_id ELSE NULL END) AS "good",
+                COUNT(DISTINCT CASE WHEN (sds.{col_name} >= {base_benchmark} AND sds.{col_name} < {benchmark_value})
                     THEN sds.school_id ELSE NULL END) AS "moderate",
                 COUNT(DISTINCT CASE WHEN sds.{col_name} >= {benchmark_value} THEN sds.school_id ELSE NULL END) AS "bad",
                 COUNT(DISTINCT CASE WHEN sds.{col_name} IS NULL THEN sds.school_id ELSE NULL END) AS "unknown",
@@ -1481,10 +1481,10 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             if kwargs['is_reverse'] is True:
                 kwargs['case_conditions'] = """
                 CASE
-                    WHEN sds."{col_name}" < {benchmark_value} THEN 'good'
-                    WHEN (sds."{col_name}" >= {benchmark_value} AND sds."{col_name}" <= {base_benchmark})
+                    WHEN sds."{col_name}" < {base_benchmark} THEN 'good'
+                    WHEN (sds."{col_name}" >= {base_benchmark} AND sds."{col_name}" < {benchmark_value})
                         THEN 'moderate'
-                    WHEN sds."{col_name}" > {base_benchmark} THEN 'bad'
+                    WHEN sds."{col_name}" >= {benchmark_value} THEN 'bad'
                     ELSE 'unknown' END AS live_avg_connectivity
                 """.format(**kwargs)
 
@@ -2354,9 +2354,9 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
             if kwargs['is_reverse'] is True:
                 kwargs['case_conditions'] = """
-                CASE WHEN sds.{col_name} < {benchmark_value}  THEN 'good'
-                    WHEN sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark} THEN 'moderate'
-                    WHEN sds.{col_name} > {base_benchmark} THEN 'bad'
+                CASE WHEN sds.{col_name} < {base_benchmark}  THEN 'good'
+                    WHEN sds.{col_name} >= {base_benchmark} AND sds.{col_name} < {benchmark_value} THEN 'moderate'
+                    WHEN sds.{col_name} >= {benchmark_value} THEN 'bad'
                     ELSE 'unknown'
                 END AS field_status,
                 """.format(**kwargs)

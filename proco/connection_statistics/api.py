@@ -806,6 +806,11 @@ class ConnectivityConfigurationsViewSet(APIView):
                 self.queryset = self.queryset.filter(
                     live_data_source__in=live_data_sources,
                 ).filter(**{parameter_column_name + '__isnull': False})
+            elif data_layer_instance.type == DataLayer.LAYER_TYPE_STATIC:
+                data_sources = data_layer_instance.data_sources.all()
+                if data_sources.exists():
+                    parameter_col = data_sources.first().data_source_column
+                    parameter_column_name = str(parameter_col['name'])
 
             school_filters = ''
             school_static_filters = ''
@@ -850,7 +855,7 @@ class ConnectivityConfigurationsViewSet(APIView):
                 date_queryset = CountryDailyStatus.objects.filter(country_id=country_id)
                 if live_data_sources:
                     date_queryset = date_queryset.filter(live_data_source__in=live_data_sources)
-                if parameter_column_name:
+                if parameter_column_name and layer_id and data_layer_instance and data_layer_instance.type == DataLayer.LAYER_TYPE_LIVE:
                     date_queryset = date_queryset.filter(**{parameter_column_name + '__isnull': False})
 
             today_date = core_utilities.get_current_datetime_object().date()
@@ -866,7 +871,39 @@ class ConnectivityConfigurationsViewSet(APIView):
                 date__range=(last_week_start, last_week_end)
             ).values_list('date', flat=True).order_by('-date').first()
 
-            if last_week_entry:
+            if layer_id and data_layer_instance and data_layer_instance.type == DataLayer.LAYER_TYPE_STATIC and parameter_column_name:
+                if school_filters or school_static_filters:
+                    static_qs = SchoolWeeklyStatus.objects.filter(school__in=school_qs)
+                else:
+                    static_qs = SchoolWeeklyStatus.objects.filter(school__deleted__isnull=True)
+                    
+                if country_id:
+                    static_qs = static_qs.filter(school__country_id=country_id)
+                if admin1_id:
+                    static_qs = static_qs.filter(school__admin1_id=admin1_id)
+                if school_id:
+                    static_qs = static_qs.filter(school=school_id)
+                if school_ids:
+                    static_qs = static_qs.filter(school__in=school_ids)
+                
+                if hasattr(SchoolWeeklyStatus, parameter_column_name):
+                    static_qs = static_qs.filter(**{parameter_column_name + '__isnull': False})
+                elif hasattr(School, parameter_column_name):
+                    static_qs = static_qs.filter(**{'school__' + parameter_column_name + '__isnull': False})
+                
+                latest_static_entry = static_qs.order_by('-date').values_list('date', flat=True).first()
+                if latest_static_entry:
+                    monday_on_entry_date = latest_static_entry - timedelta(days=latest_static_entry.weekday())
+                    sunday_on_entry_date = monday_on_entry_date + timedelta(days=6)
+                    first_date = date_queryset.order_by('date').values_list('date', flat=True).first()
+                    last_date = date_queryset.order_by('-date').values_list('date', flat=True).first()
+                    last_week_entry = None
+                else:
+                    monday_on_entry_date = None
+            
+            if monday_on_entry_date:
+                pass # Already set
+            elif last_week_entry:
                 # TECH-7453: 1. If last week's data is present use it as default.
                 monday_on_entry_date = last_week_start
                 sunday_on_entry_date = last_week_end
