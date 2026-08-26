@@ -2438,41 +2438,23 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
     def get_static_map_query(self, env, request):
         query = """
                 WITH bounds AS (SELECT {env} AS geom, {env}::box2d AS b2d
-                    ), prioritized_schools AS (
-                SELECT
-                    schools_school.id, schools_school.geopoint, schools_school.connectivity_status, {table_name}."{col_name}" AS field_value, ROW_NUMBER() OVER (
-                    PARTITION BY schools_school.geopoint
-                    ORDER BY
-                    CASE
-                    WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 1
-                    WHEN schools_school.connectivity_status = 'no' THEN 2
-                    ELSE 3
-                    END ASC, schools_school.id ASC
-                    ) AS priority_rank, (COUNT (*) OVER (PARTITION BY schools_school.geopoint) > 1) AS has_multiple_school_on_same_lat_lng
+                    ), mvtgeom AS (
+                SELECT DISTINCT ST_AsMVTGeom(ST_Transform("schools_school".geopoint, 3857), bounds.b2d) AS geom, {random_select_list}
+                    "schools_school".id, sws."{col_name}" AS field_value, (COUNT (*) OVER (PARTITION BY "schools_school".geopoint) > 1) AS has_multiple_school_on_same_lat_lng,
+                    'connected' AS connectivity_status, {label_case_statements}
                 FROM schools_school
                     INNER JOIN bounds
-                ON ST_Intersects(schools_school.geopoint, ST_Transform(bounds.geom, 4326))
-                    INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
+                ON ST_Intersects("schools_school".geopoint, ST_Transform(bounds.geom, 4326))
+                    INNER JOIN connection_statistics_schoolweeklystatus sws ON "schools_school".last_weekly_status_id = sws.id
                     {school_weekly_join}
-                WHERE schools_school."deleted" IS NULL
+                WHERE "schools_school"."deleted" IS NULL
                     {country_condition}
                     {admin1_condition}
                     {school_condition}
                     {same_school_coords_condition}
                     {school_weekly_condition}
-                    )
-                    , sampled_schools AS (
-                SELECT id, geopoint, field_value, has_multiple_school_on_same_lat_lng
-                FROM prioritized_schools
-                WHERE priority_rank = 1
                     {random_order}
                     {limit_condition}
-                    )
-                    , mvtgeom AS (
-                SELECT DISTINCT ST_AsMVTGeom(ST_Transform(sampled_schools.geopoint, 3857), bounds.b2d) AS geom, {random_select_list}
-                    sampled_schools.id, sampled_schools.field_value, sampled_schools.has_multiple_school_on_same_lat_lng, 'connected' AS connectivity_status, {label_case_statements}
-                FROM sampled_schools
-                    CROSS JOIN bounds
                     )
                 SELECT COALESCE(NULLIF(tile.mvt, ''::bytea), {empty_mvt_layer})
                 FROM (SELECT ST_AsMVT(DISTINCT mvtgeom.*, '{mvt_layer}') AS mvt
@@ -2501,7 +2483,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
         if len(kwargs.get('school_ids', [])) > 0:
             add_random_condition = False
-            kwargs['school_condition'] = 'AND schools_school."id" IN ({0})'.format(
+            kwargs['school_condition'] = 'AND "schools_school"."id" IN ({0})'.format(
                 ','.join([str(school_id) for school_id in kwargs['school_ids']])
             )
         elif len(kwargs.get('admin1_ids', [])) > 0:
@@ -2511,7 +2493,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             else:
                 add_random_condition = False
 
-            kwargs['admin1_condition'] = 'AND schools_school."admin1_id" IN ({0})'.format(
+            kwargs['admin1_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
                 ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
             )
         elif len(kwargs.get('country_ids', [])) > 0:
@@ -2521,7 +2503,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             else:
                 add_random_condition = False
 
-            kwargs['country_condition'] = 'AND schools_school."country_id" IN ({0})'.format(
+            kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
 
@@ -2586,12 +2568,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 if not any(c.startswith("ELSE ") for c in label_cases):
                     label_cases.append("ELSE '{label}'".format(label=title))
 
-        # Replace table references with sampled_schools.field_value for use in mvtgeom CTE
         label_case_statements_str = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
-        label_case_statements_str = label_case_statements_str.replace(
-            f'{kwargs["table_name"]}."{kwargs["col_name"]}"',
-            'sampled_schools.field_value'
-        )
         kwargs['label_case_statements'] = label_case_statements_str
 
         if add_random_condition:
