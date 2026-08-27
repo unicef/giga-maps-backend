@@ -1327,7 +1327,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 COUNT(DISTINCT CASE WHEN sds.{col_name} < {benchmark_value} THEN sds.school_id ELSE NULL END) AS "good",
                 COUNT(DISTINCT CASE WHEN (sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark})
                     THEN sds.school_id ELSE NULL END) AS "moderate",
-                COUNT(DISTINCT CASE WHEN sds.{col_name} > {base_benchmark} THEN sds.school_id ELSE NULL END) AS "bad",
+                COUNT(DISTINCT CASE WHEN sds.{col_name} >= {benchmark_value} THEN sds.school_id ELSE NULL END) AS "bad",
                 COUNT(DISTINCT CASE WHEN sds.{col_name} IS NULL THEN sds.school_id ELSE NULL END) AS "unknown",
                 """.format(**kwargs)
 
