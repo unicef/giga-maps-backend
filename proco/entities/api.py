@@ -273,17 +273,13 @@ class EntityStatusConnectivityTileGenerator(RawEntityDetailFilterMixin, BaseTile
 
         add_random_condition = True
 
-        entity_ids = [int(x) for x in tbl.get('entity_ids', []) if str(x).isdigit()]
-        admin1_ids = [int(x) for x in tbl.get('admin1_ids', []) if str(x).isdigit()]
-        country_ids = [int(x) for x in tbl.get('country_ids', []) if str(x).isdigit()]
-
-        if len(entity_ids) > 0:
+        if len(tbl.get('entity_ids', [])) > 0:
             add_random_condition = False
             tbl['entity_condition'] = 'AND entities_entity."id" IN ({0})'.format(
-                ','.join([str(entity_id) for entity_id in entity_ids])
+            ','.join([str(entity_id) for entity_id in tbl['entity_ids']])
             )
 
-        elif len(admin1_ids) > 0:
+        elif len(tbl.get('admin1_ids', [])) > 0:
             if settings.ADMIN_MAP_API_SAMPLING_LIMIT:
                 tbl['MAP_API_SAMPLING_LIMIT'] = settings.ADMIN_MAP_API_SAMPLING_LIMIT
                 add_random_condition = True
@@ -291,10 +287,10 @@ class EntityStatusConnectivityTileGenerator(RawEntityDetailFilterMixin, BaseTile
                 add_random_condition = False
 
             tbl['admin1_condition'] = 'AND entities_entity."admin1_id" IN ({0})'.format(
-                ','.join([str(admin1_id) for admin1_id in admin1_ids])
+                ','.join([str(admin1_id) for admin1_id in tbl['admin1_ids']])
             )
 
-        elif len(country_ids) > 0:
+        elif len(tbl.get('country_ids', [])) > 0:
             if settings.COUNTRY_MAP_API_SAMPLING_LIMIT:
                 tbl['MAP_API_SAMPLING_LIMIT'] = settings.COUNTRY_MAP_API_SAMPLING_LIMIT
                 add_random_condition = True
@@ -302,7 +298,7 @@ class EntityStatusConnectivityTileGenerator(RawEntityDetailFilterMixin, BaseTile
                 add_random_condition = False
 
             tbl['country_condition'] = 'AND entities_entity."country_id" IN ({0})'.format(
-                ','.join([str(country_id) for country_id in country_ids])
+                ','.join([str(country_id) for country_id in tbl['country_ids']])
             )
 
         if len(tbl['entity_filters']) > 0:
@@ -334,19 +330,15 @@ class EntityStatusConnectivityTileGenerator(RawEntityDetailFilterMixin, BaseTile
             tbl['limit_condition'] = 'LIMIT ' + str(limit)
 
         if tbl.get('exclude_entities_same_coords_except_id'):
-            try:
-                exclude_id = int(tbl['exclude_entities_same_coords_except_id'])
-                tbl['same_entity_coords_condition'] = f"""
-                                AND (
-                                    entities_entity.id = {exclude_id}
-                                    OR NOT ST_Equals(
-                                        entities_entity.geopoint,
-                                        (SELECT geopoint FROM entities_entity WHERE id = {exclude_id})
-                                    )
+            tbl['same_entity_coords_condition'] = f"""
+                            AND (
+                                entities_entity.id = {tbl['exclude_entities_same_coords_except_id']}
+                                OR NOT ST_Equals(
+                                    entities_entity.geopoint,
+                                    (SELECT geopoint FROM entities_entity WHERE id = {tbl['exclude_entities_same_coords_except_id']})
                                 )
-                            """
-            except (ValueError, TypeError):
-                pass
+                            )
+                        """
         return sql_tmpl.format(**tbl)
 
 
@@ -751,56 +743,36 @@ class EntityConnectivityTileGenerator(RawEntityDetailFilterMixin, EntityTypeCode
             'entity_id__in' in request.query_params
         ):
             if 'school_id' in request.query_params:
-                try:
-                    s_id = int(request.query_params['school_id'])
-                    table_configs['school_condition'] = f" AND schools_school.id = {s_id}"
-                    table_configs['entity_condition'] += ' AND FALSE'
-                except (ValueError, TypeError):
-                    pass
+                table_configs['school_condition'] = f" AND schools_school.id = {request.query_params['school_id']}"
+                table_configs['entity_condition'] += ' AND FALSE'
             elif 'school_id__in' in request.query_params:
-                s_ids = [str(int(c.strip())) for c in request.query_params['school_id__in'].split(',') if c.strip().isdigit()]
-                if s_ids:
-                    table_configs['school_condition'] = f" AND schools_school.id IN ({','.join(s_ids)})"
-                    table_configs['entity_condition'] += ' AND FALSE'
+                school_ids = ','.join([c.strip() for c in request.query_params['school_id__in'].split(',')])
+                table_configs['school_condition'] = f" AND schools_school.id IN ({school_ids})"
+                table_configs['entity_condition'] += ' AND FALSE'
 
             elif 'entity_id' in request.query_params:
-                try:
-                    e_id = int(request.query_params['entity_id'])
-                    table_configs['school_condition'] += ' AND FALSE'
-                    table_configs['entity_condition'] = f" AND entities_entity.id = {e_id}"
-                except (ValueError, TypeError):
-                    pass
+                table_configs['school_condition'] += ' AND FALSE'
+                table_configs['entity_condition'] = f" AND entities_entity.id = {request.query_params['entity_id']}"
             elif 'entity_id__in' in request.query_params:
-                e_ids = [str(int(c.strip())) for c in request.query_params['entity_id__in'].split(',') if c.strip().isdigit()]
-                if e_ids:
-                    table_configs['school_condition'] += ' AND FALSE'
-                    table_configs['entity_condition'] = f" AND entities_entity.id IN ({','.join(e_ids)})"
+                entity_ids = ','.join([c.strip() for c in request.query_params['entity_id__in'].split(',')])
+                table_configs['school_condition'] += ' AND FALSE'
+                table_configs['entity_condition'] = f" AND entities_entity.id IN ({entity_ids})"
 
             elif 'admin1_id' in request.query_params:
-                try:
-                    a_id = int(request.query_params['admin1_id'])
-                    table_configs['school_admin1_condition'] = f" AND schools_school.admin1_id = {a_id}"
-                    table_configs['entity_admin1_condition'] = f" AND entities_entity.admin1_id = {a_id}"
-                except (ValueError, TypeError):
-                    pass
+                table_configs['school_admin1_condition'] = f" AND schools_school.admin1_id = {request.query_params['admin1_id']}"
+                table_configs['entity_admin1_condition'] = f" AND entities_entity.admin1_id = {request.query_params['admin1_id']}"
             elif 'admin1_id__in' in request.query_params:
-                a_ids = [str(int(c.strip())) for c in request.query_params['admin1_id__in'].split(',') if c.strip().isdigit()]
-                if a_ids:
-                    table_configs['school_admin1_condition'] = f" AND schools_school.admin1_id IN ({','.join(a_ids)})"
-                    table_configs['entity_admin1_condition'] = f" AND entities_entity.admin1_id IN ({','.join(a_ids)})"
+                admin1_ids = ','.join([c.strip() for c in request.query_params['admin1_id__in'].split(',')])
+                table_configs['school_admin1_condition'] = f" AND schools_school.admin1_id IN ({admin1_ids})"
+                table_configs['entity_admin1_condition'] = f" AND entities_entity.admin1_id IN ({admin1_ids})"
 
             elif 'country_id' in request.query_params:
-                try:
-                    c_id = int(request.query_params['country_id'])
-                    table_configs['school_country_condition'] = f" AND schools_school.country_id = {c_id}"
-                    table_configs['entity_country_condition'] = f" AND entities_entity.country_id = {c_id}"
-                except (ValueError, TypeError):
-                    pass
+                table_configs['school_country_condition'] = f" AND schools_school.country_id = {request.query_params['country_id']}"
+                table_configs['entity_country_condition'] = f" AND entities_entity.country_id = {request.query_params['country_id']}"
             elif 'country_id__in' in request.query_params:
-                c_ids = [str(int(c.strip())) for c in request.query_params['country_id__in'].split(',') if c.strip().isdigit()]
-                if c_ids:
-                    table_configs['school_country_condition'] = f" AND schools_school.country_id IN ({','.join(c_ids)})"
-                    table_configs['entity_country_condition'] = f" AND entities_entity.country_id IN ({','.join(c_ids)})"
+                country_ids = ','.join([c.strip() for c in request.query_params['country_id__in'].split(',')])
+                table_configs['school_country_condition'] = f" AND schools_school.country_id IN ({country_ids})"
+                table_configs['entity_country_condition'] = f" AND entities_entity.country_id IN ({country_ids})"
 
         else:
             zoom_level = int(request.query_params.get('z', '0'))

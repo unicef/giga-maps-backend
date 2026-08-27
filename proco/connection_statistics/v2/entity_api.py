@@ -1183,14 +1183,14 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
             else:
                 static_qs = SchoolWeeklyStatus.objects.filter(school__deleted__isnull=True)
                 
-            if country_id:
-                static_qs = static_qs.filter(school__country_id=country_id)
-            if admin1_id:
-                static_qs = static_qs.filter(school__admin1_id=admin1_id)
-            if school_id:
-                static_qs = static_qs.filter(school=school_id)
-            if school_ids:
-                static_qs = static_qs.filter(school__in=school_ids)
+                if country_id:
+                    static_qs = static_qs.filter(school__country_id=country_id)
+                if admin1_id:
+                    static_qs = static_qs.filter(school__admin1_id=admin1_id)
+                if school_id:
+                    static_qs = static_qs.filter(school=school_id)
+                if school_ids:
+                    static_qs = static_qs.filter(school__in=school_ids)
             
             if hasattr(SchoolWeeklyStatus, parameter_column_name):
                 static_qs = static_qs.filter(**{parameter_column_name + '__isnull': False})
@@ -1404,14 +1404,14 @@ class EntityConnectivityConfigurationsViewSet(EntityTypeCodeMixin, APIView):
             else:
                 static_qs = EntityWeeklyStatus.objects.filter(entity__deleted__isnull=True, entity__entity_type=entity_type_obj)
                 
-            if country_id:
-                static_qs = static_qs.filter(entity__country_id=country_id)
-            if admin1_id:
-                static_qs = static_qs.filter(entity__admin1_id=admin1_id)
-            if entity_id:
-                static_qs = static_qs.filter(entity=entity_id)
-            if entity_ids:
-                static_qs = static_qs.filter(entity__in=entity_ids)
+                if country_id:
+                    static_qs = static_qs.filter(entity__country_id=country_id)
+                if admin1_id:
+                    static_qs = static_qs.filter(entity__admin1_id=admin1_id)
+                if entity_id:
+                    static_qs = static_qs.filter(entity=entity_id)
+                if entity_ids:
+                    static_qs = static_qs.filter(entity__in=entity_ids)
             
             if hasattr(EntityWeeklyStatus, parameter_column_name):
                 static_qs = static_qs.filter(**{parameter_column_name + '__isnull': False})
