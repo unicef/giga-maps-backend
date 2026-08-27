@@ -1536,7 +1536,10 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
     """
     logger.info('Handling the published health master data rows.')
 
-    entity_type = EntityType.objects.get(code='health')
+    entity_type = EntityType.objects.filter(code='health').first()
+    if not entity_type:
+        logger.warning('Health EntityType does not exist. Skipping handle_published_entity_master_data_row.')
+        return
 
     master_model = apps.get_model(*entity_type.master_data_model.split('.'))
     detail_model = (

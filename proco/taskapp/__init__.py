@@ -144,7 +144,7 @@ def finalize_setup(sender, **kwargs):
         'proco.data_sources.tasks.handle_published_entity_master_data_row': {
             'task': 'proco.data_sources.tasks.handle_published_entity_master_data_row',
             # Executes every 4 hours
-            'schedule': crontab(hour='*/4', minute=27),
+            'schedule': crontab(hour='*/4', minute=32),
             'args': (),
         },
         'proco.data_sources.tasks.update_entity_live_data_from_giga_meter': {

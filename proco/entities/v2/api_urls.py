@@ -38,7 +38,7 @@ urlpatterns = [
     path('layers/<int:pk>/publish/', entity_api.EntityDataLayerPublishViewSet.as_view({'put': 'partial_update',}),
         name='publish-data-layer-entities'),
     path('layers/<int:pk>/preview/', entity_api.EntityDataLayerPreviewViewSet.as_view(),
-         name='preview-data-layer-entities'), # not working
+         name='preview-data-layer-entities'),
     path('filters/', entity_filter_api.EntityAdvanceFiltersViewSet.as_view({'get': 'list', 'post': 'create',}),
         name='list-or-create-entity-filters'),
     path('filters/<int:pk>/', entity_filter_api.EntityAdvanceFiltersViewSet.as_view({'put': 'partial_update', 'delete': 'destroy',}),

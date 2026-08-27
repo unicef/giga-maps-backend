@@ -647,9 +647,14 @@ def handle_deleted_entity_master_data_row(deleted_row_id=None, country_ids=None)
         if country_ids:
             rows = rows.filter(country_id__in=country_ids)
 
+        affected_country_ids = set()
         for row in rows:
+            if row.country_id:
+                affected_country_ids.add(row.country_id)
             entity = row.entity
             if entity:
+                if entity.country_id:
+                    affected_country_ids.add(entity.country_id)
                 entity.deleted = core_utilities.get_current_datetime_object()
                 entity.save(update_fields=['deleted'])
 
@@ -661,6 +666,11 @@ def handle_deleted_entity_master_data_row(deleted_row_id=None, country_ids=None)
 
             row.is_read = True
             row.save(update_fields=['is_read'])
+
+        if affected_country_ids:
+            from proco.locations.models import Country
+            for country in Country.objects.filter(id__in=affected_country_ids):
+                country.invalidate_country_related_cache()
 
         background_task_utilities.task_on_complete(task_instance)
     else:
