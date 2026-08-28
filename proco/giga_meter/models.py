@@ -16,6 +16,7 @@ class GigaMeter_Country(models.Model):
     code = models.CharField(max_length=32)
     iso3_format = models.CharField(max_length=32, null=True, blank=True)
     latest_school_master_data_version = models.PositiveIntegerField(blank=True, default=None, null=True)
+    latest_health_master_data_version = models.PositiveIntegerField(blank=True, default=None, null=True)
 
     objects = models.Manager()
 
@@ -366,3 +367,270 @@ class GigaMeter_ConnectivityPingChecks(models.Model):
 
     def __str__(self):
         return f'{self.giga_id_school} - {self.browser_id} - {self.created_at} - {self.is_connected}'
+
+class GigaMeter_Health(TimeStampedModel):
+    """
+    Unmanaged mapping of giga-meter `health` facility master rows.
+    """
+
+    health_id_giga = models.CharField(max_length=255, db_index=True)
+    facility_name = models.CharField(max_length=1000, default='Name unknown')
+    facility_data_source = models.CharField(max_length=255)
+    signature = models.CharField(max_length=255)
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+
+    dhis2_id = models.CharField(max_length=255, blank=True, null=True)
+    hims_id = models.CharField(max_length=255, blank=True, null=True)
+    hfml_id = models.CharField(max_length=255, blank=True, null=True)
+    facility_type_govt = models.CharField(max_length=255, blank=True, null=True)
+    facility_ownership_govt = models.CharField(max_length=255, blank=True, null=True)
+    facility_level = models.CharField(max_length=255, blank=True, null=True)
+    facility_accessibility = models.CharField(max_length=255, blank=True, null=True)
+    is_facility_open = models.NullBooleanField(default=None)
+    health_service_provider = models.CharField(max_length=255, blank=True, null=True)
+    facility_data_collection_year = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    admin1 = models.CharField(max_length=255, blank=True, null=True)
+    admin2 = models.CharField(max_length=255, blank=True, null=True)
+    admin3 = models.CharField(max_length=255, blank=True, null=True)
+    admin4 = models.CharField(max_length=255, blank=True, null=True)
+    admin1_id_giga = models.CharField(max_length=50, blank=True, null=True)
+    admin2_id_giga = models.CharField(max_length=50, blank=True, null=True)
+    area_type_govt = models.CharField(max_length=255, blank=True, null=True)
+
+    distance_to_closest_settlement = models.FloatField(blank=True, default=None, null=True)
+    distance_to_country_boundary = models.FloatField(blank=True, default=None, null=True)
+
+    # Live entity keeps some attributes as text (mirrored from Nest Prisma schema)
+    connectivity = models.CharField(max_length=255, blank=True, null=True)
+    connectivity_type = models.CharField(max_length=255, blank=True, null=True)
+    connectivity_govt = models.CharField(max_length=255, blank=True, null=True)
+    connectivity_govt_collection_year = models.PositiveIntegerField(blank=True, default=None, null=True)
+    connectivity_catchment_coverage = models.CharField(max_length=255, blank=True, null=True)
+
+    electricity_availability = models.CharField(max_length=255, blank=True, null=True)
+    electricity_type = models.CharField(max_length=255, blank=True, null=True)
+    electricity_availability_hours = models.FloatField(blank=True, default=None, null=True)
+    power_backup_system = models.CharField(max_length=255, blank=True, null=True)
+
+    hmis_system = models.CharField(max_length=255, blank=True, null=True)
+    hmis_system_use = models.CharField(max_length=255, blank=True, null=True)
+    ers_system = models.CharField(max_length=255, blank=True, null=True)
+    ers_system_use = models.CharField(max_length=255, blank=True, null=True)
+
+    computer_availability = models.CharField(max_length=255, blank=True, null=True)
+    device_availability = models.CharField(max_length=255, blank=True, null=True)
+    tablets_availability = models.CharField(max_length=255, blank=True, null=True)
+
+    num_staff = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_community_health_workers = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_community_health_workers_within_5km = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    pop_est_govt = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_est_hf = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_within_1km = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_within_3km = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_within_5km = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_within_10km = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    country_code = models.CharField(max_length=32, blank=True, null=True)
+    created_at = core_models.CustomDateTimeField(null=True, blank=True)
+    deleted = CustomDateTimeField(db_index=True, null=True, blank=True)
+
+    last_health_static = models.ForeignKey(
+        'GigaMeter_HealthStatic',
+        related_name='healths',
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        db_column='last_health_static_id',
+    )
+
+    objects = BaseManager()
+
+    class Meta:
+        app_label = app_config.app_name
+        managed = False
+        db_table = 'health'
+
+    def __str__(self):
+        return f'{self.health_id_giga} - {self.facility_name}'
+
+
+class GigaMeter_HealthMasterData(TimeStampedModel, models.Model):
+    """
+    Staging table for inbound health master CDC (master_sync_intermediate_health).
+    """
+
+    DATA_VERSION_CACHE_KEY = 'giga_meter_health_master_data_last_version_{0}'
+
+    country = models.ForeignKey(
+        GigaMeter_Country,
+        blank=True,
+        null=True,
+        related_name='health_master_rows',
+        on_delete=models.DO_NOTHING,
+    )
+
+    health_id_giga = models.CharField(max_length=50, null=False, blank=False, db_index=True)
+    health_id_govt = models.CharField(blank=True, null=True, max_length=255, db_index=True)
+    facility_name = models.CharField(max_length=1000, default='Name unknown')
+    admin1 = models.CharField(max_length=255, blank=True, null=True)
+    admin1_id_giga = models.CharField(max_length=50, null=True, blank=True)
+    admin2 = models.CharField(max_length=255, blank=True, null=True)
+    admin2_id_giga = models.CharField(max_length=50, null=True, blank=True)
+    latitude = models.FloatField(blank=True, default=None, null=True)
+    longitude = models.FloatField(blank=True, default=None, null=True)
+
+    facility_data_collection_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
+    facility_data_source = models.CharField(blank=True, null=True, max_length=255)
+    facility_type_govt = models.CharField(blank=True, null=True, max_length=255)
+    facility_ownership_govt = models.CharField(blank=True, null=True, max_length=255)
+    facility_level = models.CharField(blank=True, null=True, max_length=255)
+    facility_accessibility = models.CharField(blank=True, null=True, max_length=255)
+    is_facility_open = models.CharField(blank=True, null=True, max_length=255)
+    health_service_provider = models.CharField(blank=True, null=True, max_length=255)
+    area_type_govt = models.CharField(blank=True, null=True, max_length=255)
+
+    distance_to_closest_settlement = models.FloatField(blank=True, default=None, null=True)
+    distance_to_country_boundary = models.FloatField(blank=True, default=None, null=True)
+
+    connectivity = models.CharField(blank=True, null=True, max_length=255)
+    connectivity_type = models.CharField(blank=True, null=True, max_length=255)
+    connectivity_govt = models.CharField(blank=True, null=True, max_length=255)
+    connectivity_govt_collection_year = models.PositiveSmallIntegerField(blank=True, default=None, null=True)
+    connectivity_catchment_coverage = models.CharField(blank=True, null=True, max_length=255)
+
+    electricity_availability = models.CharField(blank=True, null=True, max_length=255)
+    electricity_type = models.CharField(blank=True, null=True, max_length=255)
+    electricity_availability_hours = models.FloatField(blank=True, default=None, null=True)
+    power_backup_system = models.CharField(blank=True, null=True, max_length=255)
+
+    hmis_system = models.CharField(blank=True, null=True, max_length=255)
+    hmis_system_use = models.CharField(blank=True, null=True, max_length=255)
+    ers_system = models.CharField(blank=True, null=True, max_length=255)
+    ers_system_use = models.CharField(blank=True, null=True, max_length=255)
+
+    computer_availability = models.CharField(blank=True, null=True, max_length=255)
+    device_availability = models.CharField(blank=True, null=True, max_length=255)
+    tablets_availability = models.CharField(blank=True, null=True, max_length=255)
+
+    num_staff = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_community_health_workers = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_community_health_workers_within_5km = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    pop_est_govt = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_est_hf = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_within_1km = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_within_3km = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_within_5km = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_within_10km = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    version = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    ROW_STATUS_PUBLISHED = 'PUBLISHED'
+    ROW_STATUS_DELETED = 'DELETED'
+
+    ROW_STATUS_CHOICES = (
+        (ROW_STATUS_PUBLISHED, 'Insert/Update'),
+        (ROW_STATUS_DELETED, 'Deleted'),
+    )
+
+    status = models.CharField(max_length=50, choices=ROW_STATUS_CHOICES, default=ROW_STATUS_PUBLISHED, db_index=True)
+
+    objects = models.Manager()
+
+    class Meta:
+        app_label = app_config.app_name
+        managed = False
+        db_table = 'master_sync_intermediate_health'
+        ordering = ['created']
+
+    @classmethod
+    def get_last_version(cls, iso3_format):
+        last_data_version = cache.get(cls.DATA_VERSION_CACHE_KEY.format(iso3_format))
+        if not last_data_version:
+            country_object = GigaMeter_Country.objects.get(iso3_format=iso3_format)
+            last_data_version = country_object.latest_health_master_data_version
+        return last_data_version
+
+    @classmethod
+    def set_last_version(cls, value, iso3_format):
+        cache.set(cls.DATA_VERSION_CACHE_KEY.format(iso3_format), value)
+        country_object = GigaMeter_Country.objects.get(iso3_format=iso3_format)
+        country_object.latest_health_master_data_version = value
+        country_object.save(update_fields=['latest_health_master_data_version'])
+
+
+class GigaMeter_HealthStatic(TimeStampedModel, models.Model):
+    """
+    Versioned health master snapshot (master_sync_health_static).
+    """
+
+    health = models.ForeignKey(
+        GigaMeter_Health,
+        blank=True,
+        null=True,
+        related_name='gigameter_health_static_rows',
+        on_delete=models.SET_NULL,
+        verbose_name='Giga Meter Health',
+    )
+
+    latitude = models.FloatField(blank=True, default=None, null=True)
+    longitude = models.FloatField(blank=True, default=None, null=True)
+    admin1_id_giga = models.CharField(max_length=50, null=True, blank=True)
+    admin2_id_giga = models.CharField(max_length=50, null=True, blank=True)
+
+    facility_data_collection_year = models.PositiveIntegerField(blank=True, default=None, null=True)
+    facility_data_source = models.CharField(blank=True, null=True, max_length=255)
+    facility_type_govt = models.CharField(blank=True, null=True, max_length=255)
+    facility_ownership_govt = models.CharField(blank=True, null=True, max_length=255)
+    facility_level = models.CharField(blank=True, null=True, max_length=255)
+    facility_accessibility = models.CharField(blank=True, null=True, max_length=255)
+    is_facility_open = models.NullBooleanField(default=None)
+    health_service_provider = models.CharField(blank=True, null=True, max_length=255)
+    area_type_govt = models.CharField(blank=True, null=True, max_length=255)
+
+    distance_to_closest_settlement = models.FloatField(blank=True, default=None, null=True)
+    distance_to_country_boundary = models.FloatField(blank=True, default=None, null=True)
+
+    connectivity = models.NullBooleanField(default=None)
+    connectivity_type = models.CharField(blank=True, null=True, max_length=255)
+    connectivity_govt = models.NullBooleanField(default=None)
+    connectivity_govt_collection_year = models.PositiveIntegerField(blank=True, default=None, null=True)
+    connectivity_catchment_coverage = models.CharField(blank=True, null=True, max_length=255)
+
+    electricity_availability = models.NullBooleanField(default=None)
+    electricity_type = models.CharField(blank=True, null=True, max_length=255)
+    electricity_availability_hours = models.FloatField(blank=True, default=None, null=True)
+    power_backup_system = models.CharField(blank=True, null=True, max_length=255)
+
+    hmis_system = models.CharField(blank=True, null=True, max_length=255)
+    hmis_system_use = models.CharField(blank=True, null=True, max_length=255)
+    ers_system = models.CharField(blank=True, null=True, max_length=255)
+    ers_system_use = models.CharField(blank=True, null=True, max_length=255)
+
+    computer_availability = models.NullBooleanField(default=None)
+    device_availability = models.NullBooleanField(default=None)
+    tablets_availability = models.NullBooleanField(default=None)
+
+    num_staff = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_community_health_workers = models.PositiveIntegerField(blank=True, default=None, null=True)
+    num_community_health_workers_within_5km = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    pop_est_govt = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_est_hf = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_within_1km = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_within_3km = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_within_5km = models.PositiveIntegerField(blank=True, default=None, null=True)
+    pop_within_10km = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    version = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    objects = models.Manager()
+
+    class Meta:
+        app_label = app_config.app_name
+        managed = False
+        db_table = 'master_sync_health_static'
