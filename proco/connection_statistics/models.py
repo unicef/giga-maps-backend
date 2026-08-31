@@ -1,3 +1,4 @@
+from django.core.cache import cache
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
@@ -11,6 +12,7 @@ from model_utils.models import TimeStampedModel
 from proco.connection_statistics.config import app_config as statistics_configs
 from proco.core import models as core_models
 from proco.core.managers import BaseManager
+from proco.entities.models import Entity
 from proco.locations.models import Country
 from proco.schools.constants import statuses_schema
 from proco.schools.models import School
@@ -395,3 +397,135 @@ class SchoolRealTimeRegistration(core_models.BaseModelMixin):
         verbose_name = _('School Real Time Registration Status')
         verbose_name_plural = _('School Real Time Registration Data')
         ordering = ('id',)
+
+
+# ######################################## Entity Models ########################################
+
+class EntityRealTimeConnectivity(ConnectivityStatistics, TimeStampedModel, models.Model):
+    DATA_VERSION_CACHE_KEY = 'entity_qos_data_last_version_{0}'
+
+    entity = models.ForeignKey(Entity, related_name='realtime_status', on_delete=models.CASCADE)
+    version = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    objects = BaseManager()
+
+    class Meta:
+        verbose_name = _('Real Time Connectivity Data')
+        verbose_name_plural = _('Real Time Connectivity Data')
+        ordering = ('id',)
+
+    def __str__(self):
+        return f'{self.created} {self.entity.id} {self.entity.name}'
+
+    def delete(self, *args, **kwargs):
+        force = kwargs.pop('force', False)
+
+        if force:
+            super().delete(*args, **kwargs)
+        else:
+            self.deleted = timezone.now()
+            self.save()
+
+    @classmethod
+    def get_last_version(cls, iso3_format):
+        """Get last pulled version: check cache first, fall back to DB query.
+        Mirrors QoSData.get_last_version()."""
+        last_data_version = cache.get(cls.DATA_VERSION_CACHE_KEY.format(iso3_format))
+        if not last_data_version:
+            latest_record = cls.objects.filter(
+                entity__country__iso3_format=iso3_format,
+                version__isnull=False,
+            ).order_by('-version').first()
+            if latest_record:
+                last_data_version = latest_record.version
+        return last_data_version
+
+    @classmethod
+    def set_last_version(cls, value, iso3_format):
+        """Cache the last pulled version. Mirrors QoSData.set_last_version()."""
+        cache.set(cls.DATA_VERSION_CACHE_KEY.format(iso3_format), value)
+
+
+class EntityRealTimeRegistration(core_models.BaseModelMixin):
+    entity = models.ForeignKey(Entity, related_name='realtime_registration_status', on_delete=models.CASCADE)
+
+    rt_registered = models.BooleanField(default=False)
+    rt_registration_date = core_models.CustomDateTimeField(db_index=True, null=True, blank=True)
+    rt_source = models.CharField(max_length=255, null=True, blank=True)
+
+    class Meta:
+        verbose_name = _('Real Time Registration Status')
+        verbose_name_plural = _('Real Time Registration Data')
+        ordering = ('id',)
+
+class EntityDailyStatus(ConnectivityStatistics, TimeStampedModel, models.Model):
+    entity = models.ForeignKey(Entity, related_name='daily_status', on_delete=models.CASCADE)
+    date = models.DateField()
+
+    objects = BaseManager()
+
+    class Meta:
+        verbose_name = _('Daily Connectivity Summary')
+        verbose_name_plural = _('Daily Connectivity Summary')
+        ordering = ('id',)
+        constraints = [
+            UniqueConstraint(fields=['date', 'entity', 'live_data_source', 'deleted'],
+                             name='entitydailystatus_unique_with_deleted'),
+            UniqueConstraint(fields=['date', 'entity', 'live_data_source'],
+                             condition=Q(deleted=None),
+                             name='entitydailystatus_unique_without_deleted'),
+        ]
+
+    def __str__(self):
+        year, week, weekday = self.date.isocalendar()
+        return f'{year} {self.entity.name} Week {week} Day {weekday} Speed - {self.connectivity_speed}'
+
+    def delete(self, *args, **kwargs):
+        force = kwargs.pop('force', False)
+
+        if force:
+            super().delete(*args, **kwargs)
+        else:
+            self.deleted = timezone.now()
+            self.save()
+
+
+class EntityWeeklyStatus(ConnectivityStatistics, TimeStampedModel, models.Model):
+    entity = models.ForeignKey(Entity, related_name='weekly_status', on_delete=models.CASCADE)
+    year = models.PositiveSmallIntegerField(default=get_current_year)
+    week = models.PositiveSmallIntegerField(default=get_current_week)
+    date = models.DateField()
+    download_speed_benchmark = models.FloatField(blank=True, default=None, null=True)
+
+    objects = BaseManager()
+
+    class Meta:
+        verbose_name = _('Weekly Summary')
+        verbose_name_plural = _('Weekly Summary')
+        ordering = ('id',)
+        constraints = [
+            UniqueConstraint(fields=['year', 'week', 'entity', 'deleted'],
+                             name='entityweeklystatus_unique_with_deleted'),
+            UniqueConstraint(fields=['year', 'week', 'entity'],
+                             condition=Q(deleted=None),
+                             name='entityweeklystatus_unique_without_deleted'),
+        ]
+
+    def __str__(self):
+        return f'{self.year} {self.entity.name} Week {self.week} Speed - {self.connectivity_speed}'
+
+    def save(self, **kwargs):
+        self.date = self.get_date()
+        super().save(**kwargs)
+
+    def delete(self, *args, **kwargs):
+        force = kwargs.pop('force', False)
+
+        if force:
+            super().delete(*args, **kwargs)
+        else:
+            self.deleted = timezone.now()
+            self.save()
+
+    def get_date(self):
+        return Week(self.year, self.week).monday()

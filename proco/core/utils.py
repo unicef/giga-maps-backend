@@ -320,7 +320,9 @@ def get_giga_filter_fields(request):
 
     if not filter_field_data:
         filter_field_data = {}
-        filters_data = AdvanceFilter.objects.filter(status=AdvanceFilter.FILTER_STATUS_PUBLISHED)
+        filters_data = AdvanceFilter.objects.filter(
+            status=AdvanceFilter.FILTER_STATUS_PUBLISHED
+        ).select_related('column_configuration')
         for data in filters_data:
             parameter = data.column_configuration
             table_filters = filter_field_data.get(parameter.table_alias, [])
@@ -331,17 +333,62 @@ def get_giga_filter_fields(request):
     return filter_field_data
 
 
-def get_filter_sql(request, filter_key, table_name):
+def get_filter_sql(request, filter_key, table_name, entity_type_code=None):
     query_params = request.query_params.dict()
     if len(query_params) == 0:
         return ''
 
     filter_fields = get_giga_filter_fields(request)
-    advance_filters = set(filter_fields.get(filter_key, [])) & set(query_params.keys())
+
+    if not entity_type_code and filter_key in ('schools', 'school_static', 'school_real_time'):
+        from proco.entities.constants import LEGACY_MODEL
+        entity_type_code = LEGACY_MODEL
+
+    normalized_query_params = {}
+    if entity_type_code:
+        entity_type_prefix = '{0}__'.format(entity_type_code)
+        frontend_prefix = 'filter__{0}__'.format(entity_type_code)
+        frontend_prefix_single = 'filter__{0}_'.format(entity_type_code)
+        for query_param_key in query_params:
+            if query_param_key.startswith(entity_type_prefix):
+                normalized_query_params[query_param_key[len(entity_type_prefix):]] = query_param_key
+            elif query_param_key.startswith(frontend_prefix):
+                normalized_query_params[query_param_key[len(frontend_prefix):]] = query_param_key
+            elif query_param_key.startswith(frontend_prefix_single):
+                normalized_query_params[query_param_key[len(frontend_prefix_single):]] = query_param_key
+
+    for query_param_key in query_params:
+        normalized_query_params.setdefault(query_param_key, query_param_key)
+        if query_param_key.startswith('filter__'):
+            parts = query_param_key.split('__', 2)
+            if len(parts) == 3:
+                normalized_query_params.setdefault(parts[2], query_param_key)
+
+    advance_filters = []
+    raw_filter_fields = list(filter_fields.get(filter_key, []))
+    if entity_type_code:
+        from proco.entities.constants import LEGACY_MODEL
+        if entity_type_code == LEGACY_MODEL:
+            if filter_key in ('entities', 'schools'):
+                raw_filter_fields += filter_fields.get(entity_type_code, [])
+                raw_filter_fields += filter_fields.get('schools', [])
+            elif filter_key in ('entity_static', 'school_static'):
+                raw_filter_fields += filter_fields.get(f'{entity_type_code}_static', [])
+                raw_filter_fields += filter_fields.get('school_static', [])
+
+    filter_fields_list = list(dict.fromkeys(raw_filter_fields))
+
+    for filter_field in filter_fields_list:
+        if filter_field in normalized_query_params:
+            advance_filters.append((filter_field, normalized_query_params[filter_field]))
+        else:
+            base_field = filter_field.rsplit('__', 1)[0]
+            if base_field in normalized_query_params:
+                advance_filters.append((filter_field, normalized_query_params[base_field]))
 
     sql_list = []
-    for field_filter in advance_filters:
-        filter_value = str(query_params[field_filter]).lower()
+    for field_filter, query_param_key in advance_filters:
+        filter_value = str(query_params[query_param_key]).lower()
         sql_str = None
         field_name = None
 
@@ -351,7 +398,7 @@ def get_filter_sql(request, filter_key, table_name):
             if filter_value == 'none':
                 sql_str = """({table_name}."{field_name}" IS NULL OR {table_name}."{field_name}" = '')"""
             elif '|' in filter_value:
-                filter_values = str(query_params[field_filter]).split('|')
+                filter_values = str(query_params[query_param_key]).split('|')
                 value_list  = []
                 for val in filter_values:
                     if val == 'none':
@@ -366,7 +413,7 @@ def get_filter_sql(request, filter_key, table_name):
                     else:
                         sql_str = """{table_name}."{field_name}" IN ({value})"""
             else:
-                filter_value = str(query_params[field_filter]).replace("'", "''")
+                filter_value = str(query_params[query_param_key]).replace("'", "''")
                 sql_str = """{table_name}."{field_name}" = '{value}'"""
         elif field_filter.endswith('__iexact'):
             field_name = field_filter.replace('__iexact', '')
@@ -393,7 +440,7 @@ def get_filter_sql(request, filter_key, table_name):
                 filter_value = filter_value.replace("'", "''")
         elif field_filter.endswith('__contains'):
             field_name = field_filter.replace('__contains', '')
-            filter_value = str(query_params[field_filter]).replace("'", "''")
+            filter_value = str(query_params[query_param_key]).replace("'", "''")
             sql_str = """{table_name}."{field_name}"::text LIKE '{value}'"""
         elif field_filter.endswith('__icontains'):
             field_name = field_filter.replace('__icontains', '')

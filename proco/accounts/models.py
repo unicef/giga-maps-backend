@@ -6,6 +6,7 @@ from django.db.models.constraints import UniqueConstraint
 from jsonfield import JSONField
 
 from proco.core import models as core_models
+from proco.entities.models import EntityType
 from proco.locations.models import Country
 
 
@@ -261,11 +262,13 @@ class DataSource(core_models.BaseModel):
     DATA_SOURCE_TYPE_SCHOOL_MASTER = 'SCHOOL_MASTER'
     DATA_SOURCE_TYPE_DAILY_CHECK_APP = 'DAILY_CHECK_APP'
     DATA_SOURCE_TYPE_QOS = 'QOS'
+    DATA_SOURCE_TYPE_HEALTH_MASTER = 'HEALTH_MASTER'
 
     DATA_SOURCE_TYPE_CHOICES = (
         (DATA_SOURCE_TYPE_SCHOOL_MASTER, 'School Master'),
         (DATA_SOURCE_TYPE_DAILY_CHECK_APP, 'Daily Check App'),
         (DATA_SOURCE_TYPE_QOS, 'QoS'),
+        (DATA_SOURCE_TYPE_HEALTH_MASTER, 'Health Master'),
     )
 
     DATA_SOURCE_STATUS_DRAFT = 'DRAFT'
@@ -368,6 +371,14 @@ class DataLayer(core_models.BaseModel):
         (LAYER_STATUS_DISABLED, 'Disabled'),
     )
 
+    entity_type = models.ForeignKey(
+        EntityType,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='data_layers',
+        db_index=True,
+    )
     icon = models.TextField(null=True, blank=True)
 
     # Unique
@@ -424,6 +435,13 @@ class DataLayer(core_models.BaseModel):
 
     class Meta:
         ordering = ['last_modified_at']
+
+    @property
+    def entity_name(self):
+        """Returns the entity type code string for use in raw SQL table names and filters."""
+        if self.entity_type:
+            return self.entity_type.code
+        return 'school'
 
     def save(self, **kwargs):
         self.code = str(self.code).upper()
@@ -536,6 +554,15 @@ class ColumnConfiguration(core_models.BaseModelMixin):
     is_filter_applicable = models.BooleanField(default=False)
     options = JSONField(null=True, default=dict)
 
+    entity_type = models.ForeignKey(
+        'entities.EntityType',
+        null=True,
+        blank=True,
+        related_name='column_configurations',
+        on_delete=models.DO_NOTHING,
+        help_text='Entity type this column configuration applies to. NULL means legacy school-only.',
+    )
+
     class Meta:
         ordering = ['last_modified_at']
 
@@ -631,6 +658,15 @@ class AdvanceFilter(core_models.BaseModel):
         max_length=20,
         choices=FILTER_QUERY_PARAM_CHOICES,
         default=FILTER_QUERY_PARAM_IEXACT,
+    )
+
+    entity_type = models.ForeignKey(
+        'entities.EntityType',
+        null=True,
+        blank=True,
+        related_name='advance_filters',
+        on_delete=models.DO_NOTHING,
+        help_text='Entity type this filter applies to. NULL means legacy school-only.',
     )
 
     class Meta:

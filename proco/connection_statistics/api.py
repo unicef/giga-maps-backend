@@ -470,6 +470,14 @@ class ConnectivityAPIView(APIView):
 
         speed_benchmark, _ = get_benchmark_value_for_default_download_layer(benchmark, country_id)
 
+        # Calculate entities_total separately as we filter out weekly_queryset by rt_registered=True below
+        total_queryset = self.queryset.annotate(dummy_group_by=Value(1)).values('dummy_group_by').annotate(
+            total_schools=Count('id', distinct=True)
+        ).values('total_schools').order_by()
+        if len(self.school_filters) > 0:
+            total_queryset = total_queryset.extra(where=[self.school_filters])
+        total_schools = list(total_queryset)[0]['total_schools']
+
         weekly_queryset = self.queryset.annotate(
             t=FilteredRelation(
                 'weekly_status',
@@ -512,6 +520,7 @@ class ConnectivityAPIView(APIView):
             'moderate': weekly_status['moderate'],
             'no_internet': weekly_status['bad'],
             'unknown': weekly_status['unknown'],
+            'total': total_schools,
         }
 
         graph_data, positive_speeds = self.generate_country_graph_data(start_date, end_date)

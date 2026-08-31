@@ -41,6 +41,7 @@ class Country(GeometryMixin, TimeStampedModel):
     description = models.TextField(max_length=1000, blank=True, default='')
     data_source = models.TextField(max_length=500, blank=True, default='')
     data_source_description = models.TextField(max_length=500, blank=True, default='')
+    health_data_source = models.TextField(max_length=500, blank=True, default='')
 
     date_of_join = models.DateField(null=True, blank=True, default=None)
     date_schools_mapped = models.DateField(null=True, blank=True, default=None)
@@ -70,13 +71,21 @@ class Country(GeometryMixin, TimeStampedModel):
         return f'{self.name}'
 
     def invalidate_country_related_cache(self):
+        code = str(self.code).lower()
         cache_manager.invalidate((
             'GLOBAL_STATS*',
             'COUNTRIES_LIST*',
-            'COUNTRY_INFO_pk_{0}'.format(str(self.code).lower()),
-            'SCHOOLS_{0}_*'.format(str(self.code).lower()),
+            'COUNTRY_INFO_pk_{0}'.format(code),
+            'SCHOOLS_{0}_*'.format(code),
             'CONNECTIVITY_CONFIGURATIONS_STATS_*_country_id_*{}*'.format(self.id),
             'DATA_LAYER_INFO_*_country_id_*{}*'.format(self.id),
+            "*V2_ENTITY_COUNTRIES_LIST_",
+            "*V2_ENTITY_LAYERS_LIST_*",
+            "*V2_ENTITY_FILTERS_LIST_*",
+            "*V2_ENTITY_COUNTRY_DETAIL_pk_{0}".format(code),
+            "*V2_ENTITY_LIST_{0}_*".format(code),
+            "*V2_ENTITY_*_country_id_\\['{0}'\\]*".format(code),
+            "*V2_ENTITY_*_country_id_{0}*".format(code),
         ))
 
     def save(self, *args, **kwargs):

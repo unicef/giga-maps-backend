@@ -3,6 +3,7 @@ import logging
 import delta_sharing
 from delta_sharing.reader import DeltaSharingReader
 from django.conf import settings
+from requests.exceptions import HTTPError
 
 from proco.giga_meter import models as giga_meter_models
 from proco.data_sources import utils as sources_utilities
@@ -23,9 +24,9 @@ def sync_school_master_data(
     logger.debug('Country object: {0}'.format(country))
 
     if not country:
-        logger.error('Country with ISO3 Format ({0}) not found in DB. '
-                     'Hence skipping the load for current table.'.format(table_name))
-        raise ValueError(f"Invalid 'iso3_format': {table_name}")
+        logger.warning('Country with ISO3 Format ({0}) not found in DB. '
+                       'Hence skipping the load for current table.'.format(table_name))
+        return
 
     country_latest_school_master_data_version = giga_meter_models.GigaMeter_SchoolMasterData.get_last_version(
         table_name)
@@ -42,7 +43,18 @@ def sync_school_master_data(
     )
     logger.debug('Table URL: %s', table_url)
 
-    table_current_version = delta_sharing.get_table_version(table_url)
+    try:
+        table_current_version = delta_sharing.get_table_version(table_url)
+    except HTTPError as ex:
+        if ex.response is not None and ex.response.status_code == 404:
+            logger.warning('Table version not found (404) for country ({0}). Skipping.'.format(table_name))
+            return
+        logger.warning('HTTP error getting table version for country ({0}): {1}. Skipping.'.format(table_name, ex))
+        return
+    except Exception as ex:
+        logger.warning('Failed to get table version for country ({0}): {1}. Skipping.'.format(table_name, ex))
+        return
+
     logger.debug('Table current version from API: {0}'.format(table_current_version))
 
     if country_latest_school_master_data_version == table_current_version:
@@ -50,13 +62,32 @@ def sync_school_master_data(
                     'Hence skipping the data update for current country ({0}).'.format(country))
         return
 
-    loaded_data_df = delta_sharing.load_table_changes_as_pandas(
-        table_url,
-        country_latest_school_master_data_version,
-        table_current_version,
-        None,
-        None,
-    )
+    if country_latest_school_master_data_version is not None and table_current_version is not None and country_latest_school_master_data_version > table_current_version:
+        logger.warning(
+            'School Master start version ({0}) in DB is greater than remote table version ({1}) for country ({2}). '
+            'Pulling full data from version 0.'.format(country_latest_school_master_data_version, table_current_version, table_name)
+        )
+        country_latest_school_master_data_version = 0
+
+    try:
+        loaded_data_df = delta_sharing.load_table_changes_as_pandas(
+            table_url,
+            country_latest_school_master_data_version,
+            table_current_version,
+            None,
+            None,
+        )
+    except HTTPError as ex:
+        if ex.response is not None and ex.response.status_code in (400, 404):
+            logger.warning('Failed to load table changes for country ({0}) [HTTP {1}]: {2}. Skipping.'.format(
+                table_name, ex.response.status_code, ex))
+            return
+        logger.warning('HTTP error loading table changes for country ({0}): {1}. Skipping.'.format(table_name, ex))
+        return
+    except Exception as ex:
+        logger.warning('Failed to load table changes for country ({0}): {1}. Skipping.'.format(table_name, ex))
+        return
+
     logger.debug('Total count of rows in the data: {0}'.format(len(loaded_data_df)))
 
     if len(loaded_data_df) > 0:

@@ -74,9 +74,14 @@ AZURE_CONTAINER = env('AZURE_CONTAINER')  # noqa: F405
 AZURE_SSL = True
 AZURE_URL_EXPIRATION_SECS = None
 
+# Written onto every newly uploaded blob as its Cache-Control header. Safe to keep long-lived
+# because get_random_name_image() names uploads after a UUID, so a given URL never changes
+# content. Existing blobs keep their current (absent) header until they are re-uploaded.
+AZURE_OBJECT_PARAMETERS = {'cache_control': 'public, max-age=31536000, immutable'}
+
 if AZURE_ACCOUNT_NAME and AZURE_ACCOUNT_KEY and AZURE_CONTAINER:
     DEFAULT_FILE_STORAGE = 'storages.backends.azure_storage.AzureStorage'
-    STATICFILES_STORAGE = 'storages.backends.azure_storage.AzureStorage'
+    STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
 else:
     DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
     STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
@@ -153,6 +158,33 @@ SENTRY_INTEGRATIONS = (
 )
 SENTRY_ENABLED = True if SENTRY_ACTIVE_DSN else False
 
+def sentry_before_send(event, hint):
+    """
+    Filter out known non-actionable external data source errors and routine task messages
+    so they are not reported to Sentry as issues.
+    """
+    ignored_patterns = [
+        'Provided Start version',
+        'Could not find version for table',
+        'Could not find version for',
+        'Country with ISO3 Format',
+        'not found in DB',
+        'skipping current iteration',
+        'does not exist to use for share',
+        'does not exist to use',
+    ]
+    if 'logentry' in event:
+        msg = event['logentry'].get('message', '') or event['logentry'].get('formatted', '')
+        if any(pattern in msg for pattern in ignored_patterns):
+            return None
+    if 'exc_info' in hint:
+        exc_type, exc_value, tb = hint['exc_info']
+        exc_str = str(exc_value)
+        if any(pattern in exc_str for pattern in ignored_patterns):
+            return None
+    return event
+
+
 if SENTRY_ENABLED:
     sentry_sdk.init(
         SENTRY_ACTIVE_DSN,
@@ -160,6 +192,7 @@ if SENTRY_ENABLED:
         release=get_git_hash(),
         environment=APP_ENVIRONMENT,
         integrations=SENTRY_INTEGRATIONS,
+        before_send=sentry_before_send,
     )
 
 # Mapbox

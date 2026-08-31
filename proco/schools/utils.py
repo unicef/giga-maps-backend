@@ -152,10 +152,58 @@ def update_school_from_country_or_school_weekly_update(start_time=None, end_time
     logger.debug('Query to select schools where SchoolWeeklyStatus updated between ({0} - {1}): {2}'.format(
         start_time, end_time, school_updated_in_last_12_hours.query))
 
+    from proco.data_sources.models import SchoolMasterData
+    from proco.connection_statistics.models import SchoolRealTimeRegistration
+
     for data_chunk in core_utilities.queryset_iterator(school_updated_in_last_12_hours, chunk_size=100):
+        school_ids = [s.id for s in data_chunk]
+        giga_ids = [s.giga_id_school for s in data_chunk if not core_utilities.is_blank_string(s.giga_id_school)]
+
+        rt_regs = set(SchoolRealTimeRegistration.objects.filter(
+            school_id__in=school_ids,
+            rt_registered=True,
+            rt_registration_date__date__lte=core_utilities.get_current_datetime_object().date(),
+        ).values_list('school_id', flat=True))
+
+        master_data = SchoolMasterData.objects.filter(
+            status=SchoolMasterData.ROW_STATUS_PUBLISHED,
+            school_id_giga__in=giga_ids,
+        ).order_by('school_id_giga', '-id').distinct('school_id_giga')
+        master_map = {m.school_id_giga: m for m in master_data}
+
         with transaction.atomic():
             for school in data_chunk:
                 school.coverage_type = get_coverage_type(school)
                 school.coverage_status = get_coverage_status(school)
-                school.connectivity_status = get_connectivity_status_by_master_api(school)
-                school.save()
+                
+                if school.id in rt_regs:
+                    school.connectivity_status = 'good'
+                else:
+                    school_row = master_map.get(school.giga_id_school)
+                    if school_row:
+                        status = 'unknown'
+                        if (core_utilities.is_blank_string(school_row.connectivity_govt) or
+                            str(school_row.connectivity_govt).lower() == 'unknown'):
+                            connectivity_govt = None
+                        elif str(school_row.connectivity_govt).lower() in core_configs.true_choices:
+                            connectivity_govt = 'yes'
+                        else:
+                            connectivity_govt = 'no'
+                            
+                        connectivity_rt = None
+                        if not core_utilities.is_blank_string(school_row.connectivity_RT):
+                            connectivity_rt = 'yes' if str(school_row.connectivity_RT).lower() in core_configs.true_choices else 'no'
+
+                        connectivity = None
+                        if not core_utilities.is_blank_string(school_row.connectivity):
+                            connectivity = 'yes' if str(school_row.connectivity).lower() in core_configs.true_choices else 'no'
+
+                        if connectivity_govt == 'yes' or connectivity_rt == 'yes' or connectivity == 'yes':
+                            status = 'good'
+                        elif connectivity_govt == 'no':
+                            status = 'no'
+                        school.connectivity_status = status
+                    else:
+                        school.connectivity_status = get_connectivity_status(school)
+            
+            School.objects.bulk_update(data_chunk, ['coverage_type', 'coverage_status', 'connectivity_status'])

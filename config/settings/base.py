@@ -79,6 +79,7 @@ LOCAL_APPS = [
     'proco.proco_data_migrations',
     'proco.data_sources',
     'proco.giga_meter',
+    'proco.entities',
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -352,6 +353,7 @@ ADMIN_REORDER = (
     'accounts',
     'data_sources',
     'giga_meter',
+    'entities',
 )
 
 RANDOM_SCHOOLS_DEFAULT_AMOUNT = env('RANDOM_SCHOOLS_DEFAULT_AMOUNT', default=20000)
@@ -418,6 +420,7 @@ if ENABLE_AZURE_COGNITIVE_SEARCH:
         'SEARCH_API_KEY': env('SEARCH_API_KEY', default=None),
         'COUNTRY_INDEX_NAME': env('COUNTRY_INDEX_NAME', default='giga_countries'),
         'SCHOOL_INDEX_NAME': env('SCHOOL_INDEX_NAME', default='giga_schools'),
+        'ENTITIES_INDEX_NAME': env('ENTITIES_INDEX_NAME', default='giga_entities'),
     }
 
 DATA_SOURCE_CONFIG = {
@@ -432,9 +435,22 @@ DATA_SOURCE_CONFIG = {
         'EXPIRATION_TIME': env('SCHOOL_MASTER_EXPIRATION_TIME', default=None),
         'COUNTRY_EXCLUSION_LIST': env('SCHOOL_MASTER_COUNTRY_EXCLUSION_LIST', default='').split(','),
     },
+    'HEALTH_MASTER': {
+        'SHARE_NAME': env('HEALTH_MASTER_SHARE_NAME', default='gold'),
+        'SCHEMA_NAME': env('HEALTH_MASTER_SCHEMA_NAME', default='health-master'),
+        'REVIEW_GRACE_PERIOD_IN_HRS': env('HEALTH_MASTER_REVIEW_GRACE_PERIOD_IN_HRS', default='48'),
+        'DASHBOARD_URL': env('HEALTH_MASTER_DASHBOARD_URL', default=None),
+        'SHARE_CREDENTIALS_VERSION': env('HEALTH_MASTER_SHARE_CREDENTIALS_VERSION', default=1),
+        'ENDPOINT': env('HEALTH_MASTER_ENDPOINT', default=None),
+        'BEARER_TOKEN': env('HEALTH_MASTER_BEARER_TOKEN', default=None),
+        'EXPIRATION_TIME': env('HEALTH_MASTER_EXPIRATION_TIME', default=None),
+        'COUNTRY_INCLUSION_LIST': env('HEALTH_MASTER_COUNTRY_INCLUSION_LIST', default='').split(','),
+        'COUNTRY_EXCLUSION_LIST': env('HEALTH_MASTER_COUNTRY_EXCLUSION_LIST', default='').split(','),
+    },
     'QOS': {
         'SHARE_NAME': env('QOS_SHARE_NAME', default='gold'),
         'SCHEMA_NAME': env('QOS_SCHEMA_NAME', default='qos'),
+        'ENTITY_SCHEMA_NAME': env('QOS_ENTITY_SCHEMA_NAME', default='health-master'),
         'SHARE_CREDENTIALS_VERSION': env('QOS_SHARE_CREDENTIALS_VERSION', default=1),
         'ENDPOINT': env('QOS_ENDPOINT', default=None),
         'BEARER_TOKEN': env('QOS_BEARER_TOKEN', default=None),
@@ -444,6 +460,8 @@ DATA_SOURCE_CONFIG = {
     'DAILY_CHECK_APP': {
         'BASE_URL': env('DAILY_CHECK_APP_BASE_URL', default=None),
         'API_CODE': env('DAILY_CHECK_APP_API_CODE', default='DAILY_CHECK_APP'),
+        'MEASUREMENT_PATH': env('ENTITY_GIGA_METER_MEASUREMENT_PATH', default='/measurements/v2/sandbox'),
+        'PAGE_SIZE': env.int('ENTITY_GIGA_METER_PAGE_SIZE', default=50),
     },
 }
 
@@ -479,6 +497,10 @@ LOGGING = {
         'verbose': {
             'format': '%(hostname)s %(hostip)s %(asctime)s %(levelname)s %(pathname)s: %(message)s'
         },
+        'file_readable': {
+            'format': '\n==================== [ %(asctime)s ] %(levelname)s ====================\nModule: %(module)s (Line %(lineno)d)\nMessage: %(message)s',
+            'datefmt': '%Y-%m-%d %H:%M:%S'
+        },
     },
     'handlers': {
         'console': {
@@ -488,6 +510,15 @@ LOGGING = {
             'stream': sys.stderr,
             'filters': ['hostname_filter'],
         },
+        'file': {
+            'level': 'ERROR',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': str(root('django_errors.log')),
+            'when': 'midnight',
+            'interval': 1,
+            'backupCount': 14,
+            'formatter': 'file_readable',
+        },
     },
     'loggers': {
         'gigamaps': {
@@ -495,9 +526,18 @@ LOGGING = {
             'handlers': ['console'],
             'filters': ['hostname_filter'],
         },
+        'django.request': {
+            'handlers': ['console', 'file'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+        'django.server': {
+            'handlers': ['console', 'file'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
     },
 }
-
 
 COUNTRY_MAP_API_SAMPLING_LIMIT = env('COUNTRY_MAP_API_SAMPLING_LIMIT', default=None)
 ADMIN_MAP_API_SAMPLING_LIMIT = env('ADMIN_MAP_API_SAMPLING_LIMIT', default=None)
@@ -515,6 +555,7 @@ READ_ONLY_DATABASE_ALLOWED_REQUESTS = [
     'download-schools',
     'download-countries',
     'search-countries-admin-schools',
+    'search-countries-admin-entities',
     # 'get-time-player-data-v2',
     'tiles-view',
 ]
@@ -528,6 +569,7 @@ AI_TRANSLATION_SUPPORTED_TARGETS = env.list('AI_TRANSLATION_SUPPORTED_TARGETS', 
 AI_TRANSLATION_CACHE_KEY_LIMIT = env('AI_TRANSLATION_CACHE_KEY_LIMIT', default=2000)
 
 GIGA_METER_ENABLE_AUTO_SYNC = env.bool('GIGA_METER_ENABLE_AUTO_SYNC', default=True)
+ENTITY_LIVE_DATA_ENABLE_AUTO_SYNC = env.bool('ENTITY_LIVE_DATA_ENABLE_AUTO_SYNC', default=False)
 
 UNDER_TEST = (len(sys.argv) > 1 and sys.argv[1] == 'test')
 
@@ -545,7 +587,6 @@ GIGA_NEWS_LETTER_URL = env(
     'GIGA_NEWS_LETTER_URL',
     default='https://gigaconnect.us1.list-manage.com/subscribe?u=ad5a5d41f9573f4114f531faa&id=64ba229224',
 )
-
 
 AZURE_DELTALAKE_CONFIG = {
     'GIGA_METER_PING_BACKUP': {

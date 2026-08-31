@@ -58,7 +58,7 @@ steps:
 # Sonar Scan
 - task: Bash@3
   displayName: Sonar Scan
-  condition: eq(variables['Build.SourceBranch'], 'refs/heads/develop')
+  # condition: eq(variables['Build.SourceBranch'], 'refs/heads/develop')
   inputs:
     targetType: 'inline'
     script: |
@@ -89,11 +89,11 @@ steps:
 
 - task: Docker@2
   displayName: Stg - Build and Push image
-  condition:
-      and(
-        succeeded(),
-        eq(variables['Build.SourceBranch'], 'refs/heads/staging')
-      )
+  # condition:
+  #     and(
+  #       succeeded(),
+  #       eq(variables['Build.SourceBranch'], 'refs/heads/staging')
+  #     )
   inputs:
     command: buildAndPush
     repository: $(imageRepositoryStg)

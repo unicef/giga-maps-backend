@@ -613,26 +613,37 @@ class BaseSearchMixin:
         if 'q' not in self.params:
             return None
         search_text_orig = self.params.get('q', ['*'])[-1]
+        if not search_text_orig or search_text_orig.strip() in ('*', '""', "''"):
+            return '*'
+
         search_text = self.normalize_search_text(search_text_orig)
         search_text = core_utilities.sanitize_str(search_text)
-        # Remove multiple spaces with single space
 
         words = []
         for search_word in search_text.split():
-            if not search_word.endswith('*'):
-                search_word += '*'
             if '-' in search_word or ',' in search_word:
-                search_word = '"' + search_word + '"'
-
+                search_word = '"' + search_word.rstrip('*') + '"'
+            else:
+                if not search_word.endswith('*'):
+                    search_word += '*'
             words.append(search_word)
 
         search_text = ' '.join(words)
         if ' ' in search_text:
             search_text = search_text.replace(' ', ' AND ')
 
-        search_text_orig = search_text_orig if search_text_orig.startswith('"') else '"' + search_text_orig + '"'
+        clean_orig = search_text_orig.replace('*', '').strip('"')
+        search_text_orig_clause = '"' + clean_orig + '"' if clean_orig else ''
 
-        return '(' + search_text_orig.replace('*', '') + ') OR (' + search_text + ')'
+        if search_text_orig_clause and search_text:
+            if search_text_orig_clause == search_text:
+                return '(' + search_text_orig_clause + ')'
+            return '(' + search_text_orig_clause + ') OR (' + search_text + ')'
+        elif search_text_orig_clause:
+            return '(' + search_text_orig_clause + ')'
+        elif search_text:
+            return '(' + search_text + ')'
+        return '*'
 
     @property
     def get_search_fields(self):

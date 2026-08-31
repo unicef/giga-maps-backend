@@ -2,6 +2,7 @@ import logging
 import re
 from collections import OrderedDict
 
+from django.db.models import Count
 from django.db.models.functions.text import Lower
 from rest_flex_fields.serializers import FlexFieldsModelSerializer
 from rest_framework import serializers
@@ -29,6 +30,7 @@ from proco.core.mixins import DownloadSerializerMixin
 from proco.custom_auth.serializers import ExpandUserSerializer
 from proco.locations import exceptions as locations_exceptions
 from proco.locations.models import Country, CountryAdminMetadata
+from proco.entities.models import Entity, EntityType
 from proco.schools.models import School
 from proco.schools.serializers import ExpandCountrySerializer
 
@@ -87,6 +89,7 @@ class BaseCountrySerializer(FlexFieldsModelSerializer):
             'description',
             'data_source',
             'data_source_description',
+            'health_data_source',
             'date_schools_mapped',
             'admin_metadata',
             'benchmark_metadata',
@@ -350,6 +353,7 @@ class ListCountrySerializer(BaseCountrySerializer):
     integration_status = serializers.SerializerMethodField()
     schools_with_data_percentage = serializers.SerializerMethodField()
     schools_total = serializers.SerializerMethodField()
+    entity_counts = serializers.SerializerMethodField()
     connectivity_availability = serializers.SerializerMethodField()
     coverage_availability = serializers.SerializerMethodField()
 
@@ -361,6 +365,7 @@ class ListCountrySerializer(BaseCountrySerializer):
             'date_of_join',
             'schools_with_data_percentage',
             'schools_total',
+            'entity_counts',
             'connectivity_availability',
             'coverage_availability',
         )
@@ -385,6 +390,35 @@ class ListCountrySerializer(BaseCountrySerializer):
         if instance.last_weekly_status:
             return instance.last_weekly_status.coverage_availability
 
+    def get_entity_counts(self, instance):
+        active_entity_types = EntityType.objects.filter(
+            is_active=True
+        ).order_by('display_order', 'code')
+
+        legacy_codes = {et.code for et in active_entity_types if et.is_legacy}
+        non_legacy_codes = {et.code for et in active_entity_types if not et.is_legacy}
+
+        entity_counts = {}
+
+        if non_legacy_codes:
+            rows = (
+                Entity.objects
+                .filter(country=instance, entity_type__code__in=non_legacy_codes)
+                .values('entity_type__code')
+                .annotate(count=Count('id'))
+                .order_by()
+            )
+            entity_counts.update({row['entity_type__code']: row['count'] for row in rows})
+            for code in non_legacy_codes - set(entity_counts.keys()):
+                entity_counts[code] = 0
+
+        if legacy_codes:
+            school_count = School.objects.filter(country=instance).count()
+            for code in legacy_codes:
+                entity_counts[code] = school_count
+
+        return entity_counts
+
     def get_data_source(self, instance):
         data_source = instance.data_source
         if core_utilities.is_blank_string(data_source):
@@ -406,6 +440,7 @@ class DetailCountrySerializer(BaseCountrySerializer):
 
     active_layers_list = serializers.SerializerMethodField()
     active_filters_list = serializers.SerializerMethodField()
+    entity_counts = serializers.SerializerMethodField()
 
     data_source = serializers.SerializerMethodField()
 
@@ -417,6 +452,7 @@ class DetailCountrySerializer(BaseCountrySerializer):
             'last_weekly_status_id',
             'active_layers_list',
             'active_filters_list',
+            'entity_counts',
         )
 
     def get_statistics(self, instance):
@@ -431,29 +467,64 @@ class DetailCountrySerializer(BaseCountrySerializer):
 
     def get_active_layers_list(self, instance):
         active_layers_list = []
-        linked_layers = instance.active_layers.all()
+        linked_layers = instance.active_layers.select_related('data_layer__entity_type').all()
         for relationship_instance in linked_layers:
+            entity_type = relationship_instance.data_layer.entity_type
             active_layers_list.append({
                 'data_layer_id': relationship_instance.data_layer_id,
                 'is_default': relationship_instance.is_default,
                 'data_sources': relationship_instance.data_sources,
                 'is_applicable': relationship_instance.is_applicable,
                 'legend_configs': relationship_instance.legend_configs,
+                'entity_type': entity_type.code if entity_type else None,
             })
 
         return active_layers_list
 
     def get_active_filters_list(self, instance):
         active_filters_list = []
-        linked_filters = instance.active_filters.all().filter(advance_filter__status=AdvanceFilter.FILTER_STATUS_PUBLISHED)
+        linked_filters = instance.active_filters.select_related('advance_filter__entity_type').filter(
+            advance_filter__status=AdvanceFilter.FILTER_STATUS_PUBLISHED
+        )
         for relationship_instance in linked_filters:
+            entity_type = relationship_instance.advance_filter.entity_type
             active_filters_list.append({
                 'advance_filter_id': relationship_instance.advance_filter_id,
                 'is_default': relationship_instance.is_default,
-                'default_filter_values': relationship_instance.default_filter_values
+                'default_filter_values': relationship_instance.default_filter_values,
+                'entity_type': entity_type.code if entity_type else None,
             })
 
         return active_filters_list
+
+    def get_entity_counts(self, instance):
+        active_entity_types = EntityType.objects.filter(
+            is_active=True
+        ).order_by('display_order', 'code')
+
+        legacy_codes = {et.code for et in active_entity_types if et.is_legacy}
+        non_legacy_codes = {et.code for et in active_entity_types if not et.is_legacy}
+
+        entity_counts = {}
+
+        if non_legacy_codes:
+            rows = (
+                Entity.objects
+                .filter(country=instance, entity_type__code__in=non_legacy_codes)
+                .values('entity_type__code')
+                .annotate(count=Count('id'))
+                .order_by()
+            )
+            entity_counts.update({row['entity_type__code']: row['count'] for row in rows})
+            for code in non_legacy_codes - set(entity_counts.keys()):
+                entity_counts[code] = 0
+
+        if legacy_codes:
+            school_count = School.objects.filter(country=instance).count()
+            for code in legacy_codes:
+                entity_counts[code] = school_count
+
+        return entity_counts
 
     def get_data_source(self, instance):
         data_source = instance.data_source

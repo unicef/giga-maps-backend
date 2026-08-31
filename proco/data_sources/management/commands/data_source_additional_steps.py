@@ -1,20 +1,35 @@
 import logging
 
 from django.core.management.base import BaseCommand
+from django.db import connection
 
-from proco.data_sources.models import SchoolMasterData
+from proco.data_sources.models import HealthEntityMasterIntermediateData, SchoolMasterData
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
 
 def delete_school_master_historical_rows(country_id):
-    history_qs = SchoolMasterData.history.model.objects.all()
-
+    model = SchoolMasterData.history.model
     if country_id:
-        history_qs = history_qs.filter(country_id=country_id)
+        history_qs = model.objects.filter(country_id=country_id)
+        logger.info('Hard deleting records from School Master History table for query: {}'.format(history_qs.query))
+        history_qs._raw_delete(history_qs.db)
+    else:
+        logger.info(f'Truncating records from School Master History table: {model._meta.db_table}')
+        with connection.cursor() as cursor:
+            cursor.execute(f"TRUNCATE TABLE {model._meta.db_table}")
 
-    logger.info('Hard deleting records from School Master History table for query: {}'.format(history_qs.query))
-    history_qs.delete()
+
+def delete_health_entity_master_historical_rows(country_id):
+    model = HealthEntityMasterIntermediateData.history.model
+    if country_id:
+        history_qs = model.objects.filter(country_id=country_id)
+        logger.info('Hard deleting records from Health Entity Master History table for query: {}'.format(history_qs.query))
+        history_qs._raw_delete(history_qs.db)
+    else:
+        logger.info(f'Truncating records from Health Entity Master History table: {model._meta.db_table}')
+        with connection.cursor() as cursor:
+            cursor.execute(f"TRUNCATE TABLE {model._meta.db_table}")
 
 
 class Command(BaseCommand):
@@ -23,6 +38,13 @@ class Command(BaseCommand):
             '--clean_school_master_historical_rows', action='store_true', dest='clean_school_master_historical_rows',
             default=False,
             help='If provided, School Master historical records will be deleted based on passed options.'
+        )
+
+        parser.add_argument(
+            '--clean_health_entity_master_historical_rows', action='store_true',
+            dest='clean_health_entity_master_historical_rows',
+            default=False,
+            help='If provided, Health Entity Master historical records will be deleted based on passed options.'
         )
 
         parser.add_argument(
@@ -51,5 +73,10 @@ class Command(BaseCommand):
             logger.info('Performing school master historical record cleanup.')
             delete_school_master_historical_rows(country_id)
             logger.info('Completed school master historical record cleanup.\n\n')
+
+        if options.get('clean_health_entity_master_historical_rows'):
+            logger.info('Performing health entity master historical record cleanup.')
+            delete_health_entity_master_historical_rows(country_id)
+            logger.info('Completed health entity master historical record cleanup.\n\n')
 
         logger.info('Completed data source utility successfully.\n')
