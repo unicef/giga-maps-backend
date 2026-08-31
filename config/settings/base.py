@@ -435,6 +435,7 @@ DATA_SOURCE_CONFIG = {
         'EXPIRATION_TIME': env('SCHOOL_MASTER_EXPIRATION_TIME', default=None),
         'COUNTRY_EXCLUSION_LIST': env('SCHOOL_MASTER_COUNTRY_EXCLUSION_LIST', default='').split(','),
     },
+    # Health Master Delta Sharing. Credentials fall back to SCHOOL_MASTER in the load task when unset.
     'HEALTH_MASTER': {
         'SHARE_NAME': env('HEALTH_MASTER_SHARE_NAME', default='gold'),
         'SCHEMA_NAME': env('HEALTH_MASTER_SCHEMA_NAME', default='health-master'),
@@ -570,6 +571,8 @@ AI_TRANSLATION_CACHE_KEY_LIMIT = env('AI_TRANSLATION_CACHE_KEY_LIMIT', default=2
 
 GIGA_METER_ENABLE_AUTO_SYNC = env.bool('GIGA_METER_ENABLE_AUTO_SYNC', default=True)
 ENTITY_LIVE_DATA_ENABLE_AUTO_SYNC = env.bool('ENTITY_LIVE_DATA_ENABLE_AUTO_SYNC', default=False)
+# Separate flag so health master sync can stay off until HEALTH_MASTER feed is ready.
+GIGA_METER_ENABLE_HEALTH_AUTO_SYNC = env.bool('GIGA_METER_ENABLE_HEALTH_AUTO_SYNC', default=False)
 
 UNDER_TEST = (len(sys.argv) > 1 and sys.argv[1] == 'test')
 
