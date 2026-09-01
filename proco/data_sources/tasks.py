@@ -526,12 +526,16 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                 call_command('index_rebuild_schools', *cmd_args)
 
             send_slack_notifications(change_summary, publish_source=publish_source)
-            background_task_utilities.task_on_complete(task_instance)
         except SoftTimeLimitExceeded:
             send_slack_notifications(change_summary, publish_source=publish_source)
+            task_instance.error('SoftTimeLimitExceeded')
             raise
         except Exception as e:
+            logger.exception('Error in handle_published_school_master_data_row')
+            task_instance.error(f'Error occurred: {e}')
             raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -567,59 +571,65 @@ def handle_deleted_school_master_data_row(deleted_row=None, country_ids=None, pu
 
     if task_instance:
         logger.debug('Not found running job for deleted rows handler: {}'.format(task_key))
-        new_deleted_records = sources_models.SchoolMasterData.objects.filter(
-            status=sources_models.SchoolMasterData.ROW_STATUS_DELETED_PUBLISHED,
-            is_read=False,
-            school__isnull=False,
-        )
+        try:
+            new_deleted_records = sources_models.SchoolMasterData.objects.filter(
+                status=sources_models.SchoolMasterData.ROW_STATUS_DELETED_PUBLISHED,
+                is_read=False,
+                school__isnull=False,
+            )
 
-        if deleted_row:
-            new_deleted_records = new_deleted_records.filter(pk=deleted_row.id)
+            if deleted_row:
+                new_deleted_records = new_deleted_records.filter(pk=deleted_row.id)
 
-        if country_ids and len(country_ids) > 0:
-            new_deleted_records = new_deleted_records.filter(country_id__in=country_ids)
+            if country_ids and len(country_ids) > 0:
+                new_deleted_records = new_deleted_records.filter(country_id__in=country_ids)
 
-        current_date = core_utilities.get_current_datetime_object()
-        task_instance.info('Total records to update: {}'.format(new_deleted_records.count()))
+            current_date = core_utilities.get_current_datetime_object()
+            task_instance.info('Total records to update: {}'.format(new_deleted_records.count()))
 
-        for data_chunk in core_utilities.queryset_iterator(new_deleted_records, chunk_size=1000):
-            for row in data_chunk:
-                try:
-                    country_code = row.country.iso3_format
-                    if country_code not in change_summary:
-                        change_summary[country_code] = {
-                            'country_name': row.country.name,
-                            'school_model_changes': defaultdict(),
-                            'school_weekly_changes': defaultdict(),
-                            'rt_registration_changes': defaultdict(),
-                            'pulled_at_datetime': None,
-                            'new_schools': 0,
-                            'updated_schools': 0,
-                            'deleted_schools': 0
-                        }
-                    # Deleted Schools
-                    change_summary[country_code]['deleted_schools'] += 1
+            for data_chunk in core_utilities.queryset_iterator(new_deleted_records, chunk_size=1000):
+                for row in data_chunk:
+                    try:
+                        country_code = row.country.iso3_format
+                        if country_code not in change_summary:
+                            change_summary[country_code] = {
+                                'country_name': row.country.name,
+                                'school_model_changes': defaultdict(),
+                                'school_weekly_changes': defaultdict(),
+                                'rt_registration_changes': defaultdict(),
+                                'pulled_at_datetime': None,
+                                'new_schools': 0,
+                                'updated_schools': 0,
+                                'deleted_schools': 0
+                            }
+                        # Deleted Schools
+                        change_summary[country_code]['deleted_schools'] += 1
 
-                    row.school.delete()
+                        row.school.delete()
 
-                    statistics_models.SchoolWeeklyStatus.objects.filter(school=row.school).update(deleted=current_date)
+                        statistics_models.SchoolWeeklyStatus.objects.filter(school=row.school).update(deleted=current_date)
 
-                    statistics_models.SchoolDailyStatus.objects.filter(school=row.school).update(deleted=current_date)
+                        statistics_models.SchoolDailyStatus.objects.filter(school=row.school).update(deleted=current_date)
 
-                    statistics_models.SchoolRealTimeRegistration.objects.filter(school=row.school).update(
-                        deleted=current_date)
+                        statistics_models.SchoolRealTimeRegistration.objects.filter(school=row.school).update(
+                            deleted=current_date)
 
-                    row.is_read = True
-                    row.save()
+                        row.is_read = True
+                        row.save()
 
-                except Exception as ex:
-                    logger.error('Error reported on deletion: {0}'.format(ex))
-                    logger.error('Record: {0}'.format(row.__dict__))
-                    task_instance.info('Error reported for ID ({0}) on deletion: {1}'.format(row.id, ex))
+                    except Exception as ex:
+                        logger.error('Error reported on deletion: {0}'.format(ex))
+                        logger.error('Record: {0}'.format(row.__dict__))
+                        task_instance.info('Error reported for ID ({0}) on deletion: {1}'.format(row.id, ex))
 
-        task_instance.info('Remaining records: {}'.format(new_deleted_records.count()))
-        send_slack_notifications(change_summary, publish_source=publish_source)
-        background_task_utilities.task_on_complete(task_instance)
+            task_instance.info('Remaining records: {}'.format(new_deleted_records.count()))
+            send_slack_notifications(change_summary, publish_source=publish_source)
+        except Exception as e:
+            logger.exception('Error in handle_deleted_school_master_data_row')
+            task_instance.error(f'Error occurred: {e}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -641,125 +651,129 @@ def email_reminder_to_editor_and_publisher_for_review_waiting_records():
 
     if task_instance:
         task_instance.info('Not found running job for reminder email task: {}'.format(task_key))
+        try:
+            ds_settings = settings.DATA_SOURCE_CONFIG.get('SCHOOL_MASTER')
+            review_grace_period = core_utilities.convert_to_int(ds_settings['REVIEW_GRACE_PERIOD_IN_HRS'], default='48')
 
-        ds_settings = settings.DATA_SOURCE_CONFIG.get('SCHOOL_MASTER')
-        review_grace_period = core_utilities.convert_to_int(ds_settings['REVIEW_GRACE_PERIOD_IN_HRS'], default='48')
+            logger.info('Sending email reminder to Editor/Publisher if records are waiting for more '
+                        'than {0} hrs'.format(review_grace_period))
+            task_instance.info('Sending email reminder to Editor/Publisher if records are waiting for '
+                               'more than {0} hrs'.format(review_grace_period))
 
-        logger.info('Sending email reminder to Editor/Publisher if records are waiting for more '
-                    'than {0} hrs'.format(review_grace_period))
-        task_instance.info('Sending email reminder to Editor/Publisher if records are waiting for '
-                           'more than {0} hrs'.format(review_grace_period))
-
-        if not settings.ENABLED_DATA_SOURCES_EMAILS:
-            logger.error('School Master data source email notification is disabled.')
-            task_instance.info('ERROR: School Master data source email notification is disabled.')
-        elif (
-            core_utilities.is_blank_string(settings.ANYMAIL.get('MAILJET_API_KEY')) or
-            core_utilities.is_blank_string(settings.ANYMAIL.get('MAILJET_SECRET_KEY'))
-        ):
-            logger.error('MailJet creds are not configured to send the email. Hence email notification is disabled.')
-            task_instance.info('ERROR: MailJet creds are not configured to send the email. Hence email notification is '
-                               'disabled.')
-        else:
-            current_time = core_utilities.get_current_datetime_object()
-            check_time = current_time - timedelta(hours=review_grace_period)
-            email_user_list = []
-
-            # If there are records for all editor to review which collected date is more than 48 hrs
-            has_records_to_review_for_all_editors = sources_models.SchoolMasterData.objects.filter(
-                status=sources_models.SchoolMasterData.ROW_STATUS_DRAFT,
-                modified__lt=check_time,
-            ).exists()
-
-            # If there are records for all publishers to review which are sent to publishers
-            # to publish more than 48 hrs back
-            has_records_to_review_for_all_publishers = sources_models.SchoolMasterData.objects.filter(
-                status__in=[
-                    sources_models.SchoolMasterData.ROW_STATUS_DRAFT_LOCKED,
-                    sources_models.SchoolMasterData.ROW_STATUS_DELETED,
-                ],
-                is_read=False,
-                modified__lt=check_time,
-            ).exists()
-
-            # If it has records for all editors and publishers to review than send the reminder email to all
-            if has_records_to_review_for_all_editors and has_records_to_review_for_all_publishers:
-                logger.info('All Editors and Publishers has records to review')
-                task_instance.info('All Editors and Publishers has records to review')
-                email_user_list.extend(get_user_emails_for_permissions([
-                    auth_models.RolePermission.CAN_UPDATE_SCHOOL_MASTER_DATA,
-                    auth_models.RolePermission.CAN_PUBLISH_SCHOOL_MASTER_DATA,
-                ]))
+            if not settings.ENABLED_DATA_SOURCES_EMAILS:
+                logger.error('School Master data source email notification is disabled.')
+                task_instance.info('ERROR: School Master data source email notification is disabled.')
+            elif (
+                core_utilities.is_blank_string(settings.ANYMAIL.get('MAILJET_API_KEY')) or
+                core_utilities.is_blank_string(settings.ANYMAIL.get('MAILJET_SECRET_KEY'))
+            ):
+                logger.error('MailJet creds are not configured to send the email. Hence email notification is disabled.')
+                task_instance.info('ERROR: MailJet creds are not configured to send the email. Hence email notification is '
+                                   'disabled.')
             else:
-                # If all editors have records to review, then send reminder email
-                if has_records_to_review_for_all_editors:
-                    logger.info('All Editors has records to review')
-                    task_instance.info('All Editors has records to review')
-                    email_user_list.extend(
-                        get_user_emails_for_permissions([auth_models.RolePermission.CAN_UPDATE_SCHOOL_MASTER_DATA]))
+                current_time = core_utilities.get_current_datetime_object()
+                check_time = current_time - timedelta(hours=review_grace_period)
+                email_user_list = []
+
+                # If there are records for all editor to review which collected date is more than 48 hrs
+                has_records_to_review_for_all_editors = sources_models.SchoolMasterData.objects.filter(
+                    status=sources_models.SchoolMasterData.ROW_STATUS_DRAFT,
+                    modified__lt=check_time,
+                ).exists()
+
+                # If there are records for all publishers to review which are sent to publishers
+                # to publish more than 48 hrs back
+                has_records_to_review_for_all_publishers = sources_models.SchoolMasterData.objects.filter(
+                    status__in=[
+                        sources_models.SchoolMasterData.ROW_STATUS_DRAFT_LOCKED,
+                        sources_models.SchoolMasterData.ROW_STATUS_DELETED,
+                    ],
+                    is_read=False,
+                    modified__lt=check_time,
+                ).exists()
+
+                # If it has records for all editors and publishers to review than send the reminder email to all
+                if has_records_to_review_for_all_editors and has_records_to_review_for_all_publishers:
+                    logger.info('All Editors and Publishers has records to review')
+                    task_instance.info('All Editors and Publishers has records to review')
+                    email_user_list.extend(get_user_emails_for_permissions([
+                        auth_models.RolePermission.CAN_UPDATE_SCHOOL_MASTER_DATA,
+                        auth_models.RolePermission.CAN_PUBLISH_SCHOOL_MASTER_DATA,
+                    ]))
                 else:
-                    # Else send the email to those editors who have updated the DRAFT records but not touched
-                    # it in last 48 hrs
-                    editor_ids_who_has_old_updated_records = list(sources_models.SchoolMasterData.objects.filter(
-                        status=sources_models.SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT,
-                        modified__lt=check_time,
-                    ).values_list('modified_by_id', flat=True).order_by('modified_by_id').distinct('modified_by_id'))
-
-                    if len(editor_ids_who_has_old_updated_records) > 0:
-                        logger.info('Only few Editors has records to review')
-                        task_instance.info('Only few Editors has records to review')
+                    # If all editors have records to review, then send reminder email
+                    if has_records_to_review_for_all_editors:
+                        logger.info('All Editors has records to review')
+                        task_instance.info('All Editors has records to review')
                         email_user_list.extend(
-                            get_user_emails_for_permissions(
-                                [auth_models.RolePermission.CAN_UPDATE_SCHOOL_MASTER_DATA],
-                                ids_to_filter=editor_ids_who_has_old_updated_records)
-                        )
+                            get_user_emails_for_permissions([auth_models.RolePermission.CAN_UPDATE_SCHOOL_MASTER_DATA]))
+                    else:
+                        # Else send the email to those editors who have updated the DRAFT records but not touched
+                        # it in last 48 hrs
+                        editor_ids_who_has_old_updated_records = list(sources_models.SchoolMasterData.objects.filter(
+                            status=sources_models.SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT,
+                            modified__lt=check_time,
+                        ).values_list('modified_by_id', flat=True).order_by('modified_by_id').distinct('modified_by_id'))
 
-                # If all publishers have records to review, then send reminder email to all
-                if has_records_to_review_for_all_publishers:
-                    logger.info('All Publishers has records to review')
-                    task_instance.info('All Publishers has records to review')
-                    email_user_list.extend(
-                        get_user_emails_for_permissions([auth_models.RolePermission.CAN_PUBLISH_SCHOOL_MASTER_DATA]))
-                else:
-                    # Else send the email to those publishers who have updated the records
-                    # but not touched it in last 48 hrs
-                    publisher_ids_who_has_old_updated_records = list(sources_models.SchoolMasterData.objects.filter(
-                        status=sources_models.SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT_LOCKED,
-                        modified__lt=check_time,
-                    ).values_list('modified_by_id', flat=True).order_by('modified_by_id').distinct('modified_by_id'))
+                        if len(editor_ids_who_has_old_updated_records) > 0:
+                            logger.info('Only few Editors has records to review')
+                            task_instance.info('Only few Editors has records to review')
+                            email_user_list.extend(
+                                get_user_emails_for_permissions(
+                                    [auth_models.RolePermission.CAN_UPDATE_SCHOOL_MASTER_DATA],
+                                    ids_to_filter=editor_ids_who_has_old_updated_records)
+                            )
 
-                    if len(publisher_ids_who_has_old_updated_records) > 0:
-                        logger.info('Only few Publishers has records to review')
-                        task_instance.info('Only few Publishers has records to review')
+                    # If all publishers have records to review, then send reminder email to all
+                    if has_records_to_review_for_all_publishers:
+                        logger.info('All Publishers has records to review')
+                        task_instance.info('All Publishers has records to review')
                         email_user_list.extend(
-                            get_user_emails_for_permissions(
-                                [auth_models.RolePermission.CAN_PUBLISH_SCHOOL_MASTER_DATA],
-                                ids_to_filter=publisher_ids_who_has_old_updated_records)
-                        )
+                            get_user_emails_for_permissions([auth_models.RolePermission.CAN_PUBLISH_SCHOOL_MASTER_DATA]))
+                    else:
+                        # Else send the email to those publishers who have updated the records
+                        # but not touched it in last 48 hrs
+                        publisher_ids_who_has_old_updated_records = list(sources_models.SchoolMasterData.objects.filter(
+                            status=sources_models.SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT_LOCKED,
+                            modified__lt=check_time,
+                        ).values_list('modified_by_id', flat=True).order_by('modified_by_id').distinct('modified_by_id'))
 
-            if len(email_user_list) > 0:
-                # Get the unique email IDs so it sends only 1 email
-                unique_email_ids = set(email_user_list)
+                        if len(publisher_ids_who_has_old_updated_records) > 0:
+                            logger.info('Only few Publishers has records to review')
+                            task_instance.info('Only few Publishers has records to review')
+                            email_user_list.extend(
+                                get_user_emails_for_permissions(
+                                    [auth_models.RolePermission.CAN_PUBLISH_SCHOOL_MASTER_DATA],
+                                    ids_to_filter=publisher_ids_who_has_old_updated_records)
+                            )
 
-                email_subject = sources_config.school_master_records_to_review_email_subject_format % (
-                    core_utilities.get_project_title()
-                )
+                if len(email_user_list) > 0:
+                    # Get the unique email IDs so it sends only 1 email
+                    unique_email_ids = set(email_user_list)
 
-                dashboard_url = ds_settings['DASHBOARD_URL']
-                email_message = sources_config.school_master_records_to_review_email_message_format.format(
-                    dashboard_url='Dashboard url: {}'.format(dashboard_url) if dashboard_url else '',
-                )
+                    email_subject = sources_config.school_master_records_to_review_email_subject_format % (
+                        core_utilities.get_project_title()
+                    )
 
-                email_content = {'subject': email_subject, 'message': email_message}
-                logger.info('Sending the below emails:\n'
-                            'To: {0}\n'
-                            'Subject: {1}\n'
-                            'Body: {2}'.format(unique_email_ids, email_subject, email_message))
-                task_instance.info('Sending the below emails:\tTo: {0}\tSubject: {1}\tBody: {2}'.format(
-                    unique_email_ids, email_subject, email_message))
-                account_utilities.send_email_over_mailjet_service(unique_email_ids, **email_content)
+                    dashboard_url = ds_settings['DASHBOARD_URL']
+                    email_message = sources_config.school_master_records_to_review_email_message_format.format(
+                        dashboard_url='Dashboard url: {}'.format(dashboard_url) if dashboard_url else '',
+                    )
 
-        background_task_utilities.task_on_complete(task_instance)
+                    email_content = {'subject': email_subject, 'message': email_message}
+                    logger.info('Sending the below emails:\n'
+                                'To: {0}\n'
+                                'Subject: {1}\n'
+                                'Body: {2}'.format(unique_email_ids, email_subject, email_message))
+                    task_instance.info('Sending the below emails:\tTo: {0}\tSubject: {1}\tBody: {2}'.format(
+                        unique_email_ids, email_subject, email_message))
+                    account_utilities.send_email_over_mailjet_service(unique_email_ids, **email_content)
+        except Exception as exc:
+            logger.exception('Error during email_reminder_to_editor_and_publisher_for_review_waiting_records')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -796,57 +810,63 @@ def cleanup_school_master_rows():
 
     if task_instance:
         logger.debug('Not found running job for school master cleanup task: {}'.format(task_key))
-        country_ids = list(sources_models.SchoolMasterData.objects.values_list('country_id', flat=True).distinct())
-        for country_id in country_ids:
-            if not country_id:
-                continue
-            with connection.cursor() as cursor:
-                cursor.execute("""
-                    DELETE FROM data_sources_schoolmasterdata
-                    WHERE country_id = %s AND id IN (
-                        SELECT id FROM (
-                            SELECT id, ROW_NUMBER() OVER (
-                                PARTITION BY school_id_giga
-                                ORDER BY created DESC
-                            ) as rn
-                            FROM data_sources_schoolmasterdata
-                            WHERE country_id = %s AND status IN ('DRAFT', 'UPDATED_IN_DRAFT', 'DRAFT_LOCKED', 'UPDATED_IN_DRAFT_LOCKED', 'DELETED', 'DELETED_PUBLISHED', 'DISCARDED')
-                        ) t
-                        WHERE t.rn > 1
-                    )
-                """, [country_id, country_id])
+        try:
+            country_ids = list(sources_models.SchoolMasterData.objects.values_list('country_id', flat=True).distinct())
+            for country_id in country_ids:
+                if not country_id:
+                    continue
+                with connection.cursor() as cursor:
+                    cursor.execute("""
+                        DELETE FROM data_sources_schoolmasterdata
+                        WHERE country_id = %s AND id IN (
+                            SELECT id FROM (
+                                SELECT id, ROW_NUMBER() OVER (
+                                    PARTITION BY school_id_giga
+                                    ORDER BY created DESC
+                                ) as rn
+                                FROM data_sources_schoolmasterdata
+                                WHERE country_id = %s AND status IN ('DRAFT', 'UPDATED_IN_DRAFT', 'DRAFT_LOCKED', 'UPDATED_IN_DRAFT_LOCKED', 'DELETED', 'DELETED_PUBLISHED', 'DISCARDED')
+                            ) t
+                            WHERE t.rn > 1
+                        )
+                    """, [country_id, country_id])
 
-                cursor.execute("""
-                    DELETE FROM data_sources_schoolmasterdata
-                    WHERE country_id = %s AND id IN (
-                        SELECT id FROM (
-                            SELECT id, ROW_NUMBER() OVER (
-                                PARTITION BY school_id_giga
-                                ORDER BY published_at DESC
-                            ) as rn
-                            FROM data_sources_schoolmasterdata
-                            WHERE country_id = %s AND status = 'PUBLISHED'
-                        ) t
-                        WHERE t.rn > 1
-                    )
-                """, [country_id, country_id])
+                    cursor.execute("""
+                        DELETE FROM data_sources_schoolmasterdata
+                        WHERE country_id = %s AND id IN (
+                            SELECT id FROM (
+                                SELECT id, ROW_NUMBER() OVER (
+                                    PARTITION BY school_id_giga
+                                    ORDER BY published_at DESC
+                                ) as rn
+                                FROM data_sources_schoolmasterdata
+                                WHERE country_id = %s AND status = 'PUBLISHED'
+                            ) t
+                            WHERE t.rn > 1
+                        )
+                    """, [country_id, country_id])
 
-                cursor.execute("""
-                    DELETE FROM data_sources_schoolmasterdata
-                    WHERE country_id = %s AND id IN (
-                        SELECT id FROM (
-                            SELECT id, ROW_NUMBER() OVER (
-                                PARTITION BY school_id_giga
-                                ORDER BY created DESC
-                            ) as rn
-                            FROM data_sources_schoolmasterdata
-                            WHERE country_id = %s AND is_read = True AND status != 'PUBLISHED'
-                        ) t
-                        WHERE t.rn > 1
-                    )
-                """, [country_id, country_id])
-        task_instance.info('Deleted duplicate rows for same School GIGA ID chunked by country')
-        background_task_utilities.task_on_complete(task_instance)
+                    cursor.execute("""
+                        DELETE FROM data_sources_schoolmasterdata
+                        WHERE country_id = %s AND id IN (
+                            SELECT id FROM (
+                                SELECT id, ROW_NUMBER() OVER (
+                                    PARTITION BY school_id_giga
+                                    ORDER BY created DESC
+                                ) as rn
+                                FROM data_sources_schoolmasterdata
+                                WHERE country_id = %s AND is_read = True AND status != 'PUBLISHED'
+                            ) t
+                            WHERE t.rn > 1
+                        )
+                    """, [country_id, country_id])
+            task_instance.info('Deleted duplicate rows for same School GIGA ID chunked by country')
+        except Exception as exc:
+            logger.exception('Error during cleanup_school_master_rows')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -860,57 +880,63 @@ def cleanup_health_entity_master_rows():
 
     if task_instance:
         logger.debug('Not found running job for health master cleanup task: {}'.format(task_key))
-        country_ids = list(sources_models.HealthEntityMasterIntermediateData.objects.values_list('country_id', flat=True).distinct())
-        for country_id in country_ids:
-            if not country_id:
-                continue
-            with connection.cursor() as cursor:
-                cursor.execute("""
-                    DELETE FROM data_sources_healthentitymasterintermediatedata
-                    WHERE country_id = %s AND id IN (
-                        SELECT id FROM (
-                            SELECT id, ROW_NUMBER() OVER (
-                                PARTITION BY health_id_giga
-                                ORDER BY created DESC
-                            ) as rn
-                            FROM data_sources_healthentitymasterintermediatedata
-                            WHERE country_id = %s AND status IN ('DRAFT', 'UPDATED_IN_DRAFT', 'DRAFT_LOCKED', 'UPDATED_IN_DRAFT_LOCKED', 'DELETED', 'DELETED_PUBLISHED', 'DISCARDED')
-                        ) t
-                        WHERE t.rn > 1
-                    )
-                """, [country_id, country_id])
+        try:
+            country_ids = list(sources_models.HealthEntityMasterIntermediateData.objects.values_list('country_id', flat=True).distinct())
+            for country_id in country_ids:
+                if not country_id:
+                    continue
+                with connection.cursor() as cursor:
+                    cursor.execute("""
+                        DELETE FROM data_sources_healthentitymasterintermediatedata
+                        WHERE country_id = %s AND id IN (
+                            SELECT id FROM (
+                                SELECT id, ROW_NUMBER() OVER (
+                                    PARTITION BY health_id_giga
+                                    ORDER BY created DESC
+                                ) as rn
+                                FROM data_sources_healthentitymasterintermediatedata
+                                WHERE country_id = %s AND status IN ('DRAFT', 'UPDATED_IN_DRAFT', 'DRAFT_LOCKED', 'UPDATED_IN_DRAFT_LOCKED', 'DELETED', 'DELETED_PUBLISHED', 'DISCARDED')
+                            ) t
+                            WHERE t.rn > 1
+                        )
+                    """, [country_id, country_id])
 
-                cursor.execute("""
-                    DELETE FROM data_sources_healthentitymasterintermediatedata
-                    WHERE country_id = %s AND id IN (
-                        SELECT id FROM (
-                            SELECT id, ROW_NUMBER() OVER (
-                                PARTITION BY health_id_giga
-                                ORDER BY published_at DESC
-                            ) as rn
-                            FROM data_sources_healthentitymasterintermediatedata
-                            WHERE country_id = %s AND status = 'PUBLISHED'
-                        ) t
-                        WHERE t.rn > 1
-                    )
-                """, [country_id, country_id])
+                    cursor.execute("""
+                        DELETE FROM data_sources_healthentitymasterintermediatedata
+                        WHERE country_id = %s AND id IN (
+                            SELECT id FROM (
+                                SELECT id, ROW_NUMBER() OVER (
+                                    PARTITION BY health_id_giga
+                                    ORDER BY published_at DESC
+                                ) as rn
+                                FROM data_sources_healthentitymasterintermediatedata
+                                WHERE country_id = %s AND status = 'PUBLISHED'
+                            ) t
+                            WHERE t.rn > 1
+                        )
+                    """, [country_id, country_id])
 
-                cursor.execute("""
-                    DELETE FROM data_sources_healthentitymasterintermediatedata
-                    WHERE country_id = %s AND id IN (
-                        SELECT id FROM (
-                            SELECT id, ROW_NUMBER() OVER (
-                                PARTITION BY health_id_giga
-                                ORDER BY created DESC
-                            ) as rn
-                            FROM data_sources_healthentitymasterintermediatedata
-                            WHERE country_id = %s AND is_read = True AND status != 'PUBLISHED'
-                        ) t
-                        WHERE t.rn > 1
-                    )
-                """, [country_id, country_id])
-        task_instance.info('Deleted duplicate rows for same Health GIGA ID chunked by country')
-        background_task_utilities.task_on_complete(task_instance)
+                    cursor.execute("""
+                        DELETE FROM data_sources_healthentitymasterintermediatedata
+                        WHERE country_id = %s AND id IN (
+                            SELECT id FROM (
+                                SELECT id, ROW_NUMBER() OVER (
+                                    PARTITION BY health_id_giga
+                                    ORDER BY created DESC
+                                ) as rn
+                                FROM data_sources_healthentitymasterintermediatedata
+                                WHERE country_id = %s AND is_read = True AND status != 'PUBLISHED'
+                            ) t
+                            WHERE t.rn > 1
+                        )
+                    """, [country_id, country_id])
+            task_instance.info('Deleted duplicate rows for same Health GIGA ID chunked by country')
+        except Exception as exc:
+            logger.exception('Error during cleanup_health_entity_master_rows')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -932,11 +958,17 @@ def update_static_data(*args, country_iso3_format=None):
 
     if task_instance:
         logger.debug('Not found running job for static data pull handler: {}'.format(task_key))
-        load_data_from_school_master_apis(country_iso3_format=country_iso3_format)
-        task_instance.info('Completed the load data from School Master API call')
-        cleanup_school_master_rows.delay()
-        task_instance.info('Scheduled cleanup school master rows')
-        background_task_utilities.task_on_complete(task_instance)
+        try:
+            load_data_from_school_master_apis(country_iso3_format=country_iso3_format)
+            task_instance.info('Completed the load data from School Master API call')
+            cleanup_school_master_rows.delay()
+            task_instance.info('Scheduled cleanup school master rows')
+        except Exception as exc:
+            logger.exception('Error during sync static data from school master')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -988,38 +1020,43 @@ def update_live_data(*args, today=True):
 
     if task_instance:
         logger.debug('Not found running job: {}'.format(task_key))
-        countries_ids = Country.objects.values_list('id', flat=True)
+        try:
+            countries_ids = Country.objects.values_list('id', flat=True)
 
-        if today:
-            today_date = core_utilities.get_current_datetime_object().date()
-            chain(
-                load_data_from_daily_check_app_api.s(),
-                load_data_from_qos_apis.s(),
-                chord(
-                    group([
-                        finalize_previous_day_data.s(country_id, today_date)
-                        for country_id in countries_ids
-                    ]),
-                    finalize_task.si(),
-                ),
-            ).delay()
+            if today:
+                today_date = core_utilities.get_current_datetime_object().date()
+                chain(
+                    load_data_from_daily_check_app_api.s(),
+                    load_data_from_qos_apis.s(),
+                    chord(
+                        group([
+                            finalize_previous_day_data.s(country_id, today_date)
+                            for country_id in countries_ids
+                        ]),
+                        finalize_task.si(),
+                    ),
+                ).delay()
 
-        else:
-            yesterday_date = core_utilities.get_current_datetime_object().date() - timedelta(days=1)
-            chain(
-                load_data_from_daily_check_app_api.s(),
-                load_data_from_qos_apis.s(),
-                chord(
-                    group([
-                        finalize_previous_day_data.s(country_id, yesterday_date)
-                        for country_id in countries_ids
-                    ]),
-                    finalize_task.si(),
-                ),
+            else:
+                yesterday_date = core_utilities.get_current_datetime_object().date() - timedelta(days=1)
+                chain(
+                    load_data_from_daily_check_app_api.s(),
+                    load_data_from_qos_apis.s(),
+                    chord(
+                        group([
+                            finalize_previous_day_data.s(country_id, yesterday_date)
+                            for country_id in countries_ids
+                        ]),
+                        finalize_task.si(),
+                    ),
 
-            ).delay()
-
-        background_task_utilities.task_on_complete(task_instance)
+                ).delay()
+        except Exception as exc:
+            logger.exception('Error during update_live_data')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -1039,27 +1076,32 @@ def update_qos_data(*args, today=True):
 
     if task_instance:
         logger.debug('Not found running job: {}'.format(task_key))
-        countries_ids = list(QoSData.objects.all().order_by('country_id').values_list(
-            'country_id', flat=True).distinct('country_id'))
+        try:
+            countries_ids = list(QoSData.objects.all().order_by('country_id').values_list(
+                'country_id', flat=True).distinct('country_id'))
 
-        if today:
-            aggr_date = core_utilities.get_current_datetime_object().date()
-        else:
-            aggr_date = core_utilities.get_current_datetime_object().date() - timedelta(days=1)
+            if today:
+                aggr_date = core_utilities.get_current_datetime_object().date()
+            else:
+                aggr_date = core_utilities.get_current_datetime_object().date() - timedelta(days=1)
 
-        chain(
-            load_data_from_qos_apis.s(),
-            chord(
-                group([
-                    finalize_previous_day_data.s(country_id, aggr_date)
-                    for country_id in countries_ids
-                ]),
-                finalize_task.si(),
-            ),
+            chain(
+                load_data_from_qos_apis.s(),
+                chord(
+                    group([
+                        finalize_previous_day_data.s(country_id, aggr_date)
+                        for country_id in countries_ids
+                    ]),
+                    finalize_task.si(),
+                ),
 
-        ).delay()
-
-        background_task_utilities.task_on_complete(task_instance)
+            ).delay()
+        except Exception as exc:
+            logger.exception('Error during update_qos_data')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -1075,109 +1117,115 @@ def clean_old_live_data():
 
     if task_instance:
         logger.debug('Not found running job for live data cleanup handler: {}'.format(task_key))
-        older_then_date = current_datetime - timedelta(days=30)
+        try:
+            older_then_date = current_datetime - timedelta(days=30)
 
-        logger.debug('Deleting all the rows from "RealTimeConnectivity" Data Table which is older than: {0}'.format(
-            older_then_date))
-        statistics_models.RealTimeConnectivity.objects.filter(created__lt=older_then_date).delete()
-        task_instance.info('"RealTimeConnectivity" data table completed')
-
-        logger.debug(
-            'Deleting all the rows from "DailyCheckAppMeasurementData" Data Table which is older than: {0}'.format(
+            logger.debug('Deleting all the rows from "RealTimeConnectivity" Data Table which is older than: {0}'.format(
                 older_then_date))
-        # Delete all entries from DailyCheckApp Data Table which is older than 30 days
-        sources_models.DailyCheckAppMeasurementData.objects.filter(created_at__lt=older_then_date).delete()
-        task_instance.info('"DailyCheckAppMeasurementData" data table completed')
+            statistics_models.RealTimeConnectivity.objects.filter(created__lt=older_then_date).delete()
+            task_instance.info('"RealTimeConnectivity" data table completed')
 
-        logger.debug('Deleting all the rows from "QoSData" Data Table which is older than: {0}'.format(older_then_date))
-        qos_latest_ids = list(sources_models.QoSData.objects.filter(
-            version__isnull=False
-        ).order_by('country_id', '-version').distinct('country_id').values_list('id', flat=True))
-        # Delete all entries from QoS Data Table but keep latest version per country
-        sources_models.QoSData.objects.exclude(id__in=qos_latest_ids).delete()
-        task_instance.info('"QoSData" data table completed')
+            logger.debug(
+                'Deleting all the rows from "DailyCheckAppMeasurementData" Data Table which is older than: {0}'.format(
+                    older_then_date))
+            # Delete all entries from DailyCheckApp Data Table which is older than 30 days
+            sources_models.DailyCheckAppMeasurementData.objects.filter(created_at__lt=older_then_date).delete()
+            task_instance.info('"DailyCheckAppMeasurementData" data table completed')
 
-        logger.debug('Deleting all the rows from "EntityRealTimeConnectivity" Data Table')
-        # We need to find the ID of the max version per country
-        entity_qos_latest_qs = statistics_models.EntityRealTimeConnectivity.objects.filter(
-            version__isnull=False
-        ).values('entity__country_id').annotate(
-            max_v=Max('version')
-        ).order_by().values_list('entity__country_id', 'max_v')
+            logger.debug('Deleting all the rows from "QoSData" Data Table which is older than: {0}'.format(older_then_date))
+            qos_latest_ids = list(sources_models.QoSData.objects.filter(
+                version__isnull=False
+            ).order_by('country_id', '-version').distinct('country_id').values_list('id', flat=True))
+            # Delete all entries from QoS Data Table but keep latest version per country
+            sources_models.QoSData.objects.exclude(id__in=qos_latest_ids).delete()
+            task_instance.info('"QoSData" data table completed')
 
-        entity_qos_latest_ids = []
-        for country_id, max_version in entity_qos_latest_qs:
-            # Get ALL IDs per country that match its max version
-            match_ids = list(statistics_models.EntityRealTimeConnectivity.objects.filter(
-                entity__country_id=country_id, version=max_version
-            ).values_list('id', flat=True))
-            if match_ids:
-                entity_qos_latest_ids.extend(match_ids)
+            logger.debug('Deleting all the rows from "EntityRealTimeConnectivity" Data Table')
+            # We need to find the ID of the max version per country
+            entity_qos_latest_qs = statistics_models.EntityRealTimeConnectivity.objects.filter(
+                version__isnull=False
+            ).values('entity__country_id').annotate(
+                max_v=Max('version')
+            ).order_by().values_list('entity__country_id', 'max_v')
 
-        # Delete old entries for QoS (keep latest version per country)
-        statistics_models.EntityRealTimeConnectivity.objects.filter(
-            live_data_source=statistics_configs.QOS_SOURCE
-        ).exclude(id__in=entity_qos_latest_ids).delete()
+            entity_qos_latest_ids = []
+            for country_id, max_version in entity_qos_latest_qs:
+                # Get ALL IDs per country that match its max version
+                match_ids = list(statistics_models.EntityRealTimeConnectivity.objects.filter(
+                    entity__country_id=country_id, version=max_version
+                ).values_list('id', flat=True))
+                if match_ids:
+                    entity_qos_latest_ids.extend(match_ids)
 
-        task_instance.info('"EntityRealTimeConnectivity" data table completed')
+            # Delete old entries for QoS (keep latest version per country)
+            statistics_models.EntityRealTimeConnectivity.objects.filter(
+                live_data_source=statistics_configs.QOS_SOURCE
+            ).exclude(id__in=entity_qos_latest_ids).delete()
 
-        logger.debug('Deleting all the rows from "BackgroundTask" Data Table which is older than: '
-                     '{0}'.format(older_then_date))
-        # Delete all entries from BackgroundTask Table which are older than 30 days
-        # We use ._raw_delete to bypass loading objects into memory for faster execution
-        background_tasks_qs = BackgroundTask.objects.filter(created_at__lt=older_then_date)
-        background_tasks_qs._raw_delete(background_tasks_qs.db)
-        task_instance.info('"BackgroundTask" data table completed')
+            task_instance.info('"EntityRealTimeConnectivity" data table completed')
 
-        # Purge soft-deleted schools and related statuses to reclaim DB space and prevent bloat
-        task_instance.info('Purging soft-deleted schools and statuses...')
-        deleted_school_ids = list(School.objects.all_records().filter(deleted__isnull=False).values_list('id', flat=True)[:50000])
-        task_instance.info('Found {0} soft-deleted schools to purge.'.format(len(deleted_school_ids)))
-        for i in range(0, len(deleted_school_ids), 5000):
-            chunk = deleted_school_ids[i:i+5000]
-            School.objects.all_records().filter(id__in=chunk).update(last_weekly_status=None)
-            sources_models.SchoolMasterData.objects.filter(school_id__in=chunk).update(school_id=None)
-            statistics_models.SchoolDailyStatus.objects.all_records().filter(school_id__in=chunk)._raw_delete(connection.alias)
-            statistics_models.SchoolWeeklyStatus.objects.all_records().filter(school_id__in=chunk)._raw_delete(connection.alias)
-            statistics_models.RealTimeConnectivity.objects.all_records().filter(school_id__in=chunk)._raw_delete(connection.alias)
-            statistics_models.SchoolRealTimeRegistration.objects.all_records().filter(school_id__in=chunk)._raw_delete(connection.alias)
-            sources_models.QoSData.objects.filter(school_id__in=chunk)._raw_delete(connection.alias)
-            School.objects.all_records().filter(id__in=chunk)._raw_delete(connection.alias)
-        task_instance.info('Purged soft-deleted schools successfully.')
+            logger.debug('Deleting all the rows from "BackgroundTask" Data Table which is older than: '
+                         '{0}'.format(older_then_date))
+            # Delete all entries from BackgroundTask Table which are older than 30 days
+            # We use ._raw_delete to bypass loading objects into memory for faster execution
+            background_tasks_qs = BackgroundTask.objects.filter(created_at__lt=older_then_date)
+            background_tasks_qs._raw_delete(background_tasks_qs.db)
+            task_instance.info('"BackgroundTask" data table completed')
 
-        # Purge any orphan soft-deleted school statuses
-        statistics_models.SchoolDailyStatus.objects.all_records().filter(deleted__isnull=False)._raw_delete(connection.alias)
-        School.objects.all_records().filter(
-            last_weekly_status__in=statistics_models.SchoolWeeklyStatus.objects.all_records().filter(deleted__isnull=False)
-        ).update(last_weekly_status=None)
-        statistics_models.SchoolWeeklyStatus.objects.all_records().filter(deleted__isnull=False)._raw_delete(connection.alias)
+            # Purge soft-deleted schools and related statuses to reclaim DB space and prevent bloat
+            task_instance.info('Purging soft-deleted schools and statuses...')
+            deleted_school_ids = list(School.objects.all_records().filter(deleted__isnull=False).values_list('id', flat=True)[:50000])
+            task_instance.info('Found {0} soft-deleted schools to purge.'.format(len(deleted_school_ids)))
+            for i in range(0, len(deleted_school_ids), 5000):
+                chunk = deleted_school_ids[i:i+5000]
+                School.objects.all_records().filter(id__in=chunk).update(last_weekly_status=None)
+                sources_models.SchoolMasterData.objects.filter(school_id__in=chunk).update(school_id=None)
+                statistics_models.SchoolDailyStatus.objects.all_records().filter(school_id__in=chunk)._raw_delete(connection.alias)
+                statistics_models.SchoolWeeklyStatus.objects.all_records().filter(school_id__in=chunk)._raw_delete(connection.alias)
+                statistics_models.RealTimeConnectivity.objects.all_records().filter(school_id__in=chunk)._raw_delete(connection.alias)
+                statistics_models.SchoolRealTimeRegistration.objects.all_records().filter(school_id__in=chunk)._raw_delete(connection.alias)
+                sources_models.QoSData.objects.filter(school_id__in=chunk)._raw_delete(connection.alias)
+                School.objects.all_records().filter(id__in=chunk)._raw_delete(connection.alias)
+            task_instance.info('Purged soft-deleted schools successfully.')
 
-        # Purge soft-deleted entities and related statuses
-        task_instance.info('Purging soft-deleted entities and statuses...')
-        deleted_entity_ids = list(Entity.objects.all_records().filter(deleted__isnull=False).values_list('id', flat=True)[:50000])
-        task_instance.info('Found {0} soft-deleted entities to purge.'.format(len(deleted_entity_ids)))
-        for i in range(0, len(deleted_entity_ids), 5000):
-            chunk = deleted_entity_ids[i:i+5000]
-            Entity.objects.all_records().filter(id__in=chunk).update(last_weekly_status=None)
-            sources_models.HealthEntityMasterIntermediateData.objects.filter(entity_id__in=chunk).update(entity_id=None)
-            statistics_models.EntityDailyStatus.objects.all_records().filter(entity_id__in=chunk)._raw_delete(connection.alias)
-            statistics_models.EntityWeeklyStatus.objects.all_records().filter(entity_id__in=chunk)._raw_delete(connection.alias)
-            statistics_models.EntityRealTimeConnectivity.objects.all_records().filter(entity_id__in=chunk)._raw_delete(connection.alias)
-            statistics_models.EntityRealTimeRegistration.objects.all_records().filter(entity_id__in=chunk)._raw_delete(connection.alias)
+            # Purge any orphan soft-deleted school statuses
+            statistics_models.SchoolDailyStatus.objects.all_records().filter(deleted__isnull=False)._raw_delete(connection.alias)
+            School.objects.all_records().filter(
+                last_weekly_status__in=statistics_models.SchoolWeeklyStatus.objects.all_records().filter(deleted__isnull=False)
+            ).update(last_weekly_status=None)
+            statistics_models.SchoolWeeklyStatus.objects.all_records().filter(deleted__isnull=False)._raw_delete(connection.alias)
 
-            from proco.entities.models import HealthEntity
-            HealthEntity.objects.all_records().filter(entity_id__in=chunk)._raw_delete(connection.alias)
-            Entity.objects.all_records().filter(id__in=chunk)._raw_delete(connection.alias)
-        task_instance.info('Purged soft-deleted entities successfully.')
+            # Purge soft-deleted entities and related statuses
+            task_instance.info('Purging soft-deleted entities and statuses...')
+            deleted_entity_ids = list(Entity.objects.all_records().filter(deleted__isnull=False).values_list('id', flat=True)[:50000])
+            task_instance.info('Found {0} soft-deleted entities to purge.'.format(len(deleted_entity_ids)))
+            for i in range(0, len(deleted_entity_ids), 5000):
+                chunk = deleted_entity_ids[i:i+5000]
+                Entity.objects.all_records().filter(id__in=chunk).update(last_weekly_status=None)
+                sources_models.HealthEntityMasterIntermediateData.objects.filter(entity_id__in=chunk).update(entity_id=None)
+                statistics_models.EntityDailyStatus.objects.all_records().filter(entity_id__in=chunk)._raw_delete(connection.alias)
+                statistics_models.EntityWeeklyStatus.objects.all_records().filter(entity_id__in=chunk)._raw_delete(connection.alias)
+                statistics_models.EntityRealTimeConnectivity.objects.all_records().filter(entity_id__in=chunk)._raw_delete(connection.alias)
+                statistics_models.EntityRealTimeRegistration.objects.all_records().filter(entity_id__in=chunk)._raw_delete(connection.alias)
 
-        # Purge any orphan soft-deleted entity statuses
-        statistics_models.EntityDailyStatus.objects.all_records().filter(deleted__isnull=False)._raw_delete(connection.alias)
-        Entity.objects.all_records().filter(
-            last_weekly_status__in=statistics_models.EntityWeeklyStatus.objects.all_records().filter(deleted__isnull=False)
-        ).update(last_weekly_status=None)
-        statistics_models.EntityWeeklyStatus.objects.all_records().filter(deleted__isnull=False)._raw_delete(connection.alias)
+                from proco.entities.models import HealthEntity
+                HealthEntity.objects.all_records().filter(entity_id__in=chunk)._raw_delete(connection.alias)
+                Entity.objects.all_records().filter(id__in=chunk)._raw_delete(connection.alias)
+            task_instance.info('Purged soft-deleted entities successfully.')
 
-        background_task_utilities.task_on_complete(task_instance)
+            # Purge any orphan soft-deleted entity statuses
+            statistics_models.EntityDailyStatus.objects.all_records().filter(deleted__isnull=False)._raw_delete(connection.alias)
+            Entity.objects.all_records().filter(
+                last_weekly_status__in=statistics_models.EntityWeeklyStatus.objects.all_records().filter(deleted__isnull=False)
+            ).update(last_weekly_status=None)
+            statistics_models.EntityWeeklyStatus.objects.all_records().filter(deleted__isnull=False)._raw_delete(connection.alias)
+
+        except Exception as exc:
+            logger.exception('Error during clean_old_live_data')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -1204,18 +1252,23 @@ def data_loss_recovery_for_pcdc_weekly_task(start_week_no, end_week_no, year, pu
 
     if task_instance:
         logger.debug('Not found running job: {}'.format(task_key))
-        cmd_args = [
-            '-start_week_no={}'.format(start_week_no),
-            '-end_week_no={}'.format(end_week_no),
-            '-year={}'.format(year),
-        ]
+        try:
+            cmd_args = [
+                '-start_week_no={}'.format(start_week_no),
+                '-end_week_no={}'.format(end_week_no),
+                '-year={}'.format(year),
+            ]
 
-        if pull_data:
-            cmd_args.append('--pull_data')
+            if pull_data:
+                cmd_args.append('--pull_data')
 
-        call_command('data_loss_recovery_for_pcdc_weekly', *cmd_args)
-
-        background_task_utilities.task_on_complete(task_instance)
+            call_command('data_loss_recovery_for_pcdc_weekly', *cmd_args)
+        except Exception as exc:
+            logger.exception('Error during data_loss_recovery_for_pcdc_weekly_task')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -1231,21 +1284,26 @@ def clean_historic_data():
 
     if task_instance:
         logger.debug('Not found running job for historic data cleanup handler: {}'.format(task_key))
-        cmd_args = [
-            '--clean_school_master_historical_rows',
-        ]
+        try:
+            cmd_args = [
+                '--clean_school_master_historical_rows',
+            ]
 
-        call_command('data_source_additional_steps', *cmd_args)
-        task_instance.info('Completed school master historical record cleanup.')
+            call_command('data_source_additional_steps', *cmd_args)
+            task_instance.info('Completed school master historical record cleanup.')
 
-        cmd_args = [
-            '--clean_health_entity_master_historical_rows',
-        ]
+            cmd_args = [
+                '--clean_health_entity_master_historical_rows',
+            ]
 
-        call_command('data_source_additional_steps', *cmd_args)
-        task_instance.info('Completed health entity master historical record cleanup.')
-
-        background_task_utilities.task_on_complete(task_instance)
+            call_command('data_source_additional_steps', *cmd_args)
+            task_instance.info('Completed health entity master historical record cleanup.')
+        except Exception as exc:
+            logger.exception('Error during clean_historic_data')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -1268,26 +1326,31 @@ def scheduler_for_data_loss_recovery_for_qos_dates(
 
     if task_instance:
         logger.debug('Not found running job for qos data loss utility handler: {}'.format(task_key))
-        cmd_args = []
-        if country_iso3_format:
-            cmd_args.append('-country_code={}'.format(country_iso3_format))
+        try:
+            cmd_args = []
+            if country_iso3_format:
+                cmd_args.append('-country_code={}'.format(country_iso3_format))
 
-        if start_date:
-            cmd_args.append('-start_date={}'.format(start_date))
-        if end_date:
-            cmd_args.append('-end_date={}'.format(end_date))
+            if start_date:
+                cmd_args.append('-start_date={}'.format(start_date))
+            if end_date:
+                cmd_args.append('-end_date={}'.format(end_date))
 
-        if check_missing_dates is True:
-            cmd_args.append('--check_missing_dates')
-        if pull_data is True:
-            cmd_args.append('--pull_data')
-        if aggregate_data is True:
-            cmd_args.append('--aggregate')
+            if check_missing_dates is True:
+                cmd_args.append('--check_missing_dates')
+            if pull_data is True:
+                cmd_args.append('--pull_data')
+            if aggregate_data is True:
+                cmd_args.append('--aggregate')
 
-        call_command('data_loss_recovery_for_qos_dates', *cmd_args)
-        task_instance.info('Completed QoS data loss recovery utility handler.')
-
-        background_task_utilities.task_on_complete(task_instance)
+            call_command('data_loss_recovery_for_qos_dates', *cmd_args)
+            task_instance.info('Completed QoS data loss recovery utility handler.')
+        except Exception as exc:
+            logger.exception('Error during scheduler_for_data_loss_recovery_for_qos_dates')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -1309,20 +1372,25 @@ def scheduler_for_data_loss_recovery_for_school_master_version(
 
     if task_instance:
         logger.debug('Not found running job for school master data loss utility handler: {0}'.format(task_key))
-        cmd_args = []
-        if country_iso3_format:
-            cmd_args.append('-country_code={0}'.format(country_iso3_format))
+        try:
+            cmd_args = []
+            if country_iso3_format:
+                cmd_args.append('-country_code={0}'.format(country_iso3_format))
 
-        if pull_data is True:
-            cmd_args.append('--pull_data')
+            if pull_data is True:
+                cmd_args.append('--pull_data')
 
-        if pull_version:
-            cmd_args.append('-pull_version={0}'.format(pull_version))
+            if pull_version:
+                cmd_args.append('-pull_version={0}'.format(pull_version))
 
-        call_command('data_loss_recovery_for_school_master_version', *cmd_args)
-        task_instance.info('Completed School Master data loss recovery utility handler.')
-
-        background_task_utilities.task_on_complete(task_instance)
+            call_command('data_loss_recovery_for_school_master_version', *cmd_args)
+            task_instance.info('Completed School Master data loss recovery utility handler.')
+        except Exception as exc:
+            logger.exception('Error during scheduler_for_data_loss_recovery_for_school_master_version')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -1347,7 +1415,7 @@ def validate_config(config: dict, parent: str, *children: str):
 
 
 def validate_schema_and_sync_schema_table_data(profile_file, schema_name, share_name, country_iso3_format,
-                                               country_codes_for_inclusion, country_codes_for_exclusion, errors):
+                                               country_codes_for_exclusion, errors):
     # Create a SharingClient.
     try:
         client = source_utilities.ProcoSharingClient(profile_file)
@@ -1371,17 +1439,11 @@ def validate_schema_and_sync_schema_table_data(profile_file, schema_name, share_
             health_master_fields = [f.name for f in
                                     sources_models.HealthEntityMasterIntermediateData._meta.get_fields()]
             for schema_table in schema_tables:
-                schema_country_code = schema_table.name.strip().upper()
                 logger.debug('#' * 10)
                 logger.debug('Table: %s', schema_table)
-                if country_iso3_format and country_iso3_format.strip().upper() != schema_country_code:
+                if country_iso3_format and country_iso3_format != schema_table.name:
                     continue
-                if len(country_codes_for_inclusion) > 0 and schema_country_code not in country_codes_for_inclusion:
-                    logger.warning('Country with ISO3 Format ({0}) is not configured in Health Master country '
-                                   'inclusion list. Hence skipping the load for this country code.'.format(
-                                       schema_table.name))
-                    continue
-                if len(country_codes_for_exclusion) > 0 and schema_country_code in country_codes_for_exclusion:
+                if len(country_codes_for_exclusion) > 0 and schema_table.name in country_codes_for_exclusion:
                     logger.warning('Country with ISO3 Format ({0}) configured to exclude from Health Master data pull. '
                                    'Hence skipping the load for this country code.'.format(schema_table.name))
                     continue
@@ -1393,12 +1455,13 @@ def validate_schema_and_sync_schema_table_data(profile_file, schema_name, share_
                     logger.warning('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
                 except Exception as ex:
                     logger.warning('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
-            return changes_for_countries, deleted_entities, errors
         else:
             logger.warning('Health Master schema ({0}) does not exist to use for share ({1}).'.format(schema_name,
                                                                                                     share_name))
     else:
         logger.warning('Health Master share ({0}) does not exist to use.'.format(share_name))
+
+    return changes_for_countries, deleted_entities, errors
 
 
 def load_entity_data_from_health_master_apis(country_iso3_format=None):
@@ -1411,22 +1474,13 @@ def load_entity_data_from_health_master_apis(country_iso3_format=None):
     errors = []
     ds_settings = validate_config(settings.DATA_SOURCE_CONFIG,
                                   "HEALTH_MASTER", "SHARE_NAME", "SCHEMA_NAME", "DASHBOARD_URL",
-                                  "COUNTRY_INCLUSION_LIST", "COUNTRY_EXCLUSION_LIST",
+                                  "COUNTRY_EXCLUSION_LIST",
                                   "SHARE_CREDENTIALS_VERSION", "ENDPOINT", "BEARER_TOKEN", "EXPIRATION_TIME"
                                   )
     share_name = ds_settings['SHARE_NAME']
     schema_name = ds_settings['SCHEMA_NAME']
     dashboard_url = ds_settings['DASHBOARD_URL']
-    country_codes_for_inclusion = [
-        country_code.strip().upper()
-        for country_code in ds_settings['COUNTRY_INCLUSION_LIST']
-        if country_code.strip()
-    ]
-    country_codes_for_exclusion = [
-        country_code.strip().upper()
-        for country_code in ds_settings['COUNTRY_EXCLUSION_LIST']
-        if country_code.strip()
-    ]
+    country_codes_for_exclusion = ds_settings['COUNTRY_EXCLUSION_LIST']
     profile_json = {
         'shareCredentialsVersion': ds_settings.get('SHARE_CREDENTIALS_VERSION', 1),
         'endpoint': ds_settings.get('ENDPOINT'),
@@ -1439,20 +1493,23 @@ def load_entity_data_from_health_master_apis(country_iso3_format=None):
             dt=format_date(core_utilities.get_current_datetime_object())
         )
     )
-    open(profile_file, 'w').write(json.dumps(profile_json))
-
-    changes_for_countries, deleted_entities, errors = validate_schema_and_sync_schema_table_data(profile_file,
-                                                                                                 schema_name,
-                                                                                                 share_name,
-                                                                                                 country_iso3_format,
-                                                                                                 country_codes_for_inclusion,
-                                                                                                 country_codes_for_exclusion,
-                                                                                                 errors)
-
     try:
-        os.remove(profile_file)
-    except OSError:
-        pass
+        open(profile_file, 'w').write(json.dumps(profile_json))
+
+        changes_for_countries, deleted_entities, errors = validate_schema_and_sync_schema_table_data(
+            profile_file,
+            schema_name,
+            share_name,
+            country_iso3_format,
+            country_codes_for_exclusion,
+            errors,
+        )
+    finally:
+        try:
+            if os.path.exists(profile_file):
+                os.remove(profile_file)
+        except OSError:
+            pass
 
     has_data_changes = len(list(filter(lambda val: val, list(changes_for_countries.values())))) > 0
 
@@ -1518,11 +1575,17 @@ def update_entity_static_data(*args, country_iso3_format=None):
         task_id, task_key, 'Sync Static Data from Health Master sources', check_previous=True)
     if task_instance:
         logger.debug('Not found running job for static data pull handler: {}'.format(task_key))
-        load_entity_data_from_health_master_apis(country_iso3_format=country_iso3_format)
-        task_instance.info('Completed the load data from Health Master API call')
-        cleanup_health_entity_master_rows.delay()
-        task_instance.info('Scheduled cleanup health master rows')
-        background_task_utilities.task_on_complete(task_instance)
+        try:
+            load_entity_data_from_health_master_apis(country_iso3_format=country_iso3_format)
+            task_instance.info('Completed the load data from Health Master API call')
+            cleanup_health_entity_master_rows.delay()
+            task_instance.info('Scheduled cleanup health master rows')
+        except Exception as exc:
+            logger.exception('Error during sync static data from health master')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -1570,248 +1633,242 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
 
     if task_instance:
         logger.debug('Not found running job for published rows handler task: {}'.format(task_key))
-        updated_entity_ids = []
-        created_entity_ids = []
+        try:
+            updated_entity_ids = []
+            created_entity_ids = []
 
-        # Manually updating the records as PUBLISHED
-        master_model.objects.filter(
-            is_read=False
-        ).update(
-            status=master_model.ROW_STATUS_PUBLISHED
-        )
+            # Manually updating the records as PUBLISHED
+            master_model.objects.filter(
+                is_read=False
+            ).update(
+                status=master_model.ROW_STATUS_PUBLISHED
+            )
 
-        new_published_records = master_model.objects.filter(
-            status=master_model.ROW_STATUS_PUBLISHED,
-            is_read=False,
-        )
+            new_published_records = master_model.objects.filter(
+                status=master_model.ROW_STATUS_PUBLISHED,
+                is_read=False,
+            )
 
-        if published_row:
-            new_published_records = new_published_records.filter(pk=published_row.id)
+            if published_row:
+                new_published_records = new_published_records.filter(pk=published_row.id)
 
-        if country_ids and len(country_ids) > 0:
-            new_published_records = new_published_records.filter(country_id__in=country_ids)
+            if country_ids and len(country_ids) > 0:
+                new_published_records = new_published_records.filter(country_id__in=country_ids)
 
-        new_published_record_ids = list(new_published_records.values_list('id', flat=True))
-        task_instance.info('Total published records to update: {}'.format(len(new_published_record_ids)))
+            new_published_record_ids = list(new_published_records.values_list('id', flat=True))
+            task_instance.info('Total published records to update: {}'.format(len(new_published_record_ids)))
 
-        entity_field_names = {f.name for f in Entity._meta.fields}
-        lookup_fields = {
-            'giga_id', 'country', 'entity_type',
-            'country_id', 'entity_type_id', 'id',
-            'admin1', 'admin2', 'admin1_id', 'admin2_id',
-            'geopoint', 'external_id', 'name'
-        }
-        if detail_model:
-            detail_entity_field_names = {f.name for f in detail_model._meta.fields}
-            detail_lookup_fields = {'entity', 'entity_id', 'id', 'deleted'}
-
-        for i in range(0, len(new_published_record_ids), 2000):
-            chunk_ids = new_published_record_ids[i:i+2000]
-            data_chunk = list(master_model.objects.filter(id__in=chunk_ids))
-            if not data_chunk:
-                continue
-
-            # Pre-fetch Admin1 and Admin2 metadata to prevent N+1 queries
-            admin1_giga_ids = [row.admin1_id_giga for row in data_chunk if not core_utilities.is_blank_string(row.admin1_id_giga)]
-            admin2_giga_ids = [row.admin2_id_giga for row in data_chunk if not core_utilities.is_blank_string(row.admin2_id_giga)]
-            chunk_country_ids = list(set([row.country_id for row in data_chunk]))
-
-            admin1_map = {}
-            if admin1_giga_ids:
-                admin1_qs = CountryAdminMetadata.objects.filter(
-                    country_id__in=chunk_country_ids,
-                    giga_id_admin__in=admin1_giga_ids,
-                    layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN1,
-                )
-                admin1_map = {(a.country_id, a.giga_id_admin): a for a in admin1_qs}
-
-            admin2_map = {}
-            if admin2_giga_ids:
-                admin2_qs = CountryAdminMetadata.objects.filter(
-                    country_id__in=chunk_country_ids,
-                    giga_id_admin__in=admin2_giga_ids,
-                    layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN2,
-                )
-                admin2_map = {(a.country_id, a.giga_id_admin): a for a in admin2_qs}
-
-            # Batch fetch existing Entity records to avoid N+1 SELECT queries
-            health_giga_ids = [row.health_id_giga for row in data_chunk]
-            existing_entities = {
-                e.giga_id: e for e in Entity.objects.filter(
-                    giga_id__in=health_giga_ids,
-                    entity_type=entity_type,
-                    deleted__isnull=True
-                )
+            entity_field_names = {f.name for f in Entity._meta.fields}
+            lookup_fields = {
+                'giga_id', 'country', 'entity_type',
+                'country_id', 'entity_type_id', 'id',
+                'admin1', 'admin2', 'admin1_id', 'admin2_id',
+                'geopoint', 'external_id', 'name'
             }
-
-            local_entities = {}
-            entities_to_create = []
-            entities_to_update = []
-
-            # Find latest row per unique health_id_giga within the chunk
-            latest_row_by_giga = {}
-            for row in data_chunk:
-                latest_row_by_giga[row.health_id_giga] = row
-
-            row_field_names = {f.name for f in data_chunk[0]._meta.fields}
-            common_entity_fields = (entity_field_names & row_field_names) - lookup_fields
-
-            for giga_id, row in latest_row_by_giga.items():
-                try:
-                    admin1_instance = None
-                    if not core_utilities.is_blank_string(row.admin1_id_giga):
-                        admin1_instance = admin1_map.get((row.country_id, row.admin1_id_giga))
-
-                    admin2_instance = None
-                    if not core_utilities.is_blank_string(row.admin2_id_giga):
-                        admin2_instance = admin2_map.get((row.country_id, row.admin2_id_giga))
-
-                    entity_defaults = {
-                        name: getattr(row, name)
-                        for name in common_entity_fields
-                    }
-                    entity_defaults['geopoint'] = Point(row.longitude, row.latitude)
-                    entity_defaults['admin1'] = admin1_instance
-                    entity_defaults['admin2'] = admin2_instance
-                    entity_defaults['external_id'] = row.facility_id_govt
-                    entity_defaults['name'] = row.facility_name
-                    entity_defaults['connectivity_type'] = (
-                        'unknown' if core_utilities.is_blank_string(row.connectivity_type) else row.connectivity_type
-                    )
-                    entity_defaults['coverage_type'] = normalize_coverage_type(getattr(row, 'coverage_type', None))
-                    entity_defaults['coverage_status'] = get_coverage_status_from_type(entity_defaults['coverage_type'])
-
-                    # Map connectivity/connectivity_govt to connectivity_status for Entity
-                    connectivity_govt = str(getattr(row, 'connectivity_govt', '') or '').lower().strip()
-                    connectivity = str(getattr(row, 'connectivity', '') or '').lower().strip()
-                    if connectivity_govt in ['yes', 'true', 'good', 'moderate'] or connectivity in ['yes', 'true',
-                                                                                                    'good', 'moderate']:
-                        entity_defaults['connectivity_status'] = 'good'
-                    elif connectivity_govt in ['no', 'false'] or connectivity in ['no', 'false']:
-                        entity_defaults['connectivity_status'] = 'no'
-                    else:
-                        entity_defaults['connectivity_status'] = 'unknown'
-
-                    if giga_id in existing_entities:
-                        entity = existing_entities[giga_id]
-                        for k, v in entity_defaults.items():
-                            setattr(entity, k, v)
-                        entity.name_lower = str(entity.name).lower()
-                        if entity.external_id:
-                            entity.external_id = str(entity.external_id).lower()
-                        entities_to_update.append(entity)
-                    else:
-                        entity = Entity(
-                            giga_id=giga_id,
-                            country_id=row.country_id,
-                            entity_type=entity_type,
-                        )
-                        for k, v in entity_defaults.items():
-                            setattr(entity, k, v)
-                        entity.name_lower = str(entity.name).lower()
-                        if entity.external_id:
-                            entity.external_id = str(entity.external_id).lower()
-                        entities_to_create.append(entity)
-
-                    local_entities[giga_id] = entity
-                except Exception as ex:
-                    logger.debug('Error building Entity record: {0}'.format(ex))
-                    task_instance.info('Error building Entity record for ID ({0}) on publishing: {1}'.format(row.id, ex))
-
-            # Perform Entity bulk creation
-            if entities_to_create:
-                Entity.objects.bulk_create(entities_to_create)
-                # Populate IDs back into local_entities map
-                for entity in entities_to_create:
-                    local_entities[entity.giga_id] = entity
-
-            # Perform Entity bulk update
-            if entities_to_update:
-                entity_fields_to_update = [
-                    'geopoint', 'admin1', 'admin2', 'external_id', 'name', 'name_lower',
-                    'connectivity_status', 'coverage_status',
-                ]
-                # Also include dynamic fields
-                dummy_row = data_chunk[0]
-                for f in dummy_row._meta.fields:
-                    if f.name in entity_field_names and f.name not in lookup_fields:
-                        entity_fields_to_update.append(f.name)
-                entity_fields_to_update = list(set(entity_fields_to_update))
-                Entity.objects.bulk_update(entities_to_update, fields=entity_fields_to_update)
-
-            # Process detail models (e.g. HealthEntity) in bulk
             if detail_model:
-                existing_details = {
-                    d.entity_id: d for d in detail_model.objects.filter(
-                        entity_id__in=[e.id for e in local_entities.values() if e.id],
+                detail_entity_field_names = {f.name for f in detail_model._meta.fields}
+                detail_lookup_fields = {'entity', 'entity_id', 'id', 'deleted'}
+
+            for i in range(0, len(new_published_record_ids), 2000):
+                chunk_ids = new_published_record_ids[i:i+2000]
+                data_chunk = list(master_model.objects.filter(id__in=chunk_ids))
+                if not data_chunk:
+                    continue
+
+                # Pre-fetch Admin1 and Admin2 metadata to prevent N+1 queries
+                admin1_giga_ids = [row.admin1_id_giga for row in data_chunk if not core_utilities.is_blank_string(row.admin1_id_giga)]
+                admin2_giga_ids = [row.admin2_id_giga for row in data_chunk if not core_utilities.is_blank_string(row.admin2_id_giga)]
+                chunk_country_ids = list(set([row.country_id for row in data_chunk]))
+
+                admin1_map = {}
+                if admin1_giga_ids:
+                    admin1_qs = CountryAdminMetadata.objects.filter(
+                        country_id__in=chunk_country_ids,
+                        giga_id_admin__in=admin1_giga_ids,
+                        layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN1,
+                    )
+                    admin1_map = {(a.country_id, a.giga_id_admin): a for a in admin1_qs}
+
+                admin2_map = {}
+                if admin2_giga_ids:
+                    admin2_qs = CountryAdminMetadata.objects.filter(
+                        country_id__in=chunk_country_ids,
+                        giga_id_admin__in=admin2_giga_ids,
+                        layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN2,
+                    )
+                    admin2_map = {(a.country_id, a.giga_id_admin): a for a in admin2_qs}
+
+                # Batch fetch existing Entity records to avoid N+1 SELECT queries
+                health_giga_ids = [row.health_id_giga for row in data_chunk]
+                existing_entities = {
+                    e.giga_id: e for e in Entity.objects.filter(
+                        giga_id__in=health_giga_ids,
+                        entity_type=entity_type,
                         deleted__isnull=True
                     )
                 }
 
-                details_to_create = []
-                details_to_update = []
-                common_detail_fields = (detail_entity_field_names & row_field_names) - detail_lookup_fields
+                local_entities = {}
+                entities_to_create = []
+                entities_to_update = []
+
+                # Find latest row per unique health_id_giga within the chunk
+                latest_row_by_giga = {}
+                for row in data_chunk:
+                    latest_row_by_giga[row.health_id_giga] = row
+
+                row_field_names = {f.name for f in data_chunk[0]._meta.fields}
+                common_entity_fields = (entity_field_names & row_field_names) - lookup_fields
 
                 for giga_id, row in latest_row_by_giga.items():
-                    entity = local_entities.get(giga_id)
-                    if not entity or not entity.id:
-                        continue
-
                     try:
-                        detail_entity_defaults = {
+                        admin1_instance = None
+                        if not core_utilities.is_blank_string(row.admin1_id_giga):
+                            admin1_instance = admin1_map.get((row.country_id, row.admin1_id_giga))
+
+                        admin2_instance = None
+                        if not core_utilities.is_blank_string(row.admin2_id_giga):
+                            admin2_instance = admin2_map.get((row.country_id, row.admin2_id_giga))
+
+                        entity_defaults = {
                             name: getattr(row, name)
-                            for name in common_detail_fields
+                            for name in common_entity_fields
                         }
+                        entity_defaults['geopoint'] = Point(row.longitude, row.latitude)
+                        entity_defaults['admin1'] = admin1_instance
+                        entity_defaults['admin2'] = admin2_instance
+                        entity_defaults['external_id'] = row.facility_id_govt
+                        entity_defaults['name'] = row.facility_name
+                        entity_defaults['connectivity_type'] = (
+                            'unknown' if core_utilities.is_blank_string(row.connectivity_type) else row.connectivity_type
+                        )
+                        entity_defaults['coverage_type'] = normalize_coverage_type(getattr(row, 'coverage_type', None))
+                        entity_defaults['coverage_status'] = get_coverage_status_from_type(entity_defaults['coverage_type'])
 
-                        if entity.id in existing_details:
-                            detail = existing_details[entity.id]
-                            for k, v in detail_entity_defaults.items():
-                                setattr(detail, k, v)
-                            details_to_update.append(detail)
+                        # Map connectivity/connectivity_govt to connectivity_status for Entity
+                        connectivity_govt = str(getattr(row, 'connectivity_govt', '') or '').lower().strip()
+                        connectivity = str(getattr(row, 'connectivity', '') or '').lower().strip()
+                        if connectivity_govt in ['yes', 'true', 'good', 'moderate'] or connectivity in ['yes', 'true',
+                                                                                                        'good', 'moderate']:
+                            entity_defaults['connectivity_status'] = 'good'
+                        elif connectivity_govt in ['no', 'false'] or connectivity in ['no', 'false']:
+                            entity_defaults['connectivity_status'] = 'no'
                         else:
-                            detail = detail_model(entity=entity)
-                            for k, v in detail_entity_defaults.items():
-                                setattr(detail, k, v)
-                            details_to_create.append(detail)
+                            entity_defaults['connectivity_status'] = 'unknown'
+
+                        if giga_id in existing_entities:
+                            entity = existing_entities[giga_id]
+                            for k, v in entity_defaults.items():
+                                setattr(entity, k, v)
+                            entity.name_lower = str(entity.name).lower()
+                            if entity.external_id:
+                                entity.external_id = str(entity.external_id).lower()
+                            entities_to_update.append(entity)
+                        else:
+                            entity = Entity(
+                                giga_id=giga_id,
+                                country_id=row.country_id,
+                                entity_type=entity_type,
+                            )
+                            for k, v in entity_defaults.items():
+                                setattr(entity, k, v)
+                            entity.name_lower = str(entity.name).lower()
+                            if entity.external_id:
+                                entity.external_id = str(entity.external_id).lower()
+                            entities_to_create.append(entity)
+
+                        local_entities[giga_id] = entity
                     except Exception as ex:
-                        logger.debug('Error building detail model record: {0}'.format(ex))
-                        task_instance.info('Error building detail record for ID ({0}) on publishing: {1}'.format(row.id, ex))
+                        logger.debug('Error building Entity record: {0}'.format(ex))
+                        task_instance.info('Error building Entity record for ID ({0}) on publishing: {1}'.format(row.id, ex))
 
-                if details_to_create:
-                    detail_model.objects.bulk_create(details_to_create)
+                # Perform Entity bulk creation
+                if entities_to_create:
+                    Entity.objects.bulk_create(entities_to_create)
+                    # Populate IDs back into local_entities map
+                    for entity in entities_to_create:
+                        local_entities[entity.giga_id] = entity
 
-                if details_to_update:
-                    detail_fields_to_update = [
-                        f.name for f in detail_model._meta.fields
-                        if f.name not in detail_lookup_fields
+                # Perform Entity bulk update
+                if entities_to_update:
+                    entity_fields_to_update = [
+                        'geopoint', 'admin1', 'admin2', 'external_id', 'name', 'name_lower',
+                        'connectivity_status', 'coverage_status',
                     ]
-                    detail_model.objects.bulk_update(details_to_update, fields=detail_fields_to_update)
+                    # Also include dynamic fields
+                    dummy_row = data_chunk[0]
+                    for f in dummy_row._meta.fields:
+                        if f.name in entity_field_names and f.name not in lookup_fields:
+                            entity_fields_to_update.append(f.name)
+                    entity_fields_to_update = list(set(entity_fields_to_update))
+                    Entity.objects.bulk_update(entities_to_update, fields=entity_fields_to_update)
 
-            # Link master rows to their updated Entity
-            rows_to_update = []
-            for row in data_chunk:
-                entity = local_entities.get(row.health_id_giga)
-                if entity and entity.id:
-                    row.is_read = True
-                    row.entity = entity
-                    rows_to_update.append(row)
+                # Process detail models (e.g. HealthEntity) in bulk
+                if detail_model:
+                    existing_details = {
+                        d.entity_id: d for d in detail_model.objects.filter(
+                            entity_id__in=[e.id for e in local_entities.values() if e.id],
+                            deleted__isnull=True
+                        )
+                    }
 
-            if rows_to_update:
-                master_model.objects.bulk_update(rows_to_update, fields=['is_read', 'entity'])
+                    details_to_create = []
+                    details_to_update = []
+                    common_detail_fields = (detail_entity_field_names & row_field_names) - detail_lookup_fields
 
+                    for giga_id, row in latest_row_by_giga.items():
+                        entity = local_entities.get(giga_id)
+                        if not entity or not entity.id:
+                            continue
 
-        # Need to update the below tasks once ready
-        # if len(updated_entity_ids) > 0:
-        #     for i in range(0, len(updated_entity_ids), 20):
-        #         populate_school_new_fields_task.delay(None, None, None, school_ids=updated_entity_ids[i:i + 20])
-        #
-        #
-        # for new_entity_id in created_entity_ids:
-        #     # As it's a new entity added through Entity Master record publishing, add the school to search index
-        #     cmd_args = ['--update_index', '-entity_id={0}'.format(new_entity_id)]
-        #     call_command('index_rebuild_schools', *cmd_args)
+                        try:
+                            detail_entity_defaults = {
+                                name: getattr(row, name)
+                                for name in common_detail_fields
+                            }
 
-        background_task_utilities.task_on_complete(task_instance)
+                            if entity.id in existing_details:
+                                detail = existing_details[entity.id]
+                                for k, v in detail_entity_defaults.items():
+                                    setattr(detail, k, v)
+                                details_to_update.append(detail)
+                            else:
+                                detail = detail_model(entity=entity)
+                                for k, v in detail_entity_defaults.items():
+                                    setattr(detail, k, v)
+                                details_to_create.append(detail)
+                        except Exception as ex:
+                            logger.debug('Error building detail model record: {0}'.format(ex))
+                            task_instance.info('Error building detail record for ID ({0}) on publishing: {1}'.format(row.id, ex))
+
+                    if details_to_create:
+                        detail_model.objects.bulk_create(details_to_create)
+
+                    if details_to_update:
+                        detail_fields_to_update = [
+                            f.name for f in detail_model._meta.fields
+                            if f.name not in detail_lookup_fields
+                        ]
+                        detail_model.objects.bulk_update(details_to_update, fields=detail_fields_to_update)
+
+                # Link master rows to their updated Entity
+                rows_to_update = []
+                for row in data_chunk:
+                    entity = local_entities.get(row.health_id_giga)
+                    if entity and entity.id:
+                        row.is_read = True
+                        row.entity = entity
+                        rows_to_update.append(row)
+
+                if rows_to_update:
+                    master_model.objects.bulk_update(rows_to_update, fields=['is_read', 'entity'])
+
+        except Exception as exc:
+            logger.exception('Error during handling published entity master data rows')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -1837,6 +1894,7 @@ def send_school_master_data_change_slack_notification(country_iso3_format):
             country = Country.objects.filter(iso3_format=country_iso3_format).first()
             if not country:
                 logger.warning(f'Country with ISO3 Format ({country_iso3_format}) not found in DB.')
+                task_instance.info(f'Country with ISO3 Format ({country_iso3_format}) not found in DB.')
                 return None
 
             # Get New SchoolMasterData rows
@@ -1861,11 +1919,11 @@ def send_school_master_data_change_slack_notification(country_iso3_format):
             else:
                 task_instance.info(f'No changes found for {country_iso3_format}')
 
-            background_task_utilities.task_on_complete(task_instance)
-
         except Exception as e:
             logger.error(f'Error in school master data change notification task: {str(e)}')
             task_instance.error(f'Failed to send notification: {str(e)}')
+            raise
+        finally:
             background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info(f'Found running Job with "{task_key}" name so skipping current iteration')
@@ -2579,13 +2637,15 @@ def update_entity_qos_data(entity_type_code='health', today=True):
 
             # Step 2: Get country IDs that have entity realtime data
             countries_ids = list(
-                statistics_models.EntityRealTimeConnectivity.objects.filter(
-                    live_data_source=statistics_configs.QOS_SOURCE,
-                    entity__entity_type__code=entity_type_code,
-                    entity__deleted__isnull=True,
-                ).values_list(
-                    'entity__country_id', flat=True
-                ).distinct().order_by('entity__country_id')
+                set(
+                    statistics_models.EntityRealTimeConnectivity.objects.filter(
+                        live_data_source=statistics_configs.QOS_SOURCE,
+                        entity__entity_type__code=entity_type_code,
+                        entity__deleted__isnull=True,
+                    ).order_by().values_list(
+                        'entity__country_id', flat=True
+                    ).distinct()
+                )
             )
 
             logger.info('Entity QoS - Found %d countries with %s QoS data.', len(countries_ids), entity_type_code)
@@ -2607,7 +2667,7 @@ def update_entity_qos_data(entity_type_code='health', today=True):
 
         except Exception as exc:
             logger.exception('Entity QoS - Error during QoS data sync')
-            task_instance.info(f'Entity QoS - Error occurred: {exc}')
+            task_instance.error(f'Entity QoS - Error occurred: {exc}')
             raise
 
         finally:

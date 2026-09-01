@@ -154,7 +154,13 @@ def update_school_records():
 
     if task_instance:
         logger.debug('Not found running job for school connectivity status update task.')
-        school_utilities.update_school_from_country_or_school_weekly_update()
-        background_task_utilities.task_on_complete(task_instance)
+        try:
+            school_utilities.update_school_from_country_or_school_weekly_update()
+        except Exception as exc:
+            logger.exception('Error during update_school_records')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.debug('Found running job with "{0}" name so skipping current iteration.'.format(task_key))

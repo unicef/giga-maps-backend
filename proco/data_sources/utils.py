@@ -1312,14 +1312,14 @@ def load_entity_qos_data_source_response_to_model(entity_type_code='health'):
                         speed_download = row_dict.get('speed_download')
                         speed_upload = row_dict.get('speed_upload')
                         latency = row_dict.get('latency')
-                        
+
                         speed_download_probe = row_dict.get('speed_download_probe')
                         speed_upload_probe = row_dict.get('speed_upload_probe')
                         latency_probe = row_dict.get('latency_probe')
-                        
+
                         speed_download_mean = row_dict.get('speed_download_mean')
                         speed_upload_mean = row_dict.get('speed_upload_mean')
-                        
+
                         timestamp = row_dict.get('timestamp', pull_datetime)
 
                         # Convert Mbps to bps if present
@@ -1335,6 +1335,12 @@ def load_entity_qos_data_source_response_to_model(entity_type_code='health'):
                             speed_download_mean = speed_download_mean * 1000 * 1000
                         if speed_upload_mean is not None:
                             speed_upload_mean = speed_upload_mean * 1000 * 1000
+
+                        if speed_download is None and speed_upload is None and latency is None and \
+                           speed_download_probe is None and speed_upload_probe is None and latency_probe is None and \
+                           speed_download_mean is None and speed_upload_mean is None:
+                            # Skip rows with no actual QoS data
+                            continue
 
                         insert_entries.append({
                             'entity': entity,
@@ -1472,6 +1478,7 @@ def sync_entity_qos_realtime_data(country_id, entity_type_code='health', start_d
 
     processed_entity_ids = set()
     processed_dates = set()
+    valid_entity_ids = set()
 
     # Pre-fetch existing records
     existing_qs = EntityDailyStatus.objects.filter(
@@ -1489,6 +1496,13 @@ def sync_entity_qos_realtime_data(country_id, entity_type_code='health', start_d
         entity_id = record['entity_id']
         date = record['created__date']
         key = (entity_id, date)
+
+        if record.get('connectivity_speed_avg') is not None or \
+           record.get('connectivity_latency_avg') is not None or \
+           record.get('connectivity_speed_probe_avg') is not None or \
+           record.get('connectivity_latency_probe_avg') is not None or \
+           record.get('connectivity_speed_mean_avg') is not None:
+            valid_entity_ids.add(entity_id)
 
         if key in existing_map:
             obj = existing_map[key]
@@ -1583,7 +1597,7 @@ def sync_entity_qos_realtime_data(country_id, entity_type_code='health', start_d
 
     to_create = []
     to_update = []
-    for entity_id in processed_entity_ids:
+    for entity_id in processed_entity_ids.intersection(valid_entity_ids):
         reg = existing_regs.get(entity_id)
         if reg:
             updated = False
@@ -1628,4 +1642,4 @@ def sync_entity_qos_realtime_data(country_id, entity_type_code='health', start_d
     # Ensure the final week is covered
     finalize_previous_day_entity_data.delay(None, country_obj.id, max_date, entity_type_code)
     logger.info('Entity QoS - Weekly aggregation completed for country %s (%s to %s).',
-                country_id, min_date, max_date)
+                country_obj.name, min_date, max_date)
