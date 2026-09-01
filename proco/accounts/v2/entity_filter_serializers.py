@@ -16,6 +16,7 @@ from proco.core import utils as core_utilities
 from proco.custom_auth import models as auth_models
 from proco.custom_auth.serializers import ExpandUserSerializer
 from proco.custom_auth.utils import get_user_emails_for_permissions
+from proco.entities.constants import LEGACY_MODEL
 from proco.entities.models import Entity
 
 
@@ -376,7 +377,12 @@ class PublishedEntityAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
 class EntityAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
     active_countries_list = serializers.JSONField()
     options = serializers.JSONField()
-    entity_type__code = serializers.CharField(source='entity_type.code')
+    entity_type__code = serializers.SerializerMethodField()
+
+    def get_entity_type__code(self, instance):
+        if not instance.entity_type:
+            return LEGACY_MODEL
+        return instance.entity_type.code
 
     class Meta:
         model = accounts_models.AdvanceFilter
@@ -537,7 +543,12 @@ class UpdateEntityAdvanceFilterSerializer(BaseEntityAdvanceFilterListCRUDSeriali
 
 class PublishEntityAdvanceFilterSerializer(serializers.ModelSerializer):
     options = serializers.JSONField(required=False)
-    entity_type__code = serializers.CharField(source='entity_type.code', read_only=True)
+    entity_type__code = serializers.SerializerMethodField()
+
+    def get_entity_type__code(self, instance):
+        if not instance.entity_type:
+            return LEGACY_MODEL
+        return instance.entity_type.code
 
     class Meta:
         model = accounts_models.AdvanceFilter
@@ -677,7 +688,12 @@ class EntityColumnConfigurationChoicesSerializer(FlexFieldsModelSerializer):
 
 class EntityColumnConfigurationListSerializer(FlexFieldsModelSerializer):
     options = serializers.JSONField()
-    entity_type__code = serializers.CharField(source='entity_type.code')
+    entity_type__code = serializers.SerializerMethodField()
+
+    def get_entity_type__code(self, instance):
+        if not instance.entity_type:
+            return LEGACY_MODEL
+        return instance.entity_type.code
 
     class Meta:
         model = accounts_models.ColumnConfiguration
