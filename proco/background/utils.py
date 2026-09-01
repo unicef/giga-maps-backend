@@ -30,6 +30,11 @@ def task_on_start(task_id, unique_name, description, check_previous=False):
 
 
 def task_on_complete(task):
-    task.status = BackgroundTask.STATUSES.completed
-    task.completed_at = get_current_datetime_object()
-    task.save()
+    if not task:
+        return
+    try:
+        task.status = BackgroundTask.STATUSES.completed
+        task.completed_at = get_current_datetime_object()
+        task.save()
+    except Exception:
+        pass

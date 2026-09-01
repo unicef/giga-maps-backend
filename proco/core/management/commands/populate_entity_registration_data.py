@@ -65,7 +65,9 @@ def populate_entity_registration_data(country_id, entity_id):
         NULL rt_source
     FROM connection_statistics_entitydailystatus dailystat
     INNER JOIN entities_entity entity ON entity.id = dailystat.entity_id
-    WHERE entity.deleted IS NULL AND dailystat.deleted IS NULL
+    WHERE entity.deleted IS NULL 
+      AND dailystat.deleted IS NULL 
+      AND dailystat.connectivity_speed IS NOT NULL
     """
 
     if entity_id:

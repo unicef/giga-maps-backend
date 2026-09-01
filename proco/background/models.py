@@ -1,3 +1,4 @@
+import logging
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
@@ -9,6 +10,8 @@ from proco.core import models as core_models
 from proco.core import utils as core_utilities
 from proco.core.managers import BaseManager
 from proco.utils import dates as date_utilities
+
+logger = logging.getLogger('gigamaps.' + __name__)
 
 
 class BackgroundTask(models.Model):
@@ -65,10 +68,20 @@ class BackgroundTask(models.Model):
         return f'Task: {self.name}, Status: {self.status}'
 
     def info(self, text: str):
-        if self.log:
-            self.log += '\n'
+        try:
+            if self.log:
+                self.log += '\n'
 
-        self.log += '{0}: {1}'.format(
-            date_utilities.format_datetime(core_utilities.get_current_datetime_object(), frmt='%d-%m-%Y %H:%M:%S'),
-            text)
-        self.save()
+            self.log += '{0}: {1}'.format(
+                date_utilities.format_datetime(core_utilities.get_current_datetime_object(), frmt='%d-%m-%Y %H:%M:%S'),
+                text)
+            self.save(update_fields=['log'])
+        except Exception as ex:
+            logger.warning(f'Failed to update BackgroundTask log: {ex}')
+
+    def error(self, text: str):
+        try:
+            self.info(f'ERROR: {text}')
+        except Exception as ex:
+            logger.warning(f'Failed to update BackgroundTask error: {ex}')
+

@@ -59,13 +59,15 @@ class Command(BaseCommand):
         date_list = sorted([(start_date + timedelta(days=x)) for x in range((end_date - start_date).days)] + [end_date])
         
         countries_ids = list(
-            EntityRealTimeConnectivity.objects.filter(
-                live_data_source=statistics_configs.QOS_SOURCE,
-                entity__entity_type__code=entity_type_code,
-                entity__deleted__isnull=True,
-            ).values_list(
-                'entity__country_id', flat=True
-            ).distinct()
+            set(
+                EntityRealTimeConnectivity.objects.filter(
+                    live_data_source=statistics_configs.QOS_SOURCE,
+                    entity__entity_type__code=entity_type_code,
+                    entity__deleted__isnull=True,
+                ).order_by().values_list(
+                    'entity__country_id', flat=True
+                ).distinct()
+            )
         )
 
         logger.info(f"Aggregating entity QoS data for {len(countries_ids)} countries...")

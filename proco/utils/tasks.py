@@ -48,200 +48,204 @@ def update_all_cached_values(*args, clean_cache=False):
 
     if task_instance:
         logger.info('Not found running job: {}'.format(task_key))
+        try:
+            if clean_cache:
+                if settings.INVALIDATE_CACHE_HARD.lower() == 'true':
+                    cache_manager.invalidate(hard=True)
+                    logger.info('Cache cleared. Map is updated in real time.')
+                else:
+                    cache_manager.invalidate()
+                    logger.info('Cache invalidation started. Maps will be updated in a few minutes.')
 
-        if clean_cache:
-            if settings.INVALIDATE_CACHE_HARD.lower() == 'true':
-                cache_manager.invalidate(hard=True)
-                logger.info('Cache cleared. Map is updated in real time.')
-            else:
-                cache_manager.invalidate()
-                logger.info('Cache invalidation started. Maps will be updated in a few minutes.')
+            update_cached_value.delay(url=reverse('locations:search-countries-admin-schools'))
+            update_cached_value.delay(url=reverse('locations:countries-list'))
+            update_cached_value.delay(url=reverse('connection_statistics:global-stat'))
 
-        update_cached_value.delay(url=reverse('locations:search-countries-admin-schools'))
-        update_cached_value.delay(url=reverse('locations:countries-list'))
-        update_cached_value.delay(url=reverse('connection_statistics:global-stat'))
+            # Get countries which has at least has 1 school
+            countries = Country.objects.filter(id__in=list(
+                School.objects.all().values_list('country_id', flat=True).order_by('country_id').distinct('country_id')
+            ))
 
-        # Get countries which has at least has 1 school
-        countries = Country.objects.filter(id__in=list(
-            School.objects.all().values_list('country_id', flat=True).order_by('country_id').distinct('country_id')
-        ))
+            country_wise_default_layers = {
+                row['country_id']: row['data_layer_id']
+                for row in DataLayerCountryRelationship.objects.filter(
+                    Q(is_default=True) | Q(
+                        is_default=False,
+                        data_layer__category=DataLayer.LAYER_CATEGORY_CONNECTIVITY,
+                        data_layer__created_by__isnull=True,
+                    ),
+                    data_layer__type=DataLayer.LAYER_TYPE_LIVE,
+                    data_layer__status=DataLayer.LAYER_STATUS_PUBLISHED,
+                    data_layer__deleted__isnull=True,
+                    country_id__in=list(countries)).values('country_id', 'data_layer_id').order_by('country_id').distinct()
+            }
 
-        country_wise_default_layers = {
-            row['country_id']: row['data_layer_id']
-            for row in DataLayerCountryRelationship.objects.filter(
-                Q(is_default=True) | Q(
-                    is_default=False,
-                    data_layer__category=DataLayer.LAYER_CATEGORY_CONNECTIVITY,
-                    data_layer__created_by__isnull=True,
-                ),
-                data_layer__type=DataLayer.LAYER_TYPE_LIVE,
-                data_layer__status=DataLayer.LAYER_STATUS_PUBLISHED,
-                data_layer__deleted__isnull=True,
-                country_id__in=list(countries)).values('country_id', 'data_layer_id').order_by('country_id').distinct()
-        }
+            for country in countries:
+                country_wise_task_list = [
+                    update_cached_value.s(
+                        url=reverse('locations:countries-detail', kwargs={'pk': country.code.lower()})
+                    ),
+                    update_cached_value.s(
+                        url=reverse('connection_statistics:global-stat'),
+                        query_params={'country_id': country.id},
+                    ),
+                    update_cached_value.s(
+                        url=reverse('accounts:list-published-advance-filters',
+                                    kwargs={'status': 'PUBLISHED', 'country_id': country.id}),
+                        query_params={'expand': 'column_configuration', 'ordering': 'name'},
+                    ),
+                ]
 
-        for country in countries:
-            country_wise_task_list = [
-                update_cached_value.s(
-                    url=reverse('locations:countries-detail', kwargs={'pk': country.code.lower()})
-                ),
-                update_cached_value.s(
-                    url=reverse('connection_statistics:global-stat'),
-                    query_params={'country_id': country.id},
-                ),
-                update_cached_value.s(
-                    url=reverse('accounts:list-published-advance-filters',
-                                kwargs={'status': 'PUBLISHED', 'country_id': country.id}),
-                    query_params={'expand': 'column_configuration', 'ordering': 'name'},
-                ),
-            ]
+                if country_wise_default_layers.get(country.id, None):
+                    layer_id = country_wise_default_layers[country.id]
 
-            if country_wise_default_layers.get(country.id, None):
-                layer_id = country_wise_default_layers[country.id]
+                    client = APIClient()
+                    response = client.get(
+                        reverse('connection_statistics:get-latest-week-and-month'),
+                        {'country_id': country.id, 'layer_id': layer_id, 'cache': False},
+                        format='json',
+                    )
 
-                client = APIClient()
-                response = client.get(
-                    reverse('connection_statistics:get-latest-week-and-month'),
-                    {'country_id': country.id, 'layer_id': layer_id, 'cache': False},
-                    format='json',
-                )
+                    if response.status_code == 200 and response.data and response.data.get('week'):
+                        latest_week_start_str = response.data['week']['start_date']
+                        latest_week_end_str = response.data['week']['end_date']
 
-                if response.status_code == 200 and response.data and response.data.get('week'):
-                    latest_week_start_str = response.data['week']['start_date']
-                    latest_week_end_str = response.data['week']['end_date']
+                        country_wise_task_list.append(update_cached_value.s(
+                            url=reverse('accounts:info-data-layer', kwargs={'pk': layer_id}),
+                            query_params={
+                                'country_id': country.id,
+                                'start_date': latest_week_start_str,
+                                'end_date': latest_week_end_str,
+                                'is_weekly': 'true',
+                                'benchmark': 'global',
+                                'include_same_location_schools': 'false',
+                            },
+                        ))
 
-                    country_wise_task_list.append(update_cached_value.s(
-                        url=reverse('accounts:info-data-layer', kwargs={'pk': layer_id}),
-                        query_params={
-                            'country_id': country.id,
-                            'start_date': latest_week_start_str,
-                            'end_date': latest_week_end_str,
-                            'is_weekly': 'true',
-                            'benchmark': 'global',
-                            'include_same_location_schools': 'false',
-                        },
-                    ))
+                        if country.iso3_format == 'BRA':
+                            # Case 1: Cache info API for last 4 weeks
+                            latest_week_end = to_date(latest_week_end_str).date()
+                            for week_offset in range(4):
+                                week_end = latest_week_end - timedelta(weeks=week_offset)
+                                week_start = week_end - timedelta(days=6)
 
-                    if country.iso3_format == 'BRA':
-                        # Case 1: Cache info API for last 4 weeks
-                        latest_week_end = to_date(latest_week_end_str).date()
-                        for week_offset in range(4):
-                            week_end = latest_week_end - timedelta(weeks=week_offset)
-                            week_start = week_end - timedelta(days=6)
+                                start_date_str = week_start.strftime('%d-%m-%Y')
+                                end_date_str = week_end.strftime('%d-%m-%Y')
 
-                            start_date_str = week_start.strftime('%d-%m-%Y')
-                            end_date_str = week_end.strftime('%d-%m-%Y')
-
-                            country_wise_task_list.append(update_cached_value.s(
-                                url=reverse('accounts:info-data-layer', kwargs={'pk': layer_id}),
-                                query_params={
-                                    'country_id': country.id,
-                                    'start_date': start_date_str,
-                                    'end_date': end_date_str,
-                                    'is_weekly': 'true',
-                                    'benchmark': 'global',
-                                    'include_same_location_schools': 'false',
-                                },
-                            ))
-
-                        # Case 2: Cache with filters
-                        from proco.accounts.models import AdvanceFilter
-                        country_filters = AdvanceFilter.objects.filter(
-                            status=AdvanceFilter.FILTER_STATUS_PUBLISHED,
-                            deleted__isnull=True,
-                            active_countries__country_id=country.id,
-                            active_countries__deleted__isnull=True,
-                            type=AdvanceFilter.TYPE_DROPDOWN
-                        ).distinct()
-
-                        for advance_filter in country_filters:
-                            query_param = advance_filter.query_param_filter
-                            column_config = advance_filter.column_configuration
-                            if not column_config:
-                                continue
-
-                            filter_field = column_config.name
-                            filter_options = advance_filter.options or {}
-                            static_choices = filter_options.get('choices', [])
-
-                            filter_values = []
-                            for choice in static_choices:
-                                if isinstance(choice, dict) and 'value' in choice:
-                                    filter_values.append(choice['value'])
-
-                            # Cache global-stat and info API with each filter value
-                            for value in filter_values:
-                                filter_params = {f'{filter_field}__{query_param}': value}
-
-                                # Global-stat with filter
-                                global_stat_params = {'country_id': country.id}
-                                global_stat_params.update(filter_params)
-                                country_wise_task_list.append(update_cached_value.s(
-                                    url=reverse('connection_statistics:global-stat'),
-                                    query_params=global_stat_params,
-                                ))
-
-                                # Info API with filter
-                                info_params = {
-                                    'country_id': country.id,
-                                    'start_date': latest_week_start_str,
-                                    'end_date': latest_week_end_str,
-                                    'is_weekly': 'true',
-                                    'benchmark': 'global',
-                                    'include_same_location_schools': 'false',
-                                }
-                                info_params.update(filter_params)
                                 country_wise_task_list.append(update_cached_value.s(
                                     url=reverse('accounts:info-data-layer', kwargs={'pk': layer_id}),
-                                    query_params=info_params,
+                                    query_params={
+                                        'country_id': country.id,
+                                        'start_date': start_date_str,
+                                        'end_date': end_date_str,
+                                        'is_weekly': 'true',
+                                        'benchmark': 'global',
+                                        'include_same_location_schools': 'false',
+                                    },
                                 ))
 
-                        # Case 3: Cache admin1 views
-                        from proco.locations.models import CountryAdminMetadata
-                        admin1_ids = list(CountryAdminMetadata.objects.filter(
-                            country_id=country.id,
-                            layer_name='adm1',
-                            deleted__isnull=True,
-                        ).values_list('id', flat=True))
+                            # Case 2: Cache with filters
+                            from proco.accounts.models import AdvanceFilter
+                            country_filters = AdvanceFilter.objects.filter(
+                                status=AdvanceFilter.FILTER_STATUS_PUBLISHED,
+                                deleted__isnull=True,
+                                active_countries__country_id=country.id,
+                                active_countries__deleted__isnull=True,
+                                type=AdvanceFilter.TYPE_DROPDOWN
+                            ).distinct()
 
-                        logger.info(f'Brazil: Queueing cache for {len(admin1_ids)} admin1 regions')
-                        for adm1_id in admin1_ids:
-                            # Connectivityconfigs for admin1
-                            country_wise_task_list.append(update_cached_value.s(
-                                url=reverse('connection_statistics:get-latest-week-and-month'),
-                                query_params={
-                                    'country_id': country.id,
-                                    'admin1_id': adm1_id,
-                                    'layer_id': layer_id,
-                                },
-                            ))
+                            for advance_filter in country_filters:
+                                query_param = advance_filter.query_param_filter
+                                column_config = advance_filter.column_configuration
+                                if not column_config:
+                                    continue
 
-                            # Global-stat for admin1
-                            country_wise_task_list.append(update_cached_value.s(
-                                url=reverse('connection_statistics:global-stat'),
-                                query_params={
-                                    'country_id': country.id,
-                                    'admin1_id': adm1_id,
-                                },
-                            ))
+                                filter_field = column_config.name
+                                filter_options = advance_filter.options or {}
+                                static_choices = filter_options.get('choices', [])
 
-                            # Info API for admin1
-                            country_wise_task_list.append(update_cached_value.s(
-                                url=reverse('accounts:info-data-layer', kwargs={'pk': layer_id}),
-                                query_params={
-                                    'country_id': country.id,
-                                    'start_date': latest_week_start_str,
-                                    'end_date': latest_week_end_str,
-                                    'is_weekly': 'true',
-                                    'benchmark': 'global',
-                                    'include_same_location_schools': 'false',
-                                    'admin1_id': adm1_id,
-                                },
-                            ))
+                                filter_values = []
+                                for choice in static_choices:
+                                    if isinstance(choice, dict) and 'value' in choice:
+                                        filter_values.append(choice['value'])
 
-            chain(country_wise_task_list).delay()
+                                # Cache global-stat and info API with each filter value
+                                for value in filter_values:
+                                    filter_params = {f'{filter_field}__{query_param}': value}
 
-        background_task_utilities.task_on_complete(task_instance)
+                                    # Global-stat with filter
+                                    global_stat_params = {'country_id': country.id}
+                                    global_stat_params.update(filter_params)
+                                    country_wise_task_list.append(update_cached_value.s(
+                                        url=reverse('connection_statistics:global-stat'),
+                                        query_params=global_stat_params,
+                                    ))
+
+                                    # Info API with filter
+                                    info_params = {
+                                        'country_id': country.id,
+                                        'start_date': latest_week_start_str,
+                                        'end_date': latest_week_end_str,
+                                        'is_weekly': 'true',
+                                        'benchmark': 'global',
+                                        'include_same_location_schools': 'false',
+                                    }
+                                    info_params.update(filter_params)
+                                    country_wise_task_list.append(update_cached_value.s(
+                                        url=reverse('accounts:info-data-layer', kwargs={'pk': layer_id}),
+                                        query_params=info_params,
+                                    ))
+
+                            # Case 3: Cache admin1 views
+                            from proco.locations.models import CountryAdminMetadata
+                            admin1_ids = list(CountryAdminMetadata.objects.filter(
+                                country_id=country.id,
+                                layer_name='adm1',
+                                deleted__isnull=True,
+                            ).values_list('id', flat=True))
+
+                            logger.info(f'Brazil: Queueing cache for {len(admin1_ids)} admin1 regions')
+                            for adm1_id in admin1_ids:
+                                # Connectivityconfigs for admin1
+                                country_wise_task_list.append(update_cached_value.s(
+                                    url=reverse('connection_statistics:get-latest-week-and-month'),
+                                    query_params={
+                                        'country_id': country.id,
+                                        'admin1_id': adm1_id,
+                                        'layer_id': layer_id,
+                                    },
+                                ))
+
+                                # Global-stat for admin1
+                                country_wise_task_list.append(update_cached_value.s(
+                                    url=reverse('connection_statistics:global-stat'),
+                                    query_params={
+                                        'country_id': country.id,
+                                        'admin1_id': adm1_id,
+                                    },
+                                ))
+
+                                # Info API for admin1
+                                country_wise_task_list.append(update_cached_value.s(
+                                    url=reverse('accounts:info-data-layer', kwargs={'pk': layer_id}),
+                                    query_params={
+                                        'country_id': country.id,
+                                        'start_date': latest_week_start_str,
+                                        'end_date': latest_week_end_str,
+                                        'is_weekly': 'true',
+                                        'benchmark': 'global',
+                                        'include_same_location_schools': 'false',
+                                        'admin1_id': adm1_id,
+                                    },
+                                ))
+
+                chain(country_wise_task_list).delay()
+        except Exception as exc:
+            logger.exception('Error during update_all_cached_values')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -290,9 +294,15 @@ def rebuild_school_index():
 
     if task_instance:
         logger.debug('Not found running job: {}'.format(task_key))
-        cmd_args = ['--delete_index', '--create_index', '--clean_index', '--update_index']
-        call_command('index_rebuild_schools', *cmd_args)
-        background_task_utilities.task_on_complete(task_instance)
+        try:
+            cmd_args = ['--delete_index', '--create_index', '--clean_index', '--update_index']
+            call_command('index_rebuild_schools', *cmd_args)
+        except Exception as exc:
+            logger.exception('Error during rebuild_school_index')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -320,38 +330,43 @@ def populate_school_registration_data():
 
     if task_instance:
         task_instance.info(f'Not found running job with name: {task_key}')
-        sql = """
-        SELECT DISTINCT sds.school_id
-        FROM public.connection_statistics_schooldailystatus AS sds
-        INNER JOIN public.schools_school s ON s.id = sds.school_id
-        LEFT JOIN public.connection_statistics_schoolrealtimeregistration AS srt
-            ON sds.school_id = srt.school_id
-            AND srt.deleted IS NULL
-        WHERE
-            s.deleted IS NULL
-            AND sds.deleted IS NULL
-            AND srt.school_id IS NULL
-        """
+        try:
+            sql = """
+            SELECT DISTINCT sds.school_id
+            FROM public.connection_statistics_schooldailystatus AS sds
+            INNER JOIN public.schools_school s ON s.id = sds.school_id
+            LEFT JOIN public.connection_statistics_schoolrealtimeregistration AS srt
+                ON sds.school_id = srt.school_id
+                AND srt.deleted IS NULL
+            WHERE
+                s.deleted IS NULL
+                AND sds.deleted IS NULL
+                AND srt.school_id IS NULL
+            """
 
-        school_ids_missing_in_rt_table = db_utilities.sql_to_response(sql, label='SchoolRealtimeRegistration')
-        if school_ids_missing_in_rt_table:
-            task_instance.info('Total number of newly registered schools for live data in last 6 hours: {0}'.format(
-                len(school_ids_missing_in_rt_table))
-            )
+            school_ids_missing_in_rt_table = db_utilities.sql_to_response(sql, label='SchoolRealtimeRegistration')
+            if school_ids_missing_in_rt_table:
+                task_instance.info('Total number of newly registered schools for live data in last 6 hours: {0}'.format(
+                    len(school_ids_missing_in_rt_table))
+                )
 
-            for missing_school_id in school_ids_missing_in_rt_table:
-                cmd_args = ['--reset', '-school_id={0}'.format(missing_school_id['school_id'])]
-                call_command('populate_school_registration_data', *cmd_args)
+                for missing_school_id in school_ids_missing_in_rt_table:
+                    cmd_args = ['--reset', '-school_id={0}'.format(missing_school_id['school_id'])]
+                    call_command('populate_school_registration_data', *cmd_args)
 
-                school = School.objects.get(id=missing_school_id['school_id'])
-                school.connectivity_status = school_utilities.get_connectivity_status_by_master_api(school)
-                school.save(update_fields=['connectivity_status'])
-                logger.info('School connectivity status updated for School Giga ID "{0}" as "{1}"'.format(
-                    school.giga_id_school,
-                    school.connectivity_status,
-                ))
-
-        background_task_utilities.task_on_complete(task_instance)
+                    school = School.objects.get(id=missing_school_id['school_id'])
+                    school.connectivity_status = school_utilities.get_connectivity_status_by_master_api(school)
+                    school.save(update_fields=['connectivity_status'])
+                    logger.info('School connectivity status updated for School Giga ID "{0}" as "{1}"'.format(
+                        school.giga_id_school,
+                        school.connectivity_status,
+                    ))
+        except Exception as exc:
+            logger.exception('Error during populate_school_registration_data')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -378,20 +393,25 @@ def redo_aggregations_task(country_id, year, week_no, *args):
 
     if task_instance:
         logger.debug('Not found running job: {}'.format(task_key))
-        cmd_args = [
-            '-country_id={}'.format(country_id),
-            '-year={}'.format(year),
-            '--update_school_weekly',
-            '--update_country_daily',
-            '--update_country_weekly',
-        ]
+        try:
+            cmd_args = [
+                '-country_id={}'.format(country_id),
+                '-year={}'.format(year),
+                '--update_school_weekly',
+                '--update_country_daily',
+                '--update_country_weekly',
+            ]
 
-        if week_no:
-            cmd_args.append('-week_no={}'.format(week_no))
+            if week_no:
+                cmd_args.append('-week_no={}'.format(week_no))
 
-        call_command('redo_aggregations', *cmd_args)
-
-        background_task_utilities.task_on_complete(task_instance)
+            call_command('redo_aggregations', *cmd_args)
+        except Exception as exc:
+            logger.exception('Error during redo_aggregations_task')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -418,24 +438,28 @@ def redo_entity_aggregations_task(country_id, year, week_no, entity_type_code=No
 
     if task_instance:
         logger.debug('Not found running job: {}'.format(task_key))
-        cmd_args = [
-            '-country_id={}'.format(country_id),
-            '-year={}'.format(year),
-            '--update_entity_weekly',
-        ]
+        try:
+            cmd_args = [
+                '-country_id={}'.format(country_id),
+                '-year={}'.format(year),
+                '--update_entity_weekly',
+            ]
 
-        if week_no:
-            cmd_args.append('-week_no={}'.format(week_no))
+            if week_no:
+                cmd_args.append('-week_no={}'.format(week_no))
 
-        if entity_type_code:
-            cmd_args.append('-entity_type_code={}'.format(entity_type_code))
+            if entity_type_code:
+                cmd_args.append('-entity_type_code={}'.format(entity_type_code))
 
-        call_command('redo_entity_aggregations', *cmd_args)
-
-        background_task_utilities.task_on_complete(task_instance)
+            call_command('redo_entity_aggregations', *cmd_args)
+        except Exception as exc:
+            logger.exception('Error during redo_entity_aggregations_task')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
-
 
 
 @app.task(soft_time_limit=10 * 60 * 60, time_limit=10 * 60 * 60)
@@ -470,12 +494,16 @@ def populate_school_new_fields_task(start_school_id, end_school_id, country_id, 
 
     if task_instance:
         logger.debug('Not found running job: {}'.format(task_key))
-
-        task_instance.info('Starting the command with args: {}'.format(cmd_args))
-        call_command('populate_school_new_fields', *cmd_args)
-        task_instance.info('Completed the command.')
-
-        background_task_utilities.task_on_complete(task_instance)
+        try:
+            task_instance.info('Starting the command with args: {}'.format(cmd_args))
+            call_command('populate_school_new_fields', *cmd_args)
+            task_instance.info('Completed the command.')
+        except Exception as exc:
+            logger.exception('Error during populate_school_new_fields_task')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -497,9 +525,15 @@ def rebuild_unified_index():
 
     if task_instance:
         logger.debug('Not found running job: {}'.format(task_key))
-        cmd_args = ['--delete_index', '--create_index', '--clean_index', '--update_index']
-        call_command('build_unified_index', *cmd_args)
-        background_task_utilities.task_on_complete(task_instance)
+        try:
+            cmd_args = ['--delete_index', '--create_index', '--clean_index', '--update_index']
+            call_command('build_unified_index', *cmd_args)
+        except Exception as exc:
+            logger.exception('Error during rebuild_unified_index')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -519,38 +553,44 @@ def populate_entity_registration_data():
 
     if task_instance:
         task_instance.info(f'Not found running job with name: {task_key}')
-        sql = '''
-        SELECT DISTINCT sds.entity_id
-        FROM public.connection_statistics_entitydailystatus AS sds
-        INNER JOIN public.entities_entity s ON s.id = sds.entity_id
-        LEFT JOIN public.connection_statistics_entityrealtimeregistration AS srt
-            ON sds.entity_id = srt.entity_id
-            AND srt.deleted IS NULL
-        WHERE
-            s.deleted IS NULL
-            AND sds.deleted IS NULL
-            AND srt.entity_id IS NULL
-        '''
+        try:
+            sql = '''
+            SELECT DISTINCT sds.entity_id
+            FROM public.connection_statistics_entitydailystatus AS sds
+            INNER JOIN public.entities_entity s ON s.id = sds.entity_id
+            LEFT JOIN public.connection_statistics_entityrealtimeregistration AS srt
+                ON sds.entity_id = srt.entity_id
+                AND srt.deleted IS NULL
+            WHERE
+                s.deleted IS NULL
+                AND sds.deleted IS NULL
+                AND srt.entity_id IS NULL
+                AND sds.connectivity_speed IS NOT NULL
+            '''
 
-        entity_ids_missing_in_rt_table = db_utilities.sql_to_response(sql, label='EntityRealtimeRegistration')
-        if entity_ids_missing_in_rt_table:
-            task_instance.info('Total number of newly registered entities for live data in last 6 hours: {0}'.format(
-                len(entity_ids_missing_in_rt_table))
-            )
+            entity_ids_missing_in_rt_table = db_utilities.sql_to_response(sql, label='EntityRealtimeRegistration')
+            if entity_ids_missing_in_rt_table:
+                task_instance.info('Total number of newly registered entities for live data in last 6 hours: {0}'.format(
+                    len(entity_ids_missing_in_rt_table))
+                )
 
-            for missing_entity_id in entity_ids_missing_in_rt_table:
-                cmd_args = ['--reset', '-entity_id={0}'.format(missing_entity_id['entity_id'])]
-                call_command('populate_entity_registration_data', *cmd_args)
+                for missing_entity_id in entity_ids_missing_in_rt_table:
+                    cmd_args = ['--reset', '-entity_id={0}'.format(missing_entity_id['entity_id'])]
+                    call_command('populate_entity_registration_data', *cmd_args)
 
-                entity = Entity.objects.get(id=missing_entity_id['entity_id'])
-                entity.connectivity_status = 'good'
-                entity.save(update_fields=['connectivity_status'])
-                logger.info('Entity connectivity status updated for Entity Giga ID "{0}" as "{1}"'.format(
-                    entity.giga_id,
-                    entity.connectivity_status,
-                ))
-
-        background_task_utilities.task_on_complete(task_instance)
+                    entity = Entity.objects.get(id=missing_entity_id['entity_id'])
+                    entity.connectivity_status = 'good'
+                    entity.save(update_fields=['connectivity_status'])
+                    logger.info('Entity connectivity status updated for Entity Giga ID "{0}" as "{1}"'.format(
+                        entity.giga_id,
+                        entity.connectivity_status,
+                    ))
+        except Exception as exc:
+            logger.exception('Error during populate_entity_registration_data')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -571,53 +611,58 @@ def update_entity_records():
         task_id, task_key, 'Update the entity records from weekly status')
 
     if task_instance:
-        time_threshold = core_utilities.get_current_datetime_object() - timedelta(hours=12)
+        try:
+            time_threshold = core_utilities.get_current_datetime_object() - timedelta(hours=12)
 
-        updated_weekly_statuses = EntityWeeklyStatus.objects.filter(
-            modified__gte=time_threshold
-        ).select_related('entity', 'entity__last_weekly_status').order_by('date')
+            updated_weekly_statuses = EntityWeeklyStatus.objects.filter(
+                modified__gte=time_threshold
+            ).select_related('entity', 'entity__last_weekly_status').order_by('date')
 
-        entities_to_update = {}
+            entities_to_update = {}
 
-        for status in updated_weekly_statuses.iterator(chunk_size=5000):
-            entity = entities_to_update.get(status.entity_id) or status.entity
-            if not entity:
-                continue
+            for status in updated_weekly_statuses.iterator(chunk_size=5000):
+                entity = entities_to_update.get(status.entity_id) or status.entity
+                if not entity:
+                    continue
 
-            needs_update = False
+                needs_update = False
 
-            if not entity.last_weekly_status or entity.last_weekly_status.date < status.date:
-                entity.last_weekly_status = status
-                needs_update = True
-
-            if getattr(entity.last_weekly_status, 'id', entity.last_weekly_status_id) == status.id:
-                connectivity_status = 'unknown'
-                if status.connectivity_speed is not None:
-                    connectivity_status = statuses_schema.get_connectivity_status_by_connectivity_speed(
-                        status.connectivity_speed
-                    )
-
-                if entity.connectivity_status != connectivity_status:
-                    entity.connectivity_status = connectivity_status
+                if not entity.last_weekly_status or entity.last_weekly_status.date < status.date:
+                    entity.last_weekly_status = status
                     needs_update = True
 
-                if entity.coverage_status != 'unknown':
-                    entity.coverage_status = 'unknown'
-                    needs_update = True
+                if getattr(entity.last_weekly_status, 'id', entity.last_weekly_status_id) == status.id:
+                    connectivity_status = 'unknown'
+                    if status.connectivity_speed is not None:
+                        connectivity_status = statuses_schema.get_connectivity_status_by_connectivity_speed(
+                            status.connectivity_speed
+                        )
 
-            if needs_update or status.entity_id in entities_to_update:
-                entities_to_update[entity.id] = entity
+                    if entity.connectivity_status != connectivity_status:
+                        entity.connectivity_status = connectivity_status
+                        needs_update = True
 
-        if entities_to_update:
-            from proco.entities.models import Entity
-            Entity.objects.bulk_update(
-                list(entities_to_update.values()),
-                ['last_weekly_status', 'connectivity_status', 'coverage_status'],
-                batch_size=5000
-            )
-            logger.info('Bulk updated {0} entities.'.format(len(entities_to_update)))
+                    if entity.coverage_status != 'unknown':
+                        entity.coverage_status = 'unknown'
+                        needs_update = True
 
-        background_task_utilities.task_on_complete(task_instance)
+                if needs_update or status.entity_id in entities_to_update:
+                    entities_to_update[entity.id] = entity
+
+            if entities_to_update:
+                from proco.entities.models import Entity
+                Entity.objects.bulk_update(
+                    list(entities_to_update.values()),
+                    ['last_weekly_status', 'connectivity_status', 'coverage_status'],
+                    batch_size=5000
+                )
+                logger.info('Bulk updated {0} entities.'.format(len(entities_to_update)))
+        except Exception as exc:
+            logger.exception('Error during update_entity_records')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -639,40 +684,45 @@ def handle_deleted_entity_master_data_row(deleted_row_id=None, country_ids=None)
         task_id, task_key, 'Handle deleted entity master data rows')
 
     if task_instance:
-        if deleted_row_id:
-            rows = HealthEntityMasterIntermediateData.objects.filter(id=deleted_row_id, is_read=False, status='DELETED_PUBLISHED')
-        else:
-            rows = HealthEntityMasterIntermediateData.objects.filter(is_read=False, status='DELETED_PUBLISHED')
+        try:
+            if deleted_row_id:
+                rows = HealthEntityMasterIntermediateData.objects.filter(id=deleted_row_id, is_read=False, status='DELETED_PUBLISHED')
+            else:
+                rows = HealthEntityMasterIntermediateData.objects.filter(is_read=False, status='DELETED_PUBLISHED')
 
-        if country_ids:
-            rows = rows.filter(country_id__in=country_ids)
+            if country_ids:
+                rows = rows.filter(country_id__in=country_ids)
 
-        affected_country_ids = set()
-        for row in rows:
-            if row.country_id:
-                affected_country_ids.add(row.country_id)
-            entity = row.entity
-            if entity:
-                if entity.country_id:
-                    affected_country_ids.add(entity.country_id)
-                entity.deleted = core_utilities.get_current_datetime_object()
-                entity.save(update_fields=['deleted'])
+            affected_country_ids = set()
+            for row in rows:
+                if row.country_id:
+                    affected_country_ids.add(row.country_id)
+                entity = row.entity
+                if entity:
+                    if entity.country_id:
+                        affected_country_ids.add(entity.country_id)
+                    entity.deleted = core_utilities.get_current_datetime_object()
+                    entity.save(update_fields=['deleted'])
 
-                # Soft delete related
-                from proco.connection_statistics.models import EntityDailyStatus, EntityWeeklyStatus, EntityRealTimeRegistration
-                EntityDailyStatus.objects.all_records().filter(entity=entity).update(deleted=core_utilities.get_current_datetime_object())
-                EntityWeeklyStatus.objects.all_records().filter(entity=entity).update(deleted=core_utilities.get_current_datetime_object())
-                EntityRealTimeRegistration.objects.all_records().filter(entity=entity).update(deleted=core_utilities.get_current_datetime_object())
+                    # Soft delete related
+                    from proco.connection_statistics.models import EntityDailyStatus, EntityWeeklyStatus, EntityRealTimeRegistration
+                    EntityDailyStatus.objects.all_records().filter(entity=entity).update(deleted=core_utilities.get_current_datetime_object())
+                    EntityWeeklyStatus.objects.all_records().filter(entity=entity).update(deleted=core_utilities.get_current_datetime_object())
+                    EntityRealTimeRegistration.objects.all_records().filter(entity=entity).update(deleted=core_utilities.get_current_datetime_object())
 
-            row.is_read = True
-            row.save(update_fields=['is_read'])
+                row.is_read = True
+                row.save(update_fields=['is_read'])
 
-        if affected_country_ids:
-            from proco.locations.models import Country
-            for country in Country.objects.filter(id__in=affected_country_ids):
-                country.invalidate_country_related_cache()
-
-        background_task_utilities.task_on_complete(task_instance)
+            if affected_country_ids:
+                from proco.locations.models import Country
+                for country in Country.objects.filter(id__in=affected_country_ids):
+                    country.invalidate_country_related_cache()
+        except Exception as exc:
+            logger.exception('Error during handle_deleted_entity_master_data_row')
+            task_instance.error(f'Error occurred: {exc}')
+            raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -698,162 +748,71 @@ def update_all_entity_cached_values(*args, clean_cache=False):
 
     logger.info('Not found running job: {}'.format(task_key))
 
-    if clean_cache:
-        if settings.INVALIDATE_CACHE_HARD.lower() == 'true':
-            cache_manager.invalidate(hard=True)
-            logger.info('Cache cleared. Map is updated in real time.')
-        else:
-            cache_manager.invalidate()
-            logger.info('Cache invalidation started. Maps will be updated in a few minutes.')
+    try:
+        if clean_cache:
+            if settings.INVALIDATE_CACHE_HARD.lower() == 'true':
+                cache_manager.invalidate(hard=True)
+                logger.info('Cache cleared. Map is updated in real time.')
+            else:
+                cache_manager.invalidate()
+                logger.info('Cache invalidation started. Maps will be updated in a few minutes.')
 
-    update_cached_value.delay(url=reverse('locations:search-countries-admin-schools'))
-    update_cached_value.delay(url=reverse('entities:list-entity-countries'))
-    update_cached_value.delay(url=reverse('entities:global-stat-all-entities'), query_params={'entity_type__code': ALL_ENTITIES})
+        update_cached_value.delay(url=reverse('locations:search-countries-admin-schools'))
+        update_cached_value.delay(url=reverse('entities:list-entity-countries'))
+        update_cached_value.delay(url=reverse('entities:global-stat-all-entities'), query_params={'entity_type__code': ALL_ENTITIES})
 
-    active_entity_types = EntityType.get_all_active().exclude(is_legacy=True)
-    entity_country_ids = Entity.objects.filter(deleted__isnull=True).values_list('country_id', flat=True).order_by('country_id').distinct()
-    entity_countries = Country.objects.filter(id__in=list(entity_country_ids))
+        active_entity_types = EntityType.get_all_active().exclude(is_legacy=True)
+        entity_country_ids = Entity.objects.filter(deleted__isnull=True).values_list('country_id', flat=True).order_by('country_id').distinct()
+        entity_countries = Country.objects.filter(id__in=list(entity_country_ids))
 
-    for entity_type in active_entity_types:
-        entity_wise_default_layers = {
-            row['country_id']: row['data_layer_id']
-            for row in DataLayerCountryRelationship.objects.filter(
-                Q(is_default=True) | Q(
-                    is_default=False,
-                    data_layer__category=DataLayer.LAYER_CATEGORY_CONNECTIVITY,
-                    data_layer__created_by__isnull=True,
-                ),
-                data_layer__type=DataLayer.LAYER_TYPE_LIVE,
-                data_layer__status=DataLayer.LAYER_STATUS_PUBLISHED,
-                data_layer__deleted__isnull=True,
-                data_layer__entity_type=entity_type,
-                country_id__in=list(entity_countries)
-            ).values('country_id', 'data_layer_id').order_by('country_id').distinct()
-        }
+        for entity_type in active_entity_types:
+            entity_wise_default_layers = {
+                row['country_id']: row['data_layer_id']
+                for row in DataLayerCountryRelationship.objects.filter(
+                    Q(is_default=True) | Q(
+                        is_default=False,
+                        data_layer__category=DataLayer.LAYER_CATEGORY_CONNECTIVITY,
+                        data_layer__created_by__isnull=True,
+                    ),
+                    data_layer__type=DataLayer.LAYER_TYPE_LIVE,
+                    data_layer__status=DataLayer.LAYER_STATUS_PUBLISHED,
+                    data_layer__deleted__isnull=True,
+                    data_layer__entity_type=entity_type,
+                    country_id__in=list(entity_countries)
+                ).values('country_id', 'data_layer_id').order_by('country_id').distinct()
+            }
 
-        for country in entity_countries:
-            country_wise_task_list = [
-                update_cached_value.s(
-                    url=reverse('entities:global-stat-all-entities'),
-                    query_params={'country_id': country.id, 'entity_type__code': entity_type.code},
-                ),
-                update_cached_value.s(
-                    url=reverse('entities:list-published-entity-filters',
-                                kwargs={'status': 'PUBLISHED', 'country_id': country.id}),
-                    query_params={'expand': 'column_configuration', 'ordering': 'name', 'entity_type__code': entity_type.code},
-                ),
-            ]
+            for country in entity_countries:
+                country_wise_task_list = [
+                    update_cached_value.s(
+                        url=reverse('entities:global-stat-all-entities'),
+                        query_params={'country_id': country.id, 'entity_type__code': entity_type.code},
+                    ),
+                    update_cached_value.s(
+                        url=reverse('entities:list-published-entity-filters',
+                                    kwargs={'status': 'PUBLISHED', 'country_id': country.id}),
+                        query_params={'expand': 'column_configuration', 'ordering': 'name', 'entity_type__code': entity_type.code},
+                    ),
+                ]
 
-            if entity_wise_default_layers.get(country.id, None):
-                layer_id = entity_wise_default_layers[country.id]
+                if entity_wise_default_layers.get(country.id, None):
+                    layer_id = entity_wise_default_layers[country.id]
 
-                client = APIClient()
-                response = client.get(
-                    reverse('entities:entity-get-latest-week-and-month'),
-                    {'country_id': country.id, 'layer_id': layer_id, 'cache': False},
-                    format='json',
-                )
+                    client = APIClient()
+                    response = client.get(
+                        reverse('entities:entity-get-latest-week-and-month'),
+                        {'country_id': country.id, 'layer_id': layer_id, 'cache': False},
+                        format='json',
+                    )
 
-                if response.status_code == 200 and response.data and response.data.get('week'):
-                    latest_week_start_str = response.data['week']['start_date']
-                    latest_week_end_str = response.data['week']['end_date']
-
-                    country_wise_task_list.append(update_cached_value.s(
-                        url=reverse('entities:entity-info-data-layer', kwargs={'pk': layer_id}),
-                        query_params={
-                            'country_id': country.id,
-                            'entity_type__code': entity_type.code,
-                            f'{entity_type.code}_start_date': latest_week_start_str,
-                            f'{entity_type.code}_end_date': latest_week_end_str,
-                            f'{entity_type.code}_is_weekly': 'true',
-                            f'{entity_type.code}_benchmark': 'global',
-                            f'{entity_type.code}_include_same_location': 'false',
-                        },
-                    ))
-
-                    # Cache with filters
-                    from proco.accounts.models import AdvanceFilter
-                    country_filters = AdvanceFilter.objects.filter(
-                        status=AdvanceFilter.FILTER_STATUS_PUBLISHED,
-                        deleted__isnull=True,
-                        active_countries__country_id=country.id,
-                        active_countries__deleted__isnull=True,
-                        type=AdvanceFilter.TYPE_DROPDOWN
-                    ).distinct()
-
-                    for advance_filter in country_filters:
-                        query_param = advance_filter.query_param_filter
-                        column_config = advance_filter.column_configuration
-                        if not column_config:
-                            continue
-
-                        filter_field = column_config.name
-                        filter_options = advance_filter.options or {}
-                        static_choices = filter_options.get('choices', [])
-
-                        filter_values = []
-                        for choice in static_choices:
-                            if isinstance(choice, dict) and 'value' in choice:
-                                filter_values.append(choice['value'])
-
-                        for value in filter_values:
-                            filter_params = {f'{filter_field}__{query_param}': value, 'entity_type__code': entity_type.code}
-
-                            global_stat_params = {'country_id': country.id}
-                            global_stat_params.update(filter_params)
-                            country_wise_task_list.append(update_cached_value.s(
-                                url=reverse('entities:global-stat-all-entities'),
-                                query_params=global_stat_params,
-                            ))
-
-                            info_params = {
-                                'country_id': country.id,
-                                'entity_type__code': entity_type.code,
-                                f'{entity_type.code}_start_date': latest_week_start_str,
-                                f'{entity_type.code}_end_date': latest_week_end_str,
-                                f'{entity_type.code}_is_weekly': 'true',
-                                f'{entity_type.code}_benchmark': 'global',
-                                f'{entity_type.code}_include_same_location': 'false',
-                            }
-                            info_params.update(filter_params)
-                            country_wise_task_list.append(update_cached_value.s(
-                                url=reverse('entities:entity-info-data-layer', kwargs={'pk': layer_id}),
-                                query_params=info_params,
-                            ))
-
-                    # Cache admin1 views
-                    from proco.locations.models import CountryAdminMetadata
-                    admin1_ids = list(CountryAdminMetadata.objects.filter(
-                        country_id=country.id,
-                        layer_name='adm1',
-                        deleted__isnull=True,
-                    ).values_list('id', flat=True))
-
-                    for adm1_id in admin1_ids:
-                        country_wise_task_list.append(update_cached_value.s(
-                            url=reverse('entities:entity-get-latest-week-and-month'),
-                            query_params={
-                                'country_id': country.id,
-                                'admin1_id': adm1_id,
-                                'layer_id': layer_id,
-                                'entity_type__code': entity_type.code,
-                            },
-                        ))
-
-                        country_wise_task_list.append(update_cached_value.s(
-                            url=reverse('entities:global-stat-all-entities'),
-                            query_params={
-                                'country_id': country.id,
-                                'admin1_id': adm1_id,
-                                'entity_type__code': entity_type.code,
-                            },
-                        ))
+                    if response.status_code == 200 and response.data and response.data.get('week'):
+                        latest_week_start_str = response.data['week']['start_date']
+                        latest_week_end_str = response.data['week']['end_date']
 
                         country_wise_task_list.append(update_cached_value.s(
                             url=reverse('entities:entity-info-data-layer', kwargs={'pk': layer_id}),
                             query_params={
                                 'country_id': country.id,
-                                'admin1_id': adm1_id,
                                 'entity_type__code': entity_type.code,
                                 f'{entity_type.code}_start_date': latest_week_start_str,
                                 f'{entity_type.code}_end_date': latest_week_end_str,
@@ -863,6 +822,102 @@ def update_all_entity_cached_values(*args, clean_cache=False):
                             },
                         ))
 
-            chain(country_wise_task_list).delay()
+                        # Cache with filters
+                        from proco.accounts.models import AdvanceFilter
+                        country_filters = AdvanceFilter.objects.filter(
+                            status=AdvanceFilter.FILTER_STATUS_PUBLISHED,
+                            deleted__isnull=True,
+                            active_countries__country_id=country.id,
+                            active_countries__deleted__isnull=True,
+                            type=AdvanceFilter.TYPE_DROPDOWN
+                        ).distinct()
 
-    background_task_utilities.task_on_complete(task_instance)
+                        for advance_filter in country_filters:
+                            query_param = advance_filter.query_param_filter
+                            column_config = advance_filter.column_configuration
+                            if not column_config:
+                                continue
+
+                            filter_field = column_config.name
+                            filter_options = advance_filter.options or {}
+                            static_choices = filter_options.get('choices', [])
+
+                            filter_values = []
+                            for choice in static_choices:
+                                if isinstance(choice, dict) and 'value' in choice:
+                                    filter_values.append(choice['value'])
+
+                            for value in filter_values:
+                                filter_params = {f'{filter_field}__{query_param}': value, 'entity_type__code': entity_type.code}
+
+                                global_stat_params = {'country_id': country.id}
+                                global_stat_params.update(filter_params)
+                                country_wise_task_list.append(update_cached_value.s(
+                                    url=reverse('entities:global-stat-all-entities'),
+                                    query_params=global_stat_params,
+                                ))
+
+                                info_params = {
+                                    'country_id': country.id,
+                                    'entity_type__code': entity_type.code,
+                                    f'{entity_type.code}_start_date': latest_week_start_str,
+                                    f'{entity_type.code}_end_date': latest_week_end_str,
+                                    f'{entity_type.code}_is_weekly': 'true',
+                                    f'{entity_type.code}_benchmark': 'global',
+                                    f'{entity_type.code}_include_same_location': 'false',
+                                }
+                                info_params.update(filter_params)
+                                country_wise_task_list.append(update_cached_value.s(
+                                    url=reverse('entities:entity-info-data-layer', kwargs={'pk': layer_id}),
+                                    query_params=info_params,
+                                ))
+
+                        # Cache admin1 views
+                        from proco.locations.models import CountryAdminMetadata
+                        admin1_ids = list(CountryAdminMetadata.objects.filter(
+                            country_id=country.id,
+                            layer_name='adm1',
+                            deleted__isnull=True,
+                        ).values_list('id', flat=True))
+
+                        for adm1_id in admin1_ids:
+                            country_wise_task_list.append(update_cached_value.s(
+                                url=reverse('entities:entity-get-latest-week-and-month'),
+                                query_params={
+                                    'country_id': country.id,
+                                    'admin1_id': adm1_id,
+                                    'layer_id': layer_id,
+                                    'entity_type__code': entity_type.code,
+                                },
+                            ))
+
+                            country_wise_task_list.append(update_cached_value.s(
+                                url=reverse('entities:global-stat-all-entities'),
+                                query_params={
+                                    'country_id': country.id,
+                                    'admin1_id': adm1_id,
+                                    'entity_type__code': entity_type.code,
+                                },
+                            ))
+
+                            country_wise_task_list.append(update_cached_value.s(
+                                url=reverse('entities:entity-info-data-layer', kwargs={'pk': layer_id}),
+                                query_params={
+                                    'country_id': country.id,
+                                    'admin1_id': adm1_id,
+                                    'entity_type__code': entity_type.code,
+                                    f'{entity_type.code}_start_date': latest_week_start_str,
+                                    f'{entity_type.code}_end_date': latest_week_end_str,
+                                    f'{entity_type.code}_is_weekly': 'true',
+                                    f'{entity_type.code}_benchmark': 'global',
+                                    f'{entity_type.code}_include_same_location': 'false',
+                                },
+                            ))
+
+                chain(country_wise_task_list).delay()
+    except Exception as exc:
+        logger.exception('Error during update_all_entity_cached_values')
+        task_instance.error(f'Error occurred: {exc}')
+        raise
+    finally:
+        background_task_utilities.task_on_complete(task_instance)
