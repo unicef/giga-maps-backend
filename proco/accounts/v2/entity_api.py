@@ -470,6 +470,590 @@ class BaseEntityDataLayerAPIViewSet(EntityDetailFilterMixin, APIView):
         return expression
 
 
+class LegacySchoolDataLayerMapViewSet(DataLayerMapViewSet):
+    """
+    Subclass of DataLayerMapViewSet specifically used by v2 endpoints
+    to ensure SQL queries handle unconfigured/empty legend configurations safely.
+    """
+    def get_static_map_query(self, env, request):
+        query = """
+                WITH bounds AS (SELECT {env} AS geom, {env}::box2d AS b2d
+                    ), prioritized_schools AS (
+                SELECT
+                    schools_school.id, schools_school.geopoint, schools_school.connectivity_status, {table_name}."{col_name}" AS field_value, ROW_NUMBER() OVER (
+                    PARTITION BY schools_school.geopoint
+                    ORDER BY
+                    CASE
+                    WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 1
+                    WHEN schools_school.connectivity_status = 'no' THEN 2
+                    ELSE 3
+                    END ASC, schools_school.id ASC
+                    ) AS priority_rank, (COUNT (*) OVER (PARTITION BY schools_school.geopoint) > 1) AS has_multiple_school_on_same_lat_lng
+                FROM schools_school
+                    INNER JOIN bounds
+                ON ST_Intersects(schools_school.geopoint, ST_Transform(bounds.geom, 4326))
+                    INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
+                    {school_weekly_join}
+                WHERE schools_school."deleted" IS NULL
+                    {country_condition}
+                    {admin1_condition}
+                    {school_condition}
+                    {same_school_coords_condition}
+                    {school_weekly_condition}
+                    )
+                    , sampled_schools AS (
+                SELECT id, geopoint, field_value, has_multiple_school_on_same_lat_lng
+                FROM prioritized_schools
+                WHERE priority_rank = 1
+                    {random_order}
+                    {limit_condition}
+                    )
+                    , mvtgeom AS (
+                SELECT DISTINCT ST_AsMVTGeom(ST_Transform(sampled_schools.geopoint, 3857), bounds.b2d) AS geom, {random_select_list}
+                    sampled_schools.id, sampled_schools.field_value, sampled_schools.has_multiple_school_on_same_lat_lng, 'connected' AS connectivity_status, {label_case_statements}
+                FROM sampled_schools
+                    CROSS JOIN bounds
+                    )
+                SELECT COALESCE(NULLIF(tile.mvt, ''::bytea), {empty_mvt_layer})
+                FROM (SELECT ST_AsMVT(DISTINCT mvtgeom.*, '{mvt_layer}') AS mvt
+                      FROM mvtgeom) tile; \
+                """
+
+        kwargs = copy.deepcopy(self.kwargs)
+
+        kwargs['mvt_layer'] = kwargs.get('mvt_layer', 'default')
+        kwargs['empty_mvt_layer'] = account_utilities.get_empty_mvt_layer_sql(kwargs['mvt_layer'])
+        kwargs['country_condition'] = ''
+        kwargs['admin1_condition'] = ''
+        kwargs['school_condition'] = ''
+
+        kwargs['school_weekly_join'] = ''
+        kwargs['school_weekly_condition'] = ''
+
+        kwargs['env'] = self.envelope_to_bounds_sql(env)
+
+        kwargs['limit_condition'] = ''
+        kwargs['random_order'] = ''
+        kwargs['random_select_list'] = ''
+        kwargs['same_school_coords_condition'] = ''
+
+        add_random_condition = True
+
+        if len(kwargs.get('school_ids', [])) > 0:
+            add_random_condition = False
+            kwargs['school_condition'] = 'AND schools_school."id" IN ({0})'.format(
+                ','.join([str(school_id) for school_id in kwargs['school_ids']])
+            )
+        elif len(kwargs.get('admin1_ids', [])) > 0:
+            if settings.ADMIN_MAP_API_SAMPLING_LIMIT:
+                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.ADMIN_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
+                add_random_condition = False
+
+            kwargs['admin1_condition'] = 'AND schools_school."admin1_id" IN ({0})'.format(
+                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
+            )
+        elif len(kwargs.get('country_ids', [])) > 0:
+            if settings.COUNTRY_MAP_API_SAMPLING_LIMIT:
+                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.COUNTRY_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
+                add_random_condition = False
+
+            kwargs['country_condition'] = 'AND schools_school."country_id" IN ({0})'.format(
+                ','.join([str(country_id) for country_id in kwargs['country_ids']])
+            )
+
+        if kwargs.get('exclude_schools_same_coords_except_id'):
+            kwargs['same_school_coords_condition'] = f"""
+                                        AND (
+                                            schools_school.id = {kwargs['exclude_schools_same_coords_except_id']}
+                                            OR NOT ST_Equals(
+                                                schools_school.geopoint,
+                                                (SELECT geopoint FROM schools_school WHERE id = {kwargs['exclude_schools_same_coords_except_id']})
+                                            )
+                                        )
+                                    """
+
+        if len(kwargs['school_filters']) > 0:
+            kwargs['school_condition'] += ' AND ' + kwargs['school_filters']
+
+        if len(kwargs['school_static_filters']) > 0:
+            kwargs['school_weekly_join'] = """
+            INNER JOIN "connection_statistics_schoolweeklystatus"
+                ON sws."id" = "connection_statistics_schoolweeklystatus"."id"
+            """
+            kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
+
+        legend_configs = kwargs['legend_configs']
+        label_cases = []
+        values_l = []
+        parameter_col_type = kwargs['parameter_col'].get('type', 'str').lower()
+        kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'sws')
+
+        for title, values_and_label in legend_configs.items():
+            values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
+                                 values_and_label.get('values', [])))
+
+            if len(values) > 0:
+                is_sql_value = 'SQL:' in values[0]
+                if is_sql_value:
+                    sql_statement = ' AND '.join(values).replace('SQL:', '').format(
+                        table_name=kwargs['table_name'],
+                        col_name=kwargs['col_name'],
+                    )
+                    label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
+                else:
+                    values_l.extend(values)
+                    if parameter_col_type == 'str':
+                        label_cases.append(
+                            """WHEN LOWER({table_name}."{col_name}") IN ({value}) THEN '{label}'""".format(
+                                table_name=kwargs['table_name'],
+                                col_name=kwargs['col_name'],
+                                label=title,
+                                value=','.join(["'" + str(v).lower() + "'" for v in values])
+                            ))
+                    elif parameter_col_type == 'int':
+                        label_cases.append(
+                            """WHEN {table_name}."{col_name}" IN ({value}) THEN '{label}'""".format(
+                                table_name=kwargs['table_name'],
+                                col_name=kwargs['col_name'],
+                                label=title,
+                                value=','.join([str(v) for v in values])
+                            ))
+            else:
+                if not any(c.startswith("ELSE ") for c in label_cases):
+                    label_cases.append("ELSE '{label}'".format(label=title))
+
+        label_case_statements_str = BaseEntityDataLayerAPIViewSet.build_case_expression(
+            label_cases,
+            alias='field_status',
+        )
+        label_case_statements_str = label_case_statements_str.replace(
+            f'{kwargs["table_name"]}."{kwargs["col_name"]}"',
+            'sampled_schools.field_value'
+        )
+        kwargs['label_case_statements'] = label_case_statements_str
+
+        if add_random_condition:
+            if 'limit' in request.query_params:
+                limit = request.query_params['limit']
+                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+            elif kwargs.get('MAP_API_SAMPLING_LIMIT'):
+                limit = kwargs['MAP_API_SAMPLING_LIMIT']
+                kwargs['random_order'] = 'ORDER BY random()'
+            else:
+                limit = '50000'
+                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+
+            kwargs['limit_condition'] = 'LIMIT ' + str(limit)
+            kwargs['random_select_list'] = 'random(),'
+
+        return query.format(**kwargs)
+
+    def get_live_map_query(self, env, request):
+        query = """
+                WITH bounds AS (SELECT {env} AS geom, {env}::box2d AS b2d
+                    ), mvtgeom AS (
+                SELECT DISTINCT ST_AsMVTGeom(ST_Transform("schools_school".geopoint, 3857), bounds.b2d) AS geom, {random_select_list}
+                    "schools_school".id, True AS is_rt_connected, sds.{col_name} AS field_avg, {case_conditions}
+                    'connected' AS connectivity_status, (COUNT (*) OVER (PARTITION BY "schools_school".geopoint) > 1)
+                    AS has_multiple_school_on_same_lat_lng
+                FROM schools_school
+                    INNER JOIN bounds
+                ON ST_Intersects("schools_school".geopoint, ST_Transform(bounds.geom, 4326))
+                    INNER JOIN (
+                    SELECT "schools_school"."id" AS school_id,
+                    "schools_school"."last_weekly_status_id",
+                    {col_function} AS "{col_name}"
+                    FROM "schools_school"
+                    INNER JOIN bounds ON ST_Intersects("schools_school".geopoint, ST_Transform(bounds.geom, 4326))
+                    INNER JOIN connection_statistics_schoolrealtimeregistration rt_status ON
+                    rt_status."school_id" = "schools_school".id
+                    {school_weekly_join}
+                    LEFT OUTER JOIN "connection_statistics_schooldailystatus" t ON (
+                    "schools_school"."id" = t."school_id"
+                    AND t."deleted" IS NULL
+                    AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
+                    AND t."live_data_source" IN ({live_source_types})
+                    )
+                    WHERE (
+                    "schools_school"."deleted" IS NULL
+                    AND rt_status."deleted" IS NULL
+                    {country_condition}
+                    {admin1_condition}
+                    {school_condition}
+                    {same_school_coords_condition}
+                    {school_weekly_condition}
+                    AND rt_status."rt_registered" = True
+                    AND rt_status."rt_registration_date":: date <= '{end_date}'
+                    )
+                    GROUP BY "schools_school"."id"
+                    ) AS sds ON sds.school_id = "schools_school".id
+                    {school_weekly_outer_join}
+                WHERE "schools_school"."deleted" IS NULL
+                    {random_order}
+                    {limit_condition}
+                    )
+                SELECT COALESCE(NULLIF(tile.mvt, ''::bytea), {empty_mvt_layer})
+                FROM (SELECT ST_AsMVT(DISTINCT mvtgeom.*, '{mvt_layer}') AS mvt
+                      FROM mvtgeom) tile; \
+                """
+
+        kwargs = copy.deepcopy(self.kwargs)
+
+        kwargs['mvt_layer'] = kwargs.get('mvt_layer', 'default')
+        kwargs['empty_mvt_layer'] = account_utilities.get_empty_mvt_layer_sql(kwargs['mvt_layer'])
+        kwargs['country_condition'] = ''
+        kwargs['admin1_condition'] = ''
+        kwargs['school_condition'] = ''
+
+        kwargs['school_weekly_join'] = ''
+        kwargs['school_weekly_condition'] = ''
+        kwargs['school_weekly_outer_join'] = ''
+
+        kwargs['env'] = self.envelope_to_bounds_sql(env)
+
+        kwargs['limit_condition'] = ''
+        kwargs['random_order'] = ''
+        kwargs['random_select_list'] = ''
+        kwargs['same_school_coords_condition'] = ''
+
+        add_random_condition = True
+
+        legend_configs = kwargs['legend_configs']
+        if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+            kwargs['table_name'] = 'sds'
+
+        if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
+            label_cases = []
+            uses_school_weekly_status = False
+            for title, values_and_label in legend_configs.items():
+                values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
+                                     values_and_label.get('values', [])))
+
+                if len(values) > 0:
+                    is_sql_value = 'SQL:' in values[0]
+                    if is_sql_value:
+                        sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
+                        sql_statement = account_utilities.rewrite_weekly_status_sql(sql_statement, entity_name='school')
+                        uses_school_weekly_status = uses_school_weekly_status or 'sws.' in sql_statement
+                        label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
+                else:
+                    if not any(c.startswith("ELSE ") for c in label_cases):
+                        label_cases.append("ELSE '{label}'".format(label=title))
+
+            kwargs['case_conditions'] = BaseEntityDataLayerAPIViewSet.build_case_expression(
+                label_cases,
+                alias='field_status',
+                trailing_comma=True,
+            )
+            if (
+                kwargs.get('layer_type') != accounts_models.DataLayer.LAYER_TYPE_LIVE
+                or uses_school_weekly_status
+            ):
+                kwargs['school_weekly_outer_join'] = """
+                INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
+                """
+        else:
+            kwargs['case_conditions'] = """
+                CASE WHEN sds.{col_name} >  {benchmark_value} THEN 'good'
+                    WHEN sds.{col_name} < {benchmark_value} AND sds.{col_name} >= {base_benchmark} THEN 'moderate'
+                    WHEN sds.{col_name} < {base_benchmark}  THEN 'bad'
+                    ELSE 'unknown'
+                END AS field_status,
+            """.format(**kwargs)
+
+            if kwargs['is_reverse'] is True:
+                kwargs['case_conditions'] = """
+                CASE WHEN sds.{col_name} < {base_benchmark}  THEN 'good'
+                    WHEN sds.{col_name} >= {base_benchmark} AND sds.{col_name} < {benchmark_value} THEN 'moderate'
+                    WHEN sds.{col_name} >= {benchmark_value} THEN 'bad'
+                    ELSE 'unknown'
+                END AS field_status,
+                """.format(**kwargs)
+
+        if len(kwargs.get('school_ids', [])) > 0:
+            add_random_condition = False
+            kwargs['school_condition'] = 'AND schools_school."id" IN ({0})'.format(
+                ','.join([str(school_id) for school_id in kwargs['school_ids']])
+            )
+        elif len(kwargs.get('admin1_ids', [])) > 0:
+            if settings.ADMIN_MAP_API_SAMPLING_LIMIT:
+                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.ADMIN_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
+                add_random_condition = False
+
+            kwargs['admin1_condition'] = 'AND schools_school."admin1_id" IN ({0})'.format(
+                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
+            )
+        elif len(kwargs.get('country_ids', [])) > 0:
+            if settings.COUNTRY_MAP_API_SAMPLING_LIMIT:
+                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.COUNTRY_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
+                add_random_condition = False
+
+            kwargs['country_condition'] = 'AND schools_school."country_id" IN ({0})'.format(
+                ','.join([str(country_id) for country_id in kwargs['country_ids']])
+            )
+
+        if kwargs.get('exclude_schools_same_coords_except_id'):
+            kwargs['same_school_coords_condition'] = f"""
+                                        AND (
+                                            schools_school.id = {kwargs['exclude_schools_same_coords_except_id']}
+                                            OR NOT ST_Equals(
+                                                schools_school.geopoint,
+                                                (SELECT geopoint FROM schools_school WHERE id = {kwargs['exclude_schools_same_coords_except_id']})
+                                            )
+                                        )
+                                    """
+
+        if len(kwargs['school_filters']) > 0:
+            kwargs['school_condition'] += ' AND ' + kwargs['school_filters']
+
+        if len(kwargs['school_static_filters']) > 0:
+            kwargs['school_weekly_join'] = """
+            INNER JOIN "connection_statistics_schoolweeklystatus"
+                ON sws."id" = "connection_statistics_schoolweeklystatus"."id"
+            """
+            kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
+
+        if add_random_condition:
+            if 'limit' in request.query_params:
+                limit = request.query_params['limit']
+                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+            elif kwargs.get('MAP_API_SAMPLING_LIMIT'):
+                limit = kwargs['MAP_API_SAMPLING_LIMIT']
+                kwargs['random_order'] = 'ORDER BY random()'
+            else:
+                limit = '50000'
+                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+
+            kwargs['limit_condition'] = 'LIMIT ' + str(limit)
+            kwargs['random_select_list'] = 'random(),'
+
+        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
+
+        return query.format(**kwargs)
+
+
+class LegacySchoolDataLayerInfoViewSet(DataLayerInfoViewSet):
+    """
+    Subclass of DataLayerInfoViewSet specifically used by v2 endpoints
+    to ensure SQL queries handle unconfigured/empty legend configurations safely.
+    """
+    def get_static_school_view_info_query(self):
+        query = """
+                SELECT schools_school."id",
+                       schools_school."name",
+                       schools_school."external_id",
+                       schools_school."giga_id_school",
+                       schools_school."is_verified_school",
+                       schools_school."country_id",
+                       c."name"                             AS country_name,
+                       schools_school."admin1_id",
+                       adm1_metadata."name"                 AS admin1_name,
+                       adm1_metadata."giga_id_admin"        AS admin1_code,
+                       adm1_metadata."description_ui_label" AS admin1_description_ui_label,
+                       schools_school."admin2_id",
+                       adm2_metadata."name"                 AS admin2_name,
+                       adm2_metadata."giga_id_admin"        AS admin2_code,
+                       adm2_metadata."description_ui_label" AS admin2_description_ui_label,
+                       schools_school."environment",
+                       schools_school."education_level", {table_name}."{col_name}" AS field_value, {label_case_statements}
+                    ST_AsGeoJSON(ST_Transform(schools_school."geopoint", 4326)) AS geopoint, CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                    WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
+                    ELSE 'unknown'
+                END
+                AS connectivity_status
+        FROM "schools_school"
+        INNER JOIN locations_country c ON c.id = schools_school.country_id
+        INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
+        LEFT JOIN locations_countryadminmetadata AS adm1_metadata
+            ON adm1_metadata."id" = schools_school.admin1_id
+            AND adm1_metadata."layer_name" = 'adm1'
+            AND adm1_metadata."deleted" IS NULL
+        LEFT JOIN locations_countryadminmetadata AS adm2_metadata
+            ON adm2_metadata."id" = schools_school.admin2_id
+            AND adm2_metadata."layer_name" = 'adm2'
+            AND adm2_metadata."deleted" IS NULL
+        WHERE "schools_school"."id" IN ({ids})
+            AND c."deleted" IS NULL \
+                """
+
+        kwargs = copy.deepcopy(self.kwargs)
+        kwargs['ids'] = ','.join(kwargs['school_ids'])
+
+        legend_configs = kwargs['legend_configs']
+        label_cases = []
+        values_l = []
+        parameter_col_type = kwargs['parameter_col'].get('type', 'str').lower()
+        kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'sws')
+
+        for title, values_and_label in legend_configs.items():
+            values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
+                                 values_and_label.get('values', [])))
+
+            if len(values) > 0:
+                is_sql_value = 'SQL:' in values[0]
+                if is_sql_value:
+                    sql_statement = ' AND '.join(values).replace('SQL:', '').format(
+                        table_name=kwargs['table_name'],
+                        col_name=kwargs['col_name'],
+                    )
+                    label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
+                else:
+                    values_l.extend(values)
+                    if parameter_col_type == 'str':
+                        label_cases.append(
+                            """WHEN LOWER({table_name}."{col_name}") IN ({value}) THEN '{label}'""".format(
+                                table_name=kwargs['table_name'],
+                                col_name=kwargs['col_name'],
+                                label=title,
+                                value=','.join(["'" + str(v).lower() + "'" for v in values])
+                            ))
+                    elif parameter_col_type == 'int':
+                        label_cases.append(
+                            """WHEN {table_name}."{col_name}" IN ({value}) THEN '{label}'""".format(
+                                table_name=kwargs['table_name'],
+                                col_name=kwargs['col_name'],
+                                label=title,
+                                value=','.join([str(v) for v in values])
+                            ))
+            else:
+                if not any(c.startswith("ELSE ") for c in label_cases):
+                    label_cases.append("ELSE '{label}'".format(label=title))
+
+        kwargs['label_case_statements'] = BaseEntityDataLayerAPIViewSet.build_case_expression(
+            label_cases,
+            alias='field_status',
+            trailing_comma=True,
+        )
+
+        return query.format(**kwargs)
+
+    def get_live_school_view_info_query(self):
+        query = """
+        SELECT
+            schools_school."id"                                           AS school_id,
+            adm1_metadata."name"                                          AS admin1_name,
+            adm1_metadata."description_ui_label"                          AS admin1_description_ui_label,
+            adm2_metadata."name"                                          AS admin2_name,
+            adm2_metadata."description_ui_label"                          AS admin2_description_ui_label,
+            c."name"                                                      AS country_name,
+            adm1_metadata."giga_id_admin"                                 AS admin1_code,
+            adm2_metadata."giga_id_admin"                                 AS admin2_code,
+            sds."{col_name}",
+            sws."id"                                                      AS last_weekly_status_id,
+            sws."download_speed_benchmark"                                AS download_speed_benchmark,
+            srr."rt_registered",
+            srr."rt_registration_date",
+            {benchmark_value_sql}
+            {case_conditions}
+        FROM "schools_school" schools_school
+        INNER JOIN public.locations_country c ON c."id" = schools_school."country_id"
+        LEFT JOIN "connection_statistics_schoolweeklystatus" sws ON schools_school."last_weekly_status_id" = sws."id"
+        LEFT JOIN public.locations_countryadminmetadata AS adm1_metadata
+            ON adm1_metadata."id" = schools_school.admin1_id
+            AND adm1_metadata."layer_name" = 'adm1'
+            AND adm1_metadata."deleted" IS NULL
+        LEFT JOIN public.locations_countryadminmetadata AS adm2_metadata
+            ON adm2_metadata."id" = schools_school.admin2_id
+            AND adm2_metadata."layer_name" = 'adm2'
+            AND adm2_metadata."deleted" IS NULL
+        LEFT JOIN "connection_statistics_schoolrealtimeregistration" AS srr
+            ON schools_school."id" = srr."school_id"
+            AND srr."deleted" IS NULL
+        LEFT JOIN (
+            SELECT "schools_school"."id" AS school_id,
+                {col_function} AS "{col_name}"
+            FROM "schools_school"
+            LEFT OUTER JOIN "connection_statistics_schooldailystatus" t ON (
+                "schools_school"."id" = t."school_id"
+                AND t."deleted" IS NULL
+                AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
+                AND t."live_data_source" IN ({live_source_types})
+            )
+            WHERE ("schools_school"."id" IN ({ids})
+                AND "schools_school"."deleted" IS NULL)
+            GROUP BY "schools_school"."id"
+            ORDER BY "schools_school"."id" ASC
+        ) AS sds ON sds.school_id = schools_school.id
+        WHERE "schools_school"."id" IN ({ids})
+            AND c."deleted" IS NULL
+            AND schools_school."deleted" IS NULL
+        GROUP BY schools_school."id", srr."rt_registered", srr."rt_registration_date",
+            adm1_metadata."name", adm1_metadata."description_ui_label",
+            adm2_metadata."name", adm2_metadata."description_ui_label",
+            c."name", adm1_metadata."giga_id_admin", adm2_metadata."giga_id_admin",
+            sds."{col_name}", sws."id", sws."download_speed_benchmark"
+        ORDER BY schools_school."id" ASC \
+                """
+
+        kwargs = copy.deepcopy(self.kwargs)
+        kwargs['ids'] = ','.join(kwargs['school_ids'])
+
+        if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+            kwargs['table_name'] = 'sds'
+
+        kwargs['benchmark_value_sql'] = ''
+        benchmark_value = kwargs['benchmark_value']
+        if benchmark_value is not None and isinstance(benchmark_value, str) and 'SQL:' in benchmark_value:
+            kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(
+                **kwargs) + ' AS benchmark_sql_value,'
+            kwargs['benchmark_value_sql'] = account_utilities.rewrite_weekly_status_sql(
+                kwargs['benchmark_value_sql'], entity_name='school'
+            )
+
+        legend_configs = kwargs['legend_configs']
+        if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
+            label_cases = []
+            for title, values_and_label in legend_configs.items():
+                values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
+                                     values_and_label.get('values', [])))
+
+                if len(values) > 0:
+                    is_sql_value = 'SQL:' in values[0]
+                    if is_sql_value:
+                        sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
+                        sql_statement = account_utilities.rewrite_weekly_status_sql(
+                            sql_statement, entity_name='school'
+                        )
+                        label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
+                else:
+                    if not any(c.startswith("ELSE ") for c in label_cases):
+                        label_cases.append("ELSE '{label}'".format(label=title))
+
+            kwargs['case_conditions'] = BaseEntityDataLayerAPIViewSet.build_case_expression(
+                label_cases,
+                alias='live_avg_connectivity',
+            )
+        else:
+            kwargs['case_conditions'] = """
+            CASE
+                WHEN sds."{col_name}" > {benchmark_value} THEN 'good'
+                WHEN (sds."{col_name}" >= {base_benchmark} AND sds."{col_name}" <= {benchmark_value})
+                    THEN 'moderate'
+                WHEN sds."{col_name}" < {base_benchmark} THEN 'bad'
+                ELSE 'unknown' END AS live_avg_connectivity
+            """.format(**kwargs)
+
+            if kwargs['is_reverse'] is True:
+                kwargs['case_conditions'] = """
+                CASE
+                    WHEN sds."{col_name}" < {benchmark_value} THEN 'good'
+                    WHEN (sds."{col_name}" >= {benchmark_value} AND sds."{col_name}" <= {base_benchmark})
+                        THEN 'moderate'
+                    WHEN sds."{col_name}" > {base_benchmark} THEN 'bad'
+                    ELSE 'unknown' END AS live_avg_connectivity
+                """.format(**kwargs)
+
+        return query.format(**kwargs)
+
+
 @method_decorator([
     custom_cache_control(
         public=True,
@@ -560,7 +1144,7 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                 for layer_context in self.layer_sql_contexts:
                     self.kwargs = copy.deepcopy(layer_context['kwargs'])
                     if layer_context['is_legacy']:
-                        school_map_view = DataLayerMapViewSet()
+                        school_map_view = LegacySchoolDataLayerMapViewSet()
                         school_map_view.kwargs = self.kwargs
                         if self.kwargs['layer_type'] == accounts_models.DataLayer.LAYER_TYPE_LIVE:
                             sql = school_map_view.get_live_map_query(env, request)
@@ -1184,7 +1768,7 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                 'pk': layer_id,
                 'mvt_layer': LEGACY_MODEL,
             })
-            school_view = DataLayerMapViewSet.as_view()
+            school_view = LegacySchoolDataLayerMapViewSet.as_view()
             return school_view(request._request, *args, **kwargs)
 
         use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
@@ -2361,7 +2945,6 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         except Exception as sql_exc:
             return {'error': str(sql_exc)}
 
-        import sys; sys.stderr.write(f"INFO_PANEL_ROWS: {info_panel_rows}\nKWARGS: {self.kwargs}\n")
         sorted_rows = self.sort_info_panel_rows(selected_ids, info_panel_rows, statistics, 'school_id')
 
         include_same_location = scoped_query_params.get('include_same_location_schools') == 'true'
@@ -2585,9 +3168,9 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             self.kwargs['school_real_time_filters'] = ''
 
             if is_live_layer:
-                query = DataLayerInfoViewSet.get_info_query(self)
+                query = LegacySchoolDataLayerInfoViewSet.get_info_query(self)
             else:
-                query = DataLayerInfoViewSet.get_static_info_query(self, total_query_labels)
+                query = LegacySchoolDataLayerInfoViewSet.get_static_info_query(self, total_query_labels)
 
             query_result = db_utilities.sql_to_response(
                 query,
@@ -2805,13 +3388,13 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         try:
             if is_live_layer:
                 query_result = db_utilities.sql_to_response(
-                    DataLayerInfoViewSet.get_info_query(self),
+                    LegacySchoolDataLayerInfoViewSet.get_info_query(self),
                     label=self.__class__.__name__,
                     db_var=settings.READ_ONLY_DB_KEY,
                     raise_exception=True)
             else:
                 query_result = db_utilities.sql_to_response(
-                    DataLayerInfoViewSet.get_static_info_query(self, query_labels),
+                    LegacySchoolDataLayerInfoViewSet.get_static_info_query(self, query_labels),
                     label=self.__class__.__name__,
                     db_var=settings.READ_ONLY_DB_KEY,
                     raise_exception=True)
@@ -2870,7 +3453,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 graph_data = []
                 live_avg = 0
             else:
-                graph_data, positive_speeds = self.generate_school_graph_data(DataLayerInfoViewSet)
+                graph_data, positive_speeds = self.generate_school_graph_data(LegacySchoolDataLayerInfoViewSet)
                 live_avg = self.get_live_avg(parameter_col_function.get('name', 'avg'), positive_speeds)
 
             rounded_base_benchmark_int = round(
@@ -3014,7 +3597,7 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             if is_legacy:
                 return self.build_school_detail_response(
                     request=request,
-                    school_viewset_cls=DataLayerInfoViewSet,
+                    school_viewset_cls=LegacySchoolDataLayerInfoViewSet,
                     is_live_layer=is_live_layer,
                     parameter_col_function=parameter_col_function,
                     benchmark_value=benchmark_value,
