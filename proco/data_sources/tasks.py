@@ -11,7 +11,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 from django.apps import apps
 from django.conf import settings
 from django.contrib.gis.geos import Point
-from django.core.exceptions import ImproperlyConfigured, ValidationError
+from django.core.exceptions import ImproperlyConfigured
 from django.core.management import call_command
 from django.core.cache import cache
 from django.db import connection, transaction
@@ -73,6 +73,30 @@ def get_coverage_status_from_type(coverage_type):
         statistics_models.SchoolWeeklyStatus.COVERAGE_2G: 'moderate',
         statistics_models.SchoolWeeklyStatus.COVERAGE_NO: 'no',
     }.get(coverage_type, 'unknown')
+
+
+def normalize_boolean_field_value(value):
+    if value is True or value is False or value is None:
+        return value
+    if core_utilities.is_blank_string(value):
+        return None
+
+    normalized_value = str(value).lower().strip()
+    if normalized_value in core_configs.true_choices:
+        return True
+    if normalized_value in ['false', 'no', '0']:
+        return False
+    if normalized_value in ['unknown', 'null', 'none', 'n/a', 'na']:
+        return None
+    return value
+
+
+def normalize_defaults_for_model_fields(defaults, model_field_map):
+    for field_name, value in defaults.items():
+        field = model_field_map.get(field_name)
+        if field and field.get_internal_type() == 'BooleanField':
+            defaults[field_name] = normalize_boolean_field_value(value)
+    return defaults
 
 
 @app.task
@@ -1659,6 +1683,7 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
             task_instance.info('Total published records to update: {}'.format(len(new_published_record_ids)))
 
             entity_field_names = {f.name for f in Entity._meta.fields}
+            entity_field_map = {f.name: f for f in Entity._meta.fields}
             lookup_fields = {
                 'giga_id', 'country', 'entity_type',
                 'country_id', 'entity_type_id', 'id',
@@ -1667,6 +1692,7 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
             }
             if detail_model:
                 detail_entity_field_names = {f.name for f in detail_model._meta.fields}
+                detail_entity_field_map = {f.name: f for f in detail_model._meta.fields}
                 detail_lookup_fields = {'entity', 'entity_id', 'id', 'deleted'}
 
             for i in range(0, len(new_published_record_ids), 2000):
@@ -1744,6 +1770,7 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
                         )
                         entity_defaults['coverage_type'] = normalize_coverage_type(getattr(row, 'coverage_type', None))
                         entity_defaults['coverage_status'] = get_coverage_status_from_type(entity_defaults['coverage_type'])
+                        entity_defaults = normalize_defaults_for_model_fields(entity_defaults, entity_field_map)
 
                         # Map connectivity/connectivity_govt to connectivity_status for Entity
                         connectivity_govt = str(getattr(row, 'connectivity_govt', '') or '').lower().strip()
@@ -1826,6 +1853,10 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
                                 name: getattr(row, name)
                                 for name in common_detail_fields
                             }
+                            detail_entity_defaults = normalize_defaults_for_model_fields(
+                                detail_entity_defaults,
+                                detail_entity_field_map,
+                            )
 
                             if entity.id in existing_details:
                                 detail = existing_details[entity.id]
