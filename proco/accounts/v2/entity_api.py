@@ -817,7 +817,7 @@ class LegacySchoolDataLayerMapViewSet(DataLayerMapViewSet):
         if len(kwargs['school_static_filters']) > 0:
             kwargs['school_weekly_join'] = """
             INNER JOIN "connection_statistics_schoolweeklystatus"
-                ON sws."id" = "connection_statistics_schoolweeklystatus"."id"
+                ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
             """
             kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
 
