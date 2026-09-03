@@ -734,6 +734,9 @@ def update_all_entity_cached_values(*args, clean_cache=False):
         for country in entity_countries:
             country_wise_task_list = [
                 update_cached_value.s(
+                    url=reverse('entities:retrieve-entity-country', kwargs={'pk': country.code.lower()})
+                ),
+                update_cached_value.s(
                     url=reverse('entities:global-stat-all-entities'),
                     query_params={'country_id': country.id, 'entity_type__code': entity_type.code},
                 ),
