@@ -2009,6 +2009,14 @@ def fetch_entity_giga_meter_ping_data(entity_type_code, country_iso3, logger, la
             )
             response = requests.get(api_endpoint, params=params, headers=headers)
 
+            if response.status_code == status.HTTP_404_NOT_FOUND:
+                logger.warning(
+                    'Entity Giga Meter - No measurement data found for country %s on page %d. '
+                    'Skipping country. URL: %s Response: %s',
+                    country_iso3, page, response.url, response.text,
+                )
+                break
+
             if response.status_code != status.HTTP_200_OK:
                 logger.error(
                     'Entity Giga Meter - Failed to fetch data: %s - %s',
@@ -2496,10 +2504,10 @@ def update_entity_live_data_from_giga_meter(
 
     Execution Frequency: 3 times a day (configured in taskapp/__init__.py)
     """
-    if not settings.ENTITY_LIVE_DATA_ENABLE_AUTO_SYNC:
+    if not settings.HEALTH_GIGA_METER_ENABLE_AUTO_SYNC:
         logger.warning(
-            'Entity live data sync is disabled. '
-            'To enable, update "ENTITY_LIVE_DATA_ENABLE_AUTO_SYNC" to True.'
+            'Entity Giga Meter live data sync is disabled. '
+            'To enable, update "HEALTH_GIGA_METER_ENABLE_AUTO_SYNC" to True.'
         )
         return
 
