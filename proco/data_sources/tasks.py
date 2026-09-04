@@ -302,7 +302,11 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
 
             task_instance.info('Total published records to update: {}'.format(new_published_records.count()))
 
-            for data_chunk in core_utilities.queryset_iterator(new_published_records, chunk_size=100, print_msg=False):
+            new_published_records = new_published_records.select_related('country', 'school')
+            admin_metadata_cache = {}
+
+            for data_chunk in core_utilities.queryset_iterator(new_published_records, chunk_size=1000, print_msg=False):
+                rows_to_update = []
                 for row in data_chunk:
                     try:
                         # Detecting changes for Slack Notification
@@ -342,19 +346,25 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
 
                         admin1_instance = None
                         if not core_utilities.is_blank_string(row.admin1_id_giga):
-                            admin1_instance = CountryAdminMetadata.objects.filter(
-                                country=row.country,
-                                giga_id_admin=row.admin1_id_giga,
-                                layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN1,
-                            ).first()
+                            admin1_key = (row.country_id, row.admin1_id_giga, CountryAdminMetadata.LAYER_NAME_ADMIN1)
+                            if admin1_key not in admin_metadata_cache:
+                                admin_metadata_cache[admin1_key] = CountryAdminMetadata.objects.filter(
+                                    country=row.country,
+                                    giga_id_admin=row.admin1_id_giga,
+                                    layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN1,
+                                ).first()
+                            admin1_instance = admin_metadata_cache[admin1_key]
 
                         admin2_instance = None
                         if not core_utilities.is_blank_string(row.admin2_id_giga):
-                            admin2_instance = CountryAdminMetadata.objects.filter(
-                                country=row.country,
-                                giga_id_admin=row.admin2_id_giga,
-                                layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN2,
-                            ).first()
+                            admin2_key = (row.country_id, row.admin2_id_giga, CountryAdminMetadata.LAYER_NAME_ADMIN2)
+                            if admin2_key not in admin_metadata_cache:
+                                admin_metadata_cache[admin2_key] = CountryAdminMetadata.objects.filter(
+                                    country=row.country,
+                                    giga_id_admin=row.admin2_id_giga,
+                                    layer_name=CountryAdminMetadata.LAYER_NAME_ADMIN2,
+                                ).first()
+                            admin2_instance = admin_metadata_cache[admin2_key]
 
                         school, created = School.objects.update_or_create(
                             giga_id_school=row.school_id_giga,
@@ -530,15 +540,20 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
 
                         row.is_read = True
                         row.school = school
-                        row.save()
+                        rows_to_update.append(row)
 
                         updated_school_ids.append(school.id)
                         if created:
                             created_school_ids.append(school.id)
+                    except SoftTimeLimitExceeded:
+                        raise
                     except Exception as ex:
                         logger.error('Error reported on publishing: {0}'.format(ex))
                         logger.error('Record: {0}'.format(row.__dict__))
                         task_instance.info('Error reported for ID ({0}) on publishing: {1}'.format(row.id, ex))
+
+                if rows_to_update:
+                    sources_models.SchoolMasterData.objects.bulk_update(rows_to_update, fields=['is_read', 'school'])
 
             if len(updated_school_ids) > 0:
                 for i in range(0, len(updated_school_ids), 20):
@@ -550,12 +565,13 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                 call_command('index_rebuild_schools', *cmd_args)
 
             send_slack_notifications(change_summary, publish_source=publish_source)
-            background_task_utilities.task_on_complete(task_instance)
         except SoftTimeLimitExceeded:
             send_slack_notifications(change_summary, publish_source=publish_source)
             raise
         except Exception as e:
             raise
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
@@ -812,7 +828,7 @@ def load_data_from_qos_apis(*args):
 
 
 @app.task(soft_time_limit=2 * 60 * 60, time_limit=2 * 60 * 60)
-def cleanup_school_master_rows():
+def cleanup_school_master_rows(country_ids=None):
     task_key = 'cleanup_school_master_rows_status_{current_time}'.format(
         current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
     task_id = current_task.request.id or str(uuid.uuid4())
@@ -820,63 +836,50 @@ def cleanup_school_master_rows():
 
     if task_instance:
         logger.debug('Not found running job for school master cleanup task: {}'.format(task_key))
-        country_ids = list(sources_models.SchoolMasterData.objects.values_list('country_id', flat=True).distinct())
-        for country_id in country_ids:
-            if not country_id:
-                continue
-            with connection.cursor() as cursor:
-                cursor.execute("""
-                    DELETE FROM data_sources_schoolmasterdata
-                    WHERE country_id = %s AND id IN (
-                        SELECT id FROM (
-                            SELECT id, ROW_NUMBER() OVER (
-                                PARTITION BY school_id_giga
-                                ORDER BY created DESC
-                            ) as rn
-                            FROM data_sources_schoolmasterdata
-                            WHERE country_id = %s AND status IN ('DRAFT', 'UPDATED_IN_DRAFT', 'DRAFT_LOCKED', 'UPDATED_IN_DRAFT_LOCKED', 'DELETED', 'DELETED_PUBLISHED', 'DISCARDED')
-                        ) t
-                        WHERE t.rn > 1
-                    )
-                """, [country_id, country_id])
-
-                cursor.execute("""
-                    DELETE FROM data_sources_schoolmasterdata
-                    WHERE country_id = %s AND id IN (
-                        SELECT id FROM (
-                            SELECT id, ROW_NUMBER() OVER (
-                                PARTITION BY school_id_giga
-                                ORDER BY published_at DESC
-                            ) as rn
-                            FROM data_sources_schoolmasterdata
-                            WHERE country_id = %s AND status = 'PUBLISHED'
-                        ) t
-                        WHERE t.rn > 1
-                    )
-                """, [country_id, country_id])
-
-                cursor.execute("""
-                    DELETE FROM data_sources_schoolmasterdata
-                    WHERE country_id = %s AND id IN (
-                        SELECT id FROM (
-                            SELECT id, ROW_NUMBER() OVER (
-                                PARTITION BY school_id_giga
-                                ORDER BY created DESC
-                            ) as rn
-                            FROM data_sources_schoolmasterdata
-                            WHERE country_id = %s AND is_read = True AND status != 'PUBLISHED'
-                        ) t
-                        WHERE t.rn > 1
-                    )
-                """, [country_id, country_id])
-        task_instance.info('Deleted duplicate rows for same School GIGA ID chunked by country')
-        background_task_utilities.task_on_complete(task_instance)
+        try:
+            if not country_ids:
+                country_ids = list(sources_models.SchoolMasterData.objects.values_list('country_id', flat=True).distinct())
+            for country_id in country_ids:
+                if not country_id:
+                    continue
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute("""
+                            DELETE FROM data_sources_schoolmasterdata target
+                            USING (
+                                SELECT id FROM (
+                                    SELECT id, ROW_NUMBER() OVER (
+                                        PARTITION BY school_id_giga, (status = 'PUBLISHED')
+                                        ORDER BY CASE WHEN status = 'PUBLISHED' THEN published_at ELSE created END DESC NULLS LAST, id DESC
+                                    ) as rn
+                                    FROM data_sources_schoolmasterdata
+                                    WHERE country_id = %s
+                                      AND (
+                                          status IN ('DRAFT', 'UPDATED_IN_DRAFT', 'DRAFT_LOCKED', 'UPDATED_IN_DRAFT_LOCKED', 'DELETED', 'DELETED_PUBLISHED', 'DISCARDED', 'PUBLISHED')
+                                          OR is_read = True
+                                      )
+                                ) t
+                                WHERE t.rn > 1
+                            ) dupes
+                            WHERE target.country_id = %s AND target.id = dupes.id
+                        """, [country_id, country_id])
+                except Exception as ex:
+                    logger.error('Error during cleanup for country {}: {}'.format(country_id, ex))
+                    task_instance.info('Error during cleanup for country {}: {}'.format(country_id, ex))
+                    break
+            else:
+                task_instance.info('Deleted duplicate rows for same School GIGA ID chunked by country')
+        except Exception as ex:
+            logger.error('Error in cleanup_school_master_rows: {}'.format(ex))
+            task_instance.info('Error in cleanup_school_master_rows: {}'.format(ex))
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=2 * 60 * 60, time_limit=2 * 60 * 60)
-def cleanup_health_entity_master_rows():
+def cleanup_health_entity_master_rows(country_ids=None):
     task_key = 'cleanup_health_entity_master_rows_status_{current_time}'.format(
         current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
     task_id = current_task.request.id or str(uuid.uuid4())
@@ -884,57 +887,44 @@ def cleanup_health_entity_master_rows():
 
     if task_instance:
         logger.debug('Not found running job for health master cleanup task: {}'.format(task_key))
-        country_ids = list(sources_models.HealthEntityMasterIntermediateData.objects.values_list('country_id', flat=True).distinct())
-        for country_id in country_ids:
-            if not country_id:
-                continue
-            with connection.cursor() as cursor:
-                cursor.execute("""
-                    DELETE FROM data_sources_healthentitymasterintermediatedata
-                    WHERE country_id = %s AND id IN (
-                        SELECT id FROM (
-                            SELECT id, ROW_NUMBER() OVER (
-                                PARTITION BY health_id_giga
-                                ORDER BY created DESC
-                            ) as rn
-                            FROM data_sources_healthentitymasterintermediatedata
-                            WHERE country_id = %s AND status IN ('DRAFT', 'UPDATED_IN_DRAFT', 'DRAFT_LOCKED', 'UPDATED_IN_DRAFT_LOCKED', 'DELETED', 'DELETED_PUBLISHED', 'DISCARDED')
-                        ) t
-                        WHERE t.rn > 1
-                    )
-                """, [country_id, country_id])
-
-                cursor.execute("""
-                    DELETE FROM data_sources_healthentitymasterintermediatedata
-                    WHERE country_id = %s AND id IN (
-                        SELECT id FROM (
-                            SELECT id, ROW_NUMBER() OVER (
-                                PARTITION BY health_id_giga
-                                ORDER BY published_at DESC
-                            ) as rn
-                            FROM data_sources_healthentitymasterintermediatedata
-                            WHERE country_id = %s AND status = 'PUBLISHED'
-                        ) t
-                        WHERE t.rn > 1
-                    )
-                """, [country_id, country_id])
-
-                cursor.execute("""
-                    DELETE FROM data_sources_healthentitymasterintermediatedata
-                    WHERE country_id = %s AND id IN (
-                        SELECT id FROM (
-                            SELECT id, ROW_NUMBER() OVER (
-                                PARTITION BY health_id_giga
-                                ORDER BY created DESC
-                            ) as rn
-                            FROM data_sources_healthentitymasterintermediatedata
-                            WHERE country_id = %s AND is_read = True AND status != 'PUBLISHED'
-                        ) t
-                        WHERE t.rn > 1
-                    )
-                """, [country_id, country_id])
-        task_instance.info('Deleted duplicate rows for same Health GIGA ID chunked by country')
-        background_task_utilities.task_on_complete(task_instance)
+        try:
+            if not country_ids:
+                country_ids = list(sources_models.HealthEntityMasterIntermediateData.objects.values_list('country_id', flat=True).distinct())
+            for country_id in country_ids:
+                if not country_id:
+                    continue
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute("""
+                            DELETE FROM data_sources_healthentitymasterintermediatedata target
+                            USING (
+                                SELECT id FROM (
+                                    SELECT id, ROW_NUMBER() OVER (
+                                        PARTITION BY health_id_giga, (status = 'PUBLISHED')
+                                        ORDER BY CASE WHEN status = 'PUBLISHED' THEN published_at ELSE created END DESC NULLS LAST, id DESC
+                                    ) as rn
+                                    FROM data_sources_healthentitymasterintermediatedata
+                                    WHERE country_id = %s
+                                      AND (
+                                          status IN ('DRAFT', 'UPDATED_IN_DRAFT', 'DRAFT_LOCKED', 'UPDATED_IN_DRAFT_LOCKED', 'DELETED', 'DELETED_PUBLISHED', 'DISCARDED', 'PUBLISHED')
+                                          OR is_read = True
+                                      )
+                                ) t
+                                WHERE t.rn > 1
+                            ) dupes
+                            WHERE target.country_id = %s AND target.id = dupes.id
+                        """, [country_id, country_id])
+                except Exception as ex:
+                    logger.error('Error during cleanup for country {}: {}'.format(country_id, ex))
+                    task_instance.info('Error during cleanup for country {}: {}'.format(country_id, ex))
+                    break
+            else:
+                task_instance.info('Deleted duplicate rows for same Health GIGA ID chunked by country')
+        except Exception as ex:
+            logger.error('Error in cleanup_health_entity_master_rows: {}'.format(ex))
+            task_instance.info('Error in cleanup_health_entity_master_rows: {}'.format(ex))
+        finally:
+            background_task_utilities.task_on_complete(task_instance)
     else:
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
