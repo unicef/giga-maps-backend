@@ -1427,9 +1427,11 @@ def validate_schema_and_sync_schema_table_data(profile_file, schema_name, share_
             return changes_for_countries, deleted_entities, errors
         else:
             logger.warning('Health Master schema ({0}) does not exist to use for share ({1}).'.format(schema_name,
-                                                                                                    share_name))
+                                                                                                     share_name))
     else:
         logger.warning('Health Master share ({0}) does not exist to use.'.format(share_name))
+
+    return changes_for_countries, deleted_entities, errors
 
 
 def load_entity_data_from_health_master_apis(country_iso3_format=None):
@@ -1458,6 +1460,14 @@ def load_entity_data_from_health_master_apis(country_iso3_format=None):
         for country_code in ds_settings['COUNTRY_EXCLUSION_LIST']
         if country_code.strip()
     ]
+
+    if len(country_codes_for_inclusion) == 0:
+        logger.warning(
+            'HEALTH_MASTER_COUNTRY_INCLUSION_LIST is not configured. '
+            'Skipping Health Master data pull.'
+        )
+        return
+
     profile_json = {
         'shareCredentialsVersion': ds_settings.get('SHARE_CREDENTIALS_VERSION', 1),
         'endpoint': ds_settings.get('ENDPOINT'),
