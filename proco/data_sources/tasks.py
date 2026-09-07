@@ -293,7 +293,7 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
 
             new_published_records = sources_models.SchoolMasterData.objects.filter(
                 status=sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED, is_read=False,
-            )
+            ).select_related('country', 'school', 'school__admin1', 'school__admin2', 'school__last_weekly_status')
 
             if published_row:
                 new_published_records = new_published_records.filter(pk=published_row.id)
