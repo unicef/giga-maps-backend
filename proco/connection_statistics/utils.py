@@ -332,17 +332,19 @@ def aggregate_entity_daily_status_to_entity_weekly_status(country, date, entity_
 
         entity_weekly.save()
 
-        # Update the entity's last_weekly_status and connectivity_status
+        # Update the entity's last_weekly_status and connectivity_status.  A
+        # null weekly speed means that this week has no live measurement; it
+        # must not erase a status derived from static master data.
         entity = entity_weekly.entity
         update_fields = []
 
-        status = 'unknown'
         if entity_weekly.connectivity_speed is not None:
-            status = statuses_schema.get_connectivity_status_by_connectivity_speed(entity_weekly.connectivity_speed)
-
-        if entity.connectivity_status != status:
-            entity.connectivity_status = status
-            update_fields.append('connectivity_status')
+            status = statuses_schema.get_connectivity_status_by_connectivity_speed(
+                entity_weekly.connectivity_speed
+            )
+            if entity.connectivity_status != status:
+                entity.connectivity_status = status
+                update_fields.append('connectivity_status')
 
         if entity.last_weekly_status_id != entity_weekly.id:
             if not entity.last_weekly_status or entity.last_weekly_status.date < entity_weekly.date:

@@ -1,6 +1,5 @@
 import logging
 import uuid
-
 from datetime import timedelta
 
 from celery import chain
@@ -11,12 +10,13 @@ from django.db.models import Q
 from django.db.models.functions.text import Lower
 from django.urls import reverse
 from rest_framework.test import APIClient
+
 from proco.background import utils as background_task_utilities
 from proco.core import db_utils as db_utilities
 from proco.core import utils as core_utilities
+from proco.schools.constants import statuses_schema
 from proco.taskapp import app
 from proco.utils.dates import format_date, to_date
-from proco.schools.constants import statuses_schema
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -320,17 +320,16 @@ def populate_school_registration_data():
     if task_instance:
         task_instance.info(f'Not found running job with name: {task_key}')
         sql = """
-        SELECT DISTINCT sds.school_id
-        FROM public.connection_statistics_schooldailystatus AS sds
-        INNER JOIN public.schools_school s ON s.id = sds.school_id
-        LEFT JOIN public.connection_statistics_schoolrealtimeregistration AS srt
-            ON sds.school_id = srt.school_id
-            AND srt.deleted IS NULL
-        WHERE
-            s.deleted IS NULL
-            AND sds.deleted IS NULL
-            AND srt.school_id IS NULL
-        """
+              SELECT DISTINCT sds.school_id
+              FROM public.connection_statistics_schooldailystatus AS sds
+                       INNER JOIN public.schools_school s ON s.id = sds.school_id
+                       LEFT JOIN public.connection_statistics_schoolrealtimeregistration AS srt
+                                 ON sds.school_id = srt.school_id
+                                     AND srt.deleted IS NULL
+              WHERE s.deleted IS NULL
+                AND sds.deleted IS NULL
+                AND srt.school_id IS NULL \
+              """
 
         school_ids_missing_in_rt_table = db_utilities.sql_to_response(sql, label='SchoolRealtimeRegistration')
         if school_ids_missing_in_rt_table:
@@ -436,7 +435,6 @@ def redo_entity_aggregations_task(country_id, year, week_no, entity_type_code=No
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
-
 @app.task(soft_time_limit=10 * 60 * 60, time_limit=10 * 60 * 60)
 def populate_school_new_fields_task(start_school_id, end_school_id, country_id, *args, school_ids=None):
     """
@@ -520,18 +518,17 @@ def populate_entity_registration_data():
     if task_instance:
         task_instance.info(f'Not found running job with name: {task_key}')
         sql = '''
-        SELECT DISTINCT sds.entity_id
-        FROM public.connection_statistics_entitydailystatus AS sds
-        INNER JOIN public.entities_entity s ON s.id = sds.entity_id
-        LEFT JOIN public.connection_statistics_entityrealtimeregistration AS srt
-            ON sds.entity_id = srt.entity_id
-            AND srt.deleted IS NULL
-        WHERE
-            s.deleted IS NULL
-            AND sds.deleted IS NULL
-            AND sds.connectivity_speed IS NOT NULL
-            AND srt.entity_id IS NULL
-        '''
+              SELECT DISTINCT sds.entity_id
+              FROM public.connection_statistics_entitydailystatus AS sds
+                       INNER JOIN public.entities_entity s ON s.id = sds.entity_id
+                       LEFT JOIN public.connection_statistics_entityrealtimeregistration AS srt
+                                 ON sds.entity_id = srt.entity_id
+                                     AND srt.deleted IS NULL
+              WHERE s.deleted IS NULL
+                AND sds.deleted IS NULL
+                AND sds.connectivity_speed IS NOT NULL
+                AND srt.entity_id IS NULL \
+              '''
 
         entity_ids_missing_in_rt_table = db_utilities.sql_to_response(sql, label='EntityRealtimeRegistration')
         if entity_ids_missing_in_rt_table:
@@ -564,11 +561,48 @@ def populate_entity_registration_data():
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
+def get_entity_static_connectivity_status(master_row, field_names):
+    """Return a static status, or None when the master row has no status value."""
+    positive_values = {'true', 'yes', '1', 'good', 'moderate'}
+    negative_values = {'false', 'no', '0'}
+
+    def normalized_value(field_name):
+        value = getattr(master_row, field_name, None)
+        if value is None or core_utilities.is_blank_string(value):
+            return None
+        if isinstance(value, bool):
+            return 'yes' if value else 'no'
+        return str(value).lower().strip()
+
+    # Keep the same precedence used while publishing entity master rows.
+    for field_name in ('connectivity_ever_connected', 'connectivity_govt', 'connectivity'):
+        if field_name not in field_names:
+            continue
+        value = normalized_value(field_name)
+        if value in positive_values:
+            return 'good'
+
+    if 'download_speed_govt' in field_names:
+        download_speed = getattr(master_row, 'download_speed_govt', None)
+        if download_speed is not None and download_speed > 0:
+            return 'good'
+
+    for field_name in ('connectivity_ever_connected', 'connectivity_govt', 'connectivity'):
+        if field_name not in field_names:
+            continue
+        if normalized_value(field_name) in negative_values:
+            return 'no'
+
+    return None
+
+
 @app.task(soft_time_limit=10 * 60 * 60, time_limit=10 * 60 * 60)
-def update_entity_records():
-    from proco.connection_statistics.models import EntityWeeklyStatus
-    from proco.schools.constants import statuses_schema
+def update_entity_records(start_time=None, end_time=None):
     from datetime import timedelta
+    from proco.connection_statistics.models import EntityRealTimeRegistration, EntityWeeklyStatus
+    from proco.entities.models import Entity, EntityType
+    from proco.locations.models import Country
+    from proco.schools.constants import statuses_schema
 
     logger.info('Updating entity records from weekly status changes.')
 
@@ -580,51 +614,181 @@ def update_entity_records():
         task_id, task_key, 'Update the entity records from weekly status')
 
     if task_instance:
-        time_threshold = core_utilities.get_current_datetime_object() - timedelta(hours=12)
+        if start_time is None or end_time is None:
+            current_time = core_utilities.get_current_datetime_object()
+            start_time = (current_time - timedelta(hours=25)).replace(minute=0, second=0, microsecond=0)
+            end_time = (current_time - timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
 
-        updated_weekly_statuses = EntityWeeklyStatus.objects.filter(
-            modified__gte=time_threshold
-        ).select_related('entity', 'entity__last_weekly_status').order_by('date')
+        # 1. Countries modified in time range
+        country_ids = list(Country.objects.filter(
+            modified__gte=start_time,
+            modified__lt=end_time,
+        ).values_list('id', flat=True).order_by('id').distinct())
 
-        entities_to_update = {}
+        # 2. Pick entities whose weekly status or country was modified.  The
+        # country predicate is intentional: static master data changes modify
+        # the Country record while entities themselves are unchanged.
+        entity_ids_from_weekly = list(EntityWeeklyStatus.objects.filter(
+            modified__gte=start_time,
+            modified__lt=end_time,
+        ).values_list('entity_id', flat=True).order_by('entity_id').distinct())
 
-        for status in updated_weekly_statuses.iterator(chunk_size=5000):
-            entity = entities_to_update.get(status.entity_id) or status.entity
-            if not entity:
+        # Published master rows are another source of changes.  Do not rely
+        # only on Country.modified here: the publisher may update a master row
+        # without saving the Country object.
+        entity_ids_from_master = set()
+        for entity_type in EntityType.objects.filter(is_active=True, deleted__isnull=True):
+            master_model = entity_type.get_master_data_model_class()
+            if not master_model:
                 continue
+            field_names = {field.name for field in master_model._meta.fields}
+            id_field = next((name for name in ('health_id_giga', 'school_id_giga', 'giga_id')
+                             if name in field_names), None)
+            if not id_field or 'entity' not in field_names:
+                continue
+            entity_ids_from_master.update(master_model.objects.filter(
+                status=master_model.ROW_STATUS_PUBLISHED,
+                modified__gte=start_time,
+                modified__lt=end_time,
+                entity_id__isnull=False,
+            ).values_list('entity_id', flat=True))
 
-            needs_update = False
+        entities_qs = Entity.objects.filter(
+            Q(id__in=entity_ids_from_weekly) |
+            Q(id__in=entity_ids_from_master) |
+            Q(country_id__in=country_ids)
+        )
+        entity_ids_qs = entities_qs.values_list('pk', flat=True).order_by('pk')
+        last_entity_id = entity_ids_qs.order_by('-pk').first()
+        last_seen_entity_id = 0
 
-            if not entity.last_weekly_status or entity.last_weekly_status.date < status.date:
-                entity.last_weekly_status = status
-                needs_update = True
+        coverage_status_by_type = {
+            '5g': 'good', '4g': 'good', '3g': 'moderate', '2g': 'moderate',
+            'no': 'no', 'no service': 'no', 'no coverage': 'no',
+        }
 
-            if getattr(entity.last_weekly_status, 'id', entity.last_weekly_status_id) == status.id:
-                connectivity_status = 'unknown'
-                if status.connectivity_speed is not None:
-                    connectivity_status = statuses_schema.get_connectivity_status_by_connectivity_speed(
-                        status.connectivity_speed
+        while last_entity_id and last_seen_entity_id < last_entity_id:
+            entity_ids = list(entity_ids_qs.filter(pk__gt=last_seen_entity_id)[:100])
+            if not entity_ids:
+                break
+            last_seen_entity_id = entity_ids[-1]
+
+            data_chunk = list(Entity.objects.filter(pk__in=entity_ids).select_related(
+                'entity_type', 'last_weekly_status',
+            ).only(
+                'id', 'entity_type_id', 'country_id', 'giga_id', 'coverage_type', 'coverage_status',
+                'connectivity_status', 'last_weekly_status_id', 'last_weekly_status__date',
+                'last_weekly_status__connectivity_speed', 'last_modified_at',
+                'entity_type__master_data_model',
+            ).order_by('pk'))
+
+            current_date = core_utilities.get_current_datetime_object().date()
+            rt_regs = set(EntityRealTimeRegistration.objects.filter(
+                entity_id__in=entity_ids,
+                rt_registered=True,
+                rt_registration_date__date__lte=current_date,
+            ).values_list('entity_id', flat=True))
+
+            latest_weekly_status_by_entity = {
+                status.entity_id: status
+                for status in EntityWeeklyStatus.objects.filter(
+                    entity_id__in=entity_ids,
+                ).order_by('entity_id', '-date', '-id').distinct('entity_id')
+            }
+
+            # Resolve each configured entity type's master source.  This keeps
+            # this task generic and avoids health-specific fields in the task.
+            master_models = {}
+            for entity in data_chunk:
+                if entity.entity_type_id not in master_models:
+                    master_models[entity.entity_type_id] = entity.entity_type.get_master_data_model_class()
+
+            master_map = {}
+            for entity_type_id, master_model in master_models.items():
+                if not master_model:
+                    continue
+                field_names = {field.name for field in master_model._meta.fields}
+                id_field = next((name for name in ('health_id_giga', 'school_id_giga', 'giga_id')
+                                 if name in field_names), None)
+                lookup_entities = [
+                    entity for entity in data_chunk
+                    if entity.entity_type_id == entity_type_id
+                       and entity.id not in rt_regs
+                       and entity.giga_id
+                ]
+                if not id_field or not lookup_entities:
+                    continue
+                selected_fields = ['id', 'country_id', id_field]
+                selected_fields.extend(
+                    field_name for field_name in (
+                        'coverage_type', 'connectivity_ever_connected', 'download_speed_govt',
+                        'connectivity_govt', 'connectivity',
+                    ) if field_name in field_names
+                )
+                rows = master_model.objects.filter(
+                    status=master_model.ROW_STATUS_PUBLISHED,
+                    country_id__in={entity.country_id for entity in lookup_entities},
+                    **{'{0}__in'.format(id_field): {entity.giga_id for entity in lookup_entities}},
+                ).only(*selected_fields).order_by(
+                    'country_id', id_field, '-id'
+                ).distinct('country_id', id_field)
+                master_map.update({
+                    (entity_type_id, row.country_id, getattr(row, id_field)): row
+                    for row in rows
+                })
+
+            for entity in data_chunk:
+                entity.last_modified_at = core_utilities.get_current_datetime_object()
+                weekly_status = latest_weekly_status_by_entity.get(entity.id)
+                update_last_weekly_status = (
+                    weekly_status and
+                    (not entity.last_weekly_status or entity.last_weekly_status.date < weekly_status.date)
+                )
+                if update_last_weekly_status:
+                    entity.last_weekly_status = weekly_status
+
+                if entity.id in rt_regs:
+                    entity.connectivity_status = 'good'
+                    continue
+
+                master_model = master_models.get(entity.entity_type_id)
+                master_row = None
+                if master_model:
+                    field_names = {field.name for field in master_model._meta.fields}
+                    id_field = next((name for name in ('health_id_giga', 'school_id_giga', 'giga_id')
+                                     if name in field_names), None)
+                    if id_field:
+                        master_row = master_map.get((entity.entity_type_id, entity.country_id, entity.giga_id))
+
+                if master_row:
+                    master_field_names = {field.name for field in master_model._meta.fields}
+                    coverage_type = getattr(master_row, 'coverage_type', None)
+                    if coverage_type is not None and str(coverage_type).strip():
+                        coverage_type = str(coverage_type).lower().strip()
+                        entity.coverage_type = coverage_type
+                        entity.coverage_status = coverage_status_by_type.get(coverage_type, 'unknown')
+
+                    static_status = get_entity_static_connectivity_status(
+                        master_row, master_field_names,
+                    )
+                    if static_status is not None:
+                        entity.connectivity_status = static_status
+                    elif weekly_status and weekly_status.connectivity_speed is not None:
+                        entity.connectivity_status = statuses_schema.get_connectivity_status_by_connectivity_speed(
+                            weekly_status.connectivity_speed
+                        )
+                elif weekly_status and weekly_status.connectivity_speed is not None:
+                    entity.connectivity_status = statuses_schema.get_connectivity_status_by_connectivity_speed(
+                        weekly_status.connectivity_speed
                     )
 
-                if entity.connectivity_status != connectivity_status:
-                    entity.connectivity_status = connectivity_status
-                    needs_update = True
-
-                if entity.coverage_status != 'unknown':
-                    entity.coverage_status = 'unknown'
-                    needs_update = True
-
-            if needs_update or status.entity_id in entities_to_update:
-                entities_to_update[entity.id] = entity
-
-        if entities_to_update:
-            from proco.entities.models import Entity
-            Entity.objects.bulk_update(
-                list(entities_to_update.values()),
-                ['last_weekly_status', 'connectivity_status', 'coverage_status'],
-                batch_size=5000
-            )
-            logger.info('Bulk updated {0} entities.'.format(len(entities_to_update)))
+            Entity.objects.bulk_update(data_chunk, [
+                'coverage_type',
+                'coverage_status',
+                'connectivity_status',
+                'last_weekly_status',
+                'last_modified_at',
+            ], batch_size=5000)
 
         background_task_utilities.task_on_complete(task_instance)
     else:
@@ -649,7 +813,8 @@ def handle_deleted_entity_master_data_row(deleted_row_id=None, country_ids=None)
 
     if task_instance:
         if deleted_row_id:
-            rows = HealthEntityMasterIntermediateData.objects.filter(id=deleted_row_id, is_read=False, status='DELETED_PUBLISHED')
+            rows = HealthEntityMasterIntermediateData.objects.filter(id=deleted_row_id, is_read=False,
+                                                                     status='DELETED_PUBLISHED')
         else:
             rows = HealthEntityMasterIntermediateData.objects.filter(is_read=False, status='DELETED_PUBLISHED')
 
@@ -668,10 +833,14 @@ def handle_deleted_entity_master_data_row(deleted_row_id=None, country_ids=None)
                 entity.save(update_fields=['deleted'])
 
                 # Soft delete related
-                from proco.connection_statistics.models import EntityDailyStatus, EntityWeeklyStatus, EntityRealTimeRegistration
-                EntityDailyStatus.objects.all_records().filter(entity=entity).update(deleted=core_utilities.get_current_datetime_object())
-                EntityWeeklyStatus.objects.all_records().filter(entity=entity).update(deleted=core_utilities.get_current_datetime_object())
-                EntityRealTimeRegistration.objects.all_records().filter(entity=entity).update(deleted=core_utilities.get_current_datetime_object())
+                from proco.connection_statistics.models import EntityDailyStatus, EntityWeeklyStatus, \
+                    EntityRealTimeRegistration
+                EntityDailyStatus.objects.all_records().filter(entity=entity).update(
+                    deleted=core_utilities.get_current_datetime_object())
+                EntityWeeklyStatus.objects.all_records().filter(entity=entity).update(
+                    deleted=core_utilities.get_current_datetime_object())
+                EntityRealTimeRegistration.objects.all_records().filter(entity=entity).update(
+                    deleted=core_utilities.get_current_datetime_object())
 
             row.is_read = True
             row.save(update_fields=['is_read'])
@@ -717,10 +886,12 @@ def update_all_entity_cached_values(*args, clean_cache=False):
 
     update_cached_value.delay(url=reverse('locations:search-countries-admin-schools'))
     update_cached_value.delay(url=reverse('entities:list-entity-countries'))
-    update_cached_value.delay(url=reverse('entities:global-stat-all-entities'), query_params={'entity_type__code': ALL_ENTITIES})
+    update_cached_value.delay(url=reverse('entities:global-stat-all-entities'),
+                              query_params={'entity_type__code': ALL_ENTITIES})
 
     active_entity_types = EntityType.get_all_active().exclude(is_legacy=True)
-    entity_country_ids = Entity.objects.filter(deleted__isnull=True).values_list('country_id', flat=True).order_by('country_id').distinct()
+    entity_country_ids = Entity.objects.filter(deleted__isnull=True).values_list('country_id', flat=True).order_by(
+        'country_id').distinct()
     entity_countries = Country.objects.filter(id__in=list(entity_country_ids))
 
     for entity_type in active_entity_types:
@@ -752,7 +923,8 @@ def update_all_entity_cached_values(*args, clean_cache=False):
                 update_cached_value.s(
                     url=reverse('entities:list-published-entity-filters',
                                 kwargs={'status': 'PUBLISHED', 'country_id': country.id}),
-                    query_params={'expand': 'column_configuration', 'ordering': 'name', 'entity_type__code': entity_type.code},
+                    query_params={'expand': 'column_configuration', 'ordering': 'name',
+                                  'entity_type__code': entity_type.code},
                 ),
             ]
 
@@ -809,7 +981,8 @@ def update_all_entity_cached_values(*args, clean_cache=False):
                                 filter_values.append(choice['value'])
 
                         for value in filter_values:
-                            filter_params = {f'{filter_field}__{query_param}': value, 'entity_type__code': entity_type.code}
+                            filter_params = {f'{filter_field}__{query_param}': value,
+                                             'entity_type__code': entity_type.code}
 
                             global_stat_params = {'country_id': country.id}
                             global_stat_params.update(filter_params)
