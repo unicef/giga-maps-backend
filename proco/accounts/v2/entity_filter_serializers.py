@@ -16,6 +16,7 @@ from proco.core import utils as core_utilities
 from proco.custom_auth import models as auth_models
 from proco.custom_auth.serializers import ExpandUserSerializer
 from proco.custom_auth.utils import get_user_emails_for_permissions
+from proco.entities.constants import LEGACY_MODEL
 from proco.entities.models import Entity
 
 
@@ -376,7 +377,7 @@ class PublishedEntityAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
 class EntityAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
     active_countries_list = serializers.JSONField()
     options = serializers.JSONField()
-    entity_type__code = serializers.CharField(source='entity_type.code')
+    entity_type__code = serializers.SerializerMethodField()
 
     class Meta:
         model = accounts_models.AdvanceFilter
@@ -408,6 +409,11 @@ class EntityAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
             'country_id').values_list('country_id', flat=True).distinct('country_id'))
         setattr(instance, 'active_countries_list', active_countries_list)
         return super().to_representation(instance)
+
+    def get_entity_type__code(self, instance):
+        if instance.entity_type is None or instance.entity_type.is_legacy:
+            return LEGACY_MODEL
+        return instance.entity_type.code
 
 
 class BaseEntityAdvanceFilterListCRUDSerializer(serializers.ModelSerializer):

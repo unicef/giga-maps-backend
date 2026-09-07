@@ -11,13 +11,14 @@ from django.db.models import Q
 from django.db.models.functions.text import Lower
 from django.urls import reverse
 from rest_framework.test import APIClient
-
 from proco.background import utils as background_task_utilities
 from proco.core import db_utils as db_utilities
 from proco.core import utils as core_utilities
 from proco.taskapp import app
 from proco.utils.dates import format_date, to_date
-
+from proco.entities.models import Entity
+from proco.connection_statistics.models import EntityDailyStatus
+from proco.schools.constants import statuses_schema
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -506,7 +507,6 @@ def rebuild_unified_index():
 
 @app.task(soft_time_limit=1 * 60 * 60, time_limit=1 * 60 * 60)
 def populate_entity_registration_data():
-    from proco.entities.models import Entity
 
     logger.info('Setting RT status, RT Date for entities which start live data from sources.')
 
@@ -529,6 +529,7 @@ def populate_entity_registration_data():
         WHERE
             s.deleted IS NULL
             AND sds.deleted IS NULL
+            AND sds.connectivity_speed IS NOT NULL
             AND srt.entity_id IS NULL
         '''
 
@@ -543,7 +544,15 @@ def populate_entity_registration_data():
                 call_command('populate_entity_registration_data', *cmd_args)
 
                 entity = Entity.objects.get(id=missing_entity_id['entity_id'])
-                entity.connectivity_status = 'good'
+                # Derive connectivity_status from actual daily speed data
+                latest_daily = EntityDailyStatus.objects.filter(
+                    entity_id=entity.id,
+                    connectivity_speed__isnull=False,
+                ).order_by('-date').first()
+                if latest_daily and latest_daily.connectivity_speed is not None:
+                    entity.connectivity_status = statuses_schema.get_connectivity_status_by_connectivity_speed(
+                        latest_daily.connectivity_speed,
+                    )
                 entity.save(update_fields=['connectivity_status'])
                 logger.info('Entity connectivity status updated for Entity Giga ID "{0}" as "{1}"'.format(
                     entity.giga_id,
@@ -733,6 +742,9 @@ def update_all_entity_cached_values(*args, clean_cache=False):
 
         for country in entity_countries:
             country_wise_task_list = [
+                update_cached_value.s(
+                    url=reverse('entities:retrieve-entity-country', kwargs={'pk': country.code.lower()})
+                ),
                 update_cached_value.s(
                     url=reverse('entities:global-stat-all-entities'),
                     query_params={'country_id': country.id, 'entity_type__code': entity_type.code},

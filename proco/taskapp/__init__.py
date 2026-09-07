@@ -25,19 +25,19 @@ def finalize_setup(sender, **kwargs):
     app.conf.beat_schedule.update({
         # TODO: Comment out once entity code is deployed with new FE
         # 1. Old Cache Warmup (replaced by update_all_entity_cached_values)
-        'proco.utils.tasks.update_all_cached_values': {
-            'task': 'proco.utils.tasks.update_all_cached_values',
-            'schedule': crontab(hour=4, minute=45),
-            'args': (),
-            'kwargs': {'clean_cache': True},
-        },
+        # 'proco.utils.tasks.update_all_cached_values': {
+        #     'task': 'proco.utils.tasks.update_all_cached_values',
+        #     'schedule': crontab(hour=4, minute=45),
+        #     'args': (),
+        #     'kwargs': {'clean_cache': True},
+        # },
         # TODO: Comment out once entity code is deployed with new FE
         # 2. Old School Cognitive Search Index Rebuild (replaced by rebuild_unified_index)
-        'proco.utils.tasks.rebuild_school_index': {
-            'task': 'proco.utils.tasks.rebuild_school_index',
-            'schedule': crontab(hour=2, minute=0),
-            'args': (),
-        },
+        # 'proco.utils.tasks.rebuild_school_index': {
+        #     'task': 'proco.utils.tasks.rebuild_school_index',
+        #     'schedule': crontab(hour=2, minute=0),
+        #     'args': (),
+        # },
         'proco.schools.tasks.update_school_records': {
             'task': 'proco.schools.tasks.update_school_records',
             'schedule': crontab(hour=1, minute=0),

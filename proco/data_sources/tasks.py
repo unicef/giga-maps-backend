@@ -11,7 +11,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 from django.apps import apps
 from django.conf import settings
 from django.contrib.gis.geos import Point
-from django.core.exceptions import ImproperlyConfigured, ValidationError
+from django.core.exceptions import ImproperlyConfigured
 from django.core.management import call_command
 from django.core.cache import cache
 from django.db import connection, transaction
@@ -73,6 +73,30 @@ def get_coverage_status_from_type(coverage_type):
         statistics_models.SchoolWeeklyStatus.COVERAGE_2G: 'moderate',
         statistics_models.SchoolWeeklyStatus.COVERAGE_NO: 'no',
     }.get(coverage_type, 'unknown')
+
+
+def normalize_boolean_field_value(value):
+    if value is True or value is False or value is None:
+        return value
+    if core_utilities.is_blank_string(value):
+        return None
+
+    normalized_value = str(value).lower().strip()
+    if normalized_value in core_configs.true_choices:
+        return True
+    if normalized_value in ['false', 'no', '0']:
+        return False
+    if normalized_value in ['unknown', 'null', 'none', 'n/a', 'na']:
+        return None
+    return value
+
+
+def normalize_defaults_for_model_fields(defaults, model_field_map):
+    for field_name, value in defaults.items():
+        field = model_field_map.get(field_name)
+        if field and field.get_internal_type() == 'BooleanField':
+            defaults[field_name] = normalize_boolean_field_value(value)
+    return defaults
 
 
 @app.task
@@ -265,10 +289,11 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
             logger.debug('Not found running job for published rows handler task: {}'.format(task_key))
             updated_school_ids = []
             created_school_ids = []
+            processed_rows_count = 0
 
             new_published_records = sources_models.SchoolMasterData.objects.filter(
                 status=sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED, is_read=False,
-            )
+            ).select_related('country', 'school', 'school__admin1', 'school__admin2', 'school__last_weekly_status')
 
             if published_row:
                 new_published_records = new_published_records.filter(pk=published_row.id)
@@ -511,6 +536,12 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                         updated_school_ids.append(school.id)
                         if created:
                             created_school_ids.append(school.id)
+
+                        processed_rows_count += 1
+                        if processed_rows_count % 1000 == 0:
+                            task_instance.info(
+                                'Processed {0} published school master records.'.format(processed_rows_count)
+                            )
                     except Exception as ex:
                         logger.error('Error reported on publishing: {0}'.format(ex))
                         logger.error('Record: {0}'.format(row.__dict__))
@@ -520,10 +551,10 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                 for i in range(0, len(updated_school_ids), 20):
                     populate_school_new_fields_task.delay(None, None, None, school_ids=updated_school_ids[i:i + 20])
 
-            for new_school_id in created_school_ids:
-                # As it's a new school added through School Master record publishing, add the school to search index
-                cmd_args = ['--update_index', '-school_id={0}'.format(new_school_id)]
-                call_command('index_rebuild_schools', *cmd_args)
+            # for new_school_id in created_school_ids:
+            #     # As it's a new school added through School Master record publishing, add the school to search index
+            #     cmd_args = ['--update_index', '-school_id={0}'.format(new_school_id)]
+            #     call_command('index_rebuild_schools', *cmd_args)
 
             send_slack_notifications(change_summary, publish_source=publish_source)
             background_task_utilities.task_on_complete(task_instance)
@@ -1396,9 +1427,11 @@ def validate_schema_and_sync_schema_table_data(profile_file, schema_name, share_
             return changes_for_countries, deleted_entities, errors
         else:
             logger.warning('Health Master schema ({0}) does not exist to use for share ({1}).'.format(schema_name,
-                                                                                                    share_name))
+                                                                                                     share_name))
     else:
         logger.warning('Health Master share ({0}) does not exist to use.'.format(share_name))
+
+    return changes_for_countries, deleted_entities, errors
 
 
 def load_entity_data_from_health_master_apis(country_iso3_format=None):
@@ -1427,6 +1460,14 @@ def load_entity_data_from_health_master_apis(country_iso3_format=None):
         for country_code in ds_settings['COUNTRY_EXCLUSION_LIST']
         if country_code.strip()
     ]
+
+    if len(country_codes_for_inclusion) == 0:
+        logger.warning(
+            'HEALTH_MASTER_COUNTRY_INCLUSION_LIST is not configured. '
+            'Skipping Health Master data pull.'
+        )
+        return
+
     profile_json = {
         'shareCredentialsVersion': ds_settings.get('SHARE_CREDENTIALS_VERSION', 1),
         'endpoint': ds_settings.get('ENDPOINT'),
@@ -1595,6 +1636,7 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
         task_instance.info('Total published records to update: {}'.format(len(new_published_record_ids)))
 
         entity_field_names = {f.name for f in Entity._meta.fields}
+        entity_field_map = {f.name: f for f in Entity._meta.fields}
         lookup_fields = {
             'giga_id', 'country', 'entity_type',
             'country_id', 'entity_type_id', 'id',
@@ -1603,6 +1645,7 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
         }
         if detail_model:
             detail_entity_field_names = {f.name for f in detail_model._meta.fields}
+            detail_entity_field_map = {f.name: f for f in detail_model._meta.fields}
             detail_lookup_fields = {'entity', 'entity_id', 'id', 'deleted'}
 
         for i in range(0, len(new_published_record_ids), 2000):
@@ -1680,17 +1723,38 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
                     )
                     entity_defaults['coverage_type'] = normalize_coverage_type(getattr(row, 'coverage_type', None))
                     entity_defaults['coverage_status'] = get_coverage_status_from_type(entity_defaults['coverage_type'])
+                    entity_defaults = normalize_defaults_for_model_fields(entity_defaults, entity_field_map)
 
-                    # Map connectivity/connectivity_govt to connectivity_status for Entity
-                    connectivity_govt = str(getattr(row, 'connectivity_govt', '') or '').lower().strip()
-                    connectivity = str(getattr(row, 'connectivity', '') or '').lower().strip()
-                    if connectivity_govt in ['yes', 'true', 'good', 'moderate'] or connectivity in ['yes', 'true',
-                                                                                                    'good', 'moderate']:
+                    # Map connectivity fields to connectivity_status for Entity
+
+                    connectivity_ever_connected = str(
+                        getattr(row, 'connectivity_ever_connected', '') or ''
+                    ).lower().strip()
+                    download_speed_govt = getattr(row, 'download_speed_govt', None)
+                    connectivity_govt = str(
+                        getattr(row, 'connectivity_govt', '') or ''
+                    ).lower().strip()
+                    connectivity = str(
+                        getattr(row, 'connectivity', '') or ''
+                    ).lower().strip()
+
+                    if connectivity_ever_connected in ['yes', 'true']:
                         entity_defaults['connectivity_status'] = 'good'
-                    elif connectivity_govt in ['no', 'false'] or connectivity in ['no', 'false']:
+                    elif download_speed_govt is not None and download_speed_govt > 0:
+                        entity_defaults['connectivity_status'] = 'good'
+                    elif connectivity_govt in ['yes', 'true', 'good', 'moderate'] or connectivity in [
+                        'yes', 'true', 'good', 'moderate',
+                    ]:
+                        entity_defaults['connectivity_status'] = 'good'
+                    elif (
+                        connectivity_ever_connected in ['no', 'false']
+                        or connectivity_govt in ['no', 'false']
+                        or connectivity in ['no', 'false']
+                    ):
                         entity_defaults['connectivity_status'] = 'no'
                     else:
                         entity_defaults['connectivity_status'] = 'unknown'
+
 
                     if giga_id in existing_entities:
                         entity = existing_entities[giga_id]
@@ -1762,6 +1826,10 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
                             name: getattr(row, name)
                             for name in common_detail_fields
                         }
+                        detail_entity_defaults = normalize_defaults_for_model_fields(
+                            detail_entity_defaults,
+                            detail_entity_field_map,
+                        )
 
                         if entity.id in existing_details:
                             detail = existing_details[entity.id]
@@ -1977,6 +2045,14 @@ def fetch_entity_giga_meter_ping_data(entity_type_code, country_iso3, logger, la
                 page, country_iso3, log_url,
             )
             response = requests.get(api_endpoint, params=params, headers=headers)
+
+            if response.status_code == status.HTTP_404_NOT_FOUND:
+                logger.warning(
+                    'Entity Giga Meter - No measurement data found for country %s on page %d. '
+                    'Skipping country. URL: %s Response: %s',
+                    country_iso3, page, response.url, response.text,
+                )
+                break
 
             if response.status_code != status.HTTP_200_OK:
                 logger.error(
@@ -2366,12 +2442,16 @@ def run_entity_ping_aggregation(entity_type_code, task_instance, logger, full_sy
                 for aggregate_date in unique_dates:
                     aggregate_entity_daily_status_to_entity_weekly_status(country_obj, aggregate_date, entity_type_code)
 
-            # Auto-register entities for realtime data
+            # Auto-register entities for realtime data (only entities with valid speed measurements)
+            valid_entities = {
+                data['entity'] for data in aggregated_records
+                if data.get('connectivity_speed') is not None
+            }
 
             existing_regs = {
                 reg.entity_id: reg
                 for reg in statistics_models.EntityRealTimeRegistration.objects.all_records().filter(
-                    entity__in=entity_map.values()
+                    entity__in=valid_entities
                 )
             }
 
@@ -2382,7 +2462,7 @@ def run_entity_ping_aggregation(entity_type_code, task_instance, logger, full_sy
             else:
                 min_ping_date = current_date
 
-            for entity_obj in entity_map.values():
+            for entity_obj in valid_entities:
                 reg = existing_regs.get(entity_obj.id)
                 if reg:
                     updated = False
@@ -2465,10 +2545,10 @@ def update_entity_live_data_from_giga_meter(
 
     Execution Frequency: 3 times a day (configured in taskapp/__init__.py)
     """
-    if not settings.ENTITY_LIVE_DATA_ENABLE_AUTO_SYNC:
+    if not settings.HEALTH_GIGA_METER_ENABLE_AUTO_SYNC:
         logger.warning(
-            'Entity live data sync is disabled. '
-            'To enable, update "ENTITY_LIVE_DATA_ENABLE_AUTO_SYNC" to True.'
+            'Entity Giga Meter live data sync is disabled. '
+            'To enable, update "HEALTH_GIGA_METER_ENABLE_AUTO_SYNC" to True.'
         )
         return
 
