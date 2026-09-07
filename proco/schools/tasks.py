@@ -142,7 +142,7 @@ def process_loaded_file(pk: int, force: bool = False):
 def update_school_records():
     """
     update_school_records
-        Periodic task executed every day at 01:00 AM and 01:00 PM to update the school fields based on changes in
+        Periodic task executed every day at 01:00 AM to update the school fields based on changes in
         SchoolWeekly or CountryWeekly tables.
     """
     task_key = 'update_school_records_status_{current_time}'.format(

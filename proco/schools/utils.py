@@ -104,15 +104,15 @@ def get_coverage_status(school_instance):
     return 'unknown'
 
 
-# Execution time 01:00 AM and 01:00 PM everyday
+# Execution time 01:00 AM everyday
 def update_school_from_country_or_school_weekly_update(start_time=None, end_time=None):
     """
-    Update the school fields every 12 hours if its SchoolWeekly or CountryWeekly records updated
+    Update the school fields every 24 hours if its SchoolWeekly or CountryWeekly records updated
 
     Logic:
-    1. Pick all schools of a country if country data updated in last 12 hours
-    2. Pick all schools of a country if country's weekly status data updated in last 12 hours
-    3. Pick all those schools where school weekly status updated in last 12 hours
+    1. Pick all schools of a country if country data updated in last 24 hours
+    2. Pick all schools of a country if country's weekly status data updated in last 24 hours
+    3. Pick all those schools where school weekly status updated in last 24 hours
     """
 
     from proco.connection_statistics.models import Country
@@ -121,41 +121,41 @@ def update_school_from_country_or_school_weekly_update(start_time=None, end_time
     if start_time is None or end_time is None:
         current_time = core_utilities.get_current_datetime_object()
 
-        start_time = (current_time - timedelta(hours=13)).replace(minute=0, second=0, microsecond=0)
+        start_time = (current_time - timedelta(hours=25)).replace(minute=0, second=0, microsecond=0)
         end_time = (current_time - timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
 
-    # Countries modified in last 12 hours
-    country_ids_updated_in_last_12_hours = Country.objects.filter(
+    # Countries modified in last 24 hours
+    country_ids_updated_in_last_24_hours = Country.objects.filter(
         modified__gte=start_time,
         modified__lt=end_time,
     ).values_list('id', flat=True).order_by('id').distinct('id')
 
     logger.debug('Query to select countries updated between ({0} - {1}): {2}'.format(
-        start_time, end_time, country_ids_updated_in_last_12_hours.query))
+        start_time, end_time, country_ids_updated_in_last_24_hours.query))
 
     # CountryWeeklyStatus modified in last 24 hours
-    country_status_updated_in_last_12_hours = Country.objects.filter(
+    country_status_updated_in_last_24_hours = Country.objects.filter(
         last_weekly_status__modified__gte=start_time,
         last_weekly_status__modified__lt=end_time,
-    ).exclude(id__in=list(country_ids_updated_in_last_12_hours)).values_list(
+    ).exclude(id__in=list(country_ids_updated_in_last_24_hours)).values_list(
         'id', flat=True).order_by('id').distinct('id')
 
     logger.debug('Query to select countries where CountryWeeklyStatus updated between ({0} - {1}): {2}'.format(
-        start_time, end_time, country_status_updated_in_last_12_hours.query))
+        start_time, end_time, country_status_updated_in_last_24_hours.query))
 
     # SchoolWeeklyStatus updated in last 24 hours
-    school_updated_in_last_12_hours = School.objects.filter(
+    school_updated_in_last_24_hours = School.objects.filter(
         Q(last_weekly_status__modified__gte=start_time, last_weekly_status__modified__lt=end_time) |
-        Q(country_id__in=list(country_ids_updated_in_last_12_hours) + list(country_status_updated_in_last_12_hours))
+        Q(country_id__in=list(country_ids_updated_in_last_24_hours) + list(country_status_updated_in_last_24_hours))
     )
 
     logger.debug('Query to select schools where SchoolWeeklyStatus updated between ({0} - {1}): {2}'.format(
-        start_time, end_time, school_updated_in_last_12_hours.query))
+        start_time, end_time, school_updated_in_last_24_hours.query))
 
     from proco.data_sources.models import SchoolMasterData
     from proco.connection_statistics.models import SchoolRealTimeRegistration
 
-    for data_chunk in core_utilities.queryset_iterator(school_updated_in_last_12_hours, chunk_size=100):
+    for data_chunk in core_utilities.queryset_iterator(school_updated_in_last_24_hours, chunk_size=100):
         school_ids = [s.id for s in data_chunk]
         giga_ids = [s.giga_id_school for s in data_chunk if not core_utilities.is_blank_string(s.giga_id_school)]
 

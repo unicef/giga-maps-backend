@@ -289,6 +289,7 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
             logger.debug('Not found running job for published rows handler task: {}'.format(task_key))
             updated_school_ids = []
             created_school_ids = []
+            processed_rows_count = 0
 
             new_published_records = sources_models.SchoolMasterData.objects.filter(
                 status=sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED, is_read=False,
@@ -535,6 +536,12 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                         updated_school_ids.append(school.id)
                         if created:
                             created_school_ids.append(school.id)
+
+                        processed_rows_count += 1
+                        if processed_rows_count % 1000 == 0:
+                            task_instance.info(
+                                'Processed {0} published school master records.'.format(processed_rows_count)
+                            )
                     except Exception as ex:
                         logger.error('Error reported on publishing: {0}'.format(ex))
                         logger.error('Record: {0}'.format(row.__dict__))
@@ -544,10 +551,10 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                 for i in range(0, len(updated_school_ids), 20):
                     populate_school_new_fields_task.delay(None, None, None, school_ids=updated_school_ids[i:i + 20])
 
-            for new_school_id in created_school_ids:
-                # As it's a new school added through School Master record publishing, add the school to search index
-                cmd_args = ['--update_index', '-school_id={0}'.format(new_school_id)]
-                call_command('index_rebuild_schools', *cmd_args)
+            # for new_school_id in created_school_ids:
+            #     # As it's a new school added through School Master record publishing, add the school to search index
+            #     cmd_args = ['--update_index', '-school_id={0}'.format(new_school_id)]
+            #     call_command('index_rebuild_schools', *cmd_args)
 
             send_slack_notifications(change_summary, publish_source=publish_source)
             background_task_utilities.task_on_complete(task_instance)

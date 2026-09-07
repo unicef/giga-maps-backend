@@ -217,9 +217,9 @@ def queryset_iterator(queryset, chunk_size=1000, print_msg=True):
 
     Note that the implementation of the iterator does not support ordered query sets.
     """
-    if not queryset:
+    if not queryset.exists():
         logger.debug('Queryset has not data to iterate over: {0}'.format(queryset.query))
-        return list(queryset)
+        return
 
     pk = 0
     last_pk = queryset.order_by('-pk')[0].pk
