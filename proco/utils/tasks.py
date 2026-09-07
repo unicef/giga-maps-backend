@@ -16,8 +16,6 @@ from proco.core import db_utils as db_utilities
 from proco.core import utils as core_utilities
 from proco.taskapp import app
 from proco.utils.dates import format_date, to_date
-from proco.entities.models import Entity
-from proco.connection_statistics.models import EntityDailyStatus
 from proco.schools.constants import statuses_schema
 
 logger = logging.getLogger('gigamaps.' + __name__)
@@ -507,6 +505,8 @@ def rebuild_unified_index():
 
 @app.task(soft_time_limit=1 * 60 * 60, time_limit=1 * 60 * 60)
 def populate_entity_registration_data():
+    from proco.connection_statistics.models import EntityDailyStatus
+    from proco.entities.models import Entity
 
     logger.info('Setting RT status, RT Date for entities which start live data from sources.')
 
