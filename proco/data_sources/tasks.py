@@ -1715,16 +1715,36 @@ def handle_published_entity_master_data_row(published_row=None, country_ids=None
                     entity_defaults['coverage_status'] = get_coverage_status_from_type(entity_defaults['coverage_type'])
                     entity_defaults = normalize_defaults_for_model_fields(entity_defaults, entity_field_map)
 
-                    # Map connectivity/connectivity_govt to connectivity_status for Entity
-                    connectivity_govt = str(getattr(row, 'connectivity_govt', '') or '').lower().strip()
-                    connectivity = str(getattr(row, 'connectivity', '') or '').lower().strip()
-                    if connectivity_govt in ['yes', 'true', 'good', 'moderate'] or connectivity in ['yes', 'true',
-                                                                                                    'good', 'moderate']:
+                    # Map connectivity fields to connectivity_status for Entity
+
+                    connectivity_ever_connected = str(
+                        getattr(row, 'connectivity_ever_connected', '') or ''
+                    ).lower().strip()
+                    download_speed_govt = getattr(row, 'download_speed_govt', None)
+                    connectivity_govt = str(
+                        getattr(row, 'connectivity_govt', '') or ''
+                    ).lower().strip()
+                    connectivity = str(
+                        getattr(row, 'connectivity', '') or ''
+                    ).lower().strip()
+
+                    if connectivity_ever_connected in ['yes', 'true']:
                         entity_defaults['connectivity_status'] = 'good'
-                    elif connectivity_govt in ['no', 'false'] or connectivity in ['no', 'false']:
+                    elif download_speed_govt is not None and download_speed_govt > 0:
+                        entity_defaults['connectivity_status'] = 'good'
+                    elif connectivity_govt in ['yes', 'true', 'good', 'moderate'] or connectivity in [
+                        'yes', 'true', 'good', 'moderate',
+                    ]:
+                        entity_defaults['connectivity_status'] = 'good'
+                    elif (
+                        connectivity_ever_connected in ['no', 'false']
+                        or connectivity_govt in ['no', 'false']
+                        or connectivity in ['no', 'false']
+                    ):
                         entity_defaults['connectivity_status'] = 'no'
                     else:
                         entity_defaults['connectivity_status'] = 'unknown'
+
 
                     if giga_id in existing_entities:
                         entity = existing_entities[giga_id]
@@ -2412,12 +2432,16 @@ def run_entity_ping_aggregation(entity_type_code, task_instance, logger, full_sy
                 for aggregate_date in unique_dates:
                     aggregate_entity_daily_status_to_entity_weekly_status(country_obj, aggregate_date, entity_type_code)
 
-            # Auto-register entities for realtime data
+            # Auto-register entities for realtime data (only entities with valid speed measurements)
+            valid_entities = {
+                data['entity'] for data in aggregated_records
+                if data.get('connectivity_speed') is not None
+            }
 
             existing_regs = {
                 reg.entity_id: reg
                 for reg in statistics_models.EntityRealTimeRegistration.objects.all_records().filter(
-                    entity__in=entity_map.values()
+                    entity__in=valid_entities
                 )
             }
 
@@ -2428,7 +2452,7 @@ def run_entity_ping_aggregation(entity_type_code, task_instance, logger, full_sy
             else:
                 min_ping_date = current_date
 
-            for entity_obj in entity_map.values():
+            for entity_obj in valid_entities:
                 reg = existing_regs.get(entity_obj.id)
                 if reg:
                     updated = False

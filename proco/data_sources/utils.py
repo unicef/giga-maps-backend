@@ -1524,7 +1524,9 @@ def sync_entity_qos_realtime_data(country_id, entity_type_code='health', start_d
                 live_data_source=statistics_configs.QOS_SOURCE,
             ))
 
-        processed_entity_ids.add(entity_id)
+        # Only register entities that have actual non-null speed measurements
+        if record.get('connectivity_speed_avg') is not None:
+            processed_entity_ids.add(entity_id)
         if date:
             processed_dates.add(date)
 
