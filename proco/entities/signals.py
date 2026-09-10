@@ -27,7 +27,7 @@ def update_entity_last_weekly_status(instance, created=False, **kwargs):
         entity.last_weekly_status = instance
         update_fields.append('last_weekly_status')
 
-    if entity.last_weekly_status_id == instance.id:
+    if entity.last_weekly_status_id == instance.id and instance.connectivity_speed is not None:
         connectivity_status = get_entity_connectivity_status(instance)
         if entity.connectivity_status != connectivity_status:
             entity.connectivity_status = connectivity_status

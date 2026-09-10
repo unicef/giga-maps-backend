@@ -168,8 +168,8 @@ def finalize_setup(sender, **kwargs):
         },
         'proco.utils.tasks.update_entity_records': {
             'task': 'proco.utils.tasks.update_entity_records',
-            # Executes twice daily at 1:30 AM and 1:30 PM (offset from school equivalent)
-            'schedule': crontab(hour='1,13', minute=30),
+            # Executes once daily at 1:30 AM
+            'schedule': crontab(hour=1, minute=30),
             'args': (),
         },
         'proco.utils.tasks.handle_deleted_entity_master_data_row': {
