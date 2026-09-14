@@ -2586,8 +2586,17 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 if not any(c.startswith("ELSE ") for c in label_cases):
                     label_cases.append("ELSE '{label}'".format(label=title))
 
+        when_cases = [case for case in label_cases if not case.startswith("ELSE ")]
+        fallback_cases = [case for case in label_cases if case.startswith("ELSE ")]
+
         # Replace table references with sampled_schools.field_value for use in mvtgeom CTE
-        label_case_statements_str = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
+        if when_cases:
+            label_case_statements_str = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
+        else:
+            fallback_label = fallback_cases[0][5:] if fallback_cases else "'unknown'"
+            label_case_statements_str = '{fallback_label} AS field_status'.format(
+                fallback_label=fallback_label
+            )
         label_case_statements_str = label_case_statements_str.replace(
             f'{kwargs["table_name"]}."{kwargs["col_name"]}"',
             'sampled_schools.field_value'
