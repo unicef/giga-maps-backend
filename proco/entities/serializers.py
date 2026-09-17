@@ -40,3 +40,32 @@ class ListEntitySerializer(CountryToSerializerMixin, BaseEntitySerializer):
     def get_is_verified(self, obj):
         # TODO: Get this logic
         return False
+
+
+class CommaSeparatedIntegerField(serializers.CharField):
+    def to_internal_value(self, data):
+        data = super().to_internal_value(data)
+        if not data or not data.strip():
+            raise serializers.ValidationError("This field may not be blank.")
+        parts = [p.strip() for p in data.split(",") if p.strip()]
+        if not parts:
+            raise serializers.ValidationError("This field may not be blank.")
+        for p in parts:
+            if not p.isdigit():
+                raise serializers.ValidationError("Must be a comma-separated list of valid integers.")
+        return parts
+
+
+class TileQuerySerializer(serializers.Serializer):
+    country_id = serializers.IntegerField(required=False)
+    country_id__in = CommaSeparatedIntegerField(required=False)
+    admin1_id = serializers.IntegerField(required=False)
+    admin1_id__in = CommaSeparatedIntegerField(required=False)
+    school_id = serializers.IntegerField(required=False)
+    school_id__in = CommaSeparatedIntegerField(required=False)
+    entity_id = serializers.IntegerField(required=False)
+    entity_id__in = CommaSeparatedIntegerField(required=False)
+    exclude_schools_same_coords_except_id = serializers.IntegerField(required=False)
+    exclude_entities_same_coords_except_id = serializers.IntegerField(required=False)
+    limit = serializers.IntegerField(required=False, min_value=1)
+
