@@ -1002,7 +1002,7 @@ def update_all_entity_cached_values(*args, clean_cache=False):
                     latest_week_start_str = latest_week['start_date']
                     latest_week_end_str = latest_week['end_date']
                     same_location_params = {
-                        f'include_same_location_schools': 'false',
+                        f'school_include_same_location': 'false',
                     }
 
                     country_wise_task_list.append(update_cached_value.s(
