@@ -35,7 +35,7 @@ from proco.locations.search_indexes import UnifiedEntityIndex
 from proco.utils.cache import cache_manager, custom_cache_control
 
 from proco.entities.models import Entity, EntityType
-from proco.entities.serializers import ListEntitySerializer
+from proco.entities.serializers import ListEntitySerializer, TileQuerySerializer
 from proco.locations.models import Country
 from proco.schools.api import ConnectivityTileRequestHandler, BaseTileGenerator, ConnectivityTileGenerator, \
     SchoolStatusConnectivityTileGenerator
@@ -433,6 +433,9 @@ class EntityConnectivityTileRequestHandler(APIView):
         return f"{self.CACHE_KEY_PREFIX}_{entity}_tiles_{param_string}"
 
     def get(self, request, *args, **kwargs):
+        serializer = TileQuerySerializer(data=request.query_params.dict())
+        serializer.is_valid(raise_exception=True)
+
         use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
         request_path = remove_query_param(request.get_full_path(), 'cache')
         cache_key = self.get_cache_key()
@@ -804,10 +807,11 @@ class EntityConnectivityTileGenerator(RawEntityDetailFilterMixin, EntityTypeCode
 
         else:
             zoom_level = int(request.query_params.get('z', '0'))
-            if zoom_level == 0:
-                table_configs['limit_condition'] = 'LIMIT ' + '90000'
-            elif zoom_level == 1:
-                table_configs['limit_condition'] = 'LIMIT ' + '30000'
+            if 'limit' not in request.query_params:
+                if zoom_level == 0:
+                    table_configs['limit_condition'] = 'LIMIT ' + '12000'
+                elif zoom_level == 1:
+                    table_configs['limit_condition'] = 'LIMIT ' + '12000'
 
             table_configs['random_order'] = 'ORDER BY schools_school.giga_id_school ASC'
             table_configs['entity_random_order'] = 'ORDER BY entities_entity.giga_id ASC'
@@ -884,6 +888,18 @@ class EntityConnectivityTileGenerator(RawEntityDetailFilterMixin, EntityTypeCode
 
         self.query_filters(request, tbl)
 
+        zoom_level = int(request.query_params.get('z', '0'))
+        if zoom_level == 0:
+            tbl['school_bounds_join'] = 'CROSS JOIN bounds'
+            tbl['school_bounds_filter'] = 'AND schools_school.geopoint IS NOT NULL'
+            tbl['entity_bounds_join'] = 'CROSS JOIN bounds'
+            tbl['entity_bounds_filter'] = 'AND entities_entity.geopoint IS NOT NULL'
+        else:
+            tbl['school_bounds_join'] = f'INNER JOIN bounds ON ST_Intersects(schools_school.geopoint, ST_Transform(bounds.geom, {tbl["srid"]}))'
+            tbl['school_bounds_filter'] = ''
+            tbl['entity_bounds_join'] = f'INNER JOIN bounds ON ST_Intersects(entities_entity.geopoint, ST_Transform(bounds.geom, {tbl["srid"]}))'
+            tbl['entity_bounds_filter'] = ''
+
         """sql with join and connectivity_speed"""
         sql_tmpl = """
             WITH bounds AS (
@@ -908,13 +924,14 @@ class EntityConnectivityTileGenerator(RawEntityDetailFilterMixin, EntityTypeCode
                     ELSE False
                 END AS is_rt_connected
                 FROM schools_school
-                INNER JOIN bounds ON ST_Intersects(schools_school.geopoint, ST_Transform(bounds.geom, {srid}))
+                {school_bounds_join}
                 {school_weekly_join}
                 LEFT JOIN connection_statistics_schoolweeklystatus c {weekly_lookup_condition}
                     AND c."deleted" IS NULL
                 LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status
                     ON rt_status.school_id = schools_school.id AND rt_status."deleted" IS NULL
                 WHERE schools_school."deleted" IS NULL
+                    {school_bounds_filter}
                     {school_country_condition}
                     {school_admin1_condition}
                     {school_condition}
@@ -941,7 +958,7 @@ class EntityConnectivityTileGenerator(RawEntityDetailFilterMixin, EntityTypeCode
                 END AS is_rt_connected,
                 (SELECT code FROM entities_entity_type WHERE id = entities_entity.entity_type_id) AS entity_type
                 FROM entities_entity
-                INNER JOIN bounds ON ST_Intersects(entities_entity.geopoint, ST_Transform(bounds.geom, {srid}))
+                {entity_bounds_join}
                 {entity_detail_join}
                 {entity_weekly_join}
                 LEFT JOIN connection_statistics_entityweeklystatus c {entity_weekly_lookup_condition}
@@ -949,6 +966,7 @@ class EntityConnectivityTileGenerator(RawEntityDetailFilterMixin, EntityTypeCode
                 LEFT JOIN connection_statistics_entityrealtimeregistration rt_status
                     ON rt_status.entity_id = entities_entity.id AND rt_status."deleted" IS NULL
                 WHERE entities_entity."deleted" IS NULL
+                    {entity_bounds_filter}
                     {entity_country_condition}
                     {entity_admin1_condition}
                     {entity_condition}
@@ -1057,6 +1075,9 @@ class EntityGlobalConnectivityTileRequestHandler(APIView):
         )
 
     def get(self, request):
+        serializer = TileQuerySerializer(data=request.query_params.dict())
+        serializer.is_valid(raise_exception=True)
+
         use_cached_data = self.request.query_params.get(self.CACHE_KEY, 'on').lower() in ['on', 'true']
         request_path = remove_query_param(request.get_full_path(), 'cache')
         cache_key = self.get_cache_key()
