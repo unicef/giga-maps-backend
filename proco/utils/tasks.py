@@ -25,10 +25,9 @@ logger = logging.getLogger('gigamaps.' + __name__)
 def update_cached_value(*args, url='', query_params=None, **kwargs):
     client = APIClient()
     if query_params:
-        query_params['cache'] = False
         client.get(url, query_params, format='json')
     else:
-        client.get(url, {'cache': False}, format='json')
+        client.get(url, format='json')
 
 
 @app.task(soft_time_limit=60 * 60, time_limit=65 * 60)
@@ -101,7 +100,7 @@ def update_all_cached_values(*args, clean_cache=False):
                 client = APIClient()
                 response = client.get(
                     reverse('connection_statistics:get-latest-week-and-month'),
-                    {'country_id': country.id, 'layer_id': layer_id, 'cache': False},
+                    {'country_id': country.id, 'layer_id': layer_id},
                     format='json',
                 )
 
@@ -858,9 +857,10 @@ def handle_deleted_entity_master_data_row(deleted_row_id=None, country_ids=None)
 @app.task(soft_time_limit=120 * 60, time_limit=125 * 60)
 def update_all_entity_cached_values(*args, clean_cache=False):
     from proco.entities.models import Entity, EntityType
-    from proco.entities.constants import ALL_ENTITIES
+    from proco.entities.constants import ALL_ENTITIES, LEGACY_MODEL
     from proco.locations.models import Country
     from proco.accounts.models import DataLayerCountryRelationship, DataLayer
+    from proco.schools.models import School
     from proco.utils.cache import cache_manager
 
     task_key = 'update_all_entity_cached_values_status_{current_time}'.format(
@@ -885,16 +885,69 @@ def update_all_entity_cached_values(*args, clean_cache=False):
             logger.info('Cache invalidation started. Maps will be updated in a few minutes.')
 
     update_cached_value.delay(url=reverse('locations:search-countries-admin-schools'))
+    update_cached_value.delay(url=reverse('locations:countries-list'))
+    update_cached_value.delay(url=reverse('connection_statistics:global-stat'))
     update_cached_value.delay(url=reverse('entities:list-entity-countries'))
+    update_cached_value.delay(
+        url=reverse('entities:list-published-data-layers-entities', kwargs={'status': 'PUBLISHED'}),
+        query_params={
+            'expand': 'created_by,last_modified_by,published_by',
+            'ordering': '-last_modified_at',
+        },
+    )
     update_cached_value.delay(url=reverse('entities:global-stat-all-entities'),
-                              query_params={'entity_type__code': ALL_ENTITIES})
+                                     query_params={'entity_type__code': ALL_ENTITIES})
+    today_date = core_utilities.get_current_datetime_object().date()
+    monday_date = today_date - timedelta(days=today_date.weekday())
+    last_week_start = monday_date - timedelta(days=7)
+    last_week_end = monday_date - timedelta(days=1)
+    update_cached_value.delay(
+        url=reverse('entities:global-connectivity-stat-entities'),
+        query_params={
+            'start_date': format_date(last_week_start),
+            'end_date': format_date(last_week_end),
+            'benchmark': 'global',
+            'is_weekly': 'true',
+            'entity_type__code': ALL_ENTITIES,
+        },
+    )
 
-    active_entity_types = EntityType.get_all_active().exclude(is_legacy=True)
+    active_entity_types = EntityType.get_all_active()
     entity_country_ids = Entity.objects.filter(deleted__isnull=True).values_list('country_id', flat=True).order_by(
         'country_id').distinct()
-    entity_countries = Country.objects.filter(id__in=list(entity_country_ids))
+    school_country_ids = School.objects.filter(deleted__isnull=True).values_list('country_id', flat=True).order_by(
+        'country_id').distinct()
+    entity_countries = Country.objects.filter(id__in=set(list(entity_country_ids) + list(school_country_ids)))
+
+    for country in entity_countries:
+        chain([
+            update_cached_value.s(
+                url=reverse('entities:global-stat-all-entities'),
+                query_params={'country_id': country.id, 'entity_type__code': ALL_ENTITIES},
+            ),
+            update_cached_value.s(
+                url=reverse('entities:list-published-entity-filters',
+                            kwargs={'status': 'PUBLISHED', 'country_id': country.id}),
+                query_params={'expand': 'column_configuration', 'ordering': 'name',
+                              'entity_type__code': ALL_ENTITIES},
+            ),
+        ]).delay()
 
     for entity_type in active_entity_types:
+        is_legacy_entity_type = entity_type.is_legacy or entity_type.code == LEGACY_MODEL
+        if is_legacy_entity_type:
+            entity_type_countries = Country.objects.filter(id__in=list(school_country_ids))
+        else:
+            entity_type_country_ids = Entity.objects.filter(
+                deleted__isnull=True,
+                entity_type=entity_type,
+            ).values_list('country_id', flat=True).order_by('country_id').distinct()
+            entity_type_countries = Country.objects.filter(id__in=list(entity_type_country_ids))
+
+        data_layer_entity_type_filter = Q(data_layer__entity_type=entity_type)
+        if is_legacy_entity_type:
+            data_layer_entity_type_filter |= Q(data_layer__entity_type__isnull=True)
+
         entity_wise_default_layers = {
             row['country_id']: row['data_layer_id']
             for row in DataLayerCountryRelationship.objects.filter(
@@ -906,12 +959,13 @@ def update_all_entity_cached_values(*args, clean_cache=False):
                 data_layer__type=DataLayer.LAYER_TYPE_LIVE,
                 data_layer__status=DataLayer.LAYER_STATUS_PUBLISHED,
                 data_layer__deleted__isnull=True,
-                data_layer__entity_type=entity_type,
-                country_id__in=list(entity_countries)
+                country_id__in=list(entity_type_countries)
+            ).filter(
+                data_layer_entity_type_filter
             ).values('country_id', 'data_layer_id').order_by('country_id').distinct()
         }
 
-        for country in entity_countries:
+        for country in entity_type_countries:
             country_wise_task_list = [
                 update_cached_value.s(
                     url=reverse('entities:retrieve-entity-country', kwargs={'pk': country.code.lower()})
@@ -930,28 +984,38 @@ def update_all_entity_cached_values(*args, clean_cache=False):
 
             if entity_wise_default_layers.get(country.id, None):
                 layer_id = entity_wise_default_layers[country.id]
+                latest_week_params = {
+                    'country_id': country.id,
+                    'entity_type__code': ALL_ENTITIES,
+                    f'{entity_type.code}_layer_id': layer_id,
+                }
 
                 client = APIClient()
                 response = client.get(
                     reverse('entities:entity-get-latest-week-and-month'),
-                    {'country_id': country.id, 'layer_id': layer_id, 'cache': False},
+                    latest_week_params,
                     format='json',
                 )
+                latest_week = response.data.get(entity_type.code, {}).get('week') if response.data else None
 
-                if response.status_code == 200 and response.data and response.data.get('week'):
-                    latest_week_start_str = response.data['week']['start_date']
-                    latest_week_end_str = response.data['week']['end_date']
+                if response.status_code == 200 and latest_week:
+                    latest_week_start_str = latest_week['start_date']
+                    latest_week_end_str = latest_week['end_date']
+                    same_location_params = {
+                        f'school_include_same_location': 'false',
+                    }
 
                     country_wise_task_list.append(update_cached_value.s(
-                        url=reverse('entities:entity-info-data-layer', kwargs={'pk': layer_id}),
+                        url=reverse('entities:entity-info-data-layer'),
                         query_params={
                             'country_id': country.id,
                             'entity_type__code': entity_type.code,
+                            f'{entity_type.code}_layer_id': layer_id,
                             f'{entity_type.code}_start_date': latest_week_start_str,
                             f'{entity_type.code}_end_date': latest_week_end_str,
                             f'{entity_type.code}_is_weekly': 'true',
                             f'{entity_type.code}_benchmark': 'global',
-                            f'{entity_type.code}_include_same_location': 'false',
+                            **same_location_params,
                         },
                     ))
 
@@ -994,15 +1058,16 @@ def update_all_entity_cached_values(*args, clean_cache=False):
                             info_params = {
                                 'country_id': country.id,
                                 'entity_type__code': entity_type.code,
+                                f'{entity_type.code}_layer_id': layer_id,
                                 f'{entity_type.code}_start_date': latest_week_start_str,
                                 f'{entity_type.code}_end_date': latest_week_end_str,
                                 f'{entity_type.code}_is_weekly': 'true',
                                 f'{entity_type.code}_benchmark': 'global',
-                                f'{entity_type.code}_include_same_location': 'false',
+                                **same_location_params,
                             }
                             info_params.update(filter_params)
                             country_wise_task_list.append(update_cached_value.s(
-                                url=reverse('entities:entity-info-data-layer', kwargs={'pk': layer_id}),
+                                url=reverse('entities:entity-info-data-layer'),
                                 query_params=info_params,
                             ))
 
@@ -1020,8 +1085,8 @@ def update_all_entity_cached_values(*args, clean_cache=False):
                             query_params={
                                 'country_id': country.id,
                                 'admin1_id': adm1_id,
-                                'layer_id': layer_id,
-                                'entity_type__code': entity_type.code,
+                                'entity_type__code': ALL_ENTITIES,
+                                f'{entity_type.code}_layer_id': layer_id,
                             },
                         ))
 
@@ -1035,16 +1100,17 @@ def update_all_entity_cached_values(*args, clean_cache=False):
                         ))
 
                         country_wise_task_list.append(update_cached_value.s(
-                            url=reverse('entities:entity-info-data-layer', kwargs={'pk': layer_id}),
+                            url=reverse('entities:entity-info-data-layer'),
                             query_params={
                                 'country_id': country.id,
                                 'admin1_id': adm1_id,
                                 'entity_type__code': entity_type.code,
+                                f'{entity_type.code}_layer_id': layer_id,
                                 f'{entity_type.code}_start_date': latest_week_start_str,
                                 f'{entity_type.code}_end_date': latest_week_end_str,
                                 f'{entity_type.code}_is_weekly': 'true',
                                 f'{entity_type.code}_benchmark': 'global',
-                                f'{entity_type.code}_include_same_location': 'false',
+                                **same_location_params,
                             },
                         ))
 
