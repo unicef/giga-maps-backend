@@ -30,6 +30,7 @@ from proco.accounts.v2 import entity_filter_serializers
 from proco.connection_statistics import models as statistics_models
 from proco.connection_statistics.config import app_config as statistics_configs
 from proco.connection_statistics.models import SchoolWeeklyStatus
+from proco.connection_statistics.realtime_weekly_metrics import build_live_weekly_requirement
 from proco.contact.models import ContactMessage
 from proco.core import db_utils as db_utilities
 from proco.core import permissions as core_permissions
@@ -792,17 +793,16 @@ class DataLayerPreviewViewSet(APIView):
 
     def get_map_query(self, kwargs):
         query = """
-                SELECT schools_school.id,
-                       CASE
-                           WHEN rt_status.rt_registered = True AND rt_status.rt_registration_date <= '{end_date}'
-                               THEN True
-                           ELSE False
-                           END AS is_rt_connected, {case_conditions}
-                    CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
-                    WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
-                    ELSE 'unknown'
-                END
-                AS connectivity_status,
+        SELECT schools_school.id,
+            CASE WHEN rt_status.rt_registered = True
+                    AND rt_status.rt_registration_date < '{end_datetime_exclusive}' THEN True
+                    ELSE False
+            END AS is_rt_connected,
+            {case_conditions}
+            CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
+                ELSE 'unknown'
+            END AS connectivity_status,
             ST_AsGeoJSON(ST_Transform(schools_school.geopoint, 4326)) AS geopoint
         FROM schools_school
         INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
@@ -825,7 +825,7 @@ class DataLayerPreviewViewSet(APIView):
         WHERE schools_school."deleted" IS NULL
             AND rt_status."deleted" IS NULL
             AND rt_status."rt_registered" = True
-            AND rt_status."rt_registration_date"::date <= '{end_date}'
+            AND rt_status."rt_registration_date" < '{end_datetime_exclusive}'
         {country_condition_outer}
         ORDER BY random()
         LIMIT 1000 \
@@ -987,6 +987,7 @@ class DataLayerPreviewViewSet(APIView):
                 'country_ids': country_ids,
                 'start_date': start_date,
                 'end_date': end_date,
+                'end_datetime_exclusive': end_date + timedelta(days=1),
                 'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                 'parameter_col': parameter_col,
                 'parameter_col_function_sql': column_function_sql,
@@ -1118,6 +1119,9 @@ class BaseDataLayerAPIViewSet(APIView):
         elif layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
             date = core_utilities.get_current_datetime_object() - timedelta(days=7)
             self.kwargs['end_date'] = ((date - timedelta(days=date.weekday())) + timedelta(days=6)).date()
+
+        if self.kwargs.get('end_date'):
+            self.kwargs['end_datetime_exclusive'] = self.kwargs['end_date'] + timedelta(days=1)
 
         if 'country_id' in query_param_keys:
             self.kwargs['country_ids'] = [query_params['country_id']]
@@ -1253,7 +1257,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     {school_condition}
                     {school_weekly_condition}
                     AND "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
-                    AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date":: date <= '{end_date}')
+                    AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date" < '{end_datetime_exclusive}')
                     ) AS sds
                     {school_weekly_outer_join} \
                 """
@@ -1358,37 +1362,249 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
         return query.format(**kwargs)
 
+    def get_realtime_weekly_metric_info_query(self):
+        query = """
+        SELECT {case_conditions}
+            COUNT(DISTINCT CASE WHEN sds.{col_name} IS NOT NULL THEN sds.school_id ELSE NULL END)
+                AS "school_with_realtime_data",
+            {benchmark_value_sql}
+            COUNT(DISTINCT sds.school_id) AS "no_of_schools_measure"
+        FROM (
+            SELECT "schools_school"."id" AS school_id,
+                "schools_school"."last_weekly_status_id",
+                rtwm."agg_value" AS "{col_name}"
+            FROM "schools_school"
+            INNER JOIN "connection_statistics_schoolrealtimeregistration"
+                ON ("schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id")
+            {school_weekly_join}
+            LEFT OUTER JOIN "{realtime_weekly_metric_table}" rtwm
+                ON (
+                    "schools_school"."id" = rtwm."school_id"
+                    AND "schools_school"."country_id" = rtwm."country_id"
+                    AND rtwm."year" = {realtime_weekly_metric_year}
+                    AND rtwm."week" = {realtime_weekly_metric_week}
+                    AND rtwm."config_hash" = '{realtime_weekly_metric_config_hash}'
+                )
+            WHERE (
+                "schools_school"."deleted" IS NULL
+                AND "connection_statistics_schoolrealtimeregistration"."deleted" IS NULL
+                {country_condition}
+                {admin1_condition}
+                {school_condition}
+                {school_weekly_condition}
+                AND "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
+                AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date" < '{end_datetime_exclusive}')
+        ) AS sds
+        {school_weekly_outer_join}
+        """
+
+        kwargs = self.get_realtime_weekly_metric_info_query_kwargs()
+        return query.format(**kwargs)
+
+    def get_realtime_weekly_metric_exists_query(self):
+        query = """
+        SELECT EXISTS(
+            SELECT 1
+            FROM "{realtime_weekly_metric_table}" rtwm
+            INNER JOIN "schools_school"
+                ON "schools_school"."id" = rtwm."school_id"
+            {school_weekly_join}
+            WHERE "schools_school"."deleted" IS NULL
+                AND rtwm."year" = {realtime_weekly_metric_year}
+                AND rtwm."week" = {realtime_weekly_metric_week}
+                AND rtwm."config_hash" = '{realtime_weekly_metric_config_hash}'
+                {country_condition}
+                {admin1_condition}
+                {school_condition}
+                {school_weekly_condition}
+            LIMIT 1
+        ) AND NOT EXISTS(
+            SELECT 1
+            FROM "schools_school"
+            INNER JOIN "connection_statistics_schoolrealtimeregistration" rt_status
+                ON rt_status."school_id" = "schools_school"."id"
+            {school_weekly_join}
+            INNER JOIN "connection_statistics_schooldailystatus" t
+                ON t."school_id" = "schools_school"."id"
+                AND t."date" BETWEEN '{start_date}' AND '{end_date}'
+                AND t."live_data_source" IN ({live_source_types})
+                AND t."deleted" IS NULL
+                AND t."{col_name}" IS NOT NULL
+            LEFT JOIN "{realtime_weekly_metric_table}" rtwm
+                ON rtwm."school_id" = "schools_school"."id"
+                AND rtwm."country_id" = "schools_school"."country_id"
+                AND rtwm."year" = {realtime_weekly_metric_year}
+                AND rtwm."week" = {realtime_weekly_metric_week}
+                AND rtwm."config_hash" = '{realtime_weekly_metric_config_hash}'
+                AND rtwm."modified" >= t."modified"
+            WHERE "schools_school"."deleted" IS NULL
+                AND rt_status."deleted" IS NULL
+                AND rt_status."rt_registered" = True
+                AND rt_status."rt_registration_date" < '{end_datetime_exclusive}'
+                AND rtwm."id" IS NULL
+                {country_condition}
+                {admin1_condition}
+                {school_condition}
+                {school_weekly_condition}
+            LIMIT 1
+        ) AS has_aggregate_data
+        """
+
+        kwargs = self.get_realtime_weekly_metric_info_query_kwargs(include_case_conditions=False)
+        return query.format(**kwargs)
+
+    def get_realtime_weekly_metric_info_query_kwargs(self, include_case_conditions=True):
+        kwargs = copy.deepcopy(self.kwargs)
+
+        kwargs['country_condition'] = ''
+        kwargs['admin1_condition'] = ''
+        kwargs['school_condition'] = ''
+        kwargs['school_weekly_join'] = ''
+        kwargs['school_weekly_condition'] = ''
+        kwargs['school_weekly_outer_join'] = ''
+        kwargs['benchmark_value_sql'] = ''
+        kwargs['realtime_weekly_metric_table'] = statistics_models.SchoolRealTimeWeeklyMetric._meta.db_table
+        kwargs['realtime_weekly_metric_year'] = date_utilities.get_year_from_date(kwargs['start_date'])
+        kwargs['realtime_weekly_metric_week'] = date_utilities.get_week_from_date(kwargs['start_date'])
+
+        if len(kwargs.get('admin1_ids', [])) > 0:
+            kwargs['admin1_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
+                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
+            )
+        elif len(kwargs.get('country_ids', [])) > 0:
+            kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
+                ','.join([str(country_id) for country_id in kwargs['country_ids']])
+            )
+
+        if len(kwargs['school_filters']) > 0:
+            kwargs['school_condition'] = ' AND ' + kwargs['school_filters']
+
+        if len(kwargs.get('school_real_time_filters', '')) > 0 or len(kwargs['school_static_filters']) > 0:
+            kwargs['school_weekly_join'] = """
+            INNER JOIN "connection_statistics_schoolweeklystatus"
+                ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
+            """
+            kwargs['school_weekly_condition'] = ''
+            if len(kwargs.get('school_real_time_filters', '')) > 0:
+                kwargs['school_weekly_condition'] += ' AND ' + kwargs['school_real_time_filters']
+            if len(kwargs['school_static_filters']) > 0:
+                kwargs['school_weekly_condition'] += ' AND ' + kwargs['school_static_filters']
+
+        if not include_case_conditions:
+            return kwargs
+
+        benchmark_value = kwargs['benchmark_value']
+        if benchmark_value is not None and isinstance(benchmark_value, str) and 'SQL:' in benchmark_value:
+            kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(
+                **kwargs) + ' AS benchmark_sql_value,'
+            kwargs['benchmark_value_sql'] = rewrite_sds_to_sws(
+                kwargs['benchmark_value_sql'], kwargs['col_name']
+            )
+
+        legend_configs = kwargs['legend_configs']
+        if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
+            label_cases = []
+            for title, values_and_label in legend_configs.items():
+                values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
+                                     values_and_label.get('values', [])))
+
+                if len(values) > 0:
+                    is_sql_value = 'SQL:' in values[0]
+                    if is_sql_value:
+                        sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
+                        sql_statement = rewrite_sds_to_sws(sql_statement, kwargs['col_name'])
+                        label_cases.append(
+                            'COUNT(DISTINCT CASE WHEN {sql} THEN sds.school_id ELSE NULL END) AS "{label}",'.format(
+                                sql=sql_statement, label=title))
+                else:
+                    label_cases.append(
+                        'COUNT(DISTINCT CASE WHEN sds.{col_name} IS NULL '
+                        'THEN sds.school_id ELSE NULL END) AS "{label}",'.format(
+                            col_name=kwargs['col_name'], label=title))
+
+            kwargs['case_conditions'] = ' '.join(label_cases)
+
+            uses_school_weekly_status = (
+                'sws' in str(legend_configs) or
+                'sws.' in kwargs.get('case_conditions', '') or
+                'sws.' in kwargs.get('benchmark_value_sql', '')
+            )
+            if uses_school_weekly_status:
+                kwargs['school_weekly_outer_join'] = """
+                INNER JOIN "connection_statistics_schoolweeklystatus" sws
+                    ON sds."last_weekly_status_id" = sws."id"
+                """
+        else:
+            kwargs['case_conditions'] = """
+            COUNT(DISTINCT CASE WHEN sds.{col_name} > {benchmark_value} THEN sds.school_id ELSE NULL END) AS "good",
+            COUNT(DISTINCT CASE WHEN (sds.{col_name} >= {base_benchmark} AND sds.{col_name} <= {benchmark_value})
+                THEN sds.school_id ELSE NULL END) AS "moderate",
+            COUNT(DISTINCT CASE WHEN sds.{col_name} < {base_benchmark} THEN sds.school_id ELSE NULL END) AS "bad",
+            COUNT(DISTINCT CASE WHEN sds.{col_name} IS NULL THEN sds.school_id ELSE NULL END) AS "unknown",
+            """.format(**kwargs)
+
+            if kwargs['is_reverse'] is True:
+                kwargs['case_conditions'] = """
+                COUNT(DISTINCT CASE WHEN sds.{col_name} < {benchmark_value} THEN sds.school_id ELSE NULL END) AS "good",
+                COUNT(DISTINCT CASE WHEN (sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark})
+                    THEN sds.school_id ELSE NULL END) AS "moderate",
+                COUNT(DISTINCT CASE WHEN sds.{col_name} > {base_benchmark} THEN sds.school_id ELSE NULL END) AS "bad",
+                COUNT(DISTINCT CASE WHEN sds.{col_name} IS NULL THEN sds.school_id ELSE NULL END) AS "unknown",
+                """.format(**kwargs)
+
+        return kwargs
+
+    def can_use_realtime_weekly_metric_info_query(self):
+        if not self.kwargs.get('is_weekly', True):
+            return False
+
+        if self.kwargs.get('end_date') != self.kwargs.get('start_date') + timedelta(days=6):
+            return False
+
+        if self.kwargs.get('end_date') >= core_utilities.get_current_datetime_object().date():
+            return False
+
+        if not self.kwargs.get('realtime_weekly_metric_config_hash'):
+            return False
+
+        exists_response = db_utilities.sql_to_response(
+            self.get_realtime_weekly_metric_exists_query(),
+            label=self.__class__.__name__,
+            db_var=settings.READ_ONLY_DB_KEY,
+        )
+        has_aggregate_data = bool(exists_response and exists_response[-1].get('has_aggregate_data'))
+
+        return has_aggregate_data
+
     def get_school_view_info_query(self):
         query = """
-                SELECT DISTINCT schools_school."id",
-                                schools_school."name",
-                                schools_school."external_id",
-                                schools_school."giga_id_school",
-                                schools_school."is_verified_school",
-                                CASE WHEN srr."rt_registered" = True THEN true ELSE false END AS is_data_synced,
-                                schools_school."admin1_id",
-                                adm1_metadata."name"                                          AS admin1_name,
-                                adm1_metadata."giga_id_admin"                                 AS admin1_code,
-                                adm1_metadata."description_ui_label"                          AS admin1_description_ui_label,
-                                schools_school."admin2_id",
-                                adm2_metadata."name"                                          AS admin2_name,
-                                adm2_metadata."giga_id_admin"                                 AS admin2_code,
-                                adm2_metadata."description_ui_label"                          AS admin2_description_ui_label,
-                                schools_school."country_id",
-                                c."name"                                                      AS country_name,
-                                ST_AsGeoJSON(ST_Transform(schools_school."geopoint", 4326))   AS geopoint,
-                                schools_school."environment",
-                                schools_school."education_level",
-                                ROUND(sds."{col_name}"::numeric, 2)                           AS "live_avg",
-                                sws."download_speed_benchmark",
-                                CASE
-                                    WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
-                                    WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
-                                    ELSE 'unknown'
-                                    END                                                       AS connectivity_status,
-                                CASE WHEN srr."rt_registered" = True AND srr."rt_registration_date"::date <= '{end_date}' THEN true
-            ELSE false
-                END AS is_rt_connected,
+        SELECT DISTINCT schools_school."id",
+            schools_school."name",
+            schools_school."external_id",
+            schools_school."giga_id_school",
+            schools_school."is_verified_school",
+            CASE WHEN srr."rt_registered" = True THEN true ELSE false END AS is_data_synced,
+            schools_school."admin1_id",
+            adm1_metadata."name" AS admin1_name,
+            adm1_metadata."giga_id_admin" AS admin1_code,
+            adm1_metadata."description_ui_label" AS admin1_description_ui_label,
+            schools_school."admin2_id",
+            adm2_metadata."name" AS admin2_name,
+            adm2_metadata."giga_id_admin" AS admin2_code,
+            adm2_metadata."description_ui_label" AS admin2_description_ui_label,
+            schools_school."country_id",
+            c."name" AS country_name,
+            ST_AsGeoJSON(ST_Transform(schools_school."geopoint", 4326)) AS geopoint,
+            schools_school."environment",
+            schools_school."education_level",
+            ROUND(sds."{col_name}"::numeric, 2) AS "live_avg",
+            sws."download_speed_benchmark",
+            CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
+                ELSE 'unknown'
+            END AS connectivity_status,
+            CASE WHEN srr."rt_registered" = True AND srr."rt_registration_date" < '{end_datetime_exclusive}' THEN true
+            ELSE false END AS is_rt_connected,
             {benchmark_value_sql}
             {case_conditions}
         FROM "schools_school" schools_school
@@ -1405,7 +1621,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         LEFT JOIN "connection_statistics_schoolrealtimeregistration" AS srr
             ON schools_school."id" = srr."school_id"
             AND srr."deleted" IS NULL
-            AND srr."rt_registration_date"::date <= '{end_date}'
+            AND srr."rt_registration_date" < '{end_datetime_exclusive}'
         LEFT JOIN (
             SELECT "schools_school"."id" AS school_id,
                 {col_function} AS "{col_name}"
@@ -1533,30 +1749,29 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
     def get_avg_query(self, **kwargs):
         query = """
-                SELECT {school_selection} t."date" AS date, {col_function} AS "field_avg"
-                FROM "schools_school"
-                    INNER JOIN "connection_statistics_schoolrealtimeregistration"
-                ON
-                    "connection_statistics_schoolrealtimeregistration"."school_id" = "schools_school"."id"
-                    INNER JOIN "connection_statistics_schooldailystatus" t ON "schools_school"."id" = t."school_id"
-                    {school_weekly_join}
-                WHERE (
-                    {country_condition}
-                    {admin1_condition}
-                    {school_condition}
-                    {school_weekly_condition}
-                    "connection_statistics_schoolrealtimeregistration"."deleted" IS NULL
-                  AND "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
-                  AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date":: date <= '{end_date}'
-                  AND (t."date" BETWEEN '{start_date}'
-                  AND '{end_date}')
-                  AND t."live_data_source" IN ({live_source_types})
-                  AND t."deleted" IS NULL
-                  AND t."{col_name}" IS NOT NULL
-                    )
-                GROUP BY t."date"{school_group_by}
-                ORDER BY t."date" ASC \
-                """
+        SELECT {school_selection}t."date" AS date,
+            {col_function} AS "field_avg"
+        FROM "schools_school"
+        INNER JOIN "connection_statistics_schoolrealtimeregistration" ON
+            "connection_statistics_schoolrealtimeregistration"."school_id" = "schools_school"."id"
+        INNER JOIN "connection_statistics_schooldailystatus" t ON "schools_school"."id" = t."school_id"
+        {school_weekly_join}
+        WHERE (
+            {country_condition}
+            {admin1_condition}
+            {school_condition}
+            {school_weekly_condition}
+            "connection_statistics_schoolrealtimeregistration"."deleted" IS NULL
+            AND "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
+            AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date" < '{end_datetime_exclusive}'
+            AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
+            AND t."live_data_source" IN ({live_source_types})
+            AND t."deleted" IS NULL
+            AND t."{col_name}" IS NOT NULL
+        )
+        GROUP BY t."date"{school_group_by}
+        ORDER BY t."date" ASC
+        """
 
         kwargs['country_condition'] = ''
         kwargs['admin1_condition'] = ''
@@ -2012,6 +2227,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             self.kwargs['round_unit_value'] = unit_agg_str
 
             if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+                realtime_weekly_metric_requirement = build_live_weekly_requirement(data_layer_instance, data_sources)
 
                 self.kwargs.update({
                     'col_name': parameter_column_name,
@@ -2024,6 +2240,10 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     'parameter_col_function_sql': column_function_sql,
                     'is_reverse': data_layer_instance.is_reverse,
                     'legend_configs': legend_configs,
+                    'realtime_weekly_metric_config_hash': (
+                        realtime_weekly_metric_requirement['config_hash']
+                        if realtime_weekly_metric_requirement else None
+                    ),
                 })
 
                 if len(self.kwargs.get('school_ids', [])) > 0:
@@ -2103,7 +2323,12 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     elif len(self.kwargs.get('country_ids', [])) > 0:
                         is_data_synced_qs = is_data_synced_qs.filter(school__country_id__in=self.kwargs['country_ids'])
 
-                    query_response = db_utilities.sql_to_response(self.get_info_query(),
+                    use_realtime_weekly_metric = self.can_use_realtime_weekly_metric_info_query()
+                    info_query = (
+                        self.get_realtime_weekly_metric_info_query()
+                        if use_realtime_weekly_metric else self.get_info_query()
+                    )
+                    query_response = db_utilities.sql_to_response(info_query,
                                                                   label=self.__class__.__name__,
                                                                   db_var=settings.READ_ONLY_DB_KEY)[-1]
 
@@ -2270,15 +2495,15 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     AND t."live_data_source" IN ({live_source_types})
                     )
                     WHERE (
-                    "schools_school"."deleted" IS NULL
-                    AND rt_status."deleted" IS NULL
-                    {country_condition}
-                    {admin1_condition}
-                    {school_condition}
-                    {same_school_coords_condition}
-                    {school_weekly_condition}
-                    AND rt_status."rt_registered" = True
-                    AND rt_status."rt_registration_date":: date <= '{end_date}'
+                        "schools_school"."deleted" IS NULL
+                        AND rt_status."deleted" IS NULL
+                        {country_condition}
+                        {admin1_condition}
+                        {school_condition}
+                        {same_school_coords_condition}
+                        {school_weekly_condition}
+                        AND rt_status."rt_registered" = True
+                        AND rt_status."rt_registration_date" < '{end_datetime_exclusive}'
                     )
                     GROUP BY "schools_school"."id"
                     ) AS sds ON sds.school_id = "schools_school".id
@@ -2430,8 +2655,289 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
         return query.format(**kwargs)
 
+    def get_realtime_weekly_metric_map_query(self, env, request):
+        query = """
+        WITH bounds AS (
+                SELECT {env} AS geom,
+                {env}::box2d AS b2d
+            ),
+            mvtgeom AS (
+                SELECT DISTINCT ST_AsMVTGeom(ST_Transform("schools_school".geopoint, 3857), bounds.b2d) AS geom,
+                    {random_select_list}
+                    "schools_school".id,
+                    True AS is_rt_connected,
+                    sds.{col_name} AS field_avg,
+                    {case_conditions}
+                    'connected' AS connectivity_status,
+                    (COUNT(*) OVER (PARTITION BY "schools_school".geopoint) > 1)
+                    AS has_multiple_school_on_same_lat_lng
+                FROM schools_school
+                INNER JOIN bounds ON ST_Intersects("schools_school".geopoint, ST_Transform(bounds.geom, 4326))
+                INNER JOIN (
+                    SELECT "schools_school"."id" AS school_id,
+                        "schools_school"."last_weekly_status_id",
+                        rtwm."agg_value" AS "{col_name}"
+                    FROM "schools_school"
+                    INNER JOIN connection_statistics_schoolrealtimeregistration rt_status ON
+                        rt_status."school_id" = "schools_school".id
+                    {school_weekly_join}
+                    LEFT OUTER JOIN "{realtime_weekly_metric_table}" rtwm ON (
+                        "schools_school"."id" = rtwm."school_id"
+                        AND "schools_school"."country_id" = rtwm."country_id"
+                        AND rtwm."year" = {realtime_weekly_metric_year}
+                        AND rtwm."week" = {realtime_weekly_metric_week}
+                        AND rtwm."config_hash" = '{realtime_weekly_metric_config_hash}'
+                    )
+                    WHERE (
+                        "schools_school"."deleted" IS NULL
+                        AND rt_status."deleted" IS NULL
+                        {country_condition}
+                        {admin1_condition}
+                        {school_condition}
+                        {same_school_coords_condition}
+                        {school_weekly_condition}
+                        AND rt_status."rt_registered" = True
+                        AND rt_status."rt_registration_date" < '{end_datetime_exclusive}'
+                    )
+                ) AS sds ON sds.school_id = "schools_school".id
+                {school_weekly_outer_join}
+                WHERE "schools_school"."deleted" IS NULL
+                    {random_order}
+                    {limit_condition}
+            )
+            SELECT COALESCE(NULLIF(tile.mvt, ''::bytea), {empty_mvt_layer})
+            FROM (
+                SELECT ST_AsMVT(DISTINCT mvtgeom.*, '{mvt_layer}') AS mvt
+                FROM mvtgeom
+            ) tile;
+        """
+
+        kwargs = self.get_live_map_query_kwargs(env, request)
+        kwargs['mvt_layer'] = kwargs.get('mvt_layer', 'default')
+        kwargs['empty_mvt_layer'] = account_utilities.get_empty_mvt_layer_sql(kwargs['mvt_layer'])
+        kwargs['realtime_weekly_metric_table'] = statistics_models.SchoolRealTimeWeeklyMetric._meta.db_table
+        kwargs['realtime_weekly_metric_year'] = date_utilities.get_year_from_date(kwargs['start_date'])
+        kwargs['realtime_weekly_metric_week'] = date_utilities.get_week_from_date(kwargs['start_date'])
+        return query.format(**kwargs)
+
+    def get_realtime_weekly_metric_map_exists_query(self):
+        query = """
+        SELECT EXISTS(
+            SELECT 1
+            FROM "{realtime_weekly_metric_table}" rtwm
+            INNER JOIN "schools_school"
+                ON "schools_school"."id" = rtwm."school_id"
+            {school_weekly_join}
+            WHERE "schools_school"."deleted" IS NULL
+                AND rtwm."year" = {realtime_weekly_metric_year}
+                AND rtwm."week" = {realtime_weekly_metric_week}
+                AND rtwm."config_hash" = '{realtime_weekly_metric_config_hash}'
+                {country_condition}
+                {admin1_condition}
+                {school_condition}
+                {school_weekly_condition}
+            LIMIT 1
+        ) AND NOT EXISTS(
+            SELECT 1
+            FROM "schools_school"
+            INNER JOIN "connection_statistics_schoolrealtimeregistration" rt_status
+                ON rt_status."school_id" = "schools_school"."id"
+            {school_weekly_join}
+            INNER JOIN "connection_statistics_schooldailystatus" t
+                ON t."school_id" = "schools_school"."id"
+                AND t."date" BETWEEN '{start_date}' AND '{end_date}'
+                AND t."live_data_source" IN ({live_source_types})
+                AND t."deleted" IS NULL
+                AND t."{col_name}" IS NOT NULL
+            LEFT JOIN "{realtime_weekly_metric_table}" rtwm
+                ON rtwm."school_id" = "schools_school"."id"
+                AND rtwm."country_id" = "schools_school"."country_id"
+                AND rtwm."year" = {realtime_weekly_metric_year}
+                AND rtwm."week" = {realtime_weekly_metric_week}
+                AND rtwm."config_hash" = '{realtime_weekly_metric_config_hash}'
+                AND rtwm."modified" >= t."modified"
+            WHERE "schools_school"."deleted" IS NULL
+                AND rt_status."deleted" IS NULL
+                AND rt_status."rt_registered" = True
+                AND rt_status."rt_registration_date" < '{end_datetime_exclusive}'
+                AND rtwm."id" IS NULL
+                {country_condition}
+                {admin1_condition}
+                {school_condition}
+                {school_weekly_condition}
+            LIMIT 1
+        ) AS has_aggregate_data
+        """
+
+        kwargs = self.get_live_map_query_kwargs(None, None, include_map_controls=False)
+        kwargs['realtime_weekly_metric_table'] = statistics_models.SchoolRealTimeWeeklyMetric._meta.db_table
+        kwargs['realtime_weekly_metric_year'] = date_utilities.get_year_from_date(kwargs['start_date'])
+        kwargs['realtime_weekly_metric_week'] = date_utilities.get_week_from_date(kwargs['start_date'])
+        return query.format(**kwargs)
+
+    def can_use_realtime_weekly_metric_map_query(self):
+        if not self.kwargs.get('is_weekly', True):
+            return False
+
+        if self.kwargs.get('end_date') != self.kwargs.get('start_date') + timedelta(days=6):
+            return False
+
+        if self.kwargs.get('end_date') >= core_utilities.get_current_datetime_object().date():
+            return False
+
+        if not self.kwargs.get('realtime_weekly_metric_config_hash'):
+            return False
+
+        exists_response = db_utilities.sql_to_response(
+            self.get_realtime_weekly_metric_map_exists_query(),
+            label=self.__class__.__name__,
+            db_var=settings.READ_ONLY_DB_KEY,
+        )
+        has_aggregate_data = bool(exists_response and exists_response[-1].get('has_aggregate_data'))
+
+        return has_aggregate_data
+
+    def get_live_map_query_kwargs(self, env, request, include_map_controls=True):
+        kwargs = copy.deepcopy(self.kwargs)
+
+        kwargs['country_condition'] = ''
+        kwargs['admin1_condition'] = ''
+        kwargs['school_condition'] = ''
+
+        kwargs['school_weekly_join'] = ''
+        kwargs['school_weekly_condition'] = ''
+        kwargs['school_weekly_outer_join'] = ''
+
+        kwargs['env'] = self.envelope_to_bounds_sql(env) if env else ''
+
+        kwargs['limit_condition'] = ''
+        kwargs['random_order'] = ''
+        kwargs['random_select_list'] = ''
+        kwargs['same_school_coords_condition'] = ''
+
+        add_random_condition = True
+
+        legend_configs = kwargs['legend_configs']
+        if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+            kwargs['table_name'] = 'sds'
+
+        if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
+            label_cases = []
+            uses_school_weekly_status = False
+            for title, values_and_label in legend_configs.items():
+                values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
+                                     values_and_label.get('values', [])))
+
+                if len(values) > 0:
+                    is_sql_value = 'SQL:' in values[0]
+                    if is_sql_value:
+                        sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
+                        sql_statement = account_utilities.rewrite_weekly_status_sql(
+                            sql_statement, entity_name='school'
+                        )
+                        uses_school_weekly_status = uses_school_weekly_status or 'sws.' in sql_statement
+                        label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
+                else:
+                    if not any(case.startswith('ELSE ') for case in label_cases):
+                        label_cases.append("ELSE '{label}'".format(label=title))
+
+            kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status,'
+            if uses_school_weekly_status:
+                kwargs['school_weekly_outer_join'] = """
+                INNER JOIN "connection_statistics_schoolweeklystatus" sws
+                    ON sds."last_weekly_status_id" = sws."id"
+                """
+        else:
+            kwargs['case_conditions'] = """
+                CASE WHEN sds.{col_name} >  {benchmark_value} THEN 'good'
+                    WHEN sds.{col_name} < {benchmark_value} AND sds.{col_name} >= {base_benchmark} THEN 'moderate'
+                    WHEN sds.{col_name} < {base_benchmark}  THEN 'bad'
+                    ELSE 'unknown'
+                END AS field_status,
+            """.format(**kwargs)
+
+            if kwargs['is_reverse'] is True:
+                kwargs['case_conditions'] = """
+                CASE WHEN sds.{col_name} < {benchmark_value}  THEN 'good'
+                    WHEN sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark} THEN 'moderate'
+                    WHEN sds.{col_name} > {base_benchmark} THEN 'bad'
+                    ELSE 'unknown'
+                END AS field_status,
+                """.format(**kwargs)
+
+        if len(kwargs.get('school_ids', [])) > 0:
+            add_random_condition = False
+            kwargs['school_condition'] = 'AND "schools_school"."id" IN ({0})'.format(
+                ','.join([str(school_id) for school_id in kwargs['school_ids']])
+            )
+        elif len(kwargs.get('admin1_ids', [])) > 0:
+            if settings.ADMIN_MAP_API_SAMPLING_LIMIT is not None:
+                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.ADMIN_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
+                add_random_condition = False
+
+            kwargs['admin1_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
+                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
+            )
+        elif len(kwargs.get('country_ids', [])) > 0:
+            if settings.COUNTRY_MAP_API_SAMPLING_LIMIT:
+                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.COUNTRY_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
+                add_random_condition = False
+
+            kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
+                ','.join([str(country_id) for country_id in kwargs['country_ids']])
+            )
+
+        if kwargs.get('exclude_schools_same_coords_except_id'):
+            kwargs['same_school_coords_condition'] = f"""
+                                        AND (
+                                            schools_school.id = {kwargs['exclude_schools_same_coords_except_id']}
+                                            OR NOT ST_Equals(
+                                                schools_school.geopoint,
+                                                (SELECT geopoint FROM schools_school WHERE id = {kwargs['exclude_schools_same_coords_except_id']})
+                                            )
+                                        )
+                                    """
+
+        if len(kwargs['school_filters']) > 0:
+            kwargs['school_condition'] += ' AND ' + kwargs['school_filters']
+
+        if len(kwargs.get('school_real_time_filters', '')) > 0 or len(kwargs['school_static_filters']) > 0:
+            kwargs['school_weekly_join'] = """
+            INNER JOIN "connection_statistics_schoolweeklystatus"
+                ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
+            """
+            kwargs['school_weekly_condition'] = ''
+            if len(kwargs.get('school_real_time_filters', '')) > 0:
+                kwargs['school_weekly_condition'] += ' AND ' + kwargs['school_real_time_filters']
+            if len(kwargs['school_static_filters']) > 0:
+                kwargs['school_weekly_condition'] += ' AND ' + kwargs['school_static_filters']
+
+        if include_map_controls and add_random_condition:
+            if 'limit' in request.query_params:
+                limit = request.query_params['limit']
+                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+            elif kwargs.get('MAP_API_SAMPLING_LIMIT'):
+                limit = kwargs['MAP_API_SAMPLING_LIMIT']
+                kwargs['random_order'] = 'ORDER BY random()'
+            else:
+                limit = '50000'
+                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+
+            kwargs['limit_condition'] = 'LIMIT ' + str(limit)
+            kwargs['random_select_list'] = 'random(),'
+
+        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
+
+        return kwargs
+
     def envelope_to_sql(self, env, request):
         if self.kwargs['layer_type'] == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+            if self.kwargs.get('use_realtime_weekly_metric_map_query'):
+                return self.get_realtime_weekly_metric_map_query(env, request)
             return self.get_live_map_query(env, request)
         return self.get_static_map_query(env, request)
 
@@ -2680,6 +3186,8 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             legend_configs = self.get_legend_configs(data_layer_instance)
 
             if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+                realtime_weekly_metric_requirement = build_live_weekly_requirement(data_layer_instance, data_sources)
+
                 self.kwargs.update({
                     'col_name': parameter_column_name,
                     'benchmark_value': benchmark_value,
@@ -2691,7 +3199,14 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     'parameter_col_function_sql': column_function_sql,
                     'layer_type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                     'legend_configs': legend_configs,
+                    'realtime_weekly_metric_config_hash': (
+                        realtime_weekly_metric_requirement['config_hash']
+                        if realtime_weekly_metric_requirement else None
+                    ),
                 })
+                self.kwargs['use_realtime_weekly_metric_map_query'] = (
+                    self.can_use_realtime_weekly_metric_map_query()
+                )
             else:
                 self.kwargs.update({
                     'col_name': parameter_column_name,
