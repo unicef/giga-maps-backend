@@ -23,6 +23,7 @@ from proco.accounts.v2.entity_filter_serializers import (
     PublishedEntityAdvanceFiltersListSerializer,
     EntityColumnConfigurationChoicesSerializer,
 )
+from proco.connection_statistics import tasks as statistics_tasks
 from proco.connection_statistics.models import SchoolWeeklyStatus
 from proco.core import utils as core_utilities
 from proco.core import db_utils as db_utilities
@@ -1843,6 +1844,15 @@ class UpdateDataLayerSerializer(BaseDataLayerCRUDSerializer):
             if data_layer_instance.status == accounts_models.DataLayer.LAYER_STATUS_PUBLISHED:
                 args = ['--reset', '-layer_id={0}'.format(instance.id)]
                 call_command('populate_active_data_layer_for_countries', *args)
+                if (
+                    data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE and
+                    (data_layer_instance.entity_type is None or data_layer_instance.entity_type.is_legacy)
+                ):
+                    transaction.on_commit(
+                        lambda: statistics_tasks.backfill_school_live_weekly_metrics_for_layer.delay(
+                            data_layer_instance.id
+                        )
+                    )
 
             # Once Data Layer is created, send the status email to the PUBLISHERS
             request_user = core_utilities.get_current_user(context=self.context)
@@ -1936,6 +1946,14 @@ class PublishDataLayerSerializer(BaseDataLayerCRUDSerializer):
 
             args = ['--reset', '-layer_id={0}'.format(instance.id)]
             call_command('populate_active_data_layer_for_countries', *args)
+            if (
+                instance.status == accounts_models.DataLayer.LAYER_STATUS_PUBLISHED and
+                instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE and
+                (instance.entity_type is None or instance.entity_type.is_legacy)
+            ):
+                transaction.on_commit(
+                    lambda: statistics_tasks.backfill_school_live_weekly_metrics_for_layer.delay(instance.id)
+                )
 
         return instance
 

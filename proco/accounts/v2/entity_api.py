@@ -24,6 +24,7 @@ from proco.accounts.v2 import entity_serializers
 from proco.connection_statistics import models as statistics_models
 from proco.connection_statistics.config import app_config as statistics_configs
 from proco.connection_statistics.models import SchoolWeeklyStatus, EntityWeeklyStatus
+from proco.connection_statistics.realtime_weekly_metrics import build_live_weekly_requirement
 from proco.core import db_utils as db_utilities
 from proco.core import permissions as core_permissions
 from proco.core import utils as core_utilities
@@ -119,6 +120,9 @@ class BaseEntityDataLayerAPIViewSet(EntityDetailFilterMixin, APIView):
         elif layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
             date = core_utilities.get_current_datetime_object() - timedelta(days=7)
             self.kwargs['end_date'] = ((date - timedelta(days=date.weekday())) + timedelta(days=6)).date()
+
+        if self.kwargs.get('end_date'):
+            self.kwargs['end_datetime_exclusive'] = self.kwargs['end_date'] + timedelta(days=1)
 
         if 'country_id' in query_param_keys:
             self.kwargs['country_ids'] = [query_params['country_id']]
@@ -228,6 +232,9 @@ class BaseEntityDataLayerAPIViewSet(EntityDetailFilterMixin, APIView):
         elif layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
             date = core_utilities.get_current_datetime_object() - timedelta(days=7)
             self.kwargs['end_date'] = ((date - timedelta(days=date.weekday())) + timedelta(days=6)).date()
+
+        if self.kwargs.get('end_date'):
+            self.kwargs['end_datetime_exclusive'] = self.kwargs['end_date'] + timedelta(days=1)
 
         if 'country_id' in query_param_keys:
             self.kwargs['country_ids'] = [query_params['country_id']]
@@ -563,7 +570,11 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                         school_map_view = DataLayerMapViewSet()
                         school_map_view.kwargs = self.kwargs
                         if self.kwargs['layer_type'] == accounts_models.DataLayer.LAYER_TYPE_LIVE:
-                            sql = school_map_view.get_live_map_query(env, request)
+                            sql = (
+                                school_map_view.get_realtime_weekly_metric_map_query(env, request)
+                                if school_map_view.can_use_realtime_weekly_metric_map_query()
+                                else school_map_view.get_live_map_query(env, request)
+                            )
                         else:
                             sql = school_map_view.get_static_map_query(env, request)
                     elif self.kwargs['layer_type'] == accounts_models.DataLayer.LAYER_TYPE_LIVE:
@@ -1084,6 +1095,10 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
             )
 
             if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+                realtime_weekly_metric_requirement = (
+                    build_live_weekly_requirement(data_layer_instance, data_sources)
+                    if is_legacy else None
+                )
                 self.kwargs.update({
                     'col_name': parameter_column_name,
                     'benchmark_value': benchmark_value,
@@ -1099,6 +1114,10 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                     'legend_configs': legend_configs,
                     'entity_name': data_layer_instance.entity_name,
                     'mvt_layer': LEGACY_MODEL if is_legacy else 'entities',
+                    'realtime_weekly_metric_config_hash': (
+                        realtime_weekly_metric_requirement['config_hash']
+                        if realtime_weekly_metric_requirement else None
+                    ),
                 })
             else:
                 self.kwargs.update({
@@ -1284,6 +1303,11 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
 class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
     CACHE_KEY = 'cache'
     CACHE_KEY_PREFIX = 'V2_ENTITY_LAYER_INFO'
+
+    get_realtime_weekly_metric_info_query = DataLayerInfoViewSet.get_realtime_weekly_metric_info_query
+    get_realtime_weekly_metric_exists_query = DataLayerInfoViewSet.get_realtime_weekly_metric_exists_query
+    get_realtime_weekly_metric_info_query_kwargs = DataLayerInfoViewSet.get_realtime_weekly_metric_info_query_kwargs
+    can_use_realtime_weekly_metric_info_query = DataLayerInfoViewSet.can_use_realtime_weekly_metric_info_query
 
     def get_cache_key(self):
         params = dict(self.request.query_params)
@@ -2585,7 +2609,11 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
             self.kwargs['school_real_time_filters'] = ''
 
             if is_live_layer:
-                query = DataLayerInfoViewSet.get_info_query(self)
+                query = (
+                    self.get_realtime_weekly_metric_info_query()
+                    if self.can_use_realtime_weekly_metric_info_query()
+                    else DataLayerInfoViewSet.get_info_query(self)
+                )
             else:
                 query = DataLayerInfoViewSet.get_static_info_query(self, total_query_labels)
 
@@ -2804,8 +2832,13 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
 
         try:
             if is_live_layer:
+                info_query = (
+                    self.get_realtime_weekly_metric_info_query()
+                    if self.can_use_realtime_weekly_metric_info_query()
+                    else DataLayerInfoViewSet.get_info_query(self)
+                )
                 query_result = db_utilities.sql_to_response(
-                    DataLayerInfoViewSet.get_info_query(self),
+                    info_query,
                     label=self.__class__.__name__,
                     db_var=settings.READ_ONLY_DB_KEY,
                     raise_exception=True)
@@ -2982,6 +3015,10 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
         if is_live_layer:
             parameter_col_function = first_source.data_source_column_function or {}
             column_function_sql = self.get_column_function_sql(parameter_col_function)
+            realtime_weekly_metric_requirement = (
+                build_live_weekly_requirement(data_layer_instance, data_sources)
+                if is_legacy else None
+            )
 
             self.kwargs.update({
                 'col_name': parameter_column_name,
@@ -2995,6 +3032,10 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 'is_reverse': data_layer_instance.is_reverse,
                 'legend_configs': legend_configs,
                 'entity_name': data_layer_instance.entity_name,
+                'realtime_weekly_metric_config_hash': (
+                    realtime_weekly_metric_requirement['config_hash']
+                    if realtime_weekly_metric_requirement else None
+                ),
             })
             if not is_legacy:
                 self.kwargs['school_filters'] = self.kwargs.get('entity_filters', '')
