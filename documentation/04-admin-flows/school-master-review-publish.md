@@ -173,6 +173,18 @@ block the request thread for a noticeable time.
 with `is_read=False` are affected; they move to `DISCARDED` with `is_read=True`. Anything else is a
 no-op returning `400`.
 
+## No UI discard for an ordinary row
+
+Editors and publishers can reject a *deletion* (see above), but there is no console action to
+discard an ordinary `DRAFT` / `UPDATED_IN_DRAFT` / `DRAFT_LOCKED` row you simply don't want to keep.
+
+> **Operational note (not yet verified from code).** The backend supports discarding a row, but nothing in
+> the admin UI exposes it. In practice, staging rows are left alone until the next ingestion pull
+> from School Master overwrites the draft with the latest upstream record — the pull is the de facto
+> "reset". Where a row needs to be removed sooner, it is discarded manually via the Django shell/ORM
+> rather than through any documented command. Worth turning into a real admin action or a
+> `data_cleanup` flag rather than an ad hoc ORM query each time.
+
 ## Review reminders
 
 `email_reminder_to_editor_and_publisher_for_review_waiting_records` runs daily at **08:10 UTC**

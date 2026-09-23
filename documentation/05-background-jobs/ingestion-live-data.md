@@ -69,6 +69,18 @@ Three things follow from this shape:
    chord never runs and no country gets finalised — including the Daily Check App data that loaded
    successfully in step one.
 
+> **Operational note (not yet verified from code).** This is not theoretical — it is the routine failure
+> mode in practice. QoS is the historically unstable source (see `504 Gateway Time-out` on
+> `io-datasharing-stg.unitst.org` in the incident doc below); Giga Meter has been stable for about a
+> year. When the QoS leg fails, Giga Meter's data has already landed correctly in
+> `DailyCheckAppMeasurementData` / `RealTimeConnectivity`, but the chord (and therefore all
+> aggregation) never runs — so Giga Meter also ends up with no daily/weekly rollup for that cycle,
+> even though nothing is wrong with its own data. The workaround used so far has been to manually
+> re-trigger `finalize_previous_day_data` for the affected countries once QoS is unblocked (see
+> [aggregation.md](aggregation.md) / [../08-operations/runbooks.md](../08-operations/runbooks.md)).
+> The proposed structural fix — not yet implemented — is to split this into two independent
+> aggregation chains, one per source, so a QoS outage no longer blocks Giga Meter rollups.
+
 ## `today` vs yesterday
 
 The same task serves two purposes:
@@ -181,6 +193,7 @@ curl "https://<host>/api/sources/load/static_live/"
 | One country missing | ISO3 in `QOS_COUNTRY_EXCLUSION_LIST` | Settings |
 | QoS history gone | By design — `clean_old_live_data` keeps one version per country | `SchoolDailyStatus` instead |
 | Yesterday never closed | The `00:30` run was skipped by the `BackgroundTask` guard | `update_live_data_status_*_False` rows |
+| Giga Meter data loaded but no daily/weekly rollup | QoS leg of the chain failed upstream of the chord, so `finalize_previous_day_data` never ran for either source | Worker logs around `load_data_from_qos_apis`; manually rerun aggregation for the affected countries/date |
 
 ## Recovery
 

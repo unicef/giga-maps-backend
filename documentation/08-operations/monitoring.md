@@ -66,6 +66,16 @@ written to that file.
 The two DB-routing lines log on **every GET** at INFO, which is verbose in production but is the
 fastest way to confirm replica routing.
 
+### `connectivity_rt` / `connectivity_call` Slack noise
+
+> **Operational note (not yet verified from code).** Both fields are normally sourced from School Master,
+> but Giga Meter can also update them, so two ingestion paths write the same columns. The Slack
+> data-change alert fires on these fields more often than expected — believed to be an **empty
+> string vs. `None` mismatch** in the change-detection comparison rather than genuinely bad data, but
+> this was **not confirmed** on the call. Investigate whether the underlying data is actually wrong
+> before changing the alert condition; if it's a spurious diff, fix the comparison rather than
+> suppressing the alert.
+
 ## Prometheus
 
 `django_prometheus` URLs are mounted **at the root**

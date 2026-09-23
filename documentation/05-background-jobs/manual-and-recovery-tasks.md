@@ -86,6 +86,21 @@ of running inline:
 
 On a production host this matters — a 10-hour inline command dies with your SSH session.
 
+> **Operational note (not yet verified from code).** In practice, recovery is done by SSHing into the
+> server and running scripts under a `data_recovery` folder by hand — there is no pipeline trigger
+> for them outside of a release. Two operational quirks reported from that experience:
+>
+> - **Large date ranges time out and must be split into smaller chunks.** Don't run a multi-month
+>   recovery in one call; batch it.
+> - **Prefer calling the existing Celery task via the Django shell with `.delay()`** over running an
+>   ad hoc script inline — an inline script needs the SSH session kept alive for its whole duration,
+>   while `.delay()` hands it to a worker and you can disconnect.
+> - The task monitor (Flower / `BackgroundTask`) can show a task as **"running" long after it has
+>   actually timed out** — a known display gap, not a sign the task is stuck (the soft/hard limits
+>   still apply underneath). Cross-check elapsed time against the task's declared limit rather than
+>   trusting the status label alone — consistent with the "no failure state" gap already noted in
+>   [../04-admin-flows/background-task-console.md](../04-admin-flows/background-task-console.md).
+
 ## HTTP triggers
 
 | Endpoint | Runs |

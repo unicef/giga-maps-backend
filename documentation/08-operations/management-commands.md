@@ -179,6 +179,17 @@ database.
 **No transaction wrapper.** Most of these commands are not wrapped in `transaction.atomic()`. An
 interrupted run leaves partial results. Design your batches so that re-running is safe.
 
+## Django Admin — available but not enabled
+
+> **Operational note (not yet verified from code).** Most apps have deliberately **no `admin.py`** (see
+> [../09-contributing/code-structure.md](../09-contributing/code-structure.md)), and Django's own
+> admin site is not exposed in this project. Enabling it would give table views, filters, and
+> update/schedule actions largely for free, replacing a fair amount of the SSH-and-shell tooling
+> described above and in [runbooks.md](runbooks.md). It was reportedly left off for security
+> reasons, as a decision that predates the current team — the reasoning itself was not available on
+> the call. Worth revisiting with stakeholders to see if there's a securely-scoped way to expose it
+> (e.g. behind additional auth/IP allow-listing), rather than treating the current state as settled.
+
 ## Related
 
 - [runbooks.md](runbooks.md) — worked recovery procedures
