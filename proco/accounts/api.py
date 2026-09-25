@@ -1456,6 +1456,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
     def get_realtime_weekly_metric_info_query_kwargs(self, include_case_conditions=True):
         kwargs = copy.deepcopy(self.kwargs)
 
+        kwargs['table_name'] = 'sds'
         kwargs['country_condition'] = ''
         kwargs['admin1_condition'] = ''
         kwargs['school_condition'] = ''
