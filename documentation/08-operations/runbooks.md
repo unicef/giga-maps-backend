@@ -11,9 +11,11 @@ Command reference: [management-commands.md](management-commands.md).
 
 Three facts that shape every recovery here:
 
-1. **Raw QoS rows survive at most one day.** `clean_old_live_data` runs at 05:10 UTC and keeps only
-   the latest `version` per country in `QoSData`. If you need to re-derive from raw QoS, you have
-   until the next 05:10.
+1. **Raw QoS rows survive at most one day.** `clean_old_live_data` runs at 05:10 UTC and keeps
+   **a single row per country** in `QoSData` — the one with the highest `version` — deleting
+   everything else, including rows with `version = NULL`
+   ([proco/data_sources/tasks.py:1124](../../proco/data_sources/tasks.py#L1124)). If you need to
+   re-derive from raw QoS, you have until the next 05:10.
 2. **Raw PCDC and real-time rows survive 30 days.** `DailyCheckAppMeasurementData` and
    `RealTimeConnectivity` are pruned on a 30-day window.
 3. **Aggregated data is durable.** `SchoolDailyStatus`, `SchoolWeeklyStatus` and their entity
@@ -175,39 +177,87 @@ pipenv run python manage.py redo_aggregations \
 
 ## 4. Missing QoS data
 
-QoS is versioned rather than dated, so there are two diagnostic paths.
+Two commands exist — one keyed by Delta Share **version**, one by **date**. They behave differently
+enough that picking the wrong one, or the wrong flag combination, can make things worse.
 
-### By version
+### Diagnose — not with the commands' own checks
 
-```bash
-pipenv run python manage.py data_loss_recovery_for_qos \
-  -country_code='BRA' --check_missing_versions
+Because of constraint 1, both built-in checks are unreliable for anything older than the last 05:10
+cleanup:
+
+- `data_loss_recovery_for_qos_dates --check_missing_dates` lists the dates present in `QoSData`.
+  After cleanup almost every date looks missing, even when the daily tables are fine.
+- `data_loss_recovery_for_qos --check_missing_versions` starts from the lowest version still in
+  `QoSData`. With one row left per country it never reports older gaps.
+
+Check the durable tables instead — this is read-only:
+
+```sql
+SELECT date, live_data_source, COUNT(*)
+FROM connection_statistics_schooldailystatus
+WHERE date BETWEEN '2026-09-01' AND '2026-09-20'
+GROUP BY 1, 2 ORDER BY 1, 2;
 ```
 
-```bash
-# Pull a version range
-pipenv run python manage.py data_loss_recovery_for_qos \
-  -country_code='BRA' -pull_start_version=100 -pull_end_version=120 --pull_data
+A date with no or unusually few `QOS` rows for a QoS country is a gap.
 
-# Aggregate a version range
-pipenv run python manage.py data_loss_recovery_for_qos \
-  -country_code='BRA' -aggregate_start_version=100 -aggregate_end_version=120 --aggregate
-```
-
-Pull and aggregate are separate flags with separate ranges — you can re-aggregate data that is
-already present without re-pulling.
-
-### By date
+### Fix — by date (the usual case)
 
 ```bash
 pipenv run python manage.py data_loss_recovery_for_qos_dates \
-  -country_code='BRA' -start_date='2026-09-01' -end_date='2026-09-15' --check_missing_dates
+  -country_code='BRA' -start_date='01-09-2026' -end_date='03-09-2026' \
+  --pull_data --aggregate --schedule
 ```
 
-This dispatches `scheduler_for_data_loss_recovery_for_qos_dates`, a 2-hour Celery task.
+- **Dates are `DD-MM-YYYY`** (`DATE_FORMAT`, [config/settings/base.py:118](../../config/settings/base.py#L118)).
+  `YYYY-MM-DD` parses to `None` and the command fails.
+- **Always combine `--pull_data` with `--aggregate`.** `--pull_data` first **deletes** that date's
+  QoS rows from `QoSData` and `RealTimeConnectivity`
+  ([data_loss_recovery_for_qos_dates.py:401](../../proco/data_sources/management/commands/data_loss_recovery_for_qos_dates.py#L401)),
+  so the aggregation starts from a clean date. `--aggregate` on its own inserts one averaged row per
+  school and day into `RealTimeConnectivity` **on top of** whatever is already there; if the date
+  already had per-measurement rows, or you run it twice, the daily average is skewed.
+- **If the pull fails after the delete** (e.g. another `504`), the error is only logged
+  ([line 151](../../proco/data_sources/management/commands/data_loss_recovery_for_qos_dates.py#L151))
+  and that date is left with no raw QoS rows. Daily and weekly tables are untouched, so the map does
+  not lose data, but the pull must be repeated.
+- **`--schedule`** runs it as `scheduler_for_data_loss_recovery_for_qos_dates`, a Celery task with a
+  **2-hour limit**, so the SSH session can close. Without it, it runs inline. Keep ranges small (one
+  country, a few days): the loader upserts row by row, with two queries per row
+  ([proco/core/utils.py:270](../../proco/core/utils.py#L270)), and even three days have timed out.
+- Without `-country_code` it iterates **every** QoS country — avoid on production.
 
-> Remember constraint 1 above: `QoSData` retains only the latest version per country. If the
-> version you need has been pruned, only a re-pull from the Delta Share will recover it.
+> **Unverified.** The date filter is passed to Delta Sharing as `jsonPredicateHints`, which the
+> server may ignore. If the QoS server does not apply it, each date in the loop downloads the whole
+> table, which would also explain the timeouts.
+
+### Fix — by version (narrow case)
+
+Use only when a **specific version** is known to be missing and you recover it **the same day**,
+before the next 05:10 cleanup:
+
+```bash
+pipenv run python manage.py data_loss_recovery_for_qos \
+  -country_code='BRA' -pull_start_version=100 -pull_end_version=102 --pull_data \
+  --aggregate -aggregate_start_version=100 -aggregate_end_version=102
+```
+
+- Country is mandatory. There is **no `--schedule`**: it runs inline, so keep the SSH session alive.
+- `--pull_data` does not delete anything; it skips versions already present and rows for which a
+  higher version exists.
+- `--aggregate` reads the versions from `QoSData`, so after a cleanup it finds nothing to aggregate
+  unless you pulled them first. It has the same stacking problem as the date command: it adds
+  averaged rows to `RealTimeConnectivity` without clearing existing ones.
+
+### What neither command covers
+
+- **Countries without QoS.** Both only process QoS countries. If a QoS outage broke the live-data
+  chain (see [../05-background-jobs/ingestion-live-data.md](../05-background-jobs/ingestion-live-data.md)),
+  Daily Check App / Giga Meter aggregation for **non-QoS countries** also has to be re-run, for
+  example with `finalize_previous_day_data` per country and date or with `redo_aggregations` (§6).
+  Their raw rows in `RealTimeConnectivity` are only kept for 30 days.
+- **Side effect worth knowing:** re-aggregating a QoS country recomputes the daily status for
+  **all** sources of that country and date, so its Giga Meter daily rows are rebuilt too.
 
 ---
 

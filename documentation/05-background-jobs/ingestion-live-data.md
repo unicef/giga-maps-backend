@@ -153,7 +153,7 @@ Details in [aggregation.md](aggregation.md).
 |---|---|
 | `RealTimeConnectivity` | Delete where `created < now - 30 days` |
 | `DailyCheckAppMeasurementData` | Delete where `created_at < now - 30 days` |
-| `QoSData` | **Keep only the latest `version` per country** — delete everything else |
+| `QoSData` | **Keep a single row per country** (the highest `version`) — delete everything else, including `version = NULL` rows loaded by the date-based recovery |
 | `EntityRealTimeConnectivity` | Keep only the max `version` per country |
 
 > The `QoSData` rule is **not** a 30-day window despite living in a task called

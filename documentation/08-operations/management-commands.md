@@ -83,7 +83,7 @@ Covered with worked examples in [runbooks.md](runbooks.md).
 | `data_loss_recovery_for_pcdc` | `-start_date`, `-end_date`, `-pull_data_date`, `--check_missing_dates`, `--pull_data` |
 | `data_loss_recovery_for_pcdc_weekly` | `-start_week_no`, `-end_week_no`, `-year`, `--pull_data` |
 | `data_loss_recovery_for_qos` | `-country_code`, `-pull_start_version`, `-pull_end_version`, `-aggregate_start_version`, `-aggregate_end_version`, `--check_missing_versions`, `--pull_data`, `--aggregate` |
-| `data_loss_recovery_for_qos_dates` | `-country_code`, `-start_date`, `-end_date`, `--check_missing_dates` |
+| `data_loss_recovery_for_qos_dates` | `-country_code`, `-start_date`, `-end_date` (`DD-MM-YYYY`), `--check_missing_dates`, `--pull_data`, `--aggregate`, `--schedule` — see [runbooks.md §4](runbooks.md#4-missing-qos-data) before using |
 | `data_loss_recovery_for_school_master_version` | `-country_code`, `-pull_version`, `--check_latest_version`, `--pull_data`, `--schedule` |
 | `redo_aggregations` | `-country_id`, `-year`, `-week_no`, `--update_school_weekly`, `--update_country_daily` |
 | `redo_entity_aggregations` | `-country_id`, `-entity_type_code`, `-year`, `-week_no`, `--update_entity_weekly` |
