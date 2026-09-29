@@ -1,5 +1,9 @@
+from unittest import mock
+
 from django.core.cache import cache
 from django.test import TestCase
+
+from celery.exceptions import SoftTimeLimitExceeded
 
 from proco.background.models import BackgroundTask
 from proco.core.utils import get_current_datetime_object
@@ -77,6 +81,26 @@ class DataSourcesTasksTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(sources_models.SchoolMasterData.objects.all().count(), 3)
         sources_tasks.handle_deleted_school_master_data_row(country_ids=[self.country.id])
         self.assertEqual(sources_models.SchoolMasterData.objects.filter(is_read=False).count(), 2)
+
+    @mock.patch('proco.data_sources.tasks.send_slack_notifications')
+    @mock.patch('proco.data_sources.tasks.compare_target_model_changes', side_effect=SoftTimeLimitExceeded())
+    def test_handle_published_school_master_data_row_stops_on_soft_time_limit(self, mock_compare, mock_slack):
+        with self.assertRaises(SoftTimeLimitExceeded):
+            sources_tasks.handle_published_school_master_data_row()
+
+        # The task must stop at the first row instead of moving on to the next one
+        self.assertEqual(mock_compare.call_count, 1)
+        mock_slack.assert_called_once()
+        self.assertEqual(sources_models.SchoolMasterData.objects.filter(is_read=False).count(), 3)
+
+    @mock.patch('proco.data_sources.tasks.send_slack_notifications')
+    @mock.patch('proco.schools.models.School.delete', side_effect=SoftTimeLimitExceeded())
+    def test_handle_deleted_school_master_data_row_stops_on_soft_time_limit(self, mock_delete, mock_slack):
+        with self.assertRaises(SoftTimeLimitExceeded):
+            sources_tasks.handle_deleted_school_master_data_row()
+
+        self.assertEqual(mock_delete.call_count, 1)
+        self.assertEqual(sources_models.SchoolMasterData.objects.filter(is_read=False).count(), 3)
 
     def test_email_reminder_to_editor_and_publisher_for_review_waiting_records(self):
         self.assertEqual(sources_models.SchoolMasterData.objects.all().count(), 3)
