@@ -91,6 +91,28 @@ def normalize_school_master_data_frame(df):
     return df
 
 
+def normalize_facility_master_data_frame(df, name_field, govt_id_field=None):
+    """
+    Shared cleanup for facility types added on top of the generic pipeline
+    (proco/giga_meter/facility_types.py / pipeline.py): normalize the display-name
+    column, and lowercase/NaN-safe the govt-id column when the feed provides one.
+    `school` predates this and intentionally keeps its own standalone
+    normalize_school_master_data_frame above rather than being migrated onto this.
+    """
+    df[name_field] = df[name_field].apply(normalize_school_name)
+    if govt_id_field:
+        if govt_id_field in list(df.columns.tolist()):
+            df[govt_id_field] = df[govt_id_field].fillna('thisnanwillreplaceback').apply(
+                lambda val: str(val).lower()).replace('thisnanwillreplaceback', np.nan)
+        else:
+            df[govt_id_field] = None
+    return df
+
+
+def normalize_health_master_data_frame(df):
+    return normalize_facility_master_data_frame(df, 'facility_name', 'health_id_govt')
+
+
 def normalize_qos_data_frame(df):
     if 'school_id_govt' in list(df.columns.tolist()):
         df['school_id_govt'] = df['school_id_govt'].fillna('thisnanwillreplaceback').apply(

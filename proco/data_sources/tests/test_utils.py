@@ -20,6 +20,13 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
         df = pd.DataFrame.from_dict({'school_name': ['Test School']})
         self.assertEqual(len(sources_utilities.normalize_school_master_data_frame(df)), len(df))
 
+    def test_normalize_health_master_data_frame(self):
+        df = pd.DataFrame.from_dict({'facility_name': ['Test Clinic'], 'health_id_govt': ['1234567']})
+        self.assertEqual(len(sources_utilities.normalize_health_master_data_frame(df)), len(df))
+
+        df = pd.DataFrame.from_dict({'facility_name': ['Test Clinic']})
+        self.assertEqual(len(sources_utilities.normalize_health_master_data_frame(df)), len(df))
+
     def test_normalize_qos_data_frame(self):
         df = pd.DataFrame.from_dict({'school_name': ['Test School'], 'school_id_govt': ['1234567']})
         self.assertEqual(len(sources_utilities.normalize_qos_data_frame(df)), len(df))

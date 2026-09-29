@@ -24,7 +24,9 @@ from proco.core import utils as core_utilities
 from proco.core.config import app_config as core_configs
 from proco.data_sources import utils as data_sources_utilities
 from proco.data_sources.utils import get_request_headers
+from proco.giga_meter import facility_types as giga_meter_facility_types
 from proco.giga_meter import models as giga_meter_models
+from proco.giga_meter import pipeline as giga_meter_pipeline
 from proco.giga_meter import utils as giga_meter_utilities
 from proco.schools.models import School
 from proco.taskapp import app
@@ -426,6 +428,79 @@ def handle_giga_meter_school_master_data_sync(*args):
     else:
         logger.warning('Giga Meter - School Master data synch disabled from config. '
                        'To enable it, please update "GIGA_METER_ENABLE_AUTO_SYNC" configuration.')
+
+
+@app.task(soft_time_limit=6 * 60 * 60, time_limit=6 * 60 * 60)
+def giga_meter_update_health_static_data(*args, country_iso3_format=None, force_tasks=False):
+    """
+    Background task to Get Static data to Giga Meter DB for health facilities.
+
+    Execution Frequency: Once in a day
+    """
+    giga_meter_pipeline.update_static_data(
+        giga_meter_facility_types.HEALTH_CONFIG,
+        country_iso3_format=country_iso3_format,
+        force_tasks=force_tasks,
+    )
+
+
+@app.task(soft_time_limit=10 * 55 * 60, time_limit=10 * 55 * 60)
+def giga_meter_handle_published_health_master_data_row(*args, country_ids=None, force_tasks=False):
+    """
+    Background task to handle all the published rows of health master data source for Giga Meter Sync
+
+    Execution Frequency: Every 4 hour
+    """
+    giga_meter_pipeline.handle_published_master_data_row(
+        giga_meter_facility_types.HEALTH_CONFIG,
+        country_ids=country_ids,
+        force_tasks=force_tasks,
+    )
+
+
+@app.task(soft_time_limit=10 * 55 * 60, time_limit=10 * 55 * 60)
+def giga_meter_handle_deleted_health_master_data_row(*args, country_ids=None, force_tasks=False):
+    """
+    Background task to handle all the deleted rows of health master data source for Giga Meter DB
+
+    Execution Frequency: Every day
+    """
+    giga_meter_pipeline.handle_deleted_master_data_row(
+        giga_meter_facility_types.HEALTH_CONFIG,
+        country_ids=country_ids,
+        force_tasks=force_tasks,
+    )
+
+
+@app.task(soft_time_limit=10 * 60 * 60, time_limit=10 * 60 * 60)
+def handle_giga_meter_health_master_data_sync(*args):
+    if getattr(settings, 'GIGA_METER_ENABLE_HEALTH_AUTO_SYNC', False):
+        timestamp_str = format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H')
+        task_key = 'handle_giga_meter_health_master_data_sync_status_{current_time}'.format(
+            current_time=timestamp_str,
+        )
+        task_id = current_task.request.id or str(uuid.uuid4())
+        task_instance = background_task_utilities.task_on_start(
+            task_id, task_key, 'Giga Meter - Auto task to handle GigaMeter - Health Master data sync',
+            check_previous=True,
+        )
+
+        if task_instance:
+            logger.debug('Not found running job for health data sync handler: {}'.format(task_key))
+            chain(
+                giga_meter_update_health_static_data.s(),
+                giga_meter_handle_published_health_master_data_row.s(),
+                giga_meter_handle_deleted_health_master_data_row.s(),
+            ).delay()
+
+            background_task_utilities.task_on_complete(task_instance)
+        else:
+            logger.error('Found Job with "{0}" name so skipping current iteration'.format(task_key))
+    else:
+        logger.warning(
+            'Giga Meter - Health Master data sync disabled from config. '
+            'To enable it, please update "GIGA_METER_ENABLE_HEALTH_AUTO_SYNC" configuration.',
+        )
 
 
 @app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)
