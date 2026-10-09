@@ -72,57 +72,79 @@ def load_data_from_master_apis(config, country_iso3_format=None):
     )
     open(profile_file, 'w').write(json.dumps(profile_json))
 
-    client = data_sources_utilities.ProcoSharingClient(profile_file)
-    master_share = client.get_share(share_name)
-
-    if master_share:
-        master_schema = client.get_schema(master_share, schema_name)
-
-        if master_schema:
-            schema_tables = client.list_tables(master_schema)
-
-            logger.debug('All tables ready to access for Giga Meter {0} Sync: {1}'.format(
-                config.label, schema_tables,
-            ))
-
-            master_fields = [f.name for f in config.intermediate_model._meta.get_fields()]
-
-            for schema_table in schema_tables:
-                logger.debug('#' * 10)
-                logger.debug('%s table: %s', config.label, schema_table)
-
-                if country_iso3_format and country_iso3_format != schema_table.name:
-                    continue
-
-                if len(country_codes_for_exclusion) > 0 and schema_table.name in country_codes_for_exclusion:
-                    logger.warning(
-                        'Country with ISO3 Format ({0}) configured to exclude from {1} Master data pull. '
-                        'Hence skipping the load for this country code.'.format(schema_table.name, config.label),
-                    )
-                    continue
-
-                try:
-                    giga_meter_utilities.sync_master_data(
-                        config, profile_file, share_name, schema_name, schema_table.name, master_fields,
-                    )
-                except (HTTPError, DataError, ValueError) as ex:
-                    logger.error('Exception caught for {0} "{1}": {2}'.format(config.label, schema_table.name, str(ex)))
-                except Exception as ex:
-                    logger.error('Exception caught for {0} "{1}": {2}'.format(config.label, schema_table.name, str(ex)))
-
-        else:
-            logger.error(
-                '{0} Master schema ({1}) does not exist to use for share ({2}).'.format(
-                    config.label, schema_name, share_name,
-                ),
-            )
-    else:
-        logger.error('{0} Master share ({1}) does not exist to use.'.format(config.label, share_name))
-
     try:
-        os.remove(profile_file)
-    except OSError:
-        pass
+        # A share/schema lookup failure (bad or missing credentials) must not escape:
+        # this runs as the first link of a Celery chain, so raising here would also
+        # skip the publish and soft-delete steps, which work off the staging table
+        # and are independent of the feed being reachable.
+        try:
+            client = data_sources_utilities.ProcoSharingClient(profile_file)
+            master_share = client.get_share(share_name)
+        except HTTPError as ex:
+            logger.error('Failed to get {0} Master share for Giga Meter [HTTP {1}]: {2}'.format(
+                config.label, getattr(ex.response, 'status_code', 'error'), ex,
+            ))
+            master_share = None
+        except Exception as ex:
+            logger.error('Failed to get {0} Master share for Giga Meter: {1}'.format(config.label, ex))
+            master_share = None
+
+        if master_share:
+            try:
+                master_schema = client.get_schema(master_share, schema_name)
+                schema_tables = client.list_tables(master_schema) if master_schema else None
+            except Exception as ex:
+                logger.error('Failed to list {0} Master tables for Giga Meter: {1}'.format(config.label, ex))
+                master_schema = None
+                schema_tables = None
+
+            if master_schema:
+                logger.debug('All tables ready to access for Giga Meter {0} Sync: {1}'.format(
+                    config.label, schema_tables,
+                ))
+
+                master_fields = [f.name for f in config.intermediate_model._meta.get_fields()]
+
+                for schema_table in schema_tables or []:
+                    logger.debug('#' * 10)
+                    logger.debug('%s table: %s', config.label, schema_table)
+
+                    if country_iso3_format and country_iso3_format != schema_table.name:
+                        continue
+
+                    if len(country_codes_for_exclusion) > 0 and schema_table.name in country_codes_for_exclusion:
+                        logger.warning(
+                            'Country with ISO3 Format ({0}) configured to exclude from {1} Master data pull. '
+                            'Hence skipping the load for this country code.'.format(schema_table.name, config.label),
+                        )
+                        continue
+
+                    try:
+                        giga_meter_utilities.sync_master_data(
+                            config, profile_file, share_name, schema_name, schema_table.name, master_fields,
+                        )
+                    except (HTTPError, DataError, ValueError) as ex:
+                        logger.error('Exception caught for {0} "{1}": {2}'.format(
+                            config.label, schema_table.name, str(ex)))
+                    except Exception as ex:
+                        logger.error('Exception caught for {0} "{1}": {2}'.format(
+                            config.label, schema_table.name, str(ex)))
+
+            else:
+                logger.error(
+                    '{0} Master schema ({1}) does not exist to use for share ({2}).'.format(
+                        config.label, schema_name, share_name,
+                    ),
+                )
+        else:
+            logger.error('{0} Master share ({1}) does not exist to use.'.format(config.label, share_name))
+    finally:
+        # The profile file holds the Delta Sharing bearer token, so it has to go
+        # even when the pull above failed.
+        try:
+            os.remove(profile_file)
+        except OSError:
+            pass
 
 
 def update_static_data(config, country_iso3_format=None, force_tasks=False):
