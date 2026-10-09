@@ -1,6 +1,7 @@
 import logging
 import uuid
 from datetime import timedelta
+from urllib.parse import parse_qs, urlsplit
 
 from celery import chain
 from celery import current_task
@@ -8,8 +9,8 @@ from django.conf import settings
 from django.core.management import call_command
 from django.db.models import Q
 from django.db.models.functions.text import Lower
-from django.urls import reverse
-from rest_framework.test import APIClient
+from django.urls import resolve, reverse
+from rest_framework.test import APIRequestFactory
 
 from proco.background import utils as background_task_utilities
 from proco.core import db_utils as db_utilities
@@ -21,13 +22,44 @@ from proco.utils.dates import format_date, to_date
 logger = logging.getLogger('gigamaps.' + __name__)
 
 
+def call_get_view(url, query_params=None):
+    """
+    Run a GET API view in-process and return its response.
+
+    Used instead of the Django/DRF test client (APIClient): on every request the test client
+    re-connects close_old_connections to the request signals, and on Django 2.2 each connect()
+    leaves a weakref.finalize entry that is never released. Long-lived Celery workers making
+    millions of these calls grow by gigabytes.
+
+    The query string already in `url` is kept; `query_params` are merged on top of it.
+    """
+    from proco.utils.db_routers import CustomRequestDBRouterMiddleware
+
+    parts = urlsplit(url)
+    params = parse_qs(parts.query, keep_blank_values=True)
+    if query_params:
+        params.update(query_params)
+
+    request = APIRequestFactory().get(parts.path, params)
+    match = resolve(parts.path)
+
+    # Keep read-replica routing for the views that are allowed to use it
+    db_router = CustomRequestDBRouterMiddleware(lambda req: None)
+    db_router.process_view(request, match.func, match.args, match.kwargs)
+    try:
+        response = match.func(request, *match.args, **match.kwargs)
+    finally:
+        db_router.process_response(request, None)
+    return response
+
+
 @app.task(soft_time_limit=10 * 60, time_limit=11 * 60)
 def update_cached_value(*args, url='', query_params=None, **kwargs):
-    client = APIClient()
-    if query_params:
-        client.get(url, query_params, format='json')
-    else:
-        client.get(url, format='json')
+    # cache=false makes the view rebuild the response and store it under its cache key. Reading
+    # through the cache here would only find the same stale entry and queue yet another refresh.
+    params = dict(query_params or {})
+    params['cache'] = 'false'
+    call_get_view(url, params)
 
 
 @app.task(soft_time_limit=60 * 60, time_limit=65 * 60)
@@ -97,11 +129,9 @@ def update_all_cached_values(*args, clean_cache=False):
             if country_wise_default_layers.get(country.id, None):
                 layer_id = country_wise_default_layers[country.id]
 
-                client = APIClient()
-                response = client.get(
+                response = call_get_view(
                     reverse('connection_statistics:get-latest-week-and-month'),
                     {'country_id': country.id, 'layer_id': layer_id},
-                    format='json',
                 )
 
                 if response.status_code == 200 and response.data and response.data.get('week'):
@@ -990,11 +1020,9 @@ def update_all_entity_cached_values(*args, clean_cache=False):
                     f'{entity_type.code}_layer_id': layer_id,
                 }
 
-                client = APIClient()
-                response = client.get(
+                response = call_get_view(
                     reverse('entities:entity-get-latest-week-and-month'),
                     latest_week_params,
-                    format='json',
                 )
                 latest_week = response.data.get(entity_type.code, {}).get('week') if response.data else None
 
