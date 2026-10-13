@@ -6,6 +6,7 @@ from urllib.parse import parse_qs, urlsplit
 from celery import chain
 from celery import current_task
 from django.conf import settings
+from django.core.cache import cache
 from django.core.management import call_command
 from django.db.models import Q
 from django.db.models.functions.text import Lower
@@ -53,8 +54,23 @@ def call_get_view(url, query_params=None):
     return response
 
 
+def get_refresh_queued_key(url):
+    """
+    get_refresh_queued_key
+        Cache key that marks a refresh of this URL as queued and not started yet
+
+    :param url: request path of the cached response, with its query string
+    :return: str
+    """
+    return 'REFRESH_QUEUED_{0}'.format(url)
+
+
 @app.task(soft_time_limit=10 * 60, time_limit=11 * 60)
 def update_cached_value(*args, url='', query_params=None, **kwargs):
+    # Released before the rebuild starts, not after it: data can change while the view runs, so a
+    # stale read from now on has to be able to queue a new refresh.
+    cache.delete(get_refresh_queued_key(url))
+
     # cache=false makes the view rebuild the response and store it under its cache key. Reading
     # through the cache here would only find the same stale entry and queue yet another refresh.
     params = dict(query_params or {})
