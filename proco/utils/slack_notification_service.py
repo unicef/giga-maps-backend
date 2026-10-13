@@ -10,26 +10,40 @@ class SlackNotificationService:
     def __init__(self):
         self.school_master_data_changes_webhook_url = settings.SCHOOL_MASTER_DATA_CHANGES_SLACK_WEBHOOK_URL
 
-    def send_school_master_update_notification(self, change_summary, is_published=False):
-        """send notifications"""
+    def send_school_master_update_notification(self, change_summary, publish_source='pre_review'):
+        """send notifications
+        Args:
+            change_summary: Dictionary containing change details
+            publish_source: Source of publishing - 'pre_review', 'auto_publish', 'admin_portal_selected', 'admin_portal_country', 'cli'
+        """
         if not self.school_master_data_changes_webhook_url:
             logger.info("Slack notifications webhook url not provided.")
             return
         message = None
         try:
-            message = self._format_master_release_message(change_summary, is_published)
+            message = self._format_master_release_message(change_summary, publish_source)
             self._send_slack_message(self.school_master_data_changes_webhook_url, message)
             logger.info(f"Slack notification sent for {change_summary['country']} master data update")
         except Exception as e:
             logger.error(f"Failed to send Slack notification: {str(e)}. Nofitication: {message}")
             raise e
 
-    def _format_master_release_message(self, change_summary, is_published):
+    def _get_notification_header(self, publish_source):
+        """Generate notification header based on publish source."""
+        header_map = {
+            'pre_review': ('[Pre-Review]', f'*[Pre-Review] School Master Static Data Changed*'),
+            'auto_publish': ('[Auto-Publish]', f'*[Auto-Publish] School Records Published Automatically*'),
+            'admin_portal_selected': ('[Admin Portal]', f'*[Admin Portal] Selected School Records Published*'),
+            'admin_portal_country': ('[Admin Portal]', f'*[Admin Portal] Full Country School Data Published*'),
+            'cli': ('[CLI]', f'*[CLI] School Data Published via Command-Line*'),
+        }
+        # Default to pre_review if source not recognized
+        prefix, header = header_map.get(publish_source, header_map['pre_review'])
+        return header, prefix
+
+    def _format_master_release_message(self, change_summary, publish_source='pre_review'):
         """Format message with multiple blocks if needed based on block size."""
-        country_name = change_summary['country'].upper()
-        header_text = f"*{country_name} MASTER DATA UPDATE*"
-        if is_published:
-            header_text = f"*{country_name} MASTER DATA UPDATES PUBLISHED*"
+        header_text, _ = self._get_notification_header(publish_source)
         metadata_text = (
             f"*Environment:* {settings.APP_ENVIRONMENT}\n"
             f"*Country:* {change_summary['country']}\n"

@@ -2020,7 +2020,6 @@ class TimePlayerApiTestCase(TestAPIViewSetMixin, TestCase):
                 'type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                 'data_sources_list': [pcdc_data_source.id, ],
                 'data_source_column': pcdc_data_source.column_config[0],
-                'data_source_column_function': {},
                 'global_benchmark': {
                     'value': '20000000',
                     'unit': 'bps',

@@ -1,5 +1,6 @@
 import logging
 import uuid
+from datetime import timedelta
 
 from celery import chain
 from celery import current_task
@@ -13,9 +14,9 @@ from rest_framework.test import APIClient
 from proco.background import utils as background_task_utilities
 from proco.core import db_utils as db_utilities
 from proco.core import utils as core_utilities
+from proco.schools.constants import statuses_schema
 from proco.taskapp import app
-from proco.utils.dates import format_date
-
+from proco.utils.dates import format_date, to_date
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -24,13 +25,12 @@ logger = logging.getLogger('gigamaps.' + __name__)
 def update_cached_value(*args, url='', query_params=None, **kwargs):
     client = APIClient()
     if query_params:
-        query_params['cache'] = False
         client.get(url, query_params, format='json')
     else:
-        client.get(url, {'cache': False}, format='json')
+        client.get(url, format='json')
 
 
-@app.task(soft_time_limit=15 * 60, time_limit=15 * 60)
+@app.task(soft_time_limit=60 * 60, time_limit=65 * 60)
 def update_all_cached_values(*args, clean_cache=False):
     from proco.accounts.models import DataLayerCountryRelationship, DataLayer
     from proco.locations.models import Country
@@ -95,19 +95,153 @@ def update_all_cached_values(*args, clean_cache=False):
             ]
 
             if country_wise_default_layers.get(country.id, None):
-                country_wise_task_list.append(update_cached_value.s(
-                    url=reverse('connection_statistics:get-latest-week-and-month'),
-                    query_params={
-                        'country_id': country.id,
-                        'layer_id': country_wise_default_layers[country.id],
-                    },
-                ))
+                layer_id = country_wise_default_layers[country.id]
+
+                client = APIClient()
+                response = client.get(
+                    reverse('connection_statistics:get-latest-week-and-month'),
+                    {'country_id': country.id, 'layer_id': layer_id},
+                    format='json',
+                )
+
+                if response.status_code == 200 and response.data and response.data.get('week'):
+                    latest_week_start_str = response.data['week']['start_date']
+                    latest_week_end_str = response.data['week']['end_date']
+
+                    country_wise_task_list.append(update_cached_value.s(
+                        url=reverse('accounts:info-data-layer', kwargs={'pk': layer_id}),
+                        query_params={
+                            'country_id': country.id,
+                            'start_date': latest_week_start_str,
+                            'end_date': latest_week_end_str,
+                            'is_weekly': 'true',
+                            'benchmark': 'global',
+                            'include_same_location_schools': 'false',
+                        },
+                    ))
+
+                    if country.iso3_format == 'BRA':
+                        # Case 1: Cache info API for last 4 weeks
+                        latest_week_end = to_date(latest_week_end_str).date()
+                        for week_offset in range(4):
+                            week_end = latest_week_end - timedelta(weeks=week_offset)
+                            week_start = week_end - timedelta(days=6)
+
+                            start_date_str = week_start.strftime('%d-%m-%Y')
+                            end_date_str = week_end.strftime('%d-%m-%Y')
+
+                            country_wise_task_list.append(update_cached_value.s(
+                                url=reverse('accounts:info-data-layer', kwargs={'pk': layer_id}),
+                                query_params={
+                                    'country_id': country.id,
+                                    'start_date': start_date_str,
+                                    'end_date': end_date_str,
+                                    'is_weekly': 'true',
+                                    'benchmark': 'global',
+                                    'include_same_location_schools': 'false',
+                                },
+                            ))
+
+                        # Case 2: Cache with filters
+                        from proco.accounts.models import AdvanceFilter
+                        country_filters = AdvanceFilter.objects.filter(
+                            status=AdvanceFilter.FILTER_STATUS_PUBLISHED,
+                            deleted__isnull=True,
+                            active_countries__country_id=country.id,
+                            active_countries__deleted__isnull=True,
+                            type=AdvanceFilter.TYPE_DROPDOWN
+                        ).distinct()
+
+                        for advance_filter in country_filters:
+                            query_param = advance_filter.query_param_filter
+                            column_config = advance_filter.column_configuration
+                            if not column_config:
+                                continue
+
+                            filter_field = column_config.name
+                            filter_options = advance_filter.options or {}
+                            static_choices = filter_options.get('choices', [])
+
+                            filter_values = []
+                            for choice in static_choices:
+                                if isinstance(choice, dict) and 'value' in choice:
+                                    filter_values.append(choice['value'])
+
+                            # Cache global-stat and info API with each filter value
+                            for value in filter_values:
+                                filter_params = {f'{filter_field}__{query_param}': value}
+
+                                # Global-stat with filter
+                                global_stat_params = {'country_id': country.id}
+                                global_stat_params.update(filter_params)
+                                country_wise_task_list.append(update_cached_value.s(
+                                    url=reverse('connection_statistics:global-stat'),
+                                    query_params=global_stat_params,
+                                ))
+
+                                # Info API with filter
+                                info_params = {
+                                    'country_id': country.id,
+                                    'start_date': latest_week_start_str,
+                                    'end_date': latest_week_end_str,
+                                    'is_weekly': 'true',
+                                    'benchmark': 'global',
+                                    'include_same_location_schools': 'false',
+                                }
+                                info_params.update(filter_params)
+                                country_wise_task_list.append(update_cached_value.s(
+                                    url=reverse('accounts:info-data-layer', kwargs={'pk': layer_id}),
+                                    query_params=info_params,
+                                ))
+
+                        # Case 3: Cache admin1 views
+                        from proco.locations.models import CountryAdminMetadata
+                        admin1_ids = list(CountryAdminMetadata.objects.filter(
+                            country_id=country.id,
+                            layer_name='adm1',
+                            deleted__isnull=True,
+                        ).values_list('id', flat=True))
+
+                        logger.info(f'Brazil: Queueing cache for {len(admin1_ids)} admin1 regions')
+                        for adm1_id in admin1_ids:
+                            # Connectivityconfigs for admin1
+                            country_wise_task_list.append(update_cached_value.s(
+                                url=reverse('connection_statistics:get-latest-week-and-month'),
+                                query_params={
+                                    'country_id': country.id,
+                                    'admin1_id': adm1_id,
+                                    'layer_id': layer_id,
+                                },
+                            ))
+
+                            # Global-stat for admin1
+                            country_wise_task_list.append(update_cached_value.s(
+                                url=reverse('connection_statistics:global-stat'),
+                                query_params={
+                                    'country_id': country.id,
+                                    'admin1_id': adm1_id,
+                                },
+                            ))
+
+                            # Info API for admin1
+                            country_wise_task_list.append(update_cached_value.s(
+                                url=reverse('accounts:info-data-layer', kwargs={'pk': layer_id}),
+                                query_params={
+                                    'country_id': country.id,
+                                    'start_date': latest_week_start_str,
+                                    'end_date': latest_week_end_str,
+                                    'is_weekly': 'true',
+                                    'benchmark': 'global',
+                                    'include_same_location_schools': 'false',
+                                    'admin1_id': adm1_id,
+                                },
+                            ))
 
             chain(country_wise_task_list).delay()
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task
@@ -118,6 +252,7 @@ def update_country_related_cache(country_code):
     update_cached_value.delay(url=reverse('locations:countries-list'))
     update_cached_value.delay(url=reverse('connection_statistics:global-stat'))
     update_cached_value.delay(url=reverse('locations:countries-detail', kwargs={'pk': country_code.lower()}))
+    update_cached_value.delay(url=reverse('entities:retrieve-entity-country', kwargs={'pk': country_code.lower()}))
 
     country = Country.objects.annotate(
         code_lower=Lower('code'),
@@ -157,7 +292,7 @@ def rebuild_school_index():
         call_command('index_rebuild_schools', *cmd_args)
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=1 * 60 * 60, time_limit=1 * 60 * 60)
@@ -184,17 +319,16 @@ def populate_school_registration_data():
     if task_instance:
         task_instance.info(f'Not found running job with name: {task_key}')
         sql = """
-        SELECT DISTINCT sds.school_id
-        FROM public.connection_statistics_schooldailystatus AS sds
-        INNER JOIN public.schools_school s ON s.id = sds.school_id
-        LEFT JOIN public.connection_statistics_schoolrealtimeregistration AS srt
-            ON sds.school_id = srt.school_id
-            AND srt.deleted IS NULL
-        WHERE
-            s.deleted IS NULL
-            AND sds.deleted IS NULL
-            AND srt.school_id IS NULL
-        """
+              SELECT DISTINCT sds.school_id
+              FROM public.connection_statistics_schooldailystatus AS sds
+                       INNER JOIN public.schools_school s ON s.id = sds.school_id
+                       LEFT JOIN public.connection_statistics_schoolrealtimeregistration AS srt
+                                 ON sds.school_id = srt.school_id
+                                     AND srt.deleted IS NULL
+              WHERE s.deleted IS NULL
+                AND sds.deleted IS NULL
+                AND srt.school_id IS NULL \
+              """
 
         school_ids_missing_in_rt_table = db_utilities.sql_to_response(sql, label='SchoolRealtimeRegistration')
         if school_ids_missing_in_rt_table:
@@ -216,7 +350,7 @@ def populate_school_registration_data():
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=10 * 60 * 60, time_limit=10 * 60 * 60)
@@ -256,7 +390,48 @@ def redo_aggregations_task(country_id, year, week_no, *args):
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+
+
+@app.task(soft_time_limit=10 * 60 * 60, time_limit=10 * 60 * 60)
+def redo_entity_aggregations_task(country_id, year, week_no, entity_type_code=None, *args):
+    """
+    redo_entity_aggregations_task
+        Task to schedule manually from Console for entities.
+    """
+    if not country_id or not year:
+        logger.error('Required args not provided: [country_id, year]')
+        return
+
+    logger.info('Starting redo entity aggregations task: Country ID "{0}" - Year "{1}" - Week "{2}"'.format(
+        country_id, year, week_no))
+
+    task_key = 'redo_entity_aggregations_task_country_id_{0}_year_{1}_week_{2}_on_{3}'.format(
+        country_id, year, week_no, format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
+
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(
+        task_id, task_key, 'Update the EntityWeeklyStatus from EntityDailyStatus')
+
+    if task_instance:
+        logger.debug('Not found running job: {}'.format(task_key))
+        cmd_args = [
+            '-country_id={}'.format(country_id),
+            '-year={}'.format(year),
+            '--update_entity_weekly',
+        ]
+
+        if week_no:
+            cmd_args.append('-week_no={}'.format(week_no))
+
+        if entity_type_code:
+            cmd_args.append('-entity_type_code={}'.format(entity_type_code))
+
+        call_command('redo_entity_aggregations', *cmd_args)
+
+        background_task_utilities.task_on_complete(task_instance)
+    else:
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=10 * 60 * 60, time_limit=10 * 60 * 60)
@@ -298,4 +473,647 @@ def populate_school_new_fields_task(start_school_id, end_school_id, country_id, 
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+
+
+@app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)
+def rebuild_unified_index():
+    """
+    rebuild_unified_index
+        Task which runs to rebuild the Cognitive Search Index for Entities from scratch.
+        Frequency: Once in a day
+    """
+    logger.info('Rebuilding the unified entities indexes.')
+    task_key = 'rebuild_unified_index_status_{current_time}'.format(
+        current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
+
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(
+        task_id, task_key, 'Update the Cognitive Search Index for Entities')
+
+    if task_instance:
+        logger.debug('Not found running job: {}'.format(task_key))
+        cmd_args = ['--delete_index', '--create_index', '--clean_index', '--update_index']
+        call_command('build_unified_index', *cmd_args)
+        background_task_utilities.task_on_complete(task_instance)
+    else:
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+
+
+@app.task(soft_time_limit=1 * 60 * 60, time_limit=1 * 60 * 60)
+def populate_entity_registration_data():
+    from proco.connection_statistics.models import EntityDailyStatus
+    from proco.entities.models import Entity
+
+    logger.info('Setting RT status, RT Date for entities which start live data from sources.')
+
+    task_key = 'populate_entity_registration_data_status_{current_time}'.format(
+        current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
+
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(
+        task_id, task_key, 'Populate the RT table data for new entities')
+
+    if task_instance:
+        task_instance.info(f'Not found running job with name: {task_key}')
+        sql = '''
+              SELECT DISTINCT sds.entity_id
+              FROM public.connection_statistics_entitydailystatus AS sds
+                       INNER JOIN public.entities_entity s ON s.id = sds.entity_id
+                       LEFT JOIN public.connection_statistics_entityrealtimeregistration AS srt
+                                 ON sds.entity_id = srt.entity_id
+                                     AND srt.deleted IS NULL
+              WHERE s.deleted IS NULL
+                AND sds.deleted IS NULL
+                AND sds.connectivity_speed IS NOT NULL
+                AND srt.entity_id IS NULL \
+              '''
+
+        entity_ids_missing_in_rt_table = db_utilities.sql_to_response(sql, label='EntityRealtimeRegistration')
+        if entity_ids_missing_in_rt_table:
+            task_instance.info('Total number of newly registered entities for live data in last 6 hours: {0}'.format(
+                len(entity_ids_missing_in_rt_table))
+            )
+
+            for missing_entity_id in entity_ids_missing_in_rt_table:
+                cmd_args = ['--reset', '-entity_id={0}'.format(missing_entity_id['entity_id'])]
+                call_command('populate_entity_registration_data', *cmd_args)
+
+                entity = Entity.objects.get(id=missing_entity_id['entity_id'])
+                # Derive connectivity_status from actual daily speed data
+                latest_daily = EntityDailyStatus.objects.filter(
+                    entity_id=entity.id,
+                    connectivity_speed__isnull=False,
+                ).order_by('-date').first()
+                if latest_daily and latest_daily.connectivity_speed is not None:
+                    entity.connectivity_status = statuses_schema.get_connectivity_status_by_connectivity_speed(
+                        latest_daily.connectivity_speed,
+                    )
+                entity.save(update_fields=['connectivity_status'])
+                logger.info('Entity connectivity status updated for Entity Giga ID "{0}" as "{1}"'.format(
+                    entity.giga_id,
+                    entity.connectivity_status,
+                ))
+
+        background_task_utilities.task_on_complete(task_instance)
+    else:
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+
+
+def get_entity_static_connectivity_status(master_row, field_names):
+    """Return a static status, or None when the master row has no status value."""
+    positive_values = {'true', 'yes', '1', 'good', 'moderate'}
+    negative_values = {'false', 'no', '0'}
+
+    def normalized_value(field_name):
+        value = getattr(master_row, field_name, None)
+        if value is None or core_utilities.is_blank_string(value):
+            return None
+        if isinstance(value, bool):
+            return 'yes' if value else 'no'
+        return str(value).lower().strip()
+
+    # Keep the same precedence used while publishing entity master rows.
+    for field_name in ('connectivity_ever_connected', 'connectivity_govt', 'connectivity'):
+        if field_name not in field_names:
+            continue
+        value = normalized_value(field_name)
+        if value in positive_values:
+            return 'good'
+
+    if 'download_speed_govt' in field_names:
+        download_speed = getattr(master_row, 'download_speed_govt', None)
+        if download_speed is not None and download_speed > 0:
+            return 'good'
+
+    for field_name in ('connectivity_ever_connected', 'connectivity_govt', 'connectivity'):
+        if field_name not in field_names:
+            continue
+        if normalized_value(field_name) in negative_values:
+            return 'no'
+
+    return None
+
+
+@app.task(soft_time_limit=10 * 60 * 60, time_limit=10 * 60 * 60)
+def update_entity_records(start_time=None, end_time=None):
+    from datetime import timedelta
+    from proco.connection_statistics.models import EntityRealTimeRegistration, EntityWeeklyStatus
+    from proco.entities.models import Entity, EntityType
+    from proco.locations.models import Country
+    from proco.schools.constants import statuses_schema
+
+    logger.info('Updating entity records from weekly status changes.')
+
+    task_key = 'update_entity_records_status_{current_time}'.format(
+        current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
+
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(
+        task_id, task_key, 'Update the entity records from weekly status')
+
+    if task_instance:
+        if start_time is None or end_time is None:
+            current_time = core_utilities.get_current_datetime_object()
+            start_time = (current_time - timedelta(hours=25)).replace(minute=0, second=0, microsecond=0)
+            end_time = (current_time - timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+
+        # 1. Countries modified in time range
+        country_ids = list(Country.objects.filter(
+            modified__gte=start_time,
+            modified__lt=end_time,
+        ).values_list('id', flat=True).order_by('id').distinct())
+
+        # 2. Pick entities whose weekly status or country was modified.  The
+        # country predicate is intentional: static master data changes modify
+        # the Country record while entities themselves are unchanged.
+        entity_ids_from_weekly = list(EntityWeeklyStatus.objects.filter(
+            modified__gte=start_time,
+            modified__lt=end_time,
+        ).values_list('entity_id', flat=True).order_by('entity_id').distinct())
+
+        # Published master rows are another source of changes.  Do not rely
+        # only on Country.modified here: the publisher may update a master row
+        # without saving the Country object.
+        entity_ids_from_master = set()
+        for entity_type in EntityType.objects.filter(is_active=True, deleted__isnull=True):
+            master_model = entity_type.get_master_data_model_class()
+            if not master_model:
+                continue
+            field_names = {field.name for field in master_model._meta.fields}
+            id_field = next((name for name in ('health_id_giga', 'school_id_giga', 'giga_id')
+                             if name in field_names), None)
+            if not id_field or 'entity' not in field_names:
+                continue
+            entity_ids_from_master.update(master_model.objects.filter(
+                status=master_model.ROW_STATUS_PUBLISHED,
+                modified__gte=start_time,
+                modified__lt=end_time,
+                entity_id__isnull=False,
+            ).values_list('entity_id', flat=True))
+
+        entities_qs = Entity.objects.filter(
+            Q(id__in=entity_ids_from_weekly) |
+            Q(id__in=entity_ids_from_master) |
+            Q(country_id__in=country_ids)
+        )
+        entity_ids_qs = entities_qs.values_list('pk', flat=True).order_by('pk')
+        last_entity_id = entity_ids_qs.order_by('-pk').first()
+        last_seen_entity_id = 0
+
+        coverage_status_by_type = {
+            '5g': 'good', '4g': 'good', '3g': 'moderate', '2g': 'moderate',
+            'no': 'no', 'no service': 'no', 'no coverage': 'no',
+        }
+
+        while last_entity_id and last_seen_entity_id < last_entity_id:
+            entity_ids = list(entity_ids_qs.filter(pk__gt=last_seen_entity_id)[:100])
+            if not entity_ids:
+                break
+            last_seen_entity_id = entity_ids[-1]
+
+            data_chunk = list(Entity.objects.filter(pk__in=entity_ids).select_related(
+                'entity_type', 'last_weekly_status',
+            ).only(
+                'id', 'entity_type_id', 'country_id', 'giga_id', 'coverage_type', 'coverage_status',
+                'connectivity_status', 'last_weekly_status_id', 'last_weekly_status__date',
+                'last_weekly_status__connectivity_speed', 'last_modified_at',
+                'entity_type__master_data_model',
+            ).order_by('pk'))
+
+            current_date = core_utilities.get_current_datetime_object().date()
+            rt_regs = set(EntityRealTimeRegistration.objects.filter(
+                entity_id__in=entity_ids,
+                rt_registered=True,
+                rt_registration_date__date__lte=current_date,
+            ).values_list('entity_id', flat=True))
+
+            latest_weekly_status_by_entity = {
+                status.entity_id: status
+                for status in EntityWeeklyStatus.objects.filter(
+                    entity_id__in=entity_ids,
+                ).order_by('entity_id', '-date', '-id').distinct('entity_id')
+            }
+
+            # Resolve each configured entity type's master source.  This keeps
+            # this task generic and avoids health-specific fields in the task.
+            master_models = {}
+            for entity in data_chunk:
+                if entity.entity_type_id not in master_models:
+                    master_models[entity.entity_type_id] = entity.entity_type.get_master_data_model_class()
+
+            master_map = {}
+            for entity_type_id, master_model in master_models.items():
+                if not master_model:
+                    continue
+                field_names = {field.name for field in master_model._meta.fields}
+                id_field = next((name for name in ('health_id_giga', 'school_id_giga', 'giga_id')
+                                 if name in field_names), None)
+                lookup_entities = [
+                    entity for entity in data_chunk
+                    if entity.entity_type_id == entity_type_id
+                       and entity.id not in rt_regs
+                       and entity.giga_id
+                ]
+                if not id_field or not lookup_entities:
+                    continue
+                selected_fields = ['id', 'country_id', id_field]
+                selected_fields.extend(
+                    field_name for field_name in (
+                        'coverage_type', 'connectivity_ever_connected', 'download_speed_govt',
+                        'connectivity_govt', 'connectivity',
+                    ) if field_name in field_names
+                )
+                rows = master_model.objects.filter(
+                    status=master_model.ROW_STATUS_PUBLISHED,
+                    country_id__in={entity.country_id for entity in lookup_entities},
+                    **{'{0}__in'.format(id_field): {entity.giga_id for entity in lookup_entities}},
+                ).only(*selected_fields).order_by(
+                    'country_id', id_field, '-id'
+                ).distinct('country_id', id_field)
+                master_map.update({
+                    (entity_type_id, row.country_id, getattr(row, id_field)): row
+                    for row in rows
+                })
+
+            for entity in data_chunk:
+                entity.last_modified_at = core_utilities.get_current_datetime_object()
+                weekly_status = latest_weekly_status_by_entity.get(entity.id)
+                update_last_weekly_status = (
+                    weekly_status and
+                    (not entity.last_weekly_status or entity.last_weekly_status.date < weekly_status.date)
+                )
+                if update_last_weekly_status:
+                    entity.last_weekly_status = weekly_status
+
+                if entity.id in rt_regs:
+                    entity.connectivity_status = 'good'
+                    continue
+
+                master_model = master_models.get(entity.entity_type_id)
+                master_row = None
+                if master_model:
+                    field_names = {field.name for field in master_model._meta.fields}
+                    id_field = next((name for name in ('health_id_giga', 'school_id_giga', 'giga_id')
+                                     if name in field_names), None)
+                    if id_field:
+                        master_row = master_map.get((entity.entity_type_id, entity.country_id, entity.giga_id))
+
+                if master_row:
+                    master_field_names = {field.name for field in master_model._meta.fields}
+                    coverage_type = getattr(master_row, 'coverage_type', None)
+                    if coverage_type is not None and str(coverage_type).strip():
+                        coverage_type = str(coverage_type).lower().strip()
+                        entity.coverage_type = coverage_type
+                        entity.coverage_status = coverage_status_by_type.get(coverage_type, 'unknown')
+
+                    static_status = get_entity_static_connectivity_status(
+                        master_row, master_field_names,
+                    )
+                    if static_status is not None:
+                        entity.connectivity_status = static_status
+                    elif weekly_status and weekly_status.connectivity_speed is not None:
+                        entity.connectivity_status = statuses_schema.get_connectivity_status_by_connectivity_speed(
+                            weekly_status.connectivity_speed
+                        )
+                elif weekly_status and weekly_status.connectivity_speed is not None:
+                    entity.connectivity_status = statuses_schema.get_connectivity_status_by_connectivity_speed(
+                        weekly_status.connectivity_speed
+                    )
+
+            Entity.objects.bulk_update(data_chunk, [
+                'coverage_type',
+                'coverage_status',
+                'connectivity_status',
+                'last_weekly_status',
+                'last_modified_at',
+            ], batch_size=5000)
+
+        background_task_utilities.task_on_complete(task_instance)
+    else:
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+
+
+@app.task(soft_time_limit=1 * 50 * 60, time_limit=1 * 50 * 60)
+def handle_deleted_entity_master_data_row(deleted_row_id=None, country_ids=None):
+    from proco.data_sources.models import HealthEntityMasterIntermediateData
+
+    logger.info('Handling deleted entity master data rows.')
+
+    task_key = 'handle_deleted_entity_master_data_row_status_{current_time}'.format(
+        current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
+
+    if deleted_row_id:
+        task_key += f'_row_id_{deleted_row_id}'
+
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(
+        task_id, task_key, 'Handle deleted entity master data rows')
+
+    if task_instance:
+        if deleted_row_id:
+            rows = HealthEntityMasterIntermediateData.objects.filter(id=deleted_row_id, is_read=False,
+                                                                     status='DELETED_PUBLISHED')
+        else:
+            rows = HealthEntityMasterIntermediateData.objects.filter(is_read=False, status='DELETED_PUBLISHED')
+
+        if country_ids:
+            rows = rows.filter(country_id__in=country_ids)
+
+        affected_country_ids = set()
+        for row in rows:
+            if row.country_id:
+                affected_country_ids.add(row.country_id)
+            entity = row.entity
+            if entity:
+                if entity.country_id:
+                    affected_country_ids.add(entity.country_id)
+                entity.deleted = core_utilities.get_current_datetime_object()
+                entity.save(update_fields=['deleted'])
+
+                # Soft delete related
+                from proco.connection_statistics.models import EntityDailyStatus, EntityWeeklyStatus, \
+                    EntityRealTimeRegistration
+                EntityDailyStatus.objects.all_records().filter(entity=entity).update(
+                    deleted=core_utilities.get_current_datetime_object())
+                EntityWeeklyStatus.objects.all_records().filter(entity=entity).update(
+                    deleted=core_utilities.get_current_datetime_object())
+                EntityRealTimeRegistration.objects.all_records().filter(entity=entity).update(
+                    deleted=core_utilities.get_current_datetime_object())
+
+            row.is_read = True
+            row.save(update_fields=['is_read'])
+
+        if affected_country_ids:
+            from proco.locations.models import Country
+            for country in Country.objects.filter(id__in=affected_country_ids):
+                country.invalidate_country_related_cache()
+
+        background_task_utilities.task_on_complete(task_instance)
+    else:
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+
+
+@app.task(soft_time_limit=120 * 60, time_limit=125 * 60)
+def update_all_entity_cached_values(*args, clean_cache=False):
+    from proco.entities.models import Entity, EntityType
+    from proco.entities.constants import ALL_ENTITIES, LEGACY_MODEL
+    from proco.locations.models import Country
+    from proco.accounts.models import DataLayerCountryRelationship, DataLayer
+    from proco.schools.models import School
+    from proco.utils.cache import cache_manager
+
+    task_key = 'update_all_entity_cached_values_status_{current_time}'.format(
+        current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H%M'))
+
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(
+        task_id, task_key, 'Update the Entity Redis cache, allowed once in a hour')
+
+    if not task_instance:
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        return
+
+    logger.info('Not found running job: {}'.format(task_key))
+
+    if clean_cache:
+        if settings.INVALIDATE_CACHE_HARD.lower() == 'true':
+            cache_manager.invalidate(hard=True)
+            logger.info('Cache cleared. Map is updated in real time.')
+        else:
+            cache_manager.invalidate()
+            logger.info('Cache invalidation started. Maps will be updated in a few minutes.')
+
+    update_cached_value.delay(url=reverse('locations:search-countries-admin-schools'))
+    update_cached_value.delay(url=reverse('locations:countries-list'))
+    update_cached_value.delay(url=reverse('connection_statistics:global-stat'))
+    update_cached_value.delay(url=reverse('entities:list-entity-countries'))
+    update_cached_value.delay(
+        url=reverse('entities:list-published-data-layers-entities', kwargs={'status': 'PUBLISHED'}),
+        query_params={
+            'expand': 'created_by,last_modified_by,published_by',
+            'ordering': '-last_modified_at',
+        },
+    )
+    update_cached_value.delay(url=reverse('entities:global-stat-all-entities'),
+                                     query_params={'entity_type__code': ALL_ENTITIES})
+    today_date = core_utilities.get_current_datetime_object().date()
+    monday_date = today_date - timedelta(days=today_date.weekday())
+    last_week_start = monday_date - timedelta(days=7)
+    last_week_end = monday_date - timedelta(days=1)
+    update_cached_value.delay(
+        url=reverse('entities:global-connectivity-stat-entities'),
+        query_params={
+            'start_date': format_date(last_week_start),
+            'end_date': format_date(last_week_end),
+            'benchmark': 'global',
+            'is_weekly': 'true',
+            'entity_type__code': ALL_ENTITIES,
+        },
+    )
+
+    active_entity_types = EntityType.get_all_active()
+    entity_country_ids = Entity.objects.filter(deleted__isnull=True).values_list('country_id', flat=True).order_by(
+        'country_id').distinct()
+    school_country_ids = School.objects.filter(deleted__isnull=True).values_list('country_id', flat=True).order_by(
+        'country_id').distinct()
+    entity_countries = Country.objects.filter(id__in=set(list(entity_country_ids) + list(school_country_ids)))
+
+    for country in entity_countries:
+        chain([
+            update_cached_value.s(
+                url=reverse('entities:global-stat-all-entities'),
+                query_params={'country_id': country.id, 'entity_type__code': ALL_ENTITIES},
+            ),
+            update_cached_value.s(
+                url=reverse('entities:list-published-entity-filters',
+                            kwargs={'status': 'PUBLISHED', 'country_id': country.id}),
+                query_params={'expand': 'column_configuration', 'ordering': 'name',
+                              'entity_type__code': ALL_ENTITIES},
+            ),
+        ]).delay()
+
+    for entity_type in active_entity_types:
+        is_legacy_entity_type = entity_type.is_legacy or entity_type.code == LEGACY_MODEL
+        if is_legacy_entity_type:
+            entity_type_countries = Country.objects.filter(id__in=list(school_country_ids))
+        else:
+            entity_type_country_ids = Entity.objects.filter(
+                deleted__isnull=True,
+                entity_type=entity_type,
+            ).values_list('country_id', flat=True).order_by('country_id').distinct()
+            entity_type_countries = Country.objects.filter(id__in=list(entity_type_country_ids))
+
+        data_layer_entity_type_filter = Q(data_layer__entity_type=entity_type)
+        if is_legacy_entity_type:
+            data_layer_entity_type_filter |= Q(data_layer__entity_type__isnull=True)
+
+        entity_wise_default_layers = {
+            row['country_id']: row['data_layer_id']
+            for row in DataLayerCountryRelationship.objects.filter(
+                Q(is_default=True) | Q(
+                    is_default=False,
+                    data_layer__category=DataLayer.LAYER_CATEGORY_CONNECTIVITY,
+                    data_layer__created_by__isnull=True,
+                ),
+                data_layer__type=DataLayer.LAYER_TYPE_LIVE,
+                data_layer__status=DataLayer.LAYER_STATUS_PUBLISHED,
+                data_layer__deleted__isnull=True,
+                country_id__in=list(entity_type_countries)
+            ).filter(
+                data_layer_entity_type_filter
+            ).values('country_id', 'data_layer_id').order_by('country_id').distinct()
+        }
+
+        for country in entity_type_countries:
+            country_wise_task_list = [
+                update_cached_value.s(
+                    url=reverse('entities:retrieve-entity-country', kwargs={'pk': country.code.lower()})
+                ),
+                update_cached_value.s(
+                    url=reverse('entities:global-stat-all-entities'),
+                    query_params={'country_id': country.id, 'entity_type__code': entity_type.code},
+                ),
+                update_cached_value.s(
+                    url=reverse('entities:list-published-entity-filters',
+                                kwargs={'status': 'PUBLISHED', 'country_id': country.id}),
+                    query_params={'expand': 'column_configuration', 'ordering': 'name',
+                                  'entity_type__code': entity_type.code},
+                ),
+            ]
+
+            if entity_wise_default_layers.get(country.id, None):
+                layer_id = entity_wise_default_layers[country.id]
+                latest_week_params = {
+                    'country_id': country.id,
+                    'entity_type__code': ALL_ENTITIES,
+                    f'{entity_type.code}_layer_id': layer_id,
+                }
+
+                client = APIClient()
+                response = client.get(
+                    reverse('entities:entity-get-latest-week-and-month'),
+                    latest_week_params,
+                    format='json',
+                )
+                latest_week = response.data.get(entity_type.code, {}).get('week') if response.data else None
+
+                if response.status_code == 200 and latest_week:
+                    latest_week_start_str = latest_week['start_date']
+                    latest_week_end_str = latest_week['end_date']
+                    same_location_params = {
+                        f'school_include_same_location': 'false',
+                    }
+
+                    country_wise_task_list.append(update_cached_value.s(
+                        url=reverse('entities:entity-info-data-layer'),
+                        query_params={
+                            'country_id': country.id,
+                            'entity_type__code': entity_type.code,
+                            f'{entity_type.code}_layer_id': layer_id,
+                            f'{entity_type.code}_start_date': latest_week_start_str,
+                            f'{entity_type.code}_end_date': latest_week_end_str,
+                            f'{entity_type.code}_is_weekly': 'true',
+                            f'{entity_type.code}_benchmark': 'global',
+                            **same_location_params,
+                        },
+                    ))
+
+                    # Cache with filters
+                    from proco.accounts.models import AdvanceFilter
+                    country_filters = AdvanceFilter.objects.filter(
+                        status=AdvanceFilter.FILTER_STATUS_PUBLISHED,
+                        deleted__isnull=True,
+                        active_countries__country_id=country.id,
+                        active_countries__deleted__isnull=True,
+                        type=AdvanceFilter.TYPE_DROPDOWN
+                    ).distinct()
+
+                    for advance_filter in country_filters:
+                        query_param = advance_filter.query_param_filter
+                        column_config = advance_filter.column_configuration
+                        if not column_config:
+                            continue
+
+                        filter_field = column_config.name
+                        filter_options = advance_filter.options or {}
+                        static_choices = filter_options.get('choices', [])
+
+                        filter_values = []
+                        for choice in static_choices:
+                            if isinstance(choice, dict) and 'value' in choice:
+                                filter_values.append(choice['value'])
+
+                        for value in filter_values:
+                            filter_params = {f'{filter_field}__{query_param}': value,
+                                             'entity_type__code': entity_type.code}
+
+                            global_stat_params = {'country_id': country.id}
+                            global_stat_params.update(filter_params)
+                            country_wise_task_list.append(update_cached_value.s(
+                                url=reverse('entities:global-stat-all-entities'),
+                                query_params=global_stat_params,
+                            ))
+
+                            info_params = {
+                                'country_id': country.id,
+                                'entity_type__code': entity_type.code,
+                                f'{entity_type.code}_layer_id': layer_id,
+                                f'{entity_type.code}_start_date': latest_week_start_str,
+                                f'{entity_type.code}_end_date': latest_week_end_str,
+                                f'{entity_type.code}_is_weekly': 'true',
+                                f'{entity_type.code}_benchmark': 'global',
+                                **same_location_params,
+                            }
+                            info_params.update(filter_params)
+                            country_wise_task_list.append(update_cached_value.s(
+                                url=reverse('entities:entity-info-data-layer'),
+                                query_params=info_params,
+                            ))
+
+                    # Cache admin1 views
+                    from proco.locations.models import CountryAdminMetadata
+                    admin1_ids = list(CountryAdminMetadata.objects.filter(
+                        country_id=country.id,
+                        layer_name='adm1',
+                        deleted__isnull=True,
+                    ).values_list('id', flat=True))
+
+                    for adm1_id in admin1_ids:
+                        country_wise_task_list.append(update_cached_value.s(
+                            url=reverse('entities:entity-get-latest-week-and-month'),
+                            query_params={
+                                'country_id': country.id,
+                                'admin1_id': adm1_id,
+                                'entity_type__code': ALL_ENTITIES,
+                                f'{entity_type.code}_layer_id': layer_id,
+                            },
+                        ))
+
+                        country_wise_task_list.append(update_cached_value.s(
+                            url=reverse('entities:global-stat-all-entities'),
+                            query_params={
+                                'country_id': country.id,
+                                'admin1_id': adm1_id,
+                                'entity_type__code': entity_type.code,
+                            },
+                        ))
+
+                        country_wise_task_list.append(update_cached_value.s(
+                            url=reverse('entities:entity-info-data-layer'),
+                            query_params={
+                                'country_id': country.id,
+                                'admin1_id': adm1_id,
+                                'entity_type__code': entity_type.code,
+                                f'{entity_type.code}_layer_id': layer_id,
+                                f'{entity_type.code}_start_date': latest_week_start_str,
+                                f'{entity_type.code}_end_date': latest_week_end_str,
+                                f'{entity_type.code}_is_weekly': 'true',
+                                f'{entity_type.code}_benchmark': 'global',
+                                **same_location_params,
+                            },
+                        ))
+
+            chain(country_wise_task_list).delay()
+
+    background_task_utilities.task_on_complete(task_instance)

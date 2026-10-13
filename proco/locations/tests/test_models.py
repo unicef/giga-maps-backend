@@ -7,7 +7,6 @@ from proco.schools.tests.factories import SchoolFactory
 
 
 class TestCountryModel(TestCase):
-
     def test_optimization_for_empty_geometry(self):
         country = CountryFactory(geometry=GEOSGeometry('{"type": "MultiPolygon", "coordinates": []}'))
 

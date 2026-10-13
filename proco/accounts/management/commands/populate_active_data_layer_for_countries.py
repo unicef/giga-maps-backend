@@ -4,11 +4,15 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import logging
 from django.core.management.base import BaseCommand
 
+from django.core.exceptions import FieldDoesNotExist
+from django.db import transaction
+
 from proco.accounts import models as accounts_models
 from proco.connection_statistics.config import app_config as statistics_configs
 from proco.core import db_utils as db_utilities
 from proco.core.utils import get_current_datetime_object
 from proco.locations.models import Country
+from proco.entities.models import Entity
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
@@ -80,8 +84,8 @@ class Command(BaseCommand):
                 applicable_country_ids = data_layer_instance.applicable_countries
                 parameter_col = data_sources.first().data_source_column
 
-                parameter_column_name = str(parameter_col['name'])
-                parameter_column_type = str(parameter_col['type'])
+                parameter_column_name = str(parameter_col.get('name', '')) if parameter_col else ''
+                parameter_column_type = str(parameter_col.get('type', '')) if parameter_col else ''
 
                 accounts_models.DataLayerCountryRelationship.objects.filter(
                     data_layer=data_layer_instance,
@@ -91,26 +95,86 @@ class Command(BaseCommand):
                     is_applicable=False,
                 )
 
+                is_entity_layer = (
+                    data_layer_instance.entity_type is not None
+                    and not data_layer_instance.entity_type.is_legacy
+                )
+
+                if is_entity_layer:
+                    entity_detail_table = 'entities_{0}_entity'.format(
+                        data_layer_instance.entity_type.code
+                    )
+                    detail_model_class = data_layer_instance.entity_type.get_detail_model_class()
+                    col_in_detail_table = False
+                    if detail_model_class:
+                        try:
+                            detail_model_class._meta.get_field(parameter_column_name)
+                            col_in_detail_table = True
+                        except FieldDoesNotExist:
+                            pass
+
                 if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
                     parameter_table_name = str(parameter_col.get('table_name', 'sds'))
-                    sql = """
-                    SELECT DISTINCT schools_school."country_id"
-                    FROM "connection_statistics_schooldailystatus" AS sds
-                    INNER JOIN "schools_school" ON (sds."school_id" = schools_school."id")
-                    WHERE schools_school."deleted" IS NULL
-                      AND sds."deleted" IS NULL
-                      AND sds."live_data_source" IN ({live_source_types})
-                      AND schools_school."country_id" IN ({country_ids})
-                      AND {table_name}.{col_name} IS NOT NULL
-                    ORDER BY schools_school."country_id" ASC
-                    """.format(
-                        live_source_types=','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
-                        country_ids=','.join([str(country_id) for country_id in all_country_ids]),
-                        table_name=parameter_table_name,
-                        col_name=parameter_column_name
-                    )
-                    all_country_ids_has_layer_data = db_utilities.sql_to_response(sql,
-                                                                                  label='DataLayerCountryRelationship')
+                    if is_entity_layer:
+                        if col_in_detail_table:
+                            sql = """
+                            SELECT DISTINCT e."country_id"
+                            FROM "entities_entity" AS e
+                            INNER JOIN "{entity_detail_table}" AS ehe ON (ehe."entity_id" = e."id")
+                            WHERE e."deleted" IS NULL
+                              AND e."country_id" IN ({country_ids})
+                              AND ehe."{col_name}" IS NOT NULL
+                            ORDER BY e."country_id" ASC
+                            """.format(
+                                entity_detail_table=entity_detail_table,
+                                country_ids=','.join([str(cid) for cid in all_country_ids]),
+                                col_name=parameter_column_name,
+                            )
+                        else:
+                            sql = """
+                            SELECT DISTINCT e."country_id"
+                            FROM "entities_entity" AS e
+                            INNER JOIN "connection_statistics_entitydailystatus" AS eds
+                                ON (eds."entity_id" = e."id")
+                            WHERE e."deleted" IS NULL
+                              AND eds."deleted" IS NULL
+                              AND eds."live_data_source" IN ({live_source_types})
+                              AND e."country_id" IN ({country_ids})
+                              AND eds."{col_name}" IS NOT NULL
+                            ORDER BY e."country_id" ASC
+                            """.format(
+                                live_source_types=','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
+                                country_ids=','.join([str(cid) for cid in all_country_ids]),
+                                col_name=parameter_column_name,
+                            )
+                    else:
+                        sql = """
+                        SELECT DISTINCT schools_school."country_id"
+                        FROM "connection_statistics_schooldailystatus" AS sds
+                        INNER JOIN "schools_school" ON (sds."school_id" = schools_school."id")
+                        WHERE schools_school."deleted" IS NULL
+                          AND sds."deleted" IS NULL
+                          AND sds."live_data_source" IN ({live_source_types})
+                          AND schools_school."country_id" IN ({country_ids})
+                          AND {table_name}.{col_name} IS NOT NULL
+                        ORDER BY schools_school."country_id" ASC
+                        """.format(
+                            live_source_types=','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
+                            country_ids=','.join([str(cid) for cid in all_country_ids]),
+                            table_name=parameter_table_name,
+                            col_name=parameter_column_name,
+                        )
+
+                    try:
+                        with transaction.atomic():
+                            all_country_ids_has_layer_data = db_utilities.sql_to_response(sql,
+                                                                                        label='DataLayerCountryRelationship')
+                            # Handle None response from sql_to_response
+                            if all_country_ids_has_layer_data is None:
+                                all_country_ids_has_layer_data = []
+                    except Exception as e:
+                        logger.error(f'Error executing SQL query for layer {data_layer_instance.id}: {e}')
+                        all_country_ids_has_layer_data = []
 
                     for country_id_has_layer_data in all_country_ids_has_layer_data:
                         country_id = country_id_has_layer_data['country_id']
@@ -142,29 +206,76 @@ class Command(BaseCommand):
                     unknown_condition = ''
                     parameter_table_name = str(parameter_col.get('table_name', 'sws'))
                     if parameter_column_type == 'str':
-                        unknown_condition = "AND {table_name}.{col_name} != 'unknown'".format(
+                        if is_entity_layer:
+                            table_prefix = 'ehe' if col_in_detail_table else 'e'
+                            unknown_condition = "AND {t}.\"{c}\" != 'unknown'".format(
+                                t=table_prefix, c=parameter_column_name
+                            )
+                        else:
+                            unknown_condition = "AND {table_name}.{col_name} != 'unknown'".format(
+                                table_name=parameter_table_name,
+                                col_name=parameter_column_name
+                            )
+
+                    if is_entity_layer:
+                        if col_in_detail_table:
+                            sql = """
+                            SELECT DISTINCT e."country_id"
+                            FROM "entities_entity" AS e
+                            INNER JOIN "{entity_detail_table}" AS ehe ON (ehe."entity_id" = e."id")
+                            WHERE e."deleted" IS NULL
+                              AND e."country_id" IN ({country_ids})
+                              AND ehe."{col_name}" IS NOT NULL
+                              {unknown_condition}
+                            ORDER BY e."country_id" ASC
+                            """.format(
+                                entity_detail_table=entity_detail_table,
+                                country_ids=','.join([str(cid) for cid in all_country_ids]),
+                                col_name=parameter_column_name,
+                                unknown_condition=unknown_condition,
+                            )
+                        else:
+                            sql = """
+                            SELECT DISTINCT e."country_id"
+                            FROM "entities_entity" AS e
+                            WHERE e."deleted" IS NULL
+                              AND e."country_id" IN ({country_ids})
+                              AND e."{col_name}" IS NOT NULL
+                              {unknown_condition}
+                            ORDER BY e."country_id" ASC
+                            """.format(
+                                country_ids=','.join([str(cid) for cid in all_country_ids]),
+                                col_name=parameter_column_name,
+                                unknown_condition=unknown_condition,
+                            )
+                    else:
+                        sql = """
+                            SELECT DISTINCT schools_school."country_id"
+                            FROM "schools_school"
+                            INNER JOIN "connection_statistics_schoolweeklystatus" AS sws
+                                ON (sws."id" = schools_school."last_weekly_status_id")
+                            WHERE schools_school."deleted" IS NULL
+                              AND schools_school."country_id" IN ({country_ids})
+                              AND {table_name}.{col_name} IS NOT NULL
+                              {unknown_condition}
+                            ORDER BY schools_school."country_id" ASC
+                        """.format(
+                            country_ids=','.join([str(cid) for cid in all_country_ids]),
                             table_name=parameter_table_name,
-                            col_name=parameter_column_name
+                            col_name=parameter_column_name,
+                            unknown_condition=unknown_condition,
                         )
 
-                    sql = """
-                        SELECT DISTINCT schools_school."country_id"
-                        FROM "schools_school"
-                        INNER JOIN "connection_statistics_schoolweeklystatus" AS sws
-                            ON (sws."id" = schools_school."last_weekly_status_id")
-                        WHERE schools_school."deleted" IS NULL
-                          AND schools_school."country_id" IN ({country_ids})
-                          AND {table_name}.{col_name} IS NOT NULL
-                          {unknown_condition}
-                        ORDER BY schools_school."country_id" ASC
-                    """.format(
-                        country_ids=','.join([str(country_id) for country_id in all_country_ids]),
-                        table_name=parameter_table_name,
-                        col_name=parameter_column_name,
-                        unknown_condition=unknown_condition,
-                    )
-                    all_country_ids_has_layer_data = db_utilities.sql_to_response(sql,
-                                                                                  label='DataLayerCountryRelationship')
+                    try:
+                        with transaction.atomic():
+                            all_country_ids_has_layer_data = db_utilities.sql_to_response(sql,
+                                                                                        label='DataLayerCountryRelationship')
+                            # Handle None response from sql_to_response
+                            if all_country_ids_has_layer_data is None:
+                                all_country_ids_has_layer_data = []
+                    except Exception as e:
+                        logger.error(f'Error executing SQL query for layer {data_layer_instance.id}: {e}')
+                        all_country_ids_has_layer_data = []
 
                     for country_id_has_layer_data in all_country_ids_has_layer_data:
                         country_id = country_id_has_layer_data['country_id']

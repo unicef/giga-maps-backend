@@ -26,6 +26,27 @@ DATABASES = {
     GIGA_METER_DB_KEY: env.db_url(var='GIGA_METER_DATABASE_URL'),
 }
 
+# Prometheus DB instrumentation
+# --------------------------------------------------------------------------
+# Wrap each DB connection with django_prometheus so query counts and durations
+# are exported per alias (django_db_execute_total, django_db_query_duration_seconds).
+# The wrappers are thin subclasses of the underlying Django backend: they only
+# time/count queries and never change SQL, connections, or data. Each engine is
+# mapped to its instrumented equivalent so a non-PostGIS connection (e.g. the
+# giga_meter DB) keeps the correct backend. Flag-gated so it can be turned off via
+# env (ENABLED_DB_METRICS=False) without a code change if a wrapper misbehaves.
+ENABLED_DB_METRICS = env.bool('ENABLED_DB_METRICS', default=ENABLED_BACKEND_PROMETHEUS_METRICS)
+if ENABLED_DB_METRICS:
+    _INSTRUMENTED_DB_ENGINES = {
+        'django.contrib.gis.db.backends.postgis': 'config.db.backends.postgis',
+        'django.db.backends.postgresql': 'django_prometheus.db.backends.postgresql',
+        'django.db.backends.postgresql_psycopg2': 'django_prometheus.db.backends.postgresql',
+    }
+    for _db_settings in DATABASES.values():
+        _db_settings['ENGINE'] = _INSTRUMENTED_DB_ENGINES.get(
+            _db_settings.get('ENGINE'), _db_settings.get('ENGINE'),
+        )
+
 # Template
 # --------------------------------------------------------------------------
 
@@ -53,9 +74,14 @@ AZURE_CONTAINER = env('AZURE_CONTAINER')  # noqa: F405
 AZURE_SSL = True
 AZURE_URL_EXPIRATION_SECS = None
 
+# Written onto every newly uploaded blob as its Cache-Control header. Safe to keep long-lived
+# because get_random_name_image() names uploads after a UUID, so a given URL never changes
+# content. Existing blobs keep their current (absent) header until they are re-uploaded.
+AZURE_OBJECT_PARAMETERS = {'cache_control': 'public, max-age=31536000, immutable'}
+
 if AZURE_ACCOUNT_NAME and AZURE_ACCOUNT_KEY and AZURE_CONTAINER:
     DEFAULT_FILE_STORAGE = 'storages.backends.azure_storage.AzureStorage'
-    STATICFILES_STORAGE = 'storages.backends.azure_storage.AzureStorage'
+    STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
 else:
     DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
     STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
@@ -123,14 +149,50 @@ if CELERY_ENABLED:
 # -------------
 
 SENTRY_DSN = env('SENTRY_DSN', default='')
-SENTRY_ENABLED = True if SENTRY_DSN else False
+CELERY_SENTRY_DSN = env('CELERY_SENTRY_DSN', default='')
+
+# Celery deployments set CELERY_SENTRY_DSN to route events to the Celery Sentry project.
+SENTRY_ACTIVE_DSN = CELERY_SENTRY_DSN or SENTRY_DSN
+SENTRY_INTEGRATIONS = (
+    [CeleryIntegration()] if CELERY_SENTRY_DSN else [DjangoIntegration()]
+)
+SENTRY_ENABLED = True if SENTRY_ACTIVE_DSN else False
+
+def sentry_before_send(event, hint):
+    """
+    Filter out known non-actionable external data source errors and routine task messages
+    so they are not reported to Sentry as issues.
+    """
+    ignored_patterns = [
+        'Provided Start version',
+        'Could not find version for table',
+        'Could not find version for',
+        'Country with ISO3 Format',
+        'not found in DB',
+        'skipping current iteration',
+        'does not exist to use for share',
+        'does not exist to use',
+    ]
+    if 'logentry' in event:
+        msg = event['logentry'].get('message', '') or event['logentry'].get('formatted', '')
+        if any(pattern in msg for pattern in ignored_patterns):
+            return None
+    if 'exc_info' in hint:
+        exc_type, exc_value, tb = hint['exc_info']
+        exc_str = str(exc_value)
+        if any(pattern in exc_str for pattern in ignored_patterns):
+            return None
+    return event
+
 
 if SENTRY_ENABLED:
     sentry_sdk.init(
-        SENTRY_DSN,
+        SENTRY_ACTIVE_DSN,
         # traces_sample_rate=0.2,
         release=get_git_hash(),
-        integrations=[DjangoIntegration(), CeleryIntegration()],
+        environment=APP_ENVIRONMENT,
+        integrations=SENTRY_INTEGRATIONS,
+        before_send=sentry_before_send,
     )
 
 # Mapbox

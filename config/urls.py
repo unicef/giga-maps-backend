@@ -42,6 +42,7 @@ urlpatterns = [
         path('about_us/', include('proco.about_us.api_urls')),
         path('accounts/', include('proco.accounts.api_urls')),
         path('sources/', include('proco.data_sources.api_urls')),
+        path('v2/entities/', include('proco.entities.v2.api_urls')),
     ])),
     path('test/', TestView.as_view()),
     path('health/', PingAPIView.as_view()),

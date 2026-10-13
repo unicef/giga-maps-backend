@@ -410,9 +410,9 @@ class PublishSchoolMasterDataSerializer(serializers.ModelSerializer):
 
     def update_all_related_models(self, instance):
         if instance.status == sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED:
-            sources_tasks.handle_published_school_master_data_row(published_row=instance)
+            sources_tasks.handle_published_school_master_data_row(published_row=instance, publish_source='admin_portal_selected')
         else:
-            sources_tasks.handle_deleted_school_master_data_row(deleted_row=instance)
+            sources_tasks.handle_deleted_school_master_data_row(deleted_row=instance, publish_source='admin_portal_selected')
 
     def update(self, instance, validated_data):
         """

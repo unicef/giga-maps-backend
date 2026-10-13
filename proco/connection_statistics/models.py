@@ -1,3 +1,4 @@
+from django.core.cache import cache
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
@@ -11,6 +12,7 @@ from model_utils.models import TimeStampedModel
 from proco.connection_statistics.config import app_config as statistics_configs
 from proco.core import models as core_models
 from proco.core.managers import BaseManager
+from proco.entities.models import Entity
 from proco.locations.models import Country
 from proco.schools.constants import statuses_schema
 from proco.schools.models import School
@@ -19,8 +21,7 @@ from proco.utils.dates import get_current_week, get_current_year
 
 class ConnectivityStatistics(models.Model):
     connectivity_speed = core_models.PositiveBigIntegerField(help_text=_('bps'), blank=True, null=True, default=None)
-    connectivity_upload_speed = core_models.PositiveBigIntegerField(help_text=_('bps'), blank=True, null=True,
-                                                                    default=None)
+    connectivity_upload_speed = core_models.PositiveBigIntegerField(help_text=_('bps'), blank=True, null=True, default=None)
 
     connectivity_latency = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
 
@@ -38,27 +39,15 @@ class ConnectivityStatistics(models.Model):
     jitter_download = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
     jitter_upload = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
     rtt_packet_loss_pct = models.FloatField(help_text=_('percentage'), blank=True, null=True, default=None)
-
-    speed_download_max = models.PositiveIntegerField(help_text=_('bps'), blank=True, null=True, default=None)
-    speed_upload_max = models.PositiveIntegerField(help_text=_('bps'), blank=True, null=True, default=None)
-    pe_ingress = models.PositiveIntegerField(help_text=_('bps'), blank=True, null=True, default=None)
-    pe_egress = models.PositiveIntegerField(help_text=_('bps'), blank=True, null=True, default=None)
-    inbound_traffic_sum = models.BigIntegerField(help_text=_('byte'), blank=True, null=True, default=None)
-    outbound_traffic_sum = models.BigIntegerField(help_text=_('byte'), blank=True, null=True, default=None)
-    latency_min = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
-    latency_mean = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
-    latency_max = models.FloatField(help_text=_('ms'), blank=True, null=True, default=None)
-    signal_mean = models.FloatField(help_text=_('dBM'), blank=True, null=True, default=None)
-    signal_max = models.FloatField(help_text=_('dBM'), blank=True, null=True, default=None)
-    is_connected_all = models.FloatField(blank=True, default=None, null=True)
-    is_connected_true = models.FloatField(blank=True, default=None, null=True)
+    uptime = models.FloatField(help_text=_('percentage'), blank=True, null=True, default=None)
+    is_connected_true = models.FloatField(help_text=_('Is Connected'), blank=True, null=True, default=None)
+    is_connected_all = models.FloatField(help_text=_('Is Connected All'), blank=True, null=True, default=None)
 
     live_data_source = models.CharField(
         max_length=50,
         choices=statistics_configs.LIVE_DATA_SOURCE_CHOICES,
         default=statistics_configs.UNKNOWN_SOURCE,
     )
-    uptime = models.FloatField(help_text=_('percentage'), blank=True, null=True, default=None)
 
     deleted = core_models.CustomDateTimeField(db_index=True, null=True, blank=True)
 
@@ -374,6 +363,79 @@ class SchoolDailyStatus(ConnectivityStatistics, TimeStampedModel, models.Model):
             self.save()
 
 
+class SchoolRealTimeWeeklyMetric(TimeStampedModel, models.Model):
+    AGG_FUNCTION_AVG = 'avg'
+    AGG_FUNCTION_MIN = 'min'
+    AGG_FUNCTION_MAX = 'max'
+    AGG_FUNCTION_SUM = 'sum'
+    AGG_FUNCTION_MEDIAN_50 = 'median|50'
+    AGG_FUNCTION_MEDIAN_90 = 'median|90'
+
+    AGG_FUNCTION_CHOICES = Choices(
+        (AGG_FUNCTION_AVG, _('Average')),
+        (AGG_FUNCTION_MIN, _('Minimum')),
+        (AGG_FUNCTION_MAX, _('Maximum')),
+        (AGG_FUNCTION_SUM, _('Sum')),
+        (AGG_FUNCTION_MEDIAN_50, _('Median 50')),
+        (AGG_FUNCTION_MEDIAN_90, _('Median 90')),
+    )
+
+    school = models.ForeignKey(School, related_name='realtime_weekly_metrics', on_delete=models.CASCADE)
+    country = models.ForeignKey(Country, related_name='school_realtime_weekly_metrics', on_delete=models.CASCADE)
+    year = models.PositiveSmallIntegerField(default=get_current_year)
+    week = models.PositiveSmallIntegerField(default=get_current_week)
+    date = models.DateField()
+    config_hash = models.CharField(max_length=64, db_index=True)
+    live_data_sources = models.CharField(max_length=255)
+    metric_name = models.CharField(max_length=64)
+    agg_function = models.CharField(max_length=32, choices=AGG_FUNCTION_CHOICES)
+    agg_value = models.FloatField(blank=True, null=True, default=None)
+    sample_count = models.PositiveIntegerField(blank=True, default=0)
+
+    class Meta:
+        verbose_name = _('School Real Time Weekly Metric')
+        verbose_name_plural = _('School Real Time Weekly Metrics')
+        ordering = ('id',)
+        constraints = [
+            UniqueConstraint(
+                fields=['school', 'year', 'week', 'config_hash'],
+                name='schoolrealtimeweeklymetric_unique',
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=['school', 'year', 'week', 'config_hash'],
+                name='srtwm_school_lookup_idx',
+            ),
+            models.Index(
+                fields=['school', 'country', 'year', 'week', 'config_hash'],
+                name='srtwm_map_lookup_idx',
+            ),
+            models.Index(
+                fields=['country', 'year', 'week', 'config_hash'],
+                name='srtwm_country_lookup_idx',
+            ),
+            models.Index(
+                fields=['config_hash', 'year', 'week'],
+                name='srtwm_hash_week_idx',
+            ),
+            models.Index(
+                fields=['date'],
+                name='srtwm_date_idx',
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f'{self.year} Week {self.week} School {self.school_id} '
+            f'{self.metric_name} {self.agg_function} - {self.agg_value}'
+        )
+
+    def save(self, **kwargs):
+        self.date = Week(self.year, self.week).monday()
+        super().save(**kwargs)
+
+
 class RealTimeConnectivity(ConnectivityStatistics, TimeStampedModel, models.Model):
     school = models.ForeignKey(School, related_name='realtime_status', on_delete=models.CASCADE)
 
@@ -385,7 +447,7 @@ class RealTimeConnectivity(ConnectivityStatistics, TimeStampedModel, models.Mode
         ordering = ('id',)
 
     def __str__(self):
-        return f'{self.created} {self.school.id} {self.school.name}'
+        return f'{self.created} {self.school.name} Speed - {self.connectivity_speed}'
 
     def delete(self, *args, **kwargs):
         force = kwargs.pop('force', False)
@@ -408,3 +470,135 @@ class SchoolRealTimeRegistration(core_models.BaseModelMixin):
         verbose_name = _('School Real Time Registration Status')
         verbose_name_plural = _('School Real Time Registration Data')
         ordering = ('id',)
+
+
+# ######################################## Entity Models ########################################
+
+class EntityRealTimeConnectivity(ConnectivityStatistics, TimeStampedModel, models.Model):
+    DATA_VERSION_CACHE_KEY = 'entity_qos_data_last_version_{0}'
+
+    entity = models.ForeignKey(Entity, related_name='realtime_status', on_delete=models.CASCADE)
+    version = models.PositiveIntegerField(blank=True, default=None, null=True)
+
+    objects = BaseManager()
+
+    class Meta:
+        verbose_name = _('Real Time Connectivity Data')
+        verbose_name_plural = _('Real Time Connectivity Data')
+        ordering = ('id',)
+
+    def __str__(self):
+        return f'{self.created} {self.entity.id} {self.entity.name}'
+
+    def delete(self, *args, **kwargs):
+        force = kwargs.pop('force', False)
+
+        if force:
+            super().delete(*args, **kwargs)
+        else:
+            self.deleted = timezone.now()
+            self.save()
+
+    @classmethod
+    def get_last_version(cls, iso3_format):
+        """Get last pulled version: check cache first, fall back to DB query.
+        Mirrors QoSData.get_last_version()."""
+        last_data_version = cache.get(cls.DATA_VERSION_CACHE_KEY.format(iso3_format))
+        if not last_data_version:
+            latest_record = cls.objects.filter(
+                entity__country__iso3_format=iso3_format,
+                version__isnull=False,
+            ).order_by('-version').first()
+            if latest_record:
+                last_data_version = latest_record.version
+        return last_data_version
+
+    @classmethod
+    def set_last_version(cls, value, iso3_format):
+        """Cache the last pulled version. Mirrors QoSData.set_last_version()."""
+        cache.set(cls.DATA_VERSION_CACHE_KEY.format(iso3_format), value)
+
+
+class EntityRealTimeRegistration(core_models.BaseModelMixin):
+    entity = models.ForeignKey(Entity, related_name='realtime_registration_status', on_delete=models.CASCADE)
+
+    rt_registered = models.BooleanField(default=False)
+    rt_registration_date = core_models.CustomDateTimeField(db_index=True, null=True, blank=True)
+    rt_source = models.CharField(max_length=255, null=True, blank=True)
+
+    class Meta:
+        verbose_name = _('Real Time Registration Status')
+        verbose_name_plural = _('Real Time Registration Data')
+        ordering = ('id',)
+
+class EntityDailyStatus(ConnectivityStatistics, TimeStampedModel, models.Model):
+    entity = models.ForeignKey(Entity, related_name='daily_status', on_delete=models.CASCADE)
+    date = models.DateField()
+
+    objects = BaseManager()
+
+    class Meta:
+        verbose_name = _('Daily Connectivity Summary')
+        verbose_name_plural = _('Daily Connectivity Summary')
+        ordering = ('id',)
+        constraints = [
+            UniqueConstraint(fields=['date', 'entity', 'live_data_source', 'deleted'],
+                             name='entitydailystatus_unique_with_deleted'),
+            UniqueConstraint(fields=['date', 'entity', 'live_data_source'],
+                             condition=Q(deleted=None),
+                             name='entitydailystatus_unique_without_deleted'),
+        ]
+
+    def __str__(self):
+        year, week, weekday = self.date.isocalendar()
+        return f'{year} {self.entity.name} Week {week} Day {weekday} Speed - {self.connectivity_speed}'
+
+    def delete(self, *args, **kwargs):
+        force = kwargs.pop('force', False)
+
+        if force:
+            super().delete(*args, **kwargs)
+        else:
+            self.deleted = timezone.now()
+            self.save()
+
+
+class EntityWeeklyStatus(ConnectivityStatistics, TimeStampedModel, models.Model):
+    entity = models.ForeignKey(Entity, related_name='weekly_status', on_delete=models.CASCADE)
+    year = models.PositiveSmallIntegerField(default=get_current_year)
+    week = models.PositiveSmallIntegerField(default=get_current_week)
+    date = models.DateField()
+    download_speed_benchmark = models.FloatField(blank=True, default=None, null=True)
+
+    objects = BaseManager()
+
+    class Meta:
+        verbose_name = _('Weekly Summary')
+        verbose_name_plural = _('Weekly Summary')
+        ordering = ('id',)
+        constraints = [
+            UniqueConstraint(fields=['year', 'week', 'entity', 'deleted'],
+                             name='entityweeklystatus_unique_with_deleted'),
+            UniqueConstraint(fields=['year', 'week', 'entity'],
+                             condition=Q(deleted=None),
+                             name='entityweeklystatus_unique_without_deleted'),
+        ]
+
+    def __str__(self):
+        return f'{self.year} {self.entity.name} Week {self.week} Speed - {self.connectivity_speed}'
+
+    def save(self, **kwargs):
+        self.date = self.get_date()
+        super().save(**kwargs)
+
+    def delete(self, *args, **kwargs):
+        force = kwargs.pop('force', False)
+
+        if force:
+            super().delete(*args, **kwargs)
+        else:
+            self.deleted = timezone.now()
+            self.save()
+
+    def get_date(self):
+        return Week(self.year, self.week).monday()

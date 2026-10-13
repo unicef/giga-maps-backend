@@ -1,0 +1,160 @@
+# encoding: utf-8
+from __future__ import absolute_import, division, print_function, unicode_literals
+
+import logging
+
+from django.core.management.base import BaseCommand
+from django.db.models import F
+
+from proco.accounts import models as accounts_models
+from proco.core.utils import get_current_datetime_object
+from proco.schools.models import School
+from proco.entities.models import Entity
+
+logger = logging.getLogger('gigamaps.' + __name__)
+
+
+def delete_relationships(country_id, filter_id, excluded_ids):
+    relationships = accounts_models.AdvanceFilterCountryRelationship.objects.all()
+
+    if country_id:
+        relationships = relationships.filter(country_id=country_id)
+
+    if filter_id:
+        relationships = relationships.filter(advance_filter_id=filter_id)
+
+    if len(excluded_ids) > 0:
+        relationships = relationships.exclude(id__in=excluded_ids)
+
+    relationships.update(deleted=get_current_datetime_object())
+
+
+class Command(BaseCommand):
+    help = 'Create/Update the Advance Filter - Country relationship table.'
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--reset', action='store_true', dest='reset_mapping', default=False,
+            help='If provided, already created mapping will be deleted and new mapping will be created.'
+        )
+
+        parser.add_argument(
+            '-country_id', dest='country_id', required=False, type=int,
+            help='Pass the Country ID in case want to perform the update for single country.'
+        )
+
+        parser.add_argument(
+            '-filter_id', dest='filter_id', required=False, type=int,
+            help='Pass the Advance Filter ID in case want to perform the update for single filter.'
+        )
+
+    def handle(self, **options):
+        logger.info('Active advance filter + country mapping operations started.')
+
+        country_id = options.get('country_id', None)
+        filter_id = options.get('filter_id', None)
+        ids_to_keep = []
+
+        all_published_filters = accounts_models.AdvanceFilter.objects.all()
+        if filter_id:
+            all_published_filters = all_published_filters.filter(id=filter_id)
+
+        if all_published_filters.count() > 0:
+            logger.info('Relationship creation - start')
+            for filter_instance in all_published_filters:
+                parameter_details = filter_instance.column_configuration
+                parameter_field = parameter_details.name
+                parameter_table = parameter_details.table_alias
+                param_options = parameter_details.options
+
+                # Determine if this filter is for legacy schools or new entities
+                entity_type = parameter_details.entity_type
+                use_legacy_schools = entity_type is None or (entity_type and entity_type.is_legacy)
+
+                # Get all country IDs based on the model type
+                if country_id:
+                    all_country_ids = [country_id, ]
+                else:
+                    if use_legacy_schools:
+                        all_country_ids = list(School.objects.all().order_by('country_id').values_list(
+                            'country_id', flat=True).distinct('country_id'))
+                    else:
+                        all_country_ids = list(Entity.objects.filter(
+                            entity_type=entity_type
+                        ).order_by('country_id').values_list('country_id', flat=True).distinct('country_id'))
+
+                if len(all_country_ids) == 0:
+                    logger.warning('No countries found for filter {0}'.format(filter_instance.id))
+                    continue
+
+                last_weekly_status_field = 'last_weekly_status__{}'.format(parameter_field)
+
+                if isinstance(param_options, dict) and 'active_countries_filter' in param_options:
+                    active_countries_sql_filter = param_options['active_countries_filter']
+
+                    if active_countries_sql_filter:
+                        if use_legacy_schools:
+                            # Legacy school query
+                            country_qs = School.objects.all()
+                            if parameter_table == 'school_static':
+                                country_qs = country_qs.select_related('last_weekly_status').annotate(**{
+                                    parameter_table + '_' + parameter_field: F(last_weekly_status_field)
+                                })
+                        else:
+                            # Entity query
+                            country_qs = Entity.objects.filter(entity_type=entity_type)
+                            if parameter_table == 'entity_static':
+                                country_qs = country_qs.select_related('last_weekly_status').annotate(**{
+                                    parameter_table + '_' + parameter_field: F(last_weekly_status_field)
+                                })
+                            elif parameter_table not in ['entities', 'entity_static']:
+                                # Handle entity-specific detail tables (e.g., health, library)
+                                if entity_type and entity_type.detail_related_name:
+                                    # Get the actual database table name for the detail model
+                                    from django.apps import apps
+                                    app_label, model_name = entity_type.detail_model.split('.')
+                                    try:
+                                        detail_model_class = apps.get_model(app_label, model_name)
+                                        detail_table_name = detail_model_class._meta.db_table
+                                    except LookupError:
+                                        detail_table_name = f"{app_label}_{model_name.lower()}"
+
+                                    # Update the SQL filter to use the correct table name
+                                    # Replace bare field references with qualified table.field references
+                                    active_countries_sql_filter = active_countries_sql_filter.replace(
+                                        parameter_field, f'"{detail_table_name}"."{parameter_field}"'
+                                    )
+
+                                    # Add explicit JOIN condition
+                                    join_where = f'"entities_entity"."id" = "{detail_table_name}"."entity_id"'
+                                    active_countries_sql_filter = f'{join_where} AND ({active_countries_sql_filter})'
+
+                        all_country_ids_has_filter_data = list(country_qs.extra(
+                            tables=[detail_table_name] if parameter_table not in ['entities', 'entity_static'] and entity_type and entity_type.detail_related_name else [],
+                            where=[active_countries_sql_filter],
+                        ).order_by('country_id').values_list('country_id', flat=True).distinct('country_id'))
+                    else:
+                        all_country_ids_has_filter_data = all_country_ids
+
+                    for country_id_has_filter_data in all_country_ids_has_filter_data:
+                        relationship_instance, created = (
+                            accounts_models.AdvanceFilterCountryRelationship.objects.update_or_create(
+                                advance_filter=filter_instance,
+                                country_id=country_id_has_filter_data,
+                            )
+                        )
+                        ids_to_keep.append(relationship_instance.id)
+                        if created:
+                            logger.info('New AdvanceFilter + country relationship created: {0}'.format(
+                                relationship_instance.__dict__))
+                        else:
+                            logger.info(
+                                'Existing AdvanceFilter + country relationship updated: {0}'.format(
+                                    relationship_instance.__dict__))
+
+        if options.get('reset_mapping', False):
+            logger.info('Delete records which are not active now - start')
+            delete_relationships(country_id, filter_id, ids_to_keep)
+            logger.info('Delete records which are not active now - end')
+
+        logger.info('Active advance filter for country mapping operations ended.')
