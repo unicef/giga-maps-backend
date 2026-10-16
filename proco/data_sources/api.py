@@ -314,6 +314,19 @@ class SchoolMasterDataPublishByCountryViewSet(BaseModelViewSet):
         core_permissions.CanPublishSchoolMasterData,
     )
 
+    # Optional ?status__in= and ?search= params, with the same semantics as the SchoolMasterDataViewSet list,
+    # so that "Publish all" only publishes the rows the publisher sees with the filters applied
+    filter_backends = (
+        DjangoFilterBackend,
+        SearchFilter,
+    )
+
+    filterset_fields = {
+        'status': ['in'],
+    }
+
+    search_fields = ('school_name', 'school_id_giga', 'school_id_govt')
+
     def get_queryset(self, ids=None):
         """
         Return active records
@@ -357,7 +370,8 @@ class SchoolMasterDataPublishByCountryViewSet(BaseModelViewSet):
             except Exception as ex:
                 return Response(ex, status=status.HTTP_400_BAD_REQUEST)
 
-            instances = self.get_queryset(ids=id_list)
+            # Narrow the publishable rows of the countries by the optional status/search query params
+            instances = self.filter_queryset(self.get_queryset(ids=id_list))
 
             published_instances = instances.exclude(status=SchoolMasterData.ROW_STATUS_DELETED)
             if published_instances.exists():

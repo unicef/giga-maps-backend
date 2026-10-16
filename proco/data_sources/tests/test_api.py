@@ -303,6 +303,123 @@ class SchoolMasterApiTestCase(TestAPIViewSetMixin, TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
+    def _setup_country_publish_rows(self):
+        # One row per publishable status plus one UPDATED_IN_DRAFT row, which country publish must never touch.
+        # Names and ids are fixed so that each search term matches a known subset of rows.
+        country = CountryFactory()
+        rows_data = (
+            ('draft_primaria', SchoolMasterData.ROW_STATUS_DRAFT, 'Escola Primaria A', 'WRONGGOVT-A'),
+            ('draft_secundaria', SchoolMasterData.ROW_STATUS_DRAFT, 'Escola Secundaria B', 'GOVT-B'),
+            ('locked_primaria', SchoolMasterData.ROW_STATUS_DRAFT_LOCKED, 'Escola Primaria C', 'WRONGGOVT-C'),
+            ('updated_locked_secundaria', SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT_LOCKED,
+             'Escola Secundaria D', 'GOVT-D'),
+            ('deleted_primaria', SchoolMasterData.ROW_STATUS_DELETED, 'Escola Primaria E', 'WRONGGOVT-E'),
+            ('updated_in_draft_primaria', SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT,
+             'Escola Primaria F', 'WRONGGOVT-F'),
+        )
+        rows = {}
+        for key, row_status, school_name, school_id_govt in rows_data:
+            rows[key] = SchoolMasterDataFactory(
+                country=country,
+                status=row_status,
+                school_name=school_name,
+                school_id_govt=school_id_govt,
+                school_id_giga='giga-' + key,
+            )
+        return country, rows
+
+    def _publish_by_country(self, country, query_params):
+        url, view = sources_url((), query_params, view_name='publish-school-master-data-rows-for-country')
+        return self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data=[{
+                'country_id': country.id,
+            }],
+            view=view,
+        )
+
+    def _get_row_statuses(self, rows):
+        return {key: SchoolMasterData.objects.get(id=row.id).status for key, row in rows.items()}
+
+    def test_publish_by_country_with_status_filter(self):
+        country, rows = self._setup_country_publish_rows()
+
+        response = self._publish_by_country(country, {
+            'status__in': ','.join([
+                SchoolMasterData.ROW_STATUS_DRAFT_LOCKED,
+                SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT_LOCKED,
+            ]),
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(self._get_row_statuses(rows), {
+            'draft_primaria': SchoolMasterData.ROW_STATUS_DRAFT,
+            'draft_secundaria': SchoolMasterData.ROW_STATUS_DRAFT,
+            'locked_primaria': SchoolMasterData.ROW_STATUS_PUBLISHED,
+            'updated_locked_secundaria': SchoolMasterData.ROW_STATUS_PUBLISHED,
+            'deleted_primaria': SchoolMasterData.ROW_STATUS_DELETED,
+            'updated_in_draft_primaria': SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT,
+        })
+
+    def test_publish_by_country_with_search(self):
+        country, rows = self._setup_country_publish_rows()
+
+        response = self._publish_by_country(country, {'search': 'WRONGGOVT'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(self._get_row_statuses(rows), {
+            'draft_primaria': SchoolMasterData.ROW_STATUS_PUBLISHED,
+            'draft_secundaria': SchoolMasterData.ROW_STATUS_DRAFT,
+            'locked_primaria': SchoolMasterData.ROW_STATUS_PUBLISHED,
+            'updated_locked_secundaria': SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT_LOCKED,
+            'deleted_primaria': SchoolMasterData.ROW_STATUS_DELETED_PUBLISHED,
+            'updated_in_draft_primaria': SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT,
+        })
+
+    def test_publish_by_country_without_filters_publishes_all_pending_rows(self):
+        country, rows = self._setup_country_publish_rows()
+
+        response = self._publish_by_country(country, {})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(self._get_row_statuses(rows), {
+            'draft_primaria': SchoolMasterData.ROW_STATUS_PUBLISHED,
+            'draft_secundaria': SchoolMasterData.ROW_STATUS_PUBLISHED,
+            'locked_primaria': SchoolMasterData.ROW_STATUS_PUBLISHED,
+            'updated_locked_secundaria': SchoolMasterData.ROW_STATUS_PUBLISHED,
+            'deleted_primaria': SchoolMasterData.ROW_STATUS_DELETED_PUBLISHED,
+            'updated_in_draft_primaria': SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT,
+        })
+
+    def test_publish_by_country_with_non_publishable_status(self):
+        country, rows = self._setup_country_publish_rows()
+        statuses_before = self._get_row_statuses(rows)
+
+        response = self._publish_by_country(country, {'status__in': SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(self._get_row_statuses(rows), statuses_before)
+
+    def test_publish_by_country_with_status_and_search(self):
+        country, rows = self._setup_country_publish_rows()
+
+        response = self._publish_by_country(country, {
+            'status__in': ','.join([SchoolMasterData.ROW_STATUS_DRAFT, SchoolMasterData.ROW_STATUS_DELETED]),
+            'search': 'Primaria',
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(self._get_row_statuses(rows), {
+            'draft_primaria': SchoolMasterData.ROW_STATUS_PUBLISHED,
+            'draft_secundaria': SchoolMasterData.ROW_STATUS_DRAFT,
+            'locked_primaria': SchoolMasterData.ROW_STATUS_DRAFT_LOCKED,
+            'updated_locked_secundaria': SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT_LOCKED,
+            'deleted_primaria': SchoolMasterData.ROW_STATUS_DELETED_PUBLISHED,
+            'updated_in_draft_primaria': SchoolMasterData.ROW_STATUS_UPDATED_IN_DRAFT,
+        })
+
     def test_publish_by_invalid_country_id(self):
         url, view = sources_url((), {}, view_name='publish-school-master-data-rows-for-country')
 
