@@ -55,5 +55,13 @@ class AppConfig(object):
     def true_choices(self):
         return ['true', 'yes', '1']
 
+    @property
+    def cache_refresh_queued_timeout(self):
+        """
+        Seconds a cached URL stays marked as 'refresh queued' when the refresh task never starts
+        (lost task, purged queue). After it, a stale read can queue the refresh again.
+        """
+        return 10 * 60
+
 
 app_config = AppConfig()
