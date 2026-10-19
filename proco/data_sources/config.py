@@ -27,5 +27,18 @@ class AppConfig(object):
         {dashboard_url}
         """
 
+    @property
+    def health_master_update_email_subject_format(self):
+        """format for the email subject when an API Key is generated for a Public API."""
+        return '%s - Health Master Data Source has updated records'
+
+
+    @property
+    def health_master_update_email_message_format(self):
+        """format for the email message when an API Key is generated for a Public API."""
+        return """We would like to inform you that the Health Master Data Source has been updated with new records. Kindly review the details on your dashboard.
+
+        {dashboard_url}{delete_msg}{error_msg}"""
+
 
 app_config = AppConfig()

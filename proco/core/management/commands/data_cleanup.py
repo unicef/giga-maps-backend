@@ -532,6 +532,12 @@ class Command(BaseCommand):
         )
 
         parser.add_argument(
+            '--cleanup_health_entity_master_rows', action='store_true', dest='cleanup_health_entity_master_rows',
+            default=False,
+            help='If provided, run the Health Entity Master data cleanup task manually in real time.'
+        )
+
+        parser.add_argument(
             '--handle_published_school_master_data_row', action='store_true',
             dest='handle_published_school_master_data_row', default=False,
             help='If provided, run the School Master data publish task manually in real time.'
@@ -649,12 +655,6 @@ class Command(BaseCommand):
             help='If provided, recalculate the School table "education_level_govt_lower" field.'
         )
 
-        parser.add_argument(
-            '--data_loss_recovery_for_qos_for_yesterday', action='store_true',
-            dest='data_loss_recovery_for_qos_for_yesterday', default=False,
-            help='If provided, run the task manually to sync and aggregate previous day data.'
-        )
-
     def handle(self, **options):
         logger.info('Executing data cleanup utility.\n')
         logger.info('Options: {}\n\n'.format(options))
@@ -705,6 +705,11 @@ class Command(BaseCommand):
             sources_tasks.cleanup_school_master_rows()
             logger.info('Completed school master data source duplicate record cleanup.\n\n')
 
+        if options.get('cleanup_health_entity_master_rows'):
+            logger.info('Performing health entity master data source duplicate record cleanup.')
+            sources_tasks.cleanup_health_entity_master_rows()
+            logger.info('Completed health entity master data source duplicate record cleanup.\n\n')
+
         if options.get('clean_duplicate_schools'):
             logger.info('Performing school duplicate record cleanup.')
             delete_duplicate_school_records()
@@ -719,24 +724,24 @@ class Command(BaseCommand):
             logger.info('Performing school master data source publish task handling.')
 
             if country_id:
-                sources_tasks.handle_published_school_master_data_row(country_ids=[country_id, ])
+                sources_tasks.handle_published_school_master_data_row(country_ids=[country_id, ], publish_source='cli')
             else:
                 new_published_records = SchoolMasterData.objects.filter(
                     status=SchoolMasterData.ROW_STATUS_PUBLISHED, is_read=False,
                 ).order_by('-pk')[:1000]
 
                 for row in new_published_records:
-                    sources_tasks.handle_published_school_master_data_row(published_row=row)
+                    sources_tasks.handle_published_school_master_data_row(published_row=row, publish_source='cli')
             logger.info('Completed school master data source publish task handling.\n\n')
 
         if options.get('handle_published_school_master_data_row_with_scheduler'):
             if country_id:
-                sources_tasks.handle_published_school_master_data_row.delay(country_ids=[country_id, ])
+                sources_tasks.handle_published_school_master_data_row.delay(country_ids=[country_id, ], publish_source='cli')
             else:
-                sources_tasks.handle_published_school_master_data_row.delay()
+                sources_tasks.handle_published_school_master_data_row.delay(publish_source='cli')
 
         if options.get('handle_deleted_school_master_data_row'):
-            sources_tasks.handle_deleted_school_master_data_row()
+            sources_tasks.handle_deleted_school_master_data_row(publish_source='cli')
 
         if options.get('populate_school_new_fields_with_scheduler'):
             populate_school_new_fields_task.delay(start_school_id, end_school_id, country_id)
@@ -790,9 +795,5 @@ class Command(BaseCommand):
         if options.get('populate_school_education_level_govt_lower'):
             logger.info('Re-calculating the School table lower case field: education_level_govt_lower')
             populate_school_education_level_govt_lower(country_id, start_school_id, end_school_id)
-
-        if options.get('data_loss_recovery_for_qos_for_yesterday'):
-            logger.info('Running "update_qos_data(today=False)" task.')
-            sources_tasks.update_qos_data(today=False)
 
         logger.info('Completed data cleanup utility successfully.\n')

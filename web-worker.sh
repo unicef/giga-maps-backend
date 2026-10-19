@@ -2,18 +2,21 @@
 set -ex
 
 # export environment variables to make them available in ssh session
+# Tracing is off here so secret values are not written to the console logs.
+{ set +x; } 2>/dev/null
 for var in $(compgen -e); do
     echo "export $var=${!var}" >> /etc/profile
 done
 
 eval $(printenv | awk -F= '{print "export " "\""$1"\"""=""\""$2"\"" }' >> /etc/profile)
+set -x
 
 echo "Starting SSH ..."
 service ssh start
 
 pipenv run python manage.py migrate
 pipenv run python manage.py collectstatic --noinput
-pipenv run gunicorn config.wsgi:application -b 0.0.0.0:8000 -w 8 --timeout=300
+pipenv run python -m config.prometheus_multiproc -- gunicorn config.wsgi:application -c /code/config/gunicorn.py -b 0.0.0.0:8000 -w 8 --timeout=300
 
 
 # pipenv run python manage.py load_api_data --api-file /code/proco/core/resources/all_apis.tsv

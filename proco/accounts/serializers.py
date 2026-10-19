@@ -9,10 +9,8 @@ from django.contrib.admin.models import LogEntry
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.validators import validate_email
-from django.db import connection
-from django.db import transaction
-from django.db.models import F, Min, Max
-from django.db.models import Q
+from django.db import transaction, connection
+from django.db.models import Q, Min, F, Max
 from django.db.models.functions.text import Lower
 from rest_flex_fields.serializers import FlexFieldsModelSerializer
 from rest_framework import serializers
@@ -21,9 +19,14 @@ from proco.accounts import exceptions as accounts_exceptions
 from proco.accounts import models as accounts_models
 from proco.accounts import utils as account_utilities
 from proco.accounts.config import app_config as account_config
+from proco.accounts.v2.entity_filter_serializers import (
+    PublishedEntityAdvanceFiltersListSerializer,
+    EntityColumnConfigurationChoicesSerializer,
+)
+from proco.connection_statistics import tasks as statistics_tasks
 from proco.connection_statistics.models import SchoolWeeklyStatus
-from proco.core import db_utils as db_utilities
 from proco.core import utils as core_utilities
+from proco.core import db_utils as db_utilities
 from proco.custom_auth import models as auth_models
 from proco.custom_auth.serializers import ExpandUserSerializer
 from proco.custom_auth.utils import get_user_emails_for_permissions
@@ -1338,7 +1341,7 @@ class DataLayersListSerializer(FlexFieldsModelSerializer):
 
     data_sources_list = serializers.JSONField()
     data_source_column = serializers.JSONField()
-    data_source_column_function = serializers.JSONField()
+    data_source_column_function = serializers.JSONField(required=False, allow_null=True)
 
     benchmark_metadata = serializers.SerializerMethodField()
 
@@ -1379,15 +1382,24 @@ class DataLayersListSerializer(FlexFieldsModelSerializer):
         }
 
     def get_benchmark_metadata(self, instance):
-        parameter_col = instance.data_sources.all().first().data_source_column
+        first_data_source = instance.data_sources.all().first()
+        if not first_data_source or not first_data_source.data_source_column:
+            return {
+                'parameter_column_unit': '',
+                'display_unit': '',
+                'benchmark_name': instance.global_benchmark.get('benchmark_name', 'Global') if instance.global_benchmark else 'Global',
+                'benchmark_type': instance.global_benchmark.get('benchmark_type', 'global') if instance.global_benchmark else 'global',
+            }
+
+        parameter_col = first_data_source.data_source_column
         parameter_column_unit = str(parameter_col.get('unit', '')).lower()
         display_unit = parameter_col.get('display_unit', '')
 
         benchmark_metadata = {
             'parameter_column_unit': parameter_column_unit,
             'display_unit': display_unit,
-            'benchmark_name': instance.global_benchmark.get('benchmark_name', 'Global'),
-            'benchmark_type': instance.global_benchmark.get('benchmark_type', 'global'),
+            'benchmark_name': instance.global_benchmark.get('benchmark_name', 'Global') if instance.global_benchmark else 'Global',
+            'benchmark_type': instance.global_benchmark.get('benchmark_type', 'global') if instance.global_benchmark else 'global',
         }
 
         if instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
@@ -1448,7 +1460,7 @@ class DataLayersListSerializer(FlexFieldsModelSerializer):
 
 class DataLayerDataSourceRelationshipSerializer(serializers.ModelSerializer):
     data_source_column = serializers.JSONField()
-    data_source_column_function = serializers.JSONField(required=False)
+    data_source_column_function = serializers.JSONField(required=False, allow_null=True)
 
     class Meta:
         model = accounts_models.DataLayerDataSourceRelationship
@@ -1613,7 +1625,7 @@ class CreateDataLayersSerializer(BaseDataLayerCRUDSerializer):
 
     data_sources_list = serializers.JSONField()
     data_source_column = serializers.JSONField()
-    data_source_column_function = serializers.JSONField()
+    data_source_column_function = serializers.JSONField(required=False, allow_null=True)
 
     class Meta:
         model = accounts_models.DataLayer
@@ -1715,7 +1727,7 @@ class CreateDataLayersSerializer(BaseDataLayerCRUDSerializer):
 class UpdateDataLayerSerializer(BaseDataLayerCRUDSerializer):
     data_sources_list = serializers.JSONField()
     data_source_column = serializers.JSONField()
-    data_source_column_function = serializers.JSONField(required=False)
+    data_source_column_function = serializers.JSONField(required=False, allow_null=True)
 
     applicable_countries = serializers.JSONField(required=False)
     global_benchmark = serializers.JSONField(required=False)
@@ -1832,6 +1844,15 @@ class UpdateDataLayerSerializer(BaseDataLayerCRUDSerializer):
             if data_layer_instance.status == accounts_models.DataLayer.LAYER_STATUS_PUBLISHED:
                 args = ['--reset', '-layer_id={0}'.format(instance.id)]
                 call_command('populate_active_data_layer_for_countries', *args)
+                if (
+                    data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE and
+                    (data_layer_instance.entity_type is None or data_layer_instance.entity_type.is_legacy)
+                ):
+                    transaction.on_commit(
+                        lambda: statistics_tasks.backfill_school_live_weekly_metrics_for_layer.delay(
+                            data_layer_instance.id
+                        )
+                    )
 
             # Once Data Layer is created, send the status email to the PUBLISHERS
             request_user = core_utilities.get_current_user(context=self.context)
@@ -1925,6 +1946,14 @@ class PublishDataLayerSerializer(BaseDataLayerCRUDSerializer):
 
             args = ['--reset', '-layer_id={0}'.format(instance.id)]
             call_command('populate_active_data_layer_for_countries', *args)
+            if (
+                instance.status == accounts_models.DataLayer.LAYER_STATUS_PUBLISHED and
+                instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE and
+                (instance.entity_type is None or instance.entity_type.is_legacy)
+            ):
+                transaction.on_commit(
+                    lambda: statistics_tasks.backfill_school_live_weekly_metrics_for_layer.delay(instance.id)
+                )
 
         return instance
 
@@ -2119,11 +2148,13 @@ class ExpandColumnConfigurationSerializer(FlexFieldsModelSerializer):
         return options
 
 
-class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
-    options = serializers.SerializerMethodField()
+class PublishedAdvanceFiltersListSerializer(PublishedEntityAdvanceFiltersListSerializer):
+    """
+    Thin wrapper that reuses PublishedEntityAdvanceFiltersListSerializer.
+    Handles legacy (school) and all entity types (health, library, etc.) correctly.
+    """
 
-    class Meta:
-        model = accounts_models.AdvanceFilter
+    class Meta(PublishedEntityAdvanceFiltersListSerializer.Meta):
         read_only_fields = fields = (
             'id',
             'name',
@@ -2131,184 +2162,14 @@ class PublishedAdvanceFiltersListSerializer(FlexFieldsModelSerializer):
             'description',
             'column_configuration',
             'options',
-            'query_param_filter'
+            'query_param_filter',
+            'entity_type',
         )
 
         expandable_fields = {
             'column_configuration': (ExpandColumnConfigurationSerializer, {'source': 'column_configuration'}),
         }
 
-    def include_none_filter(self, parameter_table, parameter_field):
-        select_qs = School.objects.filter(country_id=self.context['country_id'])
-        none_check_sql = f'"schools_school"."{parameter_field}" IS NULL'
-        if parameter_table == 'school_static':
-            last_weekly_status_field = 'last_weekly_status__{}'.format(parameter_field)
-            select_qs = select_qs.select_related('last_weekly_status').annotate(**{
-                parameter_table + '_' + parameter_field: F(last_weekly_status_field)
-            })
-
-            none_check_sql = f'"connection_statistics_schoolweeklystatus"."{parameter_field}" IS NULL'
-        return select_qs.extra(where=[none_check_sql]).exists()
-
-    def update_range_filter_options(self, options, parameter_table, parameter_field, parameter_options):
-        last_weekly_status_field = 'last_weekly_status__{}'.format(parameter_field)
-
-        options['include_none_filter'] = self.include_none_filter(parameter_table, parameter_field)
-
-        if options.get('range_auto_compute', False):
-            select_qs = School.objects.filter(country_id=self.context['country_id'])
-            if parameter_table == 'school_static':
-                parameter_field_props = SchoolWeeklyStatus._meta.get_field(parameter_field)
-
-                select_qs = select_qs.select_related('last_weekly_status').values('country_id').annotate(
-                    min_value=Min(F(last_weekly_status_field)),
-                    max_value=Max(F(last_weekly_status_field)),
-                )
-            else:
-                parameter_field_props = School._meta.get_field(parameter_field)
-
-                select_qs = select_qs.values('country_id').annotate(
-                    min_value=Min(parameter_field),
-                    max_value=Max(parameter_field),
-                )
-
-            select_qs_result = list(
-                select_qs.values('country_id', 'min_value', 'max_value').order_by('country_id').distinct())
-            country_range_json = select_qs_result[-1] if len(select_qs_result) > 0 else None
-
-            if country_range_json and country_range_json['min_value'] is not None and country_range_json['max_value'] is not None:
-                del country_range_json['country_id']
-
-                country_range_json['min_value'] = floor(country_range_json['min_value'])
-                country_range_json['max_value'] = ceil(country_range_json['max_value'])
-
-                if 'downcast_aggr_str' in parameter_options:
-                    downcast_eval = parameter_options['downcast_aggr_str']
-                    country_range_json['min_value'] = floor(
-                        eval(downcast_eval.format(val=country_range_json['min_value'])))
-                    country_range_json['max_value'] = ceil(
-                        eval(downcast_eval.format(val=country_range_json['max_value'])))
-
-                country_range_json['min_place_holder'] = 'Min ({})'.format(country_range_json['min_value'])
-                country_range_json['max_place_holder'] = 'Max ({})'.format(country_range_json['max_value'])
-            else:
-                internal_type = parameter_field_props.get_internal_type()
-                if internal_type in connection.ops.integer_field_ranges.keys():
-                    min_value, max_value = connection.ops.integer_field_range(internal_type)
-                    country_range_json = {
-                        'min_place_holder': 'Min',
-                        'max_place_holder': 'Max',
-                        'min_value': min_value,
-                        'max_value': max_value
-                    }
-                else:
-                    country_range_json = {
-                        'min_place_holder': 'Min',
-                        'max_place_holder': 'Max',
-                    }
-
-            options['active_range'] = country_range_json
-
-    def update_boolean_filter_options(self, options, parameter_table, parameter_field):
-        join_condition = ''
-        filter_condition = ''
-
-        select_qry = """
-        SELECT DISTINCT {col} AS {col_name}
-        FROM schools_school AS schools
-        {join_condition}
-        WHERE schools.deleted IS NULL
-            AND schools.country_id = {c_id}
-            {filter_condition}
-        ORDER BY {col_name} DESC NULLS LAST
-        """
-
-        if parameter_table == 'school_static':
-            join_condition = ('INNER JOIN connection_statistics_schoolweeklystatus AS school_static '
-                              'ON schools.last_weekly_status_id = school_static.id')
-            filter_condition = 'AND school_static.deleted IS NULL'
-
-        sql_qry = select_qry.format(
-            col_name=parameter_field,
-            col=parameter_table + '.' + parameter_field,
-            c_id=self.context['country_id'],
-            join_condition=join_condition,
-            filter_condition=filter_condition)
-        choices = []
-        data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__)
-        for value in data:
-            field_value = value[parameter_field]
-
-            if core_utilities.is_blank_string(field_value):
-                choices.append({
-                    'label': 'Unknown',
-                    'value': 'none'
-                })
-            else:
-                choices.append({
-                    'label': 'Yes' if field_value else 'No',
-                    'value': 'true' if field_value else 'false',
-                })
-        options['choices'] = choices
-
-    def get_options(self, instance):
-        options = instance.options
-        if isinstance(options, dict):
-            parameter_details = instance.column_configuration
-            parameter_field = parameter_details.name
-            field_type = parameter_details.type
-            parameter_table = parameter_details.table_alias
-
-            parameter_options = parameter_details.options
-
-            if options.get('live_choices', False):
-                join_condition = ''
-                filter_condition = ''
-
-                select_qry = """
-                SELECT DISTINCT {col} AS {col_name}
-                FROM schools_school AS schools
-                {join_condition}
-                WHERE schools.deleted IS NULL
-                    AND schools.country_id = {c_id}
-                    {filter_condition}
-                ORDER BY {col_name} ASC NULLS LAST
-                """
-
-                if parameter_table == 'school_static':
-                    join_condition = ('INNER JOIN connection_statistics_schoolweeklystatus AS school_static '
-                                      'ON schools.last_weekly_status_id = school_static.id')
-                    filter_condition = 'AND school_static.deleted IS NULL'
-
-                sql_qry = select_qry.format(
-                    col_name=parameter_field,
-                    col=f"LOWER(NULLIF({parameter_table + '.' + parameter_field}, ''))" if field_type == 'str' else parameter_table + '.' + parameter_field,
-                    c_id=self.context['country_id'],
-                    join_condition=join_condition,
-                    filter_condition=filter_condition)
-                choices = []
-                data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__)
-                for value in data:
-                    field_value = value[parameter_field]
-                    if core_utilities.is_blank_string(field_value):
-                        choices.append({
-                            'label': 'Unknown',
-                            'value': 'none'
-                        })
-                    else:
-                        choices.append({
-                            'label': field_value.title()
-                            if field_type == accounts_models.ColumnConfiguration.TYPE_STR else field_value,
-                            'value': field_value
-                        })
-                options['choices'] = choices
-
-            if instance.type == accounts_models.AdvanceFilter.TYPE_RANGE:
-                self.update_range_filter_options(options, parameter_table, parameter_field, parameter_options)
-            elif instance.type == accounts_models.AdvanceFilter.TYPE_BOOLEAN:
-                self.update_boolean_filter_options(options, parameter_table, parameter_field)
-
-        return options
 
 
 class AdvanceFiltersListSerializer(FlexFieldsModelSerializer):
@@ -2521,8 +2382,11 @@ class PublishAdvanceFilterSerializer(serializers.ModelSerializer):
         return instance
 
 
-class ColumnConfigurationChoicesSerializer(FlexFieldsModelSerializer):
-    values = serializers.SerializerMethodField()
+class ColumnConfigurationChoicesSerializer(EntityColumnConfigurationChoicesSerializer):
+    """
+    Thin wrapper that reuses EntityColumnConfigurationChoicesSerializer.
+    Handles legacy (school) and all entity types (health, library, etc.) correctly.
+    """
 
     class Meta:
         model = accounts_models.ColumnConfiguration
@@ -2565,7 +2429,7 @@ class ColumnConfigurationChoicesSerializer(FlexFieldsModelSerializer):
             join_condition=join_condition,
             filter_condition=filter_condition)
 
-        data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__)
+        data = db_utilities.sql_to_response(sql_qry, label=self.__class__.__name__) or []
         for value in data:
             field_value = value[parameter_field]
             if core_utilities.is_blank_string(field_value):

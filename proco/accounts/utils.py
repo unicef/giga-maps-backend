@@ -14,6 +14,73 @@ from proco.core import utils as core_utilities
 logger = logging.getLogger('gigamaps.' + __name__)
 
 
+def _encode_varint(value):
+    encoded = []
+    while value > 0x7F:
+        encoded.append((value & 0x7F) | 0x80)
+        value >>= 7
+    encoded.append(value)
+    return bytes(encoded)
+
+
+def get_empty_mvt_layer_sql(layer_name, extent=4096):
+    layer_name = str(layer_name)
+    encoded_name = layer_name.encode('utf-8')
+    layer = b''.join([
+        b'\x78',
+        _encode_varint(2),
+        b'\x0a',
+        _encode_varint(len(encoded_name)),
+        encoded_name,
+        b'\x28',
+        _encode_varint(extent),
+    ])
+    tile = b'\x1a' + _encode_varint(len(layer)) + layer
+    return "decode('{0}', 'hex')".format(tile.hex())
+
+
+def rewrite_weekly_status_sql(sql_statement, entity_name='school'):
+    """
+    Dynamically rewrite daily status table aliases (sds/eds) to weekly status table
+    aliases (sws/ews) for all columns that belong to the weekly status model.
+    This dynamically inspects Django model metadata so any new columns added in the future
+    are automatically supported without hardcoding.
+    """
+    from proco.connection_statistics.models import SchoolWeeklyStatus, SchoolDailyStatus
+    try:
+        from proco.connection_statistics.models import EntityWeeklyStatus, EntityDailyStatus
+    except ImportError:
+        EntityWeeklyStatus = None
+        EntityDailyStatus = None
+
+    if entity_name == 'school' or EntityWeeklyStatus is None:
+        weekly_model = SchoolWeeklyStatus
+        daily_model = SchoolDailyStatus
+        target_alias = 'sws.'
+    else:
+        weekly_model = EntityWeeklyStatus
+        daily_model = EntityDailyStatus
+        target_alias = 'ews.'
+
+    weekly_cols = {f.name for f in weekly_model._meta.get_fields() if hasattr(f, 'column')}
+    daily_cols = {f.name for f in daily_model._meta.get_fields() if hasattr(f, 'column')}
+    sws_only_fields = weekly_cols - daily_cols
+    sws_only_fields.update({'latency', 'uptime', 'download_speed_benchmark'})
+
+    if sws_only_fields:
+        sorted_fields = sorted(sws_only_fields, key=len, reverse=True)
+        pattern = r'\b(eds|sds)\."?(?:' + '|'.join(sorted_fields) + r')\b"?'
+
+        def repl(m):
+            full = m.group(0)
+            col = full.split('.')[-1].strip('"')
+            return f'{target_alias}"{col}"'
+
+        sql_statement = re.sub(pattern, repl, sql_statement)
+
+    return sql_statement
+
+
 def send_standard_email(user, data):
     """
     A standard email is sent to user by Application, containing message, Signature by using MailJet creds.
@@ -146,7 +213,10 @@ class BaseTileGenerator:
                     response = Response({"error": f"sql query failed: {sql}"}, status=404)
                 else:
                     response = cur.fetchone()[0]
-            except django_db_utilities.OperationalError:
+            except django_db_utilities.DatabaseError as ex:
+                logger.error(f'Database Error during map tile generation: {ex}')
+                response = Response(status=204)
+            except Exception:
                 response = Response({"error": "An error occurred while executing requested query"}, status=500)
         return response
 

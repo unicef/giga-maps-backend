@@ -1,7 +1,6 @@
 import logging
-import sys
 from datetime import timedelta
-
+import sys
 from django.core.management.base import BaseCommand
 
 from proco.core.utils import get_current_datetime_object
@@ -47,6 +46,7 @@ class Command(BaseCommand):
             sys.exit(0)
 
         till_date = date_utilities.to_date(options.get('till_date'))
+
         # Use either start_date and end_date or till_date
         # Only process dates that have non-deleted records
         if start_date and end_date:

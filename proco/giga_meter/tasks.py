@@ -8,6 +8,7 @@ from typing import List, Dict, Iterator, Optional
 import requests
 from celery import chain
 from celery import current_task
+from datetime import datetime, timedelta
 from django.conf import settings
 from django.contrib.gis.geos import Point
 from django.core.management import call_command
@@ -24,7 +25,9 @@ from proco.core import utils as core_utilities
 from proco.core.config import app_config as core_configs
 from proco.data_sources import utils as data_sources_utilities
 from proco.data_sources.utils import get_request_headers
+from proco.giga_meter import facility_types as giga_meter_facility_types
 from proco.giga_meter import models as giga_meter_models
+from proco.giga_meter import pipeline as giga_meter_pipeline
 from proco.giga_meter import utils as giga_meter_utilities
 from proco.schools.models import School
 from proco.taskapp import app
@@ -61,8 +64,16 @@ def giga_meter_load_data_from_school_master_apis(country_iso3_format=None):
     open(profile_file, 'w').write(json.dumps(profile_json))
 
     # Create a SharingClient.
-    client = data_sources_utilities.ProcoSharingClient(profile_file)
-    school_master_share = client.get_share(share_name)
+    try:
+        client = data_sources_utilities.ProcoSharingClient(profile_file)
+        school_master_share = client.get_share(share_name)
+    except HTTPError as ex:
+        logger.warning('Failed to get School Master share for Giga Meter [HTTP {0}]: {1}'.format(
+            getattr(ex.response, 'status_code', 'error'), ex))
+        school_master_share = None
+    except Exception as ex:
+        logger.warning('Failed to get School Master share for Giga Meter: {0}'.format(ex))
+        school_master_share = None
 
     if school_master_share:
         school_master_schema = client.get_schema(school_master_share, schema_name)
@@ -90,15 +101,15 @@ def giga_meter_load_data_from_school_master_apis(country_iso3_format=None):
                     giga_meter_utilities.sync_school_master_data(
                         profile_file, share_name, schema_name, schema_table.name, school_master_fields)
                 except (HTTPError, DataError, ValueError) as ex:
-                    logger.error('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
+                    logger.warning('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
                 except Exception as ex:
-                    logger.error('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
+                    logger.warning('Exception caught for "{0}": {1}'.format(schema_table.name, str(ex)))
 
         else:
-            logger.error('School Master schema ({0}) does not exist to use for share ({1}).'.format(schema_name,
+            logger.warning('School Master schema ({0}) does not exist to use for share ({1}).'.format(schema_name,
                                                                                                     share_name))
     else:
-        logger.error('School Master share ({0}) does not exist to use.'.format(share_name))
+        logger.warning('School Master share ({0}) does not exist to use.'.format(share_name))
 
     try:
         os.remove(profile_file)
@@ -201,25 +212,25 @@ def giga_meter_handle_published_school_master_data_row(*args, country_ids=None, 
                             'electricity_type': row.electricity_type,
                             'num_adm_personnel': row.num_adm_personnel,
                             'num_students': row.num_students,
-                            'num_teachers': row.num_teachers,
-                            'num_classrooms': row.num_classrooms,
-                            'num_latrines': row.num_latrines,
-                            'water_availability': None
+                            'num_teachers' : row.num_teachers,
+                            'num_classrooms' : row.num_classrooms,
+                            'num_latrines' : row.num_latrines,
+                            'water_availability' : None
                             if core_utilities.is_blank_string(row.water_availability)
                             else str(row.water_availability).lower() in core_configs.true_choices,
-                            'electricity_availability': None
+                            'electricity_availability' : None
                             if core_utilities.is_blank_string(row.electricity_availability)
                             else str(row.electricity_availability).lower() in core_configs.true_choices,
-                            'computer_lab': None
+                            'computer_lab' : None
                             if core_utilities.is_blank_string(row.computer_lab)
                             else str(row.computer_lab).lower() in core_configs.true_choices,
-                            'num_computers': row.num_computers,
+                            'num_computers' : row.num_computers,
                             'connectivity_govt': None
                             if (core_utilities.is_blank_string(row.connectivity_govt) or
-                                str(row.connectivity_govt).lower() == 'unknown')
+                               str(row.connectivity_govt).lower() == 'unknown')
                             else str(row.connectivity_govt).lower() in core_configs.true_choices,
                             'connectivity_type_govt': row.connectivity_type_govt,
-                            'connectivity_type': row.connectivity_type,
+                            'connectivity_type':  row.connectivity_type,
                             'connectivity_type_root': row.connectivity_type_root,
                             'cellular_coverage_availability': None
                             if core_utilities.is_blank_string(row.cellular_coverage_availability)
@@ -278,7 +289,7 @@ def giga_meter_handle_published_school_master_data_row(*args, country_ids=None, 
 
                     if school_static_created:
                         school.last_school_static = school_static
-                        school.save(update_fields=['last_school_static', ])
+                        school.save(update_fields=['last_school_static',])
 
                     row.delete()
 
@@ -289,7 +300,7 @@ def giga_meter_handle_published_school_master_data_row(*args, country_ids=None, 
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=10 * 55 * 60, time_limit=10 * 55 * 60)
@@ -340,7 +351,7 @@ def giga_meter_handle_deleted_school_master_data_row(*args, country_ids=None, fo
 
                     if school:
                         school.deleted = current_date
-                        school.save(update_fields=['deleted', ])
+                        school.save(update_fields=['deleted',])
 
                     row.delete()
                 except Exception as ex:
@@ -351,7 +362,7 @@ def giga_meter_handle_deleted_school_master_data_row(*args, country_ids=None, fo
         task_instance.info('Remaining records: {}'.format(new_deleted_records.count()))
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=6 * 60 * 60, time_limit=6 * 60 * 60)
@@ -371,8 +382,8 @@ def giga_meter_update_static_data(*args, country_iso3_format=None, force_tasks=F
     else:
         task_key = f'giga_meter_update_static_data_status_{timestamp_str}'
         task_description = 'Giga Meter - Sync Static Data from School Master sources'
-
     task_id = current_task.request.id or str(uuid.uuid4())
+
     task_instance = background_task_utilities.task_on_start(task_id, task_key, task_description, check_previous=True)
 
     if task_instance:
@@ -399,7 +410,7 @@ def giga_meter_update_static_data(*args, country_iso3_format=None, force_tasks=F
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 @app.task(soft_time_limit=10 * 60 * 60, time_limit=10 * 60 * 60)
@@ -422,10 +433,83 @@ def handle_giga_meter_school_master_data_sync(*args):
 
             background_task_utilities.task_on_complete(task_instance)
         else:
-            logger.error('Found Job with "{0}" name so skipping current iteration'.format(task_key))
+            logger.info('Found Job with "{0}" name so skipping current iteration'.format(task_key))
     else:
         logger.warning('Giga Meter - School Master data synch disabled from config. '
-                       'To enable it, please update "GIGA_METER_ENABLE_AUTO_SYNC" configuration.')
+                     'To enable it, please update "GIGA_METER_ENABLE_AUTO_SYNC" configuration.')
+
+
+@app.task(soft_time_limit=6 * 60 * 60, time_limit=6 * 60 * 60)
+def giga_meter_update_health_static_data(*args, country_iso3_format=None, force_tasks=False):
+    """
+    Background task to Get Static data to Giga Meter DB for health facilities.
+
+    Execution Frequency: Once in a day
+    """
+    giga_meter_pipeline.update_static_data(
+        giga_meter_facility_types.HEALTH_CONFIG,
+        country_iso3_format=country_iso3_format,
+        force_tasks=force_tasks,
+    )
+
+
+@app.task(soft_time_limit=10 * 55 * 60, time_limit=10 * 55 * 60)
+def giga_meter_handle_published_health_master_data_row(*args, country_ids=None, force_tasks=False):
+    """
+    Background task to handle all the published rows of health master data source for Giga Meter Sync
+
+    Execution Frequency: Every 4 hour
+    """
+    giga_meter_pipeline.handle_published_master_data_row(
+        giga_meter_facility_types.HEALTH_CONFIG,
+        country_ids=country_ids,
+        force_tasks=force_tasks,
+    )
+
+
+@app.task(soft_time_limit=10 * 55 * 60, time_limit=10 * 55 * 60)
+def giga_meter_handle_deleted_health_master_data_row(*args, country_ids=None, force_tasks=False):
+    """
+    Background task to handle all the deleted rows of health master data source for Giga Meter DB
+
+    Execution Frequency: Every day
+    """
+    giga_meter_pipeline.handle_deleted_master_data_row(
+        giga_meter_facility_types.HEALTH_CONFIG,
+        country_ids=country_ids,
+        force_tasks=force_tasks,
+    )
+
+
+@app.task(soft_time_limit=10 * 60 * 60, time_limit=10 * 60 * 60)
+def handle_giga_meter_health_master_data_sync(*args):
+    if getattr(settings, 'GIGA_METER_ENABLE_HEALTH_AUTO_SYNC', False):
+        timestamp_str = format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H')
+        task_key = 'handle_giga_meter_health_master_data_sync_status_{current_time}'.format(
+            current_time=timestamp_str,
+        )
+        task_id = current_task.request.id or str(uuid.uuid4())
+        task_instance = background_task_utilities.task_on_start(
+            task_id, task_key, 'Giga Meter - Auto task to handle GigaMeter - Health Master data sync',
+            check_previous=True,
+        )
+
+        if task_instance:
+            logger.debug('Not found running job for health data sync handler: {}'.format(task_key))
+            chain(
+                giga_meter_update_health_static_data.s(),
+                giga_meter_handle_published_health_master_data_row.s(),
+                giga_meter_handle_deleted_health_master_data_row.s(),
+            ).delay()
+
+            background_task_utilities.task_on_complete(task_instance)
+        else:
+            logger.error('Found Job with "{0}" name so skipping current iteration'.format(task_key))
+    else:
+        logger.warning(
+            'Giga Meter - Health Master data sync disabled from config. '
+            'To enable it, please update "GIGA_METER_ENABLE_HEALTH_AUTO_SYNC" configuration.',
+        )
 
 
 @app.task(soft_time_limit=4 * 60 * 60, time_limit=4 * 60 * 60)
@@ -450,7 +534,7 @@ def scheduler_for_populate_school_geopoint_field(country_iso3_format):
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
 class AggregationOngoingException(Exception):
@@ -892,7 +976,7 @@ def scheduler_for_backup_giga_meter_connectivity_ping_data(*args, start_date=Non
         till_date = format_date(core_utilities.get_current_datetime_object(timestamp=n_days_old))
     else:
         till_date = end_date
-    task_key = f'scheduler_for_backup_giga_meter_connectivity_ping_data_for_country_at_{till_date}'
+    task_key = f'scheduler_for_backup_giga_meter_connectivity_ping_data_for_country_on_and_before_{till_date}'
     task_id = current_task.request.id or str(uuid.uuid4())
     task_instance = background_task_utilities.task_on_start(
         task_id,
@@ -900,12 +984,11 @@ def scheduler_for_backup_giga_meter_connectivity_ping_data(*args, start_date=Non
         f'Backup GigaMeter Connectivity Ping data before {till_date}')
 
     if task_instance:
-        task_instance.info(
-            f'Not found running job for "Backup GigaMeter Connectivity Ping data" utility handler: {task_key}')
+        task_instance.info(f'Not found running job for "Backup GigaMeter Connectivity Ping data" utility handler: {task_key}')
         cmd_args = [f'-start_date={start_date}', f'-end_date={end_date}', f'-till_date={till_date}']
         call_command('backup_giga_meter_connectivity_ping_data', *cmd_args)
         task_instance.info('Completed "Backup GigaMeter Connectivity Ping data" utility handler.')
 
         background_task_utilities.task_on_complete(task_instance)
     else:
-        logger.error('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
+        logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))

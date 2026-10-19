@@ -107,6 +107,39 @@ class DataSourcesTasksTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(sources_models.DailyCheckAppMeasurementData.objects.all().count(), 0)
         self.assertEqual(sources_models.QoSData.objects.all().count(), 0)
 
+    def test_clean_old_live_data_purging(self):
+        from django.utils import timezone
+        from proco.schools.models import School
+        from proco.connection_statistics.models import SchoolDailyStatus, SchoolWeeklyStatus, RealTimeConnectivity
+        from proco.entities.models import EntityType, Entity
+        from proco.entities.factories import EntityFactory
+
+        school = SchoolFactory(country=self.country, deleted=timezone.now())
+        SchoolDailyStatus.objects.create(school=school, date=timezone.now().date(), connectivity_speed=100)
+        SchoolWeeklyStatus.objects.create(school=school, year=2026, week=1, connectivity_speed=100)
+        RealTimeConnectivity.objects.create(school=school, connectivity_speed=100)
+
+        entity_type, _ = EntityType.objects.get_or_create(
+            code='health',
+            name='Health Facility',
+            master_data_model='data_sources.HealthEntityMasterIntermediateData',
+            detail_model='entities.HealthEntity',
+            detail_related_name='health_entity',
+        )
+        entity, health_entity = EntityFactory.create_entity(
+            'health',
+            country=self.country,
+            name='Test Clinic',
+            giga_id='test-clinic-id',
+            deleted=timezone.now(),
+            detail_kwargs={'facility_id_govt': 'govt-123'},
+        )
+
+        sources_tasks.clean_old_live_data()
+
+        self.assertFalse(School.objects.all_records().filter(id=school.id).exists())
+        self.assertFalse(Entity.objects.all_records().filter(id=entity.id).exists())
+
     def test_clean_historic_data(self):
         self.assertEqual(sources_models.SchoolMasterData.objects.all().count(), 3)
         self.assertEqual(sources_models.SchoolMasterData.history.model.objects.all().count(), 3)
@@ -139,3 +172,23 @@ class DataSourcesTasksTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(sources_tasks.scheduler_for_data_loss_recovery_for_qos_dates(
             self.country.iso3_format, '01-01-2025', '07-01-2025', True, True, True
         ), None)
+
+    def test_handle_published_entity_master_data_row(self):
+        from proco.entities.models import EntityType, Entity
+        entity_type, _ = EntityType.objects.get_or_create(code='health', name='Health Facility', master_data_model='data_sources.HealthEntityMasterIntermediateData', detail_model='entities.HealthEntity')
+
+        row = sources_models.HealthEntityMasterIntermediateData.objects.create(
+            country=self.country,
+            health_id_giga='test-health-giga-id',
+            facility_name='Test Health Facility',
+            latitude=10.0,
+            longitude=20.0,
+            status=sources_models.HealthEntityMasterIntermediateData.ROW_STATUS_PUBLISHED,
+            is_read=False,
+            facility_hours='24_7',
+        )
+
+        self.assertEqual(sources_models.HealthEntityMasterIntermediateData.objects.filter(is_read=False).count(), 1)
+        sources_tasks.handle_published_entity_master_data_row()
+        self.assertEqual(sources_models.HealthEntityMasterIntermediateData.objects.filter(is_read=False).count(), 0)
+        self.assertTrue(Entity.objects.filter(giga_id='test-health-giga-id').exists())

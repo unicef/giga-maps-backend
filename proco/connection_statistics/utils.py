@@ -19,6 +19,8 @@ from proco.connection_statistics.models import (
     RealTimeConnectivity,
     SchoolDailyStatus,
     SchoolWeeklyStatus,
+    EntityDailyStatus,
+    EntityWeeklyStatus,
 )
 from proco.core.utils import convert_to_int, get_current_datetime_object
 from proco.locations.models import Country
@@ -49,19 +51,6 @@ def aggregate_real_time_data_to_school_daily_status(country, date):
             connectivity_speed_mean_avg=Avg('connectivity_speed_mean'),
             connectivity_upload_speed_mean_avg=Avg('connectivity_upload_speed_mean'),
             connectivity_upload_speed_avg=Avg('connectivity_upload_speed'),
-            speed_download_max_avg=Avg('speed_download_max'),
-            speed_upload_max_avg=Avg('speed_upload_max'),
-            pe_ingress_avg=Avg('pe_ingress'),
-            pe_egress_avg=Avg('pe_egress'),
-            inbound_traffic_sum_avg=Avg('inbound_traffic_sum'),
-            outbound_traffic_sum_avg=Avg('outbound_traffic_sum'),
-            latency_min_avg=Avg('latency_min'),
-            latency_mean_avg=Avg('latency_mean'),
-            latency_max_avg=Avg('latency_max'),
-            signal_mean_avg=Avg('signal_mean'),
-            signal_max_avg=Avg('signal_max'),
-            is_connected_all_avg=Avg('is_connected_all'),
-            is_connected_true_avg=Avg('is_connected_true'),
         ).order_by()
 
         for source_agg in aggregate_by_source:
@@ -82,19 +71,6 @@ def aggregate_real_time_data_to_school_daily_status(country, date):
                     'connectivity_speed_mean': source_agg['connectivity_speed_mean_avg'],
                     'connectivity_upload_speed_mean': source_agg['connectivity_upload_speed_mean_avg'],
                     'connectivity_upload_speed': source_agg['connectivity_upload_speed_avg'],
-                    'speed_download_max': source_agg['speed_download_max_avg'],
-                    'speed_upload_max': source_agg['speed_upload_max_avg'],
-                    'pe_ingress': source_agg['pe_ingress_avg'],
-                    'pe_egress': source_agg['pe_egress_avg'],
-                    'inbound_traffic_sum': source_agg['inbound_traffic_sum_avg'],
-                    'outbound_traffic_sum': source_agg['outbound_traffic_sum_avg'],
-                    'latency_min': source_agg['latency_min_avg'],
-                    'latency_mean': source_agg['latency_mean_avg'],
-                    'latency_max': source_agg['latency_max_avg'],
-                    'signal_mean': source_agg['signal_mean_avg'],
-                    'signal_max': source_agg['signal_max_avg'],
-                    'is_connected_all': source_agg['is_connected_all_avg'],
-                    'is_connected_true': source_agg['is_connected_true_avg'],
                     'deleted': None,
                 },
             )
@@ -102,7 +78,7 @@ def aggregate_real_time_data_to_school_daily_status(country, date):
 
 def aggregate_school_daily_to_country_daily(country, date) -> bool:
     aggregate_by_source = SchoolDailyStatus.objects.all_records().filter(
-        school__country=country, date=date, school__deleted__isnull=True,
+        school__country=country, date=date,
     ).values('live_data_source').annotate(
         connectivity_speed_avg=Avg('connectivity_speed'),
         connectivity_latency_avg=Avg('connectivity_latency'),
@@ -116,19 +92,6 @@ def aggregate_school_daily_to_country_daily(country, date) -> bool:
         connectivity_speed_mean_avg=Avg('connectivity_speed_mean'),
         connectivity_upload_speed_mean_avg=Avg('connectivity_upload_speed_mean'),
         connectivity_upload_speed_avg=Avg('connectivity_upload_speed'),
-        speed_download_max_avg=Avg('speed_download_max'),
-        speed_upload_max_avg=Avg('speed_upload_max'),
-        pe_ingress_avg=Avg('pe_ingress'),
-        pe_egress_avg=Avg('pe_egress'),
-        inbound_traffic_sum_avg=Avg('inbound_traffic_sum'),
-        outbound_traffic_sum_avg=Avg('outbound_traffic_sum'),
-        latency_min_avg=Avg('latency_min'),
-        latency_mean_avg=Avg('latency_mean'),
-        latency_max_avg=Avg('latency_max'),
-        signal_mean_avg=Avg('signal_mean'),
-        signal_max_avg=Avg('signal_max'),
-        is_connected_all_avg=Avg('is_connected_all'),
-        is_connected_true_avg=Avg('is_connected_true'),
     ).order_by()
 
     # Adding this check because soft deletion is in place now from 2024
@@ -155,19 +118,6 @@ def aggregate_school_daily_to_country_daily(country, date) -> bool:
                 'connectivity_speed_mean': source_agg['connectivity_speed_mean_avg'],
                 'connectivity_upload_speed_mean': source_agg['connectivity_upload_speed_mean_avg'],
                 'connectivity_upload_speed': source_agg['connectivity_upload_speed_avg'],
-                'speed_download_max': source_agg['speed_download_max_avg'],
-                'speed_upload_max': source_agg['speed_upload_max_avg'],
-                'pe_ingress': source_agg['pe_ingress_avg'],
-                'pe_egress': source_agg['pe_egress_avg'],
-                'inbound_traffic_sum': source_agg['inbound_traffic_sum_avg'],
-                'outbound_traffic_sum': source_agg['outbound_traffic_sum_avg'],
-                'latency_min': source_agg['latency_min_avg'],
-                'latency_mean': source_agg['latency_mean_avg'],
-                'latency_max': source_agg['latency_max_avg'],
-                'signal_mean': source_agg['signal_mean_avg'],
-                'signal_max': source_agg['signal_max_avg'],
-                'is_connected_all': source_agg['is_connected_all_avg'],
-                'is_connected_true': source_agg['is_connected_true_avg'],
                 'deleted': None,
             },
         )
@@ -219,10 +169,6 @@ def aggregate_school_daily_status_to_school_weekly_status(country, date) -> bool
             Avg('roundtrip_time'), Avg('jitter_download'), Avg('jitter_upload'), Avg('rtt_packet_loss_pct'),
             Avg('connectivity_speed_probe'), Avg('connectivity_upload_speed_probe'), Avg('connectivity_latency_probe'),
             Avg('connectivity_speed_mean'), Avg('connectivity_upload_speed_mean'),
-            Avg('speed_download_max'), Avg('speed_upload_max'), Avg('pe_ingress'), Avg('pe_egress'),
-            Avg('inbound_traffic_sum'), Avg('outbound_traffic_sum'),
-            Avg('latency_min'), Avg('latency_mean'), Avg('latency_max'), Avg('signal_mean'), Avg('signal_max'),
-            Avg('is_connected_all'), Avg('is_connected_true'),
         )
 
         school_weekly.modified = get_current_datetime_object()
@@ -239,20 +185,6 @@ def aggregate_school_daily_status_to_school_weekly_status(country, date) -> bool
         school_weekly.connectivity_speed_mean = aggregate['connectivity_speed_mean__avg']
         school_weekly.connectivity_upload_speed_mean = aggregate['connectivity_upload_speed_mean__avg']
         school_weekly.connectivity_upload_speed = aggregate['connectivity_upload_speed__avg']
-
-        school_weekly.speed_download_max = aggregate['speed_download_max__avg']
-        school_weekly.speed_upload_max = aggregate['speed_upload_max__avg']
-        school_weekly.pe_ingress = aggregate['pe_ingress__avg']
-        school_weekly.pe_egress = aggregate['pe_egress__avg']
-        school_weekly.inbound_traffic_sum = aggregate['inbound_traffic_sum__avg']
-        school_weekly.outbound_traffic_sum = aggregate['outbound_traffic_sum__avg']
-        school_weekly.latency_min = aggregate['latency_min__avg']
-        school_weekly.latency_mean = aggregate['latency_mean__avg']
-        school_weekly.latency_max = aggregate['latency_max__avg']
-        school_weekly.signal_mean = aggregate['signal_mean__avg']
-        school_weekly.signal_max = aggregate['signal_max__avg']
-        school_weekly.is_connected_all = aggregate['is_connected_all__avg']
-        school_weekly.is_connected_true = aggregate['is_connected_true__avg']
 
         if created:
             prev_weekly = SchoolWeeklyStatus.objects.all().filter(
@@ -321,6 +253,106 @@ def aggregate_school_daily_status_to_school_weekly_status(country, date) -> bool
                 school_weekly.num_schools_per_building = prev_weekly.num_schools_per_building
 
         school_weekly.save()
+
+    return updated
+
+
+def aggregate_entity_daily_status_to_entity_weekly_status(country, date, entity_type_code=None) -> bool:
+    monday_date = date - timedelta(days=date.weekday())
+    sunday_date = monday_date + timedelta(days=6)
+
+    monday_week_no = date_utilities.get_week_from_date(monday_date)
+    monday_year = date_utilities.get_year_from_date(monday_date)
+
+    entity_ids_qs = EntityDailyStatus.objects.all().filter(
+        date__range=[monday_date, sunday_date],
+        entity__country=country,
+        entity__deleted__isnull=True
+    )
+    if entity_type_code:
+        entity_ids_qs = entity_ids_qs.filter(entity__entity_type__code=entity_type_code)
+
+    entity_ids = entity_ids_qs.values_list('entity', flat=True).order_by('entity_id').distinct('entity_id')
+
+    updated = False
+
+    for entity_id in entity_ids:
+        updated = True
+
+        aggregate_qs = EntityDailyStatus.objects.filter(
+            entity_id=entity_id, date__range=[monday_date, sunday_date],
+        )
+
+        daily_sources = set(aggregate_qs.values_list('live_data_source', flat=True))
+        from proco.connection_statistics.config import app_config as statistics_configs
+        if statistics_configs.QOS_SOURCE in daily_sources and statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE in daily_sources:
+            live_data_source = statistics_configs.DAILY_CHECK_APP_MLAB_QOS_SOURCE
+        elif statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE in daily_sources:
+            live_data_source = statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE
+        elif statistics_configs.QOS_SOURCE in daily_sources:
+            live_data_source = statistics_configs.QOS_SOURCE
+        else:
+            live_data_source = statistics_configs.UNKNOWN_SOURCE
+
+        entity_weekly = EntityWeeklyStatus.objects.filter(
+            entity_id=entity_id, week=monday_week_no, year=monday_year,
+        ).last()
+
+        if not entity_weekly:
+            entity_weekly = EntityWeeklyStatus.objects.create(
+                entity_id=entity_id,
+                year=monday_year,
+                week=monday_week_no,
+                date=monday_date,
+                live_data_source=live_data_source,
+            )
+        else:
+            if entity_weekly.live_data_source != live_data_source:
+                entity_weekly.live_data_source = live_data_source
+
+        aggregate = aggregate_qs.aggregate(
+            Avg('connectivity_speed'), Avg('connectivity_upload_speed'), Avg('connectivity_latency'),
+            Avg('roundtrip_time'), Avg('jitter_download'), Avg('jitter_upload'), Avg('rtt_packet_loss_pct'),
+            Avg('connectivity_speed_probe'), Avg('connectivity_upload_speed_probe'), Avg('connectivity_latency_probe'),
+            Avg('connectivity_speed_mean'), Avg('connectivity_upload_speed_mean'),
+        )
+
+        entity_weekly.connectivity_speed = aggregate['connectivity_speed__avg']
+        entity_weekly.connectivity_latency = aggregate['connectivity_latency__avg']
+        entity_weekly.roundtrip_time = aggregate['roundtrip_time__avg']
+        entity_weekly.jitter_download = aggregate['jitter_download__avg']
+        entity_weekly.jitter_upload = aggregate['jitter_upload__avg']
+        entity_weekly.rtt_packet_loss_pct = aggregate['rtt_packet_loss_pct__avg']
+        entity_weekly.connectivity_speed_probe = aggregate['connectivity_speed_probe__avg']
+        entity_weekly.connectivity_upload_speed_probe = aggregate['connectivity_upload_speed_probe__avg']
+        entity_weekly.connectivity_latency_probe = aggregate['connectivity_latency_probe__avg']
+        entity_weekly.connectivity_speed_mean = aggregate['connectivity_speed_mean__avg']
+        entity_weekly.connectivity_upload_speed_mean = aggregate['connectivity_upload_speed_mean__avg']
+        entity_weekly.connectivity_upload_speed = aggregate['connectivity_upload_speed__avg']
+
+        entity_weekly.save()
+
+        # Update the entity's last_weekly_status and connectivity_status.  A
+        # null weekly speed means that this week has no live measurement; it
+        # must not erase a status derived from static master data.
+        entity = entity_weekly.entity
+        update_fields = []
+
+        if entity_weekly.connectivity_speed is not None:
+            status = statuses_schema.get_connectivity_status_by_connectivity_speed(
+                entity_weekly.connectivity_speed
+            )
+            if entity.connectivity_status != status:
+                entity.connectivity_status = status
+                update_fields.append('connectivity_status')
+
+        if entity.last_weekly_status_id != entity_weekly.id:
+            if not entity.last_weekly_status or entity.last_weekly_status.date < entity_weekly.date:
+                entity.last_weekly_status = entity_weekly
+                update_fields.append('last_weekly_status')
+
+        if update_fields:
+            entity.save(update_fields=update_fields)
 
     return updated
 
@@ -463,22 +495,10 @@ def update_country_weekly_status(country: Country, date):
                                             filter=Q(connectivity_upload_speed_probe__gt=0)),
         connectivity_latency_probe=Avg('connectivity_latency_probe',
                                        filter=Q(connectivity_latency_probe__gt=0)),
-        connectivity_speed_mean=Avg('connectivity_speed_mean', filter=Q(connectivity_speed_mean__gt=0)),
+        connectivity_speed_mean=Avg('connectivity_speed_mean',
+                                    filter=Q(connectivity_speed_mean__gt=0)),
         connectivity_upload_speed_mean=Avg('connectivity_upload_speed_mean',
                                            filter=Q(connectivity_upload_speed_mean__gt=0)),
-        speed_download_max=Avg('speed_download_max', filter=Q(speed_download_max__gt=0)),
-        speed_upload_max=Avg('speed_upload_max', filter=Q(speed_upload_max__gt=0)),
-        pe_ingress=Avg('pe_ingress', filter=Q(pe_ingress__gt=0)),
-        pe_egress=Avg('pe_egress', filter=Q(pe_egress__gt=0)),
-        inbound_traffic_sum=Avg('inbound_traffic_sum', filter=Q(inbound_traffic_sum__gt=0)),
-        outbound_traffic_sum=Avg('outbound_traffic_sum', filter=Q(outbound_traffic_sum__gt=0)),
-        latency_min=Avg('latency_min', filter=Q(latency_min__gt=0)),
-        latency_mean=Avg('latency_mean', filter=Q(latency_mean__gt=0)),
-        latency_max=Avg('latency_max', filter=Q(latency_max__gt=0)),
-        signal_mean=Avg('signal_mean', filter=Q(signal_mean__gt=0)),
-        signal_max=Avg('signal_max', filter=Q(signal_max__gt=0)),
-        is_connected_all=Avg('is_connected_all', filter=Q(is_connected_all__gt=0)),
-        is_connected_true=Avg('is_connected_true', filter=Q(is_connected_true__gt=0)),
     )
 
     country_status.connectivity_speed = schools_stats['connectivity_speed']
@@ -493,20 +513,6 @@ def update_country_weekly_status(country: Country, date):
     country_status.connectivity_speed_mean = schools_stats['connectivity_speed_mean']
     country_status.connectivity_upload_speed_mean = schools_stats['connectivity_upload_speed_mean']
     country_status.connectivity_upload_speed = schools_stats['connectivity_upload_speed']
-
-    country_status.speed_download_max = schools_stats['speed_download_max']
-    country_status.speed_upload_max = schools_stats['speed_upload_max']
-    country_status.pe_ingress = schools_stats['pe_ingress']
-    country_status.pe_egress = schools_stats['pe_egress']
-    country_status.inbound_traffic_sum = schools_stats['inbound_traffic_sum']
-    country_status.outbound_traffic_sum = schools_stats['outbound_traffic_sum']
-    country_status.latency_min = schools_stats['latency_min']
-    country_status.latency_mean = schools_stats['latency_mean']
-    country_status.latency_max = schools_stats['latency_max']
-    country_status.signal_mean = schools_stats['signal_mean']
-    country_status.signal_max = schools_stats['signal_max']
-    country_status.is_connected_all = schools_stats['is_connected_all']
-    country_status.is_connected_true = schools_stats['is_connected_true']
 
     # move country status as far as we can
     if country_status.integration_status == CountryWeeklyStatus.COUNTRY_CREATED and country_status.schools_total:
@@ -576,7 +582,8 @@ def get_benchmark_value_for_default_download_layer(benchmark, country_id):
             ).order_by('id').values_list('benchmark_metadata', flat=True).first()
 
             if benchmark_metadata and len(benchmark_metadata) > 0:
-                benchmark_metadata = json.loads(benchmark_metadata)
+                if isinstance(benchmark_metadata, str):
+                    benchmark_metadata = json.loads(benchmark_metadata)
                 all_live_layers = benchmark_metadata.get('live_layer', {})
                 if len(all_live_layers) > 0 and str(data_layer_instance.id) in (all_live_layers.keys()):
                     benchmark_val = all_live_layers[str(data_layer_instance.id)]

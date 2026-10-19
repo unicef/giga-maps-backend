@@ -1,10 +1,11 @@
 import copy
 import json
 import logging
+import re
+import uuid
 from datetime import timedelta
 
 import requests
-import uuid
 from django.conf import settings
 from django.contrib.admin.models import LogEntry
 from django.db.models import Case, IntegerField, Value, When
@@ -25,9 +26,11 @@ from proco.accounts import models as accounts_models
 from proco.accounts import serializers
 from proco.accounts import utils as account_utilities
 from proco.accounts.config import app_config as account_config
+from proco.accounts.v2 import entity_filter_serializers
 from proco.connection_statistics import models as statistics_models
 from proco.connection_statistics.config import app_config as statistics_configs
 from proco.connection_statistics.models import SchoolWeeklyStatus
+from proco.connection_statistics.realtime_weekly_metrics import build_live_weekly_requirement
 from proco.contact.models import ContactMessage
 from proco.core import db_utils as db_utilities
 from proco.core import permissions as core_permissions
@@ -39,10 +42,49 @@ from proco.utils import dates as date_utilities
 from proco.utils.cache import cache_manager, custom_cache_control, no_expiry_cache_manager
 from proco.utils.filters import NullsAlwaysLastOrderingFilter
 from proco.utils.mixins import CachedListMixin
-from proco.utils.tasks import update_all_cached_values
-
+from proco.utils.tasks import update_all_cached_values, update_all_entity_cached_values
 
 logger = logging.getLogger('gigamaps.' + __name__)
+
+sws_rewrite_pattern_cache = None
+
+
+def get_sws_rewrite_pattern():
+    global sws_rewrite_pattern_cache
+    if sws_rewrite_pattern_cache is None:
+        sws_field_names = sorted(
+            {
+                f.column
+                for f in SchoolWeeklyStatus._meta.get_fields()
+                if hasattr(f, 'column')
+            },
+            key=len,
+            reverse=True,
+        )
+        if sws_field_names:
+            escaped = '|'.join(re.escape(name) for name in sws_field_names)
+
+            sws_rewrite_pattern_cache = re.compile(
+                r'\bsds\.("(' + escaped + r')"'
+                                          r'|(' + escaped + r')(?=\b))'
+            )
+    return sws_rewrite_pattern_cache
+
+
+def rewrite_sds_to_sws(sql_text, col_name):
+    pattern = get_sws_rewrite_pattern()
+    if pattern is None:
+        return sql_text
+
+    sds_columns = {'school_id', 'last_weekly_status_id', col_name}
+
+    def replacer(m):
+        matched_col = m.group(2) or m.group(3)
+        if matched_col in sds_columns:
+            return m.group(0)
+        return f'sws."{matched_col}"'
+
+    return pattern.sub(replacer, sql_text)
 
 
 class APIsListAPIView(BaseModelViewSet):
@@ -96,7 +138,7 @@ class APICategoriesViewSet(BaseModelViewSet):
         SearchFilter,
     )
 
-    ordering_fields = ( 'api__name', 'name', 'last_modified_at')
+    ordering_fields = ('api__name', 'name', 'last_modified_at')
     apply_query_pagination = True
 
     filterset_fields = {
@@ -360,7 +402,9 @@ class TranslateTextFromEnViewSet(APIView):
             if len(payload) <= settings.AI_TRANSLATION_CACHE_KEY_LIMIT:
                 return '{0}_{1}_{2}'.format(self.CACHE_KEY_PREFIX, pk, payload)
             else:
-                return '{0}_{1}_{2}_{3}'.format(self.CACHE_KEY_PREFIX, pk, payload[:int(settings.AI_TRANSLATION_CACHE_KEY_LIMIT / 2)], payload[-int(settings.AI_TRANSLATION_CACHE_KEY_LIMIT / 2):])
+                return '{0}_{1}_{2}_{3}'.format(self.CACHE_KEY_PREFIX, pk,
+                                                payload[:int(settings.AI_TRANSLATION_CACHE_KEY_LIMIT / 2)],
+                                                payload[-int(settings.AI_TRANSLATION_CACHE_KEY_LIMIT / 2):])
 
     def prepare_azure_request(self, request, *args, **kwargs):
         # Add your key and endpoint
@@ -368,10 +412,12 @@ class TranslateTextFromEnViewSet(APIView):
         endpoint = settings.AI_TRANSLATION_ENDPOINT
 
         if not key or not endpoint:
-            logger.error('Required environment variables are missing for Azure AI translation. AI_TRANSLATION_ENDPOINT, AI_TRANSLATION_KEY')
+            logger.error(
+                'Required environment variables are missing for Azure AI translation. AI_TRANSLATION_ENDPOINT, AI_TRANSLATION_KEY')
             return Response({'error': 'An error occurred while processing the request'}, status=500)
 
-        if len(settings.AI_TRANSLATION_SUPPORTED_TARGETS) > 0 and self.kwargs.get('target') not in settings.AI_TRANSLATION_SUPPORTED_TARGETS:
+        if len(settings.AI_TRANSLATION_SUPPORTED_TARGETS) > 0 and self.kwargs.get(
+            'target') not in settings.AI_TRANSLATION_SUPPORTED_TARGETS:
             return Response({'error': 'Requested language target is not supported by the application.'}, status=500)
 
         payload = request.data
@@ -381,7 +427,7 @@ class TranslateTextFromEnViewSet(APIView):
             text = request.data.get('text')
             if not text:
                 return Response({'error': 'Empty text can not be translated.'}, status=500)
-            payload = [payload,]
+            payload = [payload, ]
 
         path = 'translate'
         constructed_url = str(endpoint if str(endpoint).endswith('/') else endpoint + '/') + path
@@ -389,7 +435,7 @@ class TranslateTextFromEnViewSet(APIView):
         params = {
             'api-version': '3.0',
             'from': 'en',
-            'to': [self.kwargs.get('target', 'fr'),]
+            'to': [self.kwargs.get('target', 'fr'), ]
         }
 
         headers = {
@@ -399,8 +445,7 @@ class TranslateTextFromEnViewSet(APIView):
         }
 
         # location, also known as region.
-        # required if you're using a multi service or regional (not global) resource.
-        # It can be found in the Azure portal on the Keys and Endpoint page.
+        # required if you're using a multi-service or regional (not global) resource. It can be found in the Azure portal on the Keys and Endpoint page.
         if settings.AI_TRANSLATION_REGION:
             headers['Ocp-Apim-Subscription-Region'] = settings.AI_TRANSLATION_REGION
 
@@ -421,8 +466,8 @@ class TranslateTextFromEnViewSet(APIView):
                 try:
                     response_json = response.json()
                     no_expiry_cache_manager.set(cache_key, response_json, request_path=request_path,
-                                      soft_timeout=None)
-                    response  = Response(data=response_json, status=rest_status.HTTP_200_OK)
+                                                soft_timeout=None)
+                    response = Response(data=response_json, status=rest_status.HTTP_200_OK)
                 except requests.exceptions.InvalidJSONError as ex:
                     response = Response(data=ex.strerror, status=rest_status.HTTP_400_BAD_REQUEST)
         else:
@@ -491,7 +536,8 @@ class InvalidateCache(APIView):
             cache_manager.invalidate()
             message = 'Cache invalidation started. Maps will be updated in a few minutes.'
 
-        update_all_cached_values.delay()
+        # update_all_cached_values.delay()
+        update_all_entity_cached_values.delay()
         return Response(data={'message': message})
 
 
@@ -517,7 +563,8 @@ class InvalidateCacheByPattern(APIView):
                 cache_manager.invalidate()
                 message = 'Cache invalidation started. Maps will be updated in a few minutes.'
 
-            update_all_cached_values.delay()
+            # update_all_cached_values.delay()
+            update_all_entity_cached_values.delay()
         else:
             keys = []
 
@@ -525,13 +572,10 @@ class InvalidateCacheByPattern(APIView):
                 country_id = payload.get('id', None)
                 country_code = payload.get('code', None)
                 keys = [
-                    "*GLOBAL_STATS_",
-                    "*CONNECTIVITY_STATS_*",
-                    "*CONNECTIVITY_TILES_MAP*benchmark*global*indicator*download*limit*",
                     "*COUNTRIES_LIST_",
                     "*PUBLISHED_LAYERS_LIST_*",
                     "*GLOBAL_COUNTRY_SEARCH_MAPPING_",
-                    "*country_id_\['{0}'\]*".format(country_id),
+                    "*country_id_\\['{0}'\\]*".format(country_id),
                     "*country_id_{0}*".format(country_id),
                     "*COUNTRY_INFO_pk_{0}".format(country_code),
                 ]
@@ -541,7 +585,7 @@ class InvalidateCacheByPattern(APIView):
                     "*PUBLISHED_LAYERS_LIST_*",
                     "*DATA_LAYER_INFO_{0}*".format(layer_id),
                     "*DATA_LAYER_MAP_{0}*".format(layer_id),
-                    "*layer_id_\['{0}'\]*".format(layer_id),
+                    "*layer_id_\\['{0}'\\]*".format(layer_id),
                     "*layer_id_{0}*".format(layer_id),
                 ]
 
@@ -750,7 +794,8 @@ class DataLayerPreviewViewSet(APIView):
     def get_map_query(self, kwargs):
         query = """
         SELECT schools_school.id,
-            CASE WHEN rt_status.rt_registered = True AND rt_status.rt_registration_date <= '{end_date}' THEN True
+            CASE WHEN rt_status.rt_registered = True
+                    AND rt_status.rt_registration_date < '{end_datetime_exclusive}' THEN True
                     ELSE False
             END AS is_rt_connected,
             {case_conditions}
@@ -780,11 +825,11 @@ class DataLayerPreviewViewSet(APIView):
         WHERE schools_school."deleted" IS NULL
             AND rt_status."deleted" IS NULL
             AND rt_status."rt_registered" = True
-            AND rt_status."rt_registration_date"::date <= '{end_date}'
+            AND rt_status."rt_registration_date" < '{end_datetime_exclusive}'
         {country_condition_outer}
         ORDER BY random()
-        LIMIT 1000
-        """
+        LIMIT 1000 \
+                """
 
         legend_configs = kwargs['legend_configs']
         if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
@@ -796,16 +841,17 @@ class DataLayerPreviewViewSet(APIView):
                 if len(values) > 0:
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
-                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
-                    label_cases.append("ELSE '{label}'".format(label=title))
+                    if not any(c.startswith("ELSE ") for c in label_cases):
+                        label_cases.append("ELSE '{label}'".format(label=title))
 
             kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS connectivity,'
         else:
             kwargs['case_conditions'] = """
                         CASE WHEN sds.{col_name} > {benchmark_value} THEN 'good'
-                            WHEN sds.{col_name} <= {benchmark_value} AND sds.{col_name} >= {base_benchmark} THEN 'moderate'
+                            WHEN sds.{col_name} <= {benchmark_value} and sds.{col_name} >= {base_benchmark} THEN 'moderate'
                             WHEN sds.{col_name} < {base_benchmark}  THEN 'bad'
                             ELSE 'unknown'
                         END AS connectivity,
@@ -835,21 +881,17 @@ class DataLayerPreviewViewSet(APIView):
 
         return query.format(**kwargs)
 
-
     def get_static_map_query(self, kwargs):
         query = """
-            SELECT
-                schools_school.id,
-                schools_school.name,
-                {table_name}."{col_name}",
-                ST_AsGeoJSON(ST_Transform(schools_school.geopoint, 4326)) as geopoint,
-                {label_case_statements}
-            FROM schools_school
-            INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
-            WHERE schools_school."deleted" IS NULL {country_condition}
-            ORDER BY random()
-            LIMIT 1000
-            """
+                SELECT schools_school.id,
+                       schools_school.name, {table_name}."{col_name}", ST_AsGeoJSON(ST_Transform(schools_school.geopoint, 4326)) as geopoint, {label_case_statements}
+                FROM schools_school
+                    INNER JOIN connection_statistics_schoolweeklystatus sws
+                ON schools_school.last_weekly_status_id = sws.id
+                WHERE schools_school."deleted" IS NULL {country_condition}
+                ORDER BY random()
+                    LIMIT 1000 \
+                """
 
         kwargs['country_condition'] = ''
 
@@ -871,7 +913,7 @@ class DataLayerPreviewViewSet(APIView):
             if len(values) > 0:
                 is_sql_value = 'SQL:' in values[0]
                 if is_sql_value:
-                    sql_statement = str(','.join(values)).replace('SQL:', '').format(
+                    sql_statement = ' AND '.join(values).replace('SQL:', '').format(
                         table_name=kwargs['table_name'],
                         col_name=kwargs['col_name'],
                     )
@@ -895,12 +937,12 @@ class DataLayerPreviewViewSet(APIView):
                                 value=','.join([str(v) for v in values])
                             ))
             else:
-                label_cases.append("ELSE '{label}'".format(label=title))
+                if not any(c.startswith("ELSE ") for c in label_cases):
+                    label_cases.append("ELSE '{label}'".format(label=title))
 
         kwargs['label_case_statements'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
 
         return query.format(**kwargs)
-
 
     def get(self, request, *args, **kwargs):
         data_layer_instance = get_object_or_404(accounts_models.DataLayer.objects.all(), pk=self.kwargs.get('pk'))
@@ -945,6 +987,7 @@ class DataLayerPreviewViewSet(APIView):
                 'country_ids': country_ids,
                 'start_date': start_date,
                 'end_date': end_date,
+                'end_datetime_exclusive': end_date + timedelta(days=1),
                 'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                 'parameter_col': parameter_col,
                 'parameter_col_function_sql': column_function_sql,
@@ -966,7 +1009,8 @@ class DataLayerPreviewViewSet(APIView):
 
         if map_points:
             for map_point in map_points:
-                map_point['geopoint'] = json.loads(map_point['geopoint'])
+                if isinstance(map_point.get('geopoint'), str):
+                    map_point['geopoint'] = json.loads(map_point['geopoint'])
         return Response(data={'map': map_points})
 
 
@@ -1076,6 +1120,9 @@ class BaseDataLayerAPIViewSet(APIView):
             date = core_utilities.get_current_datetime_object() - timedelta(days=7)
             self.kwargs['end_date'] = ((date - timedelta(days=date.weekday())) + timedelta(days=6)).date()
 
+        if self.kwargs.get('end_date'):
+            self.kwargs['end_datetime_exclusive'] = self.kwargs['end_date'] + timedelta(days=1)
+
         if 'country_id' in query_param_keys:
             self.kwargs['country_ids'] = [query_params['country_id']]
         elif 'country_id__in' in query_param_keys:
@@ -1094,13 +1141,15 @@ class BaseDataLayerAPIViewSet(APIView):
             self.kwargs['school_ids'] = [s_id.strip() for s_id in query_params['school_id__in'].split(',')]
 
         if 'exclude_schools_same_coords_except_id' in query_param_keys:
-            self.kwargs['exclude_schools_same_coords_except_id'] = str(query_params['exclude_schools_same_coords_except_id']).strip()
+            self.kwargs['exclude_schools_same_coords_except_id'] = str(
+                query_params['exclude_schools_same_coords_except_id']).strip()
 
         self.kwargs['is_weekly'] = False if query_params.get('is_weekly', 'true') == 'false' else True
         self.kwargs['benchmark'] = 'national' if query_params.get('benchmark', 'global') == 'national' else 'global'
 
         self.kwargs['convert_unit'] = layer_instance.global_benchmark.get('convert_unit', 'mbps')
         self.kwargs['is_reverse'] = layer_instance.is_reverse
+        self.kwargs['layer_type'] = layer_instance.type
 
         self.kwargs['school_filters'] = core_utilities.get_filter_sql(
             self.request, 'schools', 'schools_school')
@@ -1120,7 +1169,8 @@ class BaseDataLayerAPIViewSet(APIView):
                 ).order_by('id').values_list('benchmark_metadata', flat=True).first()
 
                 if benchmark_metadata and len(benchmark_metadata) > 0:
-                    benchmark_metadata = json.loads(benchmark_metadata)
+                    if isinstance(benchmark_metadata, str):
+                        benchmark_metadata = json.loads(benchmark_metadata)
                     data_layer_type = data_layer_instance.type
                     if data_layer_type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
                         all_live_layers = benchmark_metadata.get('live_layer', {})
@@ -1145,7 +1195,10 @@ class BaseDataLayerAPIViewSet(APIView):
                     active_layers__data_layer_id=data_layer_instance.id,
                 ).order_by('id').values_list('active_layers__legend_configs', flat=True).first()
                 if legend_configurations and len(legend_configurations) > 0:
-                    legend_configs = json.loads(legend_configurations)
+                    if isinstance(legend_configurations, str):
+                        legend_configs = json.loads(legend_configurations)
+                    else:
+                        legend_configs = legend_configurations
 
         return legend_configs
 
@@ -1159,7 +1212,7 @@ class BaseDataLayerAPIViewSet(APIView):
     custom_cache_control(
         public=True,
         max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE,
-        cache_status_codes=[rest_status.HTTP_200_OK,],
+        cache_status_codes=[rest_status.HTTP_200_OK, ],
     )
 ], name='dispatch')
 class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
@@ -1178,40 +1231,36 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
     def get_info_query(self):
         query = """
-        SELECT {case_conditions}
-            COUNT(DISTINCT CASE WHEN sds.{col_name} IS NOT NULL THEN sds.school_id ELSE NULL END)
-                AS "school_with_realtime_data",
-            {benchmark_value_sql}
-            COUNT(DISTINCT sds.school_id) AS "no_of_schools_measure"
-        FROM (
-            SELECT "schools_school"."id" AS school_id,
-                "schools_school"."last_weekly_status_id",
-                {col_function} AS "{col_name}"
-            FROM "schools_school"
-            INNER JOIN "connection_statistics_schoolrealtimeregistration"
-                ON ("schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id")
-            {school_weekly_join}
-            LEFT OUTER JOIN "connection_statistics_schooldailystatus" t
-                ON (
-                    "schools_school"."id" = t."school_id"
-                    AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
+                SELECT {case_conditions}
+                    COUNT (DISTINCT CASE WHEN sds.{col_name} IS NOT NULL THEN sds.school_id ELSE NULL END)
+                    AS "school_with_realtime_data", {benchmark_value_sql}
+                    COUNT (DISTINCT sds.school_id) AS "no_of_schools_measure"
+                FROM (
+                    SELECT "schools_school"."id" AS school_id, "schools_school"."last_weekly_status_id", t."{col_name}"
+                    FROM "schools_school"
+                    INNER JOIN "connection_statistics_schoolrealtimeregistration"
+                    ON ("schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id")
+                    {school_weekly_join}
+                    LEFT OUTER JOIN (
+                    SELECT t."school_id", {col_function} AS "{col_name}"
+                    FROM "connection_statistics_schooldailystatus" t
+                    WHERE t."date" BETWEEN '{start_date}' AND '{end_date}'
                     AND t."live_data_source" IN ({live_source_types})
                     AND t."deleted" IS NULL
-                )
-            WHERE (
-                "schools_school"."deleted" IS NULL
-                AND "connection_statistics_schoolrealtimeregistration"."deleted" IS NULL
-                {country_condition}
-                {admin1_condition}
-                {school_condition}
-                {school_weekly_condition}
-                AND "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
-                AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date"::date <= '{end_date}')
-            GROUP BY "schools_school"."id"
-            ORDER BY "schools_school"."id" ASC
-        ) AS sds
-        {school_weekly_outer_join}
-        """
+                    GROUP BY t."school_id"
+                    ) t ON t."school_id" = "schools_school"."id"
+                    WHERE (
+                    "schools_school"."deleted" IS NULL
+                    AND "connection_statistics_schoolrealtimeregistration"."deleted" IS NULL
+                    {country_condition}
+                    {admin1_condition}
+                    {school_condition}
+                    {school_weekly_condition}
+                    AND "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
+                    AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date" < '{end_datetime_exclusive}')
+                    ) AS sds
+                    {school_weekly_outer_join} \
+                """
 
         kwargs = copy.deepcopy(self.kwargs)
 
@@ -1224,8 +1273,234 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs['benchmark_value_sql'] = ''
 
         benchmark_value = kwargs['benchmark_value']
-        if benchmark_value and 'SQL:' in benchmark_value:
-            kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(**kwargs) + ' AS benchmark_sql_value,'
+        if benchmark_value is not None and isinstance(benchmark_value, str) and 'SQL:' in benchmark_value:
+            kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(
+                **kwargs) + ' AS benchmark_sql_value,'
+            kwargs['benchmark_value_sql'] = rewrite_sds_to_sws(
+                kwargs['benchmark_value_sql'], kwargs['col_name']
+            )
+
+        legend_configs = kwargs['legend_configs']
+        if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+            kwargs['table_name'] = 'sds'
+
+        if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
+            label_cases = []
+            for title, values_and_label in legend_configs.items():
+                values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
+                                     values_and_label.get('values', [])))
+
+                if len(values) > 0:
+                    is_sql_value = 'SQL:' in values[0]
+                    if is_sql_value:
+                        sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
+                        sql_statement = rewrite_sds_to_sws(
+                            sql_statement, kwargs['col_name']
+                        )
+                        label_cases.append(
+                            'COUNT(DISTINCT CASE WHEN {sql} THEN sds.school_id ELSE NULL END) AS "{label}",'.format(
+                                sql=sql_statement, label=title))
+                else:
+                    label_cases.append(
+                        'COUNT(DISTINCT CASE WHEN sds.{col_name} IS NULL '
+                        'THEN sds.school_id ELSE NULL END) AS "{label}",'.format(
+                            col_name=kwargs['col_name'], label=title))
+
+            kwargs['case_conditions'] = ' '.join(label_cases)
+
+            uses_school_weekly_status = 'sws' in str(legend_configs) or 'sws.' in kwargs.get('case_conditions',
+                                                                                             '') or 'sws.' in kwargs.get(
+                'benchmark_value_sql', '')
+            if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE and not uses_school_weekly_status:
+                kwargs['school_weekly_outer_join'] = ''
+            else:
+                kwargs['school_weekly_outer_join'] = """
+                INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
+                """
+        else:
+            kwargs['case_conditions'] = """
+            COUNT(DISTINCT CASE WHEN sds.{col_name} > {benchmark_value} THEN sds.school_id ELSE NULL END) AS "good",
+            COUNT(DISTINCT CASE WHEN (sds.{col_name} >= {base_benchmark} AND sds.{col_name} <= {benchmark_value})
+                THEN sds.school_id ELSE NULL END) AS "moderate",
+            COUNT(DISTINCT CASE WHEN sds.{col_name} < {base_benchmark} THEN sds.school_id ELSE NULL END) AS "bad",
+            COUNT(DISTINCT CASE WHEN sds.{col_name} IS NULL THEN sds.school_id ELSE NULL END) AS "unknown",
+            """.format(**kwargs)
+
+            if kwargs['is_reverse'] is True:
+                kwargs['case_conditions'] = """
+                COUNT(DISTINCT CASE WHEN sds.{col_name} < {benchmark_value} THEN sds.school_id ELSE NULL END) AS "good",
+                COUNT(DISTINCT CASE WHEN (sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark})
+                    THEN sds.school_id ELSE NULL END) AS "moderate",
+                COUNT(DISTINCT CASE WHEN sds.{col_name} >= {benchmark_value} THEN sds.school_id ELSE NULL END) AS "bad",
+                COUNT(DISTINCT CASE WHEN sds.{col_name} IS NULL THEN sds.school_id ELSE NULL END) AS "unknown",
+                """.format(**kwargs)
+
+        if len(kwargs.get('admin1_ids', [])) > 0:
+            kwargs['admin1_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
+                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
+            )
+        elif len(kwargs.get('country_ids', [])) > 0:
+            kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
+                ','.join([str(country_id) for country_id in kwargs['country_ids']])
+            )
+
+        if len(kwargs['school_filters']) > 0:
+            kwargs['school_condition'] = ' AND ' + kwargs['school_filters']
+
+        if len(kwargs.get('school_real_time_filters', '')) > 0 or len(kwargs['school_static_filters']) > 0:
+            kwargs['school_weekly_join'] = """
+            INNER JOIN "connection_statistics_schoolweeklystatus"
+                ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
+            """
+            kwargs['school_weekly_condition'] = ''
+            if len(kwargs.get('school_real_time_filters', '')) > 0:
+                kwargs['school_weekly_condition'] += ' AND ' + kwargs['school_real_time_filters']
+            if len(kwargs['school_static_filters']) > 0:
+                kwargs['school_weekly_condition'] += ' AND ' + kwargs['school_static_filters']
+
+        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
+
+        return query.format(**kwargs)
+
+    def get_realtime_weekly_metric_info_query(self):
+        query = """
+        SELECT {case_conditions}
+            COUNT(DISTINCT CASE WHEN sds.{col_name} IS NOT NULL THEN sds.school_id ELSE NULL END)
+                AS "school_with_realtime_data",
+            {benchmark_value_sql}
+            COUNT(DISTINCT sds.school_id) AS "no_of_schools_measure"
+        FROM (
+            SELECT "schools_school"."id" AS school_id,
+                "schools_school"."last_weekly_status_id",
+                rtwm."agg_value" AS "{col_name}"
+            FROM "schools_school"
+            INNER JOIN "connection_statistics_schoolrealtimeregistration"
+                ON ("schools_school"."id" = "connection_statistics_schoolrealtimeregistration"."school_id")
+            {school_weekly_join}
+            LEFT OUTER JOIN "{realtime_weekly_metric_table}" rtwm
+                ON (
+                    "schools_school"."id" = rtwm."school_id"
+                    AND "schools_school"."country_id" = rtwm."country_id"
+                    AND rtwm."year" = {realtime_weekly_metric_year}
+                    AND rtwm."week" = {realtime_weekly_metric_week}
+                    AND rtwm."config_hash" = '{realtime_weekly_metric_config_hash}'
+                )
+            WHERE (
+                "schools_school"."deleted" IS NULL
+                AND "connection_statistics_schoolrealtimeregistration"."deleted" IS NULL
+                {country_condition}
+                {admin1_condition}
+                {school_condition}
+                {school_weekly_condition}
+                AND "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
+                AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date" < '{end_datetime_exclusive}')
+        ) AS sds
+        {school_weekly_outer_join}
+        """
+
+        kwargs = self.get_realtime_weekly_metric_info_query_kwargs()
+        return query.format(**kwargs)
+
+    def get_realtime_weekly_metric_exists_query(self):
+        query = """
+        SELECT EXISTS(
+            SELECT 1
+            FROM "{realtime_weekly_metric_table}" rtwm
+            INNER JOIN "schools_school"
+                ON "schools_school"."id" = rtwm."school_id"
+            {school_weekly_join}
+            WHERE "schools_school"."deleted" IS NULL
+                AND rtwm."year" = {realtime_weekly_metric_year}
+                AND rtwm."week" = {realtime_weekly_metric_week}
+                AND rtwm."config_hash" = '{realtime_weekly_metric_config_hash}'
+                {country_condition}
+                {admin1_condition}
+                {school_condition}
+                {school_weekly_condition}
+            LIMIT 1
+        ) AND NOT EXISTS(
+            SELECT 1
+            FROM "schools_school"
+            INNER JOIN "connection_statistics_schoolrealtimeregistration" rt_status
+                ON rt_status."school_id" = "schools_school"."id"
+            {school_weekly_join}
+            INNER JOIN "connection_statistics_schooldailystatus" t
+                ON t."school_id" = "schools_school"."id"
+                AND t."date" BETWEEN '{start_date}' AND '{end_date}'
+                AND t."live_data_source" IN ({live_source_types})
+                AND t."deleted" IS NULL
+                AND t."{col_name}" IS NOT NULL
+            LEFT JOIN "{realtime_weekly_metric_table}" rtwm
+                ON rtwm."school_id" = "schools_school"."id"
+                AND rtwm."country_id" = "schools_school"."country_id"
+                AND rtwm."year" = {realtime_weekly_metric_year}
+                AND rtwm."week" = {realtime_weekly_metric_week}
+                AND rtwm."config_hash" = '{realtime_weekly_metric_config_hash}'
+                AND rtwm."modified" >= t."modified"
+            WHERE "schools_school"."deleted" IS NULL
+                AND rt_status."deleted" IS NULL
+                AND rt_status."rt_registered" = True
+                AND rt_status."rt_registration_date" < '{end_datetime_exclusive}'
+                AND rtwm."id" IS NULL
+                {country_condition}
+                {admin1_condition}
+                {school_condition}
+                {school_weekly_condition}
+            LIMIT 1
+        ) AS has_aggregate_data
+        """
+
+        kwargs = self.get_realtime_weekly_metric_info_query_kwargs(include_case_conditions=False)
+        return query.format(**kwargs)
+
+    def get_realtime_weekly_metric_info_query_kwargs(self, include_case_conditions=True):
+        kwargs = copy.deepcopy(self.kwargs)
+
+        kwargs['table_name'] = 'sds'
+        kwargs['country_condition'] = ''
+        kwargs['admin1_condition'] = ''
+        kwargs['school_condition'] = ''
+        kwargs['school_weekly_join'] = ''
+        kwargs['school_weekly_condition'] = ''
+        kwargs['school_weekly_outer_join'] = ''
+        kwargs['benchmark_value_sql'] = ''
+        kwargs['realtime_weekly_metric_table'] = statistics_models.SchoolRealTimeWeeklyMetric._meta.db_table
+        kwargs['realtime_weekly_metric_year'] = date_utilities.get_year_from_date(kwargs['start_date'])
+        kwargs['realtime_weekly_metric_week'] = date_utilities.get_week_from_date(kwargs['start_date'])
+
+        if len(kwargs.get('admin1_ids', [])) > 0:
+            kwargs['admin1_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
+                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
+            )
+        elif len(kwargs.get('country_ids', [])) > 0:
+            kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
+                ','.join([str(country_id) for country_id in kwargs['country_ids']])
+            )
+
+        if len(kwargs['school_filters']) > 0:
+            kwargs['school_condition'] = ' AND ' + kwargs['school_filters']
+
+        if len(kwargs.get('school_real_time_filters', '')) > 0 or len(kwargs['school_static_filters']) > 0:
+            kwargs['school_weekly_join'] = """
+            INNER JOIN "connection_statistics_schoolweeklystatus"
+                ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
+            """
+            kwargs['school_weekly_condition'] = ''
+            if len(kwargs.get('school_real_time_filters', '')) > 0:
+                kwargs['school_weekly_condition'] += ' AND ' + kwargs['school_real_time_filters']
+            if len(kwargs['school_static_filters']) > 0:
+                kwargs['school_weekly_condition'] += ' AND ' + kwargs['school_static_filters']
+
+        if not include_case_conditions:
+            return kwargs
+
+        benchmark_value = kwargs['benchmark_value']
+        if benchmark_value is not None and isinstance(benchmark_value, str) and 'SQL:' in benchmark_value:
+            kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(
+                **kwargs) + ' AS benchmark_sql_value,'
+            kwargs['benchmark_value_sql'] = rewrite_sds_to_sws(
+                kwargs['benchmark_value_sql'], kwargs['col_name']
+            )
 
         legend_configs = kwargs['legend_configs']
         if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
@@ -1237,7 +1512,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 if len(values) > 0:
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
-                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
+                        sql_statement = rewrite_sds_to_sws(sql_statement, kwargs['col_name'])
                         label_cases.append(
                             'COUNT(DISTINCT CASE WHEN {sql} THEN sds.school_id ELSE NULL END) AS "{label}",'.format(
                                 sql=sql_statement, label=title))
@@ -1245,13 +1521,20 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     label_cases.append(
                         'COUNT(DISTINCT CASE WHEN sds.{col_name} IS NULL '
                         'THEN sds.school_id ELSE NULL END) AS "{label}",'.format(
-                            col_name=kwargs['col_name'],label=title))
+                            col_name=kwargs['col_name'], label=title))
 
             kwargs['case_conditions'] = ' '.join(label_cases)
 
-            kwargs['school_weekly_outer_join'] = """
-            INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
-            """
+            uses_school_weekly_status = (
+                'sws' in str(legend_configs) or
+                'sws.' in kwargs.get('case_conditions', '') or
+                'sws.' in kwargs.get('benchmark_value_sql', '')
+            )
+            if uses_school_weekly_status:
+                kwargs['school_weekly_outer_join'] = """
+                INNER JOIN "connection_statistics_schoolweeklystatus" sws
+                    ON sds."last_weekly_status_id" = sws."id"
+                """
         else:
             kwargs['case_conditions'] = """
             COUNT(DISTINCT CASE WHEN sds.{col_name} > {benchmark_value} THEN sds.school_id ELSE NULL END) AS "good",
@@ -1270,28 +1553,29 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 COUNT(DISTINCT CASE WHEN sds.{col_name} IS NULL THEN sds.school_id ELSE NULL END) AS "unknown",
                 """.format(**kwargs)
 
-        if len(kwargs.get('admin1_ids', [])) > 0:
-            kwargs['admin1_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
-                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
-            )
-        elif len(kwargs.get('country_ids', [])) > 0:
-            kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
-                ','.join([str(country_id) for country_id in kwargs['country_ids']])
-            )
+        return kwargs
 
-        if len(kwargs['school_filters']) > 0:
-            kwargs['school_condition'] = ' AND ' + kwargs['school_filters']
+    def can_use_realtime_weekly_metric_info_query(self):
+        if not self.kwargs.get('is_weekly', True):
+            return False
 
-        if len(kwargs['school_static_filters']) > 0:
-            kwargs['school_weekly_join'] = """
-            INNER JOIN "connection_statistics_schoolweeklystatus"
-                ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
-            """
-            kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
+        if self.kwargs.get('end_date') != self.kwargs.get('start_date') + timedelta(days=6):
+            return False
 
-        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
+        if self.kwargs.get('end_date') >= core_utilities.get_current_datetime_object().date():
+            return False
 
-        return query.format(**kwargs)
+        if not self.kwargs.get('realtime_weekly_metric_config_hash'):
+            return False
+
+        exists_response = db_utilities.sql_to_response(
+            self.get_realtime_weekly_metric_exists_query(),
+            label=self.__class__.__name__,
+            db_var=settings.READ_ONLY_DB_KEY,
+        )
+        has_aggregate_data = bool(exists_response and exists_response[-1].get('has_aggregate_data'))
+
+        return has_aggregate_data
 
     def get_school_view_info_query(self):
         query = """
@@ -1299,6 +1583,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             schools_school."name",
             schools_school."external_id",
             schools_school."giga_id_school",
+            schools_school."is_verified_school",
             CASE WHEN srr."rt_registered" = True THEN true ELSE false END AS is_data_synced,
             schools_school."admin1_id",
             adm1_metadata."name" AS admin1_name,
@@ -1319,13 +1604,13 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
                 ELSE 'unknown'
             END AS connectivity_status,
-            CASE WHEN srr."rt_registered" = True AND srr."rt_registration_date"::date <= '{end_date}' THEN true
+            CASE WHEN srr."rt_registered" = True AND srr."rt_registration_date" < '{end_datetime_exclusive}' THEN true
             ELSE false END AS is_rt_connected,
             {benchmark_value_sql}
             {case_conditions}
         FROM "schools_school" schools_school
         INNER JOIN public.locations_country c ON c."id" = schools_school."country_id"
-        INNER JOIN "connection_statistics_schoolweeklystatus" sws ON schools_school."last_weekly_status_id" = sws."id"
+        LEFT JOIN "connection_statistics_schoolweeklystatus" sws ON schools_school."last_weekly_status_id" = sws."id"
         LEFT JOIN public.locations_countryadminmetadata AS adm1_metadata
             ON adm1_metadata."id" = schools_school.admin1_id
             AND adm1_metadata."layer_name" = 'adm1'
@@ -1337,7 +1622,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         LEFT JOIN "connection_statistics_schoolrealtimeregistration" AS srr
             ON schools_school."id" = srr."school_id"
             AND srr."deleted" IS NULL
-            AND srr."rt_registration_date"::date <= '{end_date}'
+            AND srr."rt_registration_date" < '{end_datetime_exclusive}'
         LEFT JOIN (
             SELECT "schools_school"."id" AS school_id,
                 {col_function} AS "{col_name}"
@@ -1361,18 +1646,24 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             adm1_metadata."name", adm1_metadata."description_ui_label",
             adm2_metadata."name", adm2_metadata."description_ui_label",
             c."name", adm1_metadata."giga_id_admin", adm2_metadata."giga_id_admin",
-            sds."{col_name}", sws."download_speed_benchmark"
-        ORDER BY schools_school."id" ASC
-        """
+            sds."{col_name}", sws."id", sws."download_speed_benchmark"
+        ORDER BY schools_school."id" ASC \
+                """
 
         kwargs = copy.deepcopy(self.kwargs)
         kwargs['ids'] = ','.join(kwargs['school_ids'])
 
+        if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+            kwargs['table_name'] = 'sds'
+
         kwargs['benchmark_value_sql'] = ''
         benchmark_value = kwargs['benchmark_value']
-        if benchmark_value and 'SQL:' in benchmark_value:
+        if benchmark_value is not None and isinstance(benchmark_value, str) and 'SQL:' in benchmark_value:
             kwargs['benchmark_value_sql'] = benchmark_value.replace('SQL:', '').format(
                 **kwargs) + ' AS benchmark_sql_value,'
+            kwargs['benchmark_value_sql'] = rewrite_sds_to_sws(
+                kwargs['benchmark_value_sql'], kwargs['col_name']
+            )
 
         legend_configs = kwargs['legend_configs']
         if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
@@ -1384,10 +1675,14 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 if len(values) > 0:
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
-                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
+                        sql_statement = rewrite_sds_to_sws(
+                            sql_statement, kwargs['col_name']
+                        )
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
-                    label_cases.append("ELSE '{label}'".format(label=title))
+                    if not any(c.startswith("ELSE ") for c in label_cases):
+                        label_cases.append("ELSE '{label}'".format(label=title))
 
             kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS live_avg_connectivity'
         else:
@@ -1418,7 +1713,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         query = """
         SELECT sws.*
         FROM "schools_school"
-        INNER JOIN connection_statistics_schoolweeklystatus sws
+        LEFT JOIN connection_statistics_schoolweeklystatus sws
             ON "schools_school"."last_weekly_status_id" = sws."id"
         WHERE "schools_school"."deleted" IS NULL
             AND "schools_school"."id" IN ({ids})
@@ -1469,7 +1764,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             {school_weekly_condition}
             "connection_statistics_schoolrealtimeregistration"."deleted" IS NULL
             AND "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
-            AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date"::date <= '{end_date}'
+            AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date" < '{end_datetime_exclusive}'
             AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
             AND t."live_data_source" IN ({live_source_types})
             AND t."deleted" IS NULL
@@ -1518,7 +1813,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs = copy.deepcopy(self.kwargs)
 
         # Get the daily connectivity_speed for the given country from SchoolDailyStatus model
-        data = db_utilities.sql_to_response(self.get_avg_query(**kwargs), label=self.__class__.__name__, db_var=settings.READ_ONLY_DB_KEY)
+        data = db_utilities.sql_to_response(self.get_avg_query(**kwargs), label=self.__class__.__name__,
+                                            db_var=settings.READ_ONLY_DB_KEY)
 
         # Generate the graph data in the desired format
         graph_data = []
@@ -1580,18 +1876,19 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
     def get_static_info_query(self, query_labels):
         query = """
-        SELECT {label_case_statements}
-            COUNT(DISTINCT CASE WHEN {table_name}."{col_name}" IS NOT NULL THEN "schools_school"."id" ELSE NULL END)
-            AS "total_schools"
-        FROM "schools_school"
-        INNER JOIN connection_statistics_schoolweeklystatus sws ON "schools_school"."last_weekly_status_id" = sws."id"
-        {school_weekly_join}
-        WHERE "schools_school"."deleted" IS NULL
-        {country_condition}
-        {admin1_condition}
-        {school_condition}
-        {school_weekly_condition}
-        """
+                SELECT {label_case_statements}
+                    COUNT (DISTINCT CASE WHEN {table_name}."{col_name}" IS NOT NULL THEN "schools_school"."id" ELSE NULL END)
+                    AS "total_schools"
+                FROM "schools_school"
+                    INNER JOIN connection_statistics_schoolweeklystatus sws
+                ON "schools_school"."last_weekly_status_id" = sws."id"
+                    {school_weekly_join}
+                WHERE "schools_school"."deleted" IS NULL
+                    {country_condition}
+                    {admin1_condition}
+                    {school_condition}
+                    {school_weekly_condition} \
+                """
 
         kwargs = copy.deepcopy(self.kwargs)
 
@@ -1626,6 +1923,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         parameter_col_type = kwargs['parameter_col'].get('type', 'str').lower()
         kwargs['table_name'] = kwargs['parameter_col'].get('table_name', 'sws')
         is_sql_value = False
+        has_remainder = False
 
         for title, values_and_label in legend_configs.items():
             values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
@@ -1636,7 +1934,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             if len(values) > 0:
                 is_sql_value = 'SQL:' in values[0]
                 if is_sql_value:
-                    sql_statement = str(','.join(values)).replace('SQL:', '').format(
+                    sql_statement = ' AND '.join(values).replace('SQL:', '').format(
                         table_name=kwargs['table_name'],
                         col_name=kwargs['col_name'],
                     )
@@ -1676,7 +1974,12 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                         ))
                 else:
                     values = set(values_l)
-                    if parameter_col_type == 'str':
+                    if not values:
+                        label_cases.append('0 AS "{label}",'.format(label=label))
+                    elif has_remainder:
+                        label_cases.append('0 AS "{label}",'.format(label=label))
+                    elif parameter_col_type == 'str':
+                        has_remainder = True
                         label_cases.append(
                             'COUNT(DISTINCT CASE WHEN LOWER({table_name}."{col_name}") NOT IN ({value}) '
                             'THEN schools_school."id" ELSE NULL END) AS "{label}",'.format(
@@ -1686,6 +1989,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                                 value=','.join(["'" + str(v).lower() + "'" for v in values])
                             ))
                     elif parameter_col_type == 'int':
+                        has_remainder = True
                         label_cases.append(
                             'COUNT(DISTINCT CASE WHEN {table_name}."{col_name}" NOT IN ({value}) '
                             'THEN schools_school."id" ELSE NULL END) AS "{label}",'.format(
@@ -1701,29 +2005,28 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
     def get_static_school_view_info_query(self):
         query = """
-        SELECT schools_school."id",
-            schools_school."name",
-            schools_school."external_id",
-            schools_school."giga_id_school",
-            schools_school."country_id",
-            c."name" AS country_name,
-            schools_school."admin1_id",
-            adm1_metadata."name" AS admin1_name,
-            adm1_metadata."giga_id_admin" AS admin1_code,
-            adm1_metadata."description_ui_label" AS admin1_description_ui_label,
-            schools_school."admin2_id",
-            adm2_metadata."name" AS admin2_name,
-            adm2_metadata."giga_id_admin" AS admin2_code,
-            adm2_metadata."description_ui_label" AS admin2_description_ui_label,
-            schools_school."environment",
-            schools_school."education_level",
-            {table_name}."{col_name}" AS field_value,
-            {label_case_statements}
-            ST_AsGeoJSON(ST_Transform(schools_school."geopoint", 4326)) AS geopoint,
-            CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
-                WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
-                ELSE 'unknown'
-            END as connectivity_status
+                SELECT schools_school."id",
+                       schools_school."name",
+                       schools_school."external_id",
+                       schools_school."giga_id_school",
+                       schools_school."is_verified_school",
+                       schools_school."country_id",
+                       c."name"                             AS country_name,
+                       schools_school."admin1_id",
+                       adm1_metadata."name"                 AS admin1_name,
+                       adm1_metadata."giga_id_admin"        AS admin1_code,
+                       adm1_metadata."description_ui_label" AS admin1_description_ui_label,
+                       schools_school."admin2_id",
+                       adm2_metadata."name"                 AS admin2_name,
+                       adm2_metadata."giga_id_admin"        AS admin2_code,
+                       adm2_metadata."description_ui_label" AS admin2_description_ui_label,
+                       schools_school."environment",
+                       schools_school."education_level", {table_name}."{col_name}" AS field_value, {label_case_statements}
+                    ST_AsGeoJSON(ST_Transform(schools_school."geopoint", 4326)) AS geopoint, CASE WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 'connected'
+                    WHEN schools_school.connectivity_status = 'no' THEN 'not_connected'
+                    ELSE 'unknown'
+                END
+                AS connectivity_status
         FROM "schools_school"
         INNER JOIN locations_country c ON c.id = schools_school.country_id
         INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
@@ -1736,8 +2039,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             AND adm2_metadata."layer_name" = 'adm2'
             AND adm2_metadata."deleted" IS NULL
         WHERE "schools_school"."id" IN ({ids})
-            AND c."deleted" IS NULL
-        """
+            AND c."deleted" IS NULL \
+                """
 
         kwargs = copy.deepcopy(self.kwargs)
         kwargs['ids'] = ','.join(kwargs['school_ids'])
@@ -1755,7 +2058,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             if len(values) > 0:
                 is_sql_value = 'SQL:' in values[0]
                 if is_sql_value:
-                    sql_statement = str(','.join(values)).replace('SQL:', '').format(
+                    sql_statement = ' AND '.join(values).replace('SQL:', '').format(
                         table_name=kwargs['table_name'],
                         col_name=kwargs['col_name'],
                     )
@@ -1779,7 +2082,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                                 value=','.join([str(v) for v in values])
                             ))
             else:
-                label_cases.append("ELSE '{label}'".format(label=title))
+                if not any(c.startswith("ELSE ") for c in label_cases):
+                    label_cases.append("ELSE '{label}'".format(label=title))
 
         kwargs['label_case_statements'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status,'
 
@@ -1800,7 +2104,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             AND s.geopoint = (SELECT geopoint FROM schools_school WHERE id = {school_id})
         """.format(school_id=school_id)
 
-        schools_count = db_utilities.sql_to_response(count_query, label=self.__class__.__name__, db_var=settings.READ_ONLY_DB_KEY)
+        schools_count = db_utilities.sql_to_response(count_query, label=self.__class__.__name__,
+                                                     db_var=settings.READ_ONLY_DB_KEY)
         total_count = schools_count[0].get('count', 0) if schools_count else 0
         if total_count == 0:
             return response
@@ -1848,7 +2153,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             end_date=self.kwargs.get('end_date', core_utilities.get_current_datetime_object().date())
         )
 
-        sql_response = db_utilities.sql_to_response(query, label=self.__class__.__name__, db_var=settings.READ_ONLY_DB_KEY)
+        sql_response = db_utilities.sql_to_response(query, label=self.__class__.__name__,
+                                                    db_var=settings.READ_ONLY_DB_KEY)
         if sql_response:
             response['count'] = total_count
             response['school_ids'] = [r.get('id') for r in sql_response]
@@ -1922,6 +2228,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             self.kwargs['round_unit_value'] = unit_agg_str
 
             if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+                realtime_weekly_metric_requirement = build_live_weekly_requirement(data_layer_instance, data_sources)
 
                 self.kwargs.update({
                     'col_name': parameter_column_name,
@@ -1934,6 +2241,10 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     'parameter_col_function_sql': column_function_sql,
                     'is_reverse': data_layer_instance.is_reverse,
                     'legend_configs': legend_configs,
+                    'realtime_weekly_metric_config_hash': (
+                        realtime_weekly_metric_requirement['config_hash']
+                        if realtime_weekly_metric_requirement else None
+                    ),
                 })
 
                 if len(self.kwargs.get('school_ids', [])) > 0:
@@ -1963,7 +2274,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                             #     positive_speeds[str(info_panel_school['id'])]) > 0 else 0)
 
                             info_panel_school['live_avg'] = self.get_live_avg(
-                                parameter_col_function.get('name', 'avg'),
+                                (parameter_col_function or {}).get('name', 'avg'),
                                 positive_speeds[str(info_panel_school['id'])]
                             )
                             info_panel_school['graph_data'] = graph_data[str(info_panel_school['id'])]
@@ -1988,6 +2299,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                                 'convert_unit': self.kwargs.get('convert_unit'),
                                 'display_unit': display_unit,
                             }
+                            info_panel_school['layer_name'] = data_layer_instance.name
                             if request.query_params.get('include_same_location_schools') == 'true':
                                 info_panel_school['schools_at_same_location'] = self.get_school_ids_at_same_location(
                                     request,
@@ -2012,13 +2324,18 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     elif len(self.kwargs.get('country_ids', [])) > 0:
                         is_data_synced_qs = is_data_synced_qs.filter(school__country_id__in=self.kwargs['country_ids'])
 
-                    query_response = db_utilities.sql_to_response(self.get_info_query(),
+                    use_realtime_weekly_metric = self.can_use_realtime_weekly_metric_info_query()
+                    info_query = (
+                        self.get_realtime_weekly_metric_info_query()
+                        if use_realtime_weekly_metric else self.get_info_query()
+                    )
+                    query_response = db_utilities.sql_to_response(info_query,
                                                                   label=self.__class__.__name__,
                                                                   db_var=settings.READ_ONLY_DB_KEY)[-1]
 
                     graph_data, positive_speeds = self.generate_graph_data()
                     live_avg = self.get_live_avg(
-                        parameter_col_function.get('name', 'avg'),
+                        (parameter_col_function or {}).get('name', 'avg'),
                         positive_speeds
                     )
 
@@ -2027,7 +2344,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     benchmark_value_from_sql = query_response.get('benchmark_sql_value', None)
                     if benchmark_value_from_sql:
                         rounded_benchmark_value_int = round(
-                                eval(unit_agg_str.format(val=core_utilities.convert_to_int(benchmark_value_from_sql))), 2)
+                            eval(unit_agg_str.format(val=core_utilities.convert_to_int(benchmark_value_from_sql))), 2)
                         benchmark_value = str(benchmark_value_from_sql)
                     else:
                         rounded_benchmark_value_int = round(
@@ -2102,6 +2419,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                             info_panel_school['geopoint'] = json.loads(info_panel_school['geopoint'])
                             info_panel_school['statistics'] = list(filter(
                                 lambda s: s['school_id'] == info_panel_school['id'], statistics))[-1]
+                            info_panel_school['layer_name'] = data_layer_instance.name
+
                             if request.query_params.get('include_same_location_schools') == 'true':
                                 info_panel_school['schools_at_same_location'] = self.get_school_ids_at_same_location(
                                     request, info_panel_school.get('id'), info_panel_school.get('country_id')
@@ -2133,7 +2452,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
     custom_cache_control(
         public=True,
         max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE,
-        cache_status_codes=[rest_status.HTTP_200_OK,],
+        cache_status_codes=[rest_status.HTTP_200_OK, ],
     )
 ], name='dispatch')
 class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGenerator):
@@ -2152,35 +2471,29 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
     def get_live_map_query(self, env, request):
         query = """
-        WITH bounds AS (
-                SELECT {env} AS geom,
-                {env}::box2d AS b2d
-            ),
-            mvtgeom AS (
-                SELECT DISTINCT ST_AsMVTGeom(ST_Transform("schools_school".geopoint, 3857), bounds.b2d) AS geom,
-                    {random_select_list}
-                    "schools_school".id,
-                    True AS is_rt_connected,
-                    sds.{col_name} AS field_avg,
-                    {case_conditions}
-                    'connected' AS connectivity_status,
-                    (COUNT(*) OVER (PARTITION BY "schools_school".geopoint) > 1)
+                WITH bounds AS (SELECT {env} AS geom, {env}::box2d AS b2d
+                    ), mvtgeom AS (
+                SELECT DISTINCT ST_AsMVTGeom(ST_Transform("schools_school".geopoint, 3857), bounds.b2d) AS geom, {random_select_list}
+                    "schools_school".id, True AS is_rt_connected, sds.{col_name} AS field_avg, {case_conditions}
+                    'connected' AS connectivity_status, (COUNT (*) OVER (PARTITION BY "schools_school".geopoint) > 1)
                     AS has_multiple_school_on_same_lat_lng
                 FROM schools_school
-                INNER JOIN bounds ON ST_Intersects("schools_school".geopoint, ST_Transform(bounds.geom, 4326))
-                INNER JOIN (
+                    INNER JOIN bounds
+                ON ST_Intersects("schools_school".geopoint, ST_Transform(bounds.geom, 4326))
+                    INNER JOIN (
                     SELECT "schools_school"."id" AS school_id,
-                        "schools_school"."last_weekly_status_id",
-                        {col_function} AS "{col_name}"
+                    "schools_school"."last_weekly_status_id",
+                    {col_function} AS "{col_name}"
                     FROM "schools_school"
+                    INNER JOIN bounds ON ST_Intersects("schools_school".geopoint, ST_Transform(bounds.geom, 4326))
                     INNER JOIN connection_statistics_schoolrealtimeregistration rt_status ON
-                        rt_status."school_id" = "schools_school".id
+                    rt_status."school_id" = "schools_school".id
                     {school_weekly_join}
                     LEFT OUTER JOIN "connection_statistics_schooldailystatus" t ON (
-                        "schools_school"."id" = t."school_id"
-                        AND t."deleted" IS NULL
-                        AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
-                        AND t."live_data_source" IN ({live_source_types})
+                    "schools_school"."id" = t."school_id"
+                    AND t."deleted" IS NULL
+                    AND (t."date" BETWEEN '{start_date}' AND '{end_date}')
+                    AND t."live_data_source" IN ({live_source_types})
                     )
                     WHERE (
                         "schools_school"."deleted" IS NULL
@@ -2191,20 +2504,24 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                         {same_school_coords_condition}
                         {school_weekly_condition}
                         AND rt_status."rt_registered" = True
-                        AND rt_status."rt_registration_date"::date <= '{end_date}'
+                        AND rt_status."rt_registration_date" < '{end_datetime_exclusive}'
                     )
                     GROUP BY "schools_school"."id"
-                ) AS sds ON sds.school_id = "schools_school".id
-                {school_weekly_outer_join}
+                    ) AS sds ON sds.school_id = "schools_school".id
+                    {school_weekly_outer_join}
                 WHERE "schools_school"."deleted" IS NULL
                     {random_order}
                     {limit_condition}
-            )
-            SELECT ST_AsMVT(DISTINCT mvtgeom.*) FROM mvtgeom;
-        """
+                    )
+                SELECT COALESCE(NULLIF(tile.mvt, ''::bytea), {empty_mvt_layer})
+                FROM (SELECT ST_AsMVT(DISTINCT mvtgeom.*, '{mvt_layer}') AS mvt
+                      FROM mvtgeom) tile; \
+                """
 
         kwargs = copy.deepcopy(self.kwargs)
 
+        kwargs['mvt_layer'] = kwargs.get('mvt_layer', 'default')
+        kwargs['empty_mvt_layer'] = account_utilities.get_empty_mvt_layer_sql(kwargs['mvt_layer'])
         kwargs['country_condition'] = ''
         kwargs['admin1_condition'] = ''
         kwargs['school_condition'] = ''
@@ -2223,8 +2540,12 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         add_random_condition = True
 
         legend_configs = kwargs['legend_configs']
+        if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+            kwargs['table_name'] = 'sds'
+
         if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
             label_cases = []
+            uses_school_weekly_status = False
             for title, values_and_label in legend_configs.items():
                 values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
                                      values_and_label.get('values', [])))
@@ -2232,15 +2553,22 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                 if len(values) > 0:
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
-                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
+                        sql_statement = account_utilities.rewrite_weekly_status_sql(sql_statement, entity_name='school')
+                        uses_school_weekly_status = uses_school_weekly_status or 'sws.' in sql_statement
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
-                    label_cases.append("ELSE '{label}'".format(label=title))
+                    if not any(c.startswith("ELSE ") for c in label_cases):
+                        label_cases.append("ELSE '{label}'".format(label=title))
 
             kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status,'
-            kwargs['school_weekly_outer_join'] = """
-            INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
-            """
+            if (
+                kwargs.get('layer_type') != accounts_models.DataLayer.LAYER_TYPE_LIVE
+                or uses_school_weekly_status
+            ):
+                kwargs['school_weekly_outer_join'] = """
+                INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
+                """
         else:
             kwargs['case_conditions'] = """
                 CASE WHEN sds.{col_name} >  {benchmark_value} THEN 'good'
@@ -2299,12 +2627,16 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         if len(kwargs['school_filters']) > 0:
             kwargs['school_condition'] += ' AND ' + kwargs['school_filters']
 
-        if len(kwargs['school_static_filters']) > 0:
+        if len(kwargs.get('school_real_time_filters', '')) > 0 or len(kwargs['school_static_filters']) > 0:
             kwargs['school_weekly_join'] = """
             INNER JOIN "connection_statistics_schoolweeklystatus"
                 ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
             """
-            kwargs['school_weekly_condition'] = ' AND ' + kwargs['school_static_filters']
+            kwargs['school_weekly_condition'] = ''
+            if len(kwargs.get('school_real_time_filters', '')) > 0:
+                kwargs['school_weekly_condition'] += ' AND ' + kwargs['school_real_time_filters']
+            if len(kwargs['school_static_filters']) > 0:
+                kwargs['school_weekly_condition'] += ' AND ' + kwargs['school_static_filters']
 
         if add_random_condition:
             if 'limit' in request.query_params:
@@ -2324,69 +2656,340 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
         return query.format(**kwargs)
 
+    def get_realtime_weekly_metric_map_query(self, env, request):
+        query = """
+        WITH bounds AS (
+                SELECT {env} AS geom,
+                {env}::box2d AS b2d
+            ),
+            mvtgeom AS (
+                SELECT DISTINCT ST_AsMVTGeom(ST_Transform("schools_school".geopoint, 3857), bounds.b2d) AS geom,
+                    {random_select_list}
+                    "schools_school".id,
+                    True AS is_rt_connected,
+                    sds.{col_name} AS field_avg,
+                    {case_conditions}
+                    'connected' AS connectivity_status,
+                    (COUNT(*) OVER (PARTITION BY "schools_school".geopoint) > 1)
+                    AS has_multiple_school_on_same_lat_lng
+                FROM schools_school
+                INNER JOIN bounds ON ST_Intersects("schools_school".geopoint, ST_Transform(bounds.geom, 4326))
+                INNER JOIN (
+                    SELECT "schools_school"."id" AS school_id,
+                        "schools_school"."last_weekly_status_id",
+                        rtwm."agg_value" AS "{col_name}"
+                    FROM "schools_school"
+                    INNER JOIN connection_statistics_schoolrealtimeregistration rt_status ON
+                        rt_status."school_id" = "schools_school".id
+                    {school_weekly_join}
+                    LEFT OUTER JOIN "{realtime_weekly_metric_table}" rtwm ON (
+                        "schools_school"."id" = rtwm."school_id"
+                        AND "schools_school"."country_id" = rtwm."country_id"
+                        AND rtwm."year" = {realtime_weekly_metric_year}
+                        AND rtwm."week" = {realtime_weekly_metric_week}
+                        AND rtwm."config_hash" = '{realtime_weekly_metric_config_hash}'
+                    )
+                    WHERE (
+                        "schools_school"."deleted" IS NULL
+                        AND rt_status."deleted" IS NULL
+                        {country_condition}
+                        {admin1_condition}
+                        {school_condition}
+                        {same_school_coords_condition}
+                        {school_weekly_condition}
+                        AND rt_status."rt_registered" = True
+                        AND rt_status."rt_registration_date" < '{end_datetime_exclusive}'
+                    )
+                ) AS sds ON sds.school_id = "schools_school".id
+                {school_weekly_outer_join}
+                WHERE "schools_school"."deleted" IS NULL
+                    {random_order}
+                    {limit_condition}
+            )
+            SELECT COALESCE(NULLIF(tile.mvt, ''::bytea), {empty_mvt_layer})
+            FROM (
+                SELECT ST_AsMVT(DISTINCT mvtgeom.*, '{mvt_layer}') AS mvt
+                FROM mvtgeom
+            ) tile;
+        """
+
+        kwargs = self.get_live_map_query_kwargs(env, request)
+        kwargs['mvt_layer'] = kwargs.get('mvt_layer', 'default')
+        kwargs['empty_mvt_layer'] = account_utilities.get_empty_mvt_layer_sql(kwargs['mvt_layer'])
+        kwargs['realtime_weekly_metric_table'] = statistics_models.SchoolRealTimeWeeklyMetric._meta.db_table
+        kwargs['realtime_weekly_metric_year'] = date_utilities.get_year_from_date(kwargs['start_date'])
+        kwargs['realtime_weekly_metric_week'] = date_utilities.get_week_from_date(kwargs['start_date'])
+        return query.format(**kwargs)
+
+    def get_realtime_weekly_metric_map_exists_query(self):
+        query = """
+        SELECT EXISTS(
+            SELECT 1
+            FROM "{realtime_weekly_metric_table}" rtwm
+            INNER JOIN "schools_school"
+                ON "schools_school"."id" = rtwm."school_id"
+            {school_weekly_join}
+            WHERE "schools_school"."deleted" IS NULL
+                AND rtwm."year" = {realtime_weekly_metric_year}
+                AND rtwm."week" = {realtime_weekly_metric_week}
+                AND rtwm."config_hash" = '{realtime_weekly_metric_config_hash}'
+                {country_condition}
+                {admin1_condition}
+                {school_condition}
+                {school_weekly_condition}
+            LIMIT 1
+        ) AND NOT EXISTS(
+            SELECT 1
+            FROM "schools_school"
+            INNER JOIN "connection_statistics_schoolrealtimeregistration" rt_status
+                ON rt_status."school_id" = "schools_school"."id"
+            {school_weekly_join}
+            INNER JOIN "connection_statistics_schooldailystatus" t
+                ON t."school_id" = "schools_school"."id"
+                AND t."date" BETWEEN '{start_date}' AND '{end_date}'
+                AND t."live_data_source" IN ({live_source_types})
+                AND t."deleted" IS NULL
+                AND t."{col_name}" IS NOT NULL
+            LEFT JOIN "{realtime_weekly_metric_table}" rtwm
+                ON rtwm."school_id" = "schools_school"."id"
+                AND rtwm."country_id" = "schools_school"."country_id"
+                AND rtwm."year" = {realtime_weekly_metric_year}
+                AND rtwm."week" = {realtime_weekly_metric_week}
+                AND rtwm."config_hash" = '{realtime_weekly_metric_config_hash}'
+                AND rtwm."modified" >= t."modified"
+            WHERE "schools_school"."deleted" IS NULL
+                AND rt_status."deleted" IS NULL
+                AND rt_status."rt_registered" = True
+                AND rt_status."rt_registration_date" < '{end_datetime_exclusive}'
+                AND rtwm."id" IS NULL
+                {country_condition}
+                {admin1_condition}
+                {school_condition}
+                {school_weekly_condition}
+            LIMIT 1
+        ) AS has_aggregate_data
+        """
+
+        kwargs = self.get_live_map_query_kwargs(None, None, include_map_controls=False)
+        kwargs['realtime_weekly_metric_table'] = statistics_models.SchoolRealTimeWeeklyMetric._meta.db_table
+        kwargs['realtime_weekly_metric_year'] = date_utilities.get_year_from_date(kwargs['start_date'])
+        kwargs['realtime_weekly_metric_week'] = date_utilities.get_week_from_date(kwargs['start_date'])
+        return query.format(**kwargs)
+
+    def can_use_realtime_weekly_metric_map_query(self):
+        if not self.kwargs.get('is_weekly', True):
+            return False
+
+        if self.kwargs.get('end_date') != self.kwargs.get('start_date') + timedelta(days=6):
+            return False
+
+        if self.kwargs.get('end_date') >= core_utilities.get_current_datetime_object().date():
+            return False
+
+        if not self.kwargs.get('realtime_weekly_metric_config_hash'):
+            return False
+
+        exists_response = db_utilities.sql_to_response(
+            self.get_realtime_weekly_metric_map_exists_query(),
+            label=self.__class__.__name__,
+            db_var=settings.READ_ONLY_DB_KEY,
+        )
+        has_aggregate_data = bool(exists_response and exists_response[-1].get('has_aggregate_data'))
+
+        return has_aggregate_data
+
+    def get_live_map_query_kwargs(self, env, request, include_map_controls=True):
+        kwargs = copy.deepcopy(self.kwargs)
+
+        kwargs['country_condition'] = ''
+        kwargs['admin1_condition'] = ''
+        kwargs['school_condition'] = ''
+
+        kwargs['school_weekly_join'] = ''
+        kwargs['school_weekly_condition'] = ''
+        kwargs['school_weekly_outer_join'] = ''
+
+        kwargs['env'] = self.envelope_to_bounds_sql(env) if env else ''
+
+        kwargs['limit_condition'] = ''
+        kwargs['random_order'] = ''
+        kwargs['random_select_list'] = ''
+        kwargs['same_school_coords_condition'] = ''
+
+        add_random_condition = True
+
+        legend_configs = kwargs['legend_configs']
+        if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+            kwargs['table_name'] = 'sds'
+
+        if len(legend_configs) > 0 and 'SQL:' in str(legend_configs):
+            label_cases = []
+            uses_school_weekly_status = False
+            for title, values_and_label in legend_configs.items():
+                values = list(filter(lambda val: val if not core_utilities.is_blank_string(val) else None,
+                                     values_and_label.get('values', [])))
+
+                if len(values) > 0:
+                    is_sql_value = 'SQL:' in values[0]
+                    if is_sql_value:
+                        sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
+                        sql_statement = account_utilities.rewrite_weekly_status_sql(
+                            sql_statement, entity_name='school'
+                        )
+                        uses_school_weekly_status = uses_school_weekly_status or 'sws.' in sql_statement
+                        label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
+                else:
+                    if not any(case.startswith('ELSE ') for case in label_cases):
+                        label_cases.append("ELSE '{label}'".format(label=title))
+
+            kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status,'
+            if uses_school_weekly_status:
+                kwargs['school_weekly_outer_join'] = """
+                INNER JOIN "connection_statistics_schoolweeklystatus" sws
+                    ON sds."last_weekly_status_id" = sws."id"
+                """
+        else:
+            kwargs['case_conditions'] = """
+                CASE WHEN sds.{col_name} >  {benchmark_value} THEN 'good'
+                    WHEN sds.{col_name} < {benchmark_value} AND sds.{col_name} >= {base_benchmark} THEN 'moderate'
+                    WHEN sds.{col_name} < {base_benchmark}  THEN 'bad'
+                    ELSE 'unknown'
+                END AS field_status,
+            """.format(**kwargs)
+
+            if kwargs['is_reverse'] is True:
+                kwargs['case_conditions'] = """
+                CASE WHEN sds.{col_name} < {benchmark_value}  THEN 'good'
+                    WHEN sds.{col_name} >= {benchmark_value} AND sds.{col_name} <= {base_benchmark} THEN 'moderate'
+                    WHEN sds.{col_name} > {base_benchmark} THEN 'bad'
+                    ELSE 'unknown'
+                END AS field_status,
+                """.format(**kwargs)
+
+        if len(kwargs.get('school_ids', [])) > 0:
+            add_random_condition = False
+            kwargs['school_condition'] = 'AND "schools_school"."id" IN ({0})'.format(
+                ','.join([str(school_id) for school_id in kwargs['school_ids']])
+            )
+        elif len(kwargs.get('admin1_ids', [])) > 0:
+            if settings.ADMIN_MAP_API_SAMPLING_LIMIT is not None:
+                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.ADMIN_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
+                add_random_condition = False
+
+            kwargs['admin1_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
+                ','.join([str(admin1_id) for admin1_id in kwargs['admin1_ids']])
+            )
+        elif len(kwargs.get('country_ids', [])) > 0:
+            if settings.COUNTRY_MAP_API_SAMPLING_LIMIT:
+                kwargs['MAP_API_SAMPLING_LIMIT'] = settings.COUNTRY_MAP_API_SAMPLING_LIMIT
+                add_random_condition = True
+            else:
+                add_random_condition = False
+
+            kwargs['country_condition'] = 'AND "schools_school"."country_id" IN ({0})'.format(
+                ','.join([str(country_id) for country_id in kwargs['country_ids']])
+            )
+
+        if kwargs.get('exclude_schools_same_coords_except_id'):
+            kwargs['same_school_coords_condition'] = f"""
+                                        AND (
+                                            schools_school.id = {kwargs['exclude_schools_same_coords_except_id']}
+                                            OR NOT ST_Equals(
+                                                schools_school.geopoint,
+                                                (SELECT geopoint FROM schools_school WHERE id = {kwargs['exclude_schools_same_coords_except_id']})
+                                            )
+                                        )
+                                    """
+
+        if len(kwargs['school_filters']) > 0:
+            kwargs['school_condition'] += ' AND ' + kwargs['school_filters']
+
+        if len(kwargs.get('school_real_time_filters', '')) > 0 or len(kwargs['school_static_filters']) > 0:
+            kwargs['school_weekly_join'] = """
+            INNER JOIN "connection_statistics_schoolweeklystatus"
+                ON "schools_school"."last_weekly_status_id" = "connection_statistics_schoolweeklystatus"."id"
+            """
+            kwargs['school_weekly_condition'] = ''
+            if len(kwargs.get('school_real_time_filters', '')) > 0:
+                kwargs['school_weekly_condition'] += ' AND ' + kwargs['school_real_time_filters']
+            if len(kwargs['school_static_filters']) > 0:
+                kwargs['school_weekly_condition'] += ' AND ' + kwargs['school_static_filters']
+
+        if include_map_controls and add_random_condition:
+            if 'limit' in request.query_params:
+                limit = request.query_params['limit']
+                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+            elif kwargs.get('MAP_API_SAMPLING_LIMIT'):
+                limit = kwargs['MAP_API_SAMPLING_LIMIT']
+                kwargs['random_order'] = 'ORDER BY random()'
+            else:
+                limit = '50000'
+                kwargs['random_order'] = 'ORDER BY random()' if int(request.query_params.get('z', '0')) == 2 else ''
+
+            kwargs['limit_condition'] = 'LIMIT ' + str(limit)
+            kwargs['random_select_list'] = 'random(),'
+
+        kwargs['col_function'] = kwargs['parameter_col_function_sql'].format(**kwargs)
+
+        return kwargs
+
     def envelope_to_sql(self, env, request):
         if self.kwargs['layer_type'] == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+            if self.kwargs.get('use_realtime_weekly_metric_map_query'):
+                return self.get_realtime_weekly_metric_map_query(env, request)
             return self.get_live_map_query(env, request)
         return self.get_static_map_query(env, request)
 
     def get_static_map_query(self, env, request):
         query = """
-        WITH
-        bounds AS (
-            SELECT {env} AS geom,
-                   {env}::box2d AS b2d
-        ),
-        prioritized_schools AS (
-            SELECT
-                schools_school.id,
-                schools_school.geopoint,
-                schools_school.connectivity_status,
-                {table_name}."{col_name}" AS field_value,
-                ROW_NUMBER() OVER (
+                WITH bounds AS (SELECT {env} AS geom, {env}::box2d AS b2d
+                    ), prioritized_schools AS (
+                SELECT
+                    schools_school.id, schools_school.geopoint, schools_school.connectivity_status, {table_name}."{col_name}" AS field_value, ROW_NUMBER() OVER (
                     PARTITION BY schools_school.geopoint
                     ORDER BY
-                        CASE
-                            WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 1
-                            WHEN schools_school.connectivity_status = 'no' THEN 2
-                            ELSE 3
-                        END ASC,
-                        schools_school.id ASC
-                ) AS priority_rank,
-                (COUNT(*) OVER (PARTITION BY schools_school.geopoint) > 1) AS has_multiple_school_on_same_lat_lng
-            FROM schools_school
-            INNER JOIN bounds ON ST_Intersects(schools_school.geopoint, ST_Transform(bounds.geom, 4326))
-            INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
-            {school_weekly_join}
-            WHERE schools_school."deleted" IS NULL
-            {country_condition}
-            {admin1_condition}
-            {school_condition}
-            {same_school_coords_condition}
-            {school_weekly_condition}
-        ),
-        sampled_schools AS (
-            SELECT id, geopoint, field_value, has_multiple_school_on_same_lat_lng
-            FROM prioritized_schools
-            WHERE priority_rank = 1
-            {random_order}
-            {limit_condition}
-        ),
-        mvtgeom AS (
-            SELECT DISTINCT ST_AsMVTGeom(ST_Transform(sampled_schools.geopoint, 3857), bounds.b2d) AS geom,
-                {random_select_list}
-                sampled_schools.id,
-                sampled_schools.field_value,
-                sampled_schools.has_multiple_school_on_same_lat_lng,
-                'connected' AS connectivity_status,
-                {label_case_statements}
-            FROM sampled_schools
-            CROSS JOIN bounds
-        )
-        SELECT ST_AsMVT(DISTINCT mvtgeom.*) FROM mvtgeom;
-        """
+                    CASE
+                    WHEN schools_school.connectivity_status IN ('good', 'moderate') THEN 1
+                    WHEN schools_school.connectivity_status = 'no' THEN 2
+                    ELSE 3
+                    END ASC, schools_school.id ASC
+                    ) AS priority_rank, (COUNT (*) OVER (PARTITION BY schools_school.geopoint) > 1) AS has_multiple_school_on_same_lat_lng
+                FROM schools_school
+                    INNER JOIN bounds
+                ON ST_Intersects(schools_school.geopoint, ST_Transform(bounds.geom, 4326))
+                    INNER JOIN connection_statistics_schoolweeklystatus sws ON schools_school.last_weekly_status_id = sws.id
+                    {school_weekly_join}
+                WHERE schools_school."deleted" IS NULL
+                    {country_condition}
+                    {admin1_condition}
+                    {school_condition}
+                    {same_school_coords_condition}
+                    {school_weekly_condition}
+                    )
+                    , sampled_schools AS (
+                SELECT id, geopoint, field_value, has_multiple_school_on_same_lat_lng
+                FROM prioritized_schools
+                WHERE priority_rank = 1
+                    {random_order}
+                    {limit_condition}
+                    )
+                    , mvtgeom AS (
+                SELECT DISTINCT ST_AsMVTGeom(ST_Transform(sampled_schools.geopoint, 3857), bounds.b2d) AS geom, {random_select_list}
+                    sampled_schools.id, sampled_schools.field_value, sampled_schools.has_multiple_school_on_same_lat_lng, 'connected' AS connectivity_status, {label_case_statements}
+                FROM sampled_schools
+                    CROSS JOIN bounds
+                    )
+                SELECT COALESCE(NULLIF(tile.mvt, ''::bytea), {empty_mvt_layer})
+                FROM (SELECT ST_AsMVT(DISTINCT mvtgeom.*, '{mvt_layer}') AS mvt
+                      FROM mvtgeom) tile; \
+                """
 
         kwargs = copy.deepcopy(self.kwargs)
 
+        kwargs['mvt_layer'] = kwargs.get('mvt_layer', 'default')
+        kwargs['empty_mvt_layer'] = account_utilities.get_empty_mvt_layer_sql(kwargs['mvt_layer'])
         kwargs['country_condition'] = ''
         kwargs['admin1_condition'] = ''
         kwargs['school_condition'] = ''
@@ -2428,6 +3031,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             kwargs['country_condition'] = 'AND schools_school."country_id" IN ({0})'.format(
                 ','.join([str(country_id) for country_id in kwargs['country_ids']])
             )
+
         if kwargs.get('exclude_schools_same_coords_except_id'):
             kwargs['same_school_coords_condition'] = f"""
                                         AND (
@@ -2462,7 +3066,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             if len(values) > 0:
                 is_sql_value = 'SQL:' in values[0]
                 if is_sql_value:
-                    sql_statement = str(','.join(values)).replace('SQL:', '').format(
+                    sql_statement = ' AND '.join(values).replace('SQL:', '').format(
                         table_name=kwargs['table_name'],
                         col_name=kwargs['col_name'],
                     )
@@ -2486,10 +3090,20 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                                 value=','.join([str(v) for v in values])
                             ))
             else:
-                label_cases.append("ELSE '{label}'".format(label=title))
+                if not any(c.startswith("ELSE ") for c in label_cases):
+                    label_cases.append("ELSE '{label}'".format(label=title))
+
+        when_cases = [case for case in label_cases if not case.startswith("ELSE ")]
+        fallback_cases = [case for case in label_cases if case.startswith("ELSE ")]
 
         # Replace table references with sampled_schools.field_value for use in mvtgeom CTE
-        label_case_statements_str = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
+        if when_cases:
+            label_case_statements_str = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
+        else:
+            fallback_label = fallback_cases[0][5:] if fallback_cases else "'unknown'"
+            label_case_statements_str = '{fallback_label} AS field_status'.format(
+                fallback_label=fallback_label
+            )
         label_case_statements_str = label_case_statements_str.replace(
             f'{kwargs["table_name"]}."{kwargs["col_name"]}"',
             'sampled_schools.field_value'
@@ -2509,6 +3123,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
 
             kwargs['limit_condition'] = 'LIMIT ' + str(limit)
             kwargs['random_select_list'] = 'random(),'
+
         return query.format(**kwargs)
 
     def cache_enabled(self, data_layer_instance):
@@ -2524,7 +3139,8 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             ):
                 return False
 
-        date = core_utilities.get_current_datetime_object().date() - timedelta(weeks=settings.LIVE_LAYER_CACHE_FOR_WEEKS)
+        date = core_utilities.get_current_datetime_object().date() - timedelta(
+            weeks=settings.LIVE_LAYER_CACHE_FOR_WEEKS)
         if self.kwargs['start_date'] >= date:
             return True
 
@@ -2571,6 +3187,8 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
             legend_configs = self.get_legend_configs(data_layer_instance)
 
             if data_layer_instance.type == accounts_models.DataLayer.LAYER_TYPE_LIVE:
+                realtime_weekly_metric_requirement = build_live_weekly_requirement(data_layer_instance, data_sources)
+
                 self.kwargs.update({
                     'col_name': parameter_column_name,
                     'benchmark_value': benchmark_value,
@@ -2582,7 +3200,14 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     'parameter_col_function_sql': column_function_sql,
                     'layer_type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
                     'legend_configs': legend_configs,
+                    'realtime_weekly_metric_config_hash': (
+                        realtime_weekly_metric_requirement['config_hash']
+                        if realtime_weekly_metric_requirement else None
+                    ),
                 })
+                self.kwargs['use_realtime_weekly_metric_map_query'] = (
+                    self.can_use_realtime_weekly_metric_map_query()
+                )
             else:
                 self.kwargs.update({
                     'col_name': parameter_column_name,
@@ -2597,7 +3222,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     cache_manager.set(cache_key, response, request_path=request_path,
                                       soft_timeout=settings.CACHE_CONTROL_MAX_AGE)
             except Exception as ex:
-                logger.error('Exception occurred for school connectivity tiles endpoint: {}'.format(ex))
+                logger.error('Exception occurred for data layer tiles endpoint: {}'.format(ex))
                 response = Response({'error': 'An error occurred while processing the request'}, status=500)
 
         return response
@@ -2644,42 +3269,33 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
 
     def get_live_map_query(self, env, request):
         query = """
-        WITH bounds AS (
-                SELECT {env} AS geom,
-                {env}::box2d AS b2d
-            ),
-            mvtgeom AS (
-                SELECT DISTINCT ST_AsMVTGeom(ST_Transform(sds.geopoint, 3857), bounds.b2d) AS geom,
-                   sds.school_id,
-                   sds.year,
-                   CASE
-                       WHEN rt_status.rt_registered = True
-                            AND EXTRACT(YEAR FROM CAST(rt_status.rt_registration_date AS DATE)) <= sds.year THEN True
-                       ELSE False
-                   END AS is_rt_connected,
-                   {case_conditions}
+                WITH bounds AS (SELECT {env} AS geom, {env}::box2d AS b2d
+                    ), mvtgeom AS (
+                SELECT DISTINCT ST_AsMVTGeom(ST_Transform(sds.geopoint, 3857), bounds.b2d) AS geom, sds.school_id, sds.year, CASE
+                    WHEN rt_status.rt_registered = True
+                    AND EXTRACT (YEAR FROM CAST (rt_status.rt_registration_date AS DATE)) <= sds.year THEN True
+                    ELSE False
+                    END AS is_rt_connected, {case_conditions}
                 FROM bounds
-                INNER JOIN (
-                    SELECT schools_school.id AS school_id,
-                        schools_school.geopoint,
-                        EXTRACT(YEAR FROM CAST(t.date AS DATE)) AS year,
-                        schools_school."last_weekly_status_id",
-                        {col_function} AS "{col_name}"
+                    INNER JOIN (
+                    SELECT schools_school.id AS school_id, schools_school.geopoint, EXTRACT (YEAR FROM CAST (t.date AS DATE)) AS year, schools_school."last_weekly_status_id", {col_function} AS "{col_name}"
                     FROM "schools_school"
                     INNER JOIN "connection_statistics_schooldailystatus" t ON schools_school."id" = t."school_id"
                     WHERE schools_school."deleted" IS NULL
-                        AND t."deleted" IS NULL
-                        AND schools_school."country_id" = {country_id}
-                        AND EXTRACT(YEAR FROM CAST(t.date AS DATE)) >= {start_year}
-                        AND t."live_data_source" IN ({live_source_types})
-                    GROUP BY schools_school."id", EXTRACT(YEAR FROM CAST(t.date AS DATE))
-                ) AS sds ON ST_Intersects(sds.geopoint, ST_Transform(bounds.geom, 4326))
-            INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
-            LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = sds.school_id
-            WHERE rt_status."deleted" IS NULL
-        )
-        SELECT ST_AsMVT(DISTINCT mvtgeom.*) FROM mvtgeom;
-        """
+                    AND t."deleted" IS NULL
+                    AND schools_school."country_id" = {country_id}
+                    AND EXTRACT (YEAR FROM CAST (t.date AS DATE)) >= {start_year}
+                    AND t."live_data_source" IN ({live_source_types})
+                    GROUP BY schools_school."id", EXTRACT (YEAR FROM CAST (t.date AS DATE))
+                    ) AS sds
+                ON ST_Intersects(sds.geopoint, ST_Transform(bounds.geom, 4326))
+                    INNER JOIN "connection_statistics_schoolweeklystatus" sws ON sds."last_weekly_status_id" = sws."id"
+                    LEFT JOIN connection_statistics_schoolrealtimeregistration rt_status ON rt_status.school_id = sds.school_id
+                WHERE rt_status."deleted" IS NULL
+                    )
+                SELECT ST_AsMVT(DISTINCT mvtgeom.*)
+                FROM mvtgeom; \
+                """
 
         kwargs = copy.deepcopy(self.kwargs)
 
@@ -2695,10 +3311,11 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
                 if len(values) > 0:
                     is_sql_value = 'SQL:' in values[0]
                     if is_sql_value:
-                        sql_statement = str(','.join(values)).replace('SQL:', '').format(**kwargs)
+                        sql_statement = ' AND '.join(values).replace('SQL:', '').format(**kwargs)
                         label_cases.append("""WHEN {sql} THEN '{label}'""".format(sql=sql_statement, label=title))
                 else:
-                    label_cases.append("ELSE '{label}'".format(label=title))
+                    if not any(c.startswith("ELSE ") for c in label_cases):
+                        label_cases.append("ELSE '{label}'".format(label=title))
 
             kwargs['case_conditions'] = 'CASE ' + ' '.join(label_cases) + 'END AS field_status'
         else:
@@ -2755,7 +3372,8 @@ class TimePlayerViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGener
         parameter_column_name = str(parameter_col['name'])
         base_benchmark = str(parameter_col.get('base_benchmark', 1))
 
-        self.kwargs['benchmark'] = 'national' if request.query_params.get('benchmark', 'global') == 'national' else 'global'
+        self.kwargs['benchmark'] = 'national' if request.query_params.get('benchmark',
+                                                                          'global') == 'national' else 'global'
         self.kwargs['country_id'] = country_id
         self.kwargs['col_name'] = parameter_column_name
 
@@ -2875,15 +3493,15 @@ class AdvanceFiltersViewSet(BaseModelViewSet):
         updated_instance = serializer.save()
         new_options = updated_instance.options or {}
 
-        if old_type != updated_instance.type: # filter type changed invalidate the default filter without choices check
-            message="filter_type changed from {o} to {n}".format(o=old_type, n=updated_instance.type)
+        if old_type != updated_instance.type:  # filter type changed invalidate the default filter without choices check
+            message = "filter_type changed from {o} to {n}".format(o=old_type, n=updated_instance.type)
             self._invalidate_default_values(updated_instance, {}, bypass_default_value_check=True, message=message)
             return updated_instance
 
         if (
             updated_instance.type in [
-                accounts_models.AdvanceFilter.TYPE_DROPDOWN, accounts_models.AdvanceFilter.TYPE_DROPDOWN_MULTISELECT
-            ]
+            accounts_models.AdvanceFilter.TYPE_DROPDOWN, accounts_models.AdvanceFilter.TYPE_DROPDOWN_MULTISELECT
+        ]
         ):
             old_live = bool(old_options.get("live_choices"))
             new_live = bool(new_options.get("live_choices"))
@@ -2900,8 +3518,10 @@ class AdvanceFiltersViewSet(BaseModelViewSet):
     def _invalidate_incompatible_default_values(self, filter_instance, old_options, new_options):
         """ Invalidate default filter values that are no longer in sync with the updated filter options """
         try:
-            old_choices = {c.get("value") for c in old_options.get("choices", []) if isinstance(c, dict) and "value" in c}
-            new_choices = {c.get("value") for c in new_options.get("choices", []) if isinstance(c, dict) and "value" in c}
+            old_choices = {c.get("value") for c in old_options.get("choices", []) if
+                           isinstance(c, dict) and "value" in c}
+            new_choices = {c.get("value") for c in new_options.get("choices", []) if
+                           isinstance(c, dict) and "value" in c}
 
             if old_choices != new_choices:
                 self._invalidate_default_values(filter_instance, new_choices)
@@ -2909,7 +3529,8 @@ class AdvanceFiltersViewSet(BaseModelViewSet):
         except Exception as e:
             logger.error(f"Error invalidating default values for filter {filter_instance.code}: {str(e)}")
 
-    def _invalidate_default_values(self, filter_instance, new_choices, bypass_default_value_check=False, message="filter options changes"):
+    def _invalidate_default_values(self, filter_instance, new_choices, bypass_default_value_check=False,
+                                   message="filter options changes"):
         """Remove default filter values when its options or filter type change."""
         relationships = accounts_models.AdvanceFilterCountryRelationship.objects.filter(
             advance_filter=filter_instance,
@@ -3026,7 +3647,7 @@ class PublishedAdvanceFiltersViewSet(CachedListMixin, BaseModelViewSet):
         country_id = self.kwargs.get('country_id')
         status = self.kwargs.get('status', 'PUBLISHED')
 
-        queryset = queryset.filter(
+        queryset = queryset.select_related('entity_type', 'column_configuration').filter(
             status=status,
             active_countries__country=country_id,
             active_countries__deleted__isnull=True,
@@ -3063,7 +3684,7 @@ class AllPublishedAdvanceFiltersViewSet(BaseModelViewSet):
     - required to created default filter logic: TECH-7454
     """
     model = accounts_models.AdvanceFilter
-    serializer_class = serializers.PublishedAdvanceFiltersListSerializer
+    serializer_class = entity_filter_serializers.PublishedEntityAdvanceFiltersListSerializer
     permit_list_expands = ['column_configuration']
 
     apply_query_pagination = True

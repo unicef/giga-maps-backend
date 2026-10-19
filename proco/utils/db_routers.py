@@ -9,6 +9,25 @@ logger = logging.getLogger('gigamaps.' + __name__)
 
 THREAD_LOCAL = threading.local()
 
+try:
+    from django.contrib.gis.db.backends.postgis.base import DatabaseWrapper as PostGISDatabaseWrapper
+    from django.db.utils import InternalError
+
+    orig_prepare_database = PostGISDatabaseWrapper.prepare_database
+
+    def safe_prepare_database(self):
+        try:
+            orig_prepare_database(self)
+        except InternalError as e:
+            if 'tuple concurrently updated' in str(e):
+                logger.warning('Concurrent PostGIS extension creation detected; safely proceeding.')
+            else:
+                raise
+
+    PostGISDatabaseWrapper.prepare_database = safe_prepare_database
+except Exception:
+    pass
+
 
 def get_app_model_code(model):
     return "{0}.{1}".format(model._meta.app_label, model.__name__)
