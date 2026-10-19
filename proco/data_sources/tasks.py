@@ -542,6 +542,8 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                             task_instance.info(
                                 'Processed {0} published school master records.'.format(processed_rows_count)
                             )
+                    except SoftTimeLimitExceeded:
+                        raise
                     except Exception as ex:
                         logger.error('Error reported on publishing: {0}'.format(ex))
                         logger.error('Record: {0}'.format(row.__dict__))
@@ -643,6 +645,8 @@ def handle_deleted_school_master_data_row(deleted_row=None, country_ids=None, pu
                     row.is_read = True
                     row.save()
 
+                except SoftTimeLimitExceeded:
+                    raise
                 except Exception as ex:
                     logger.error('Error reported on deletion: {0}'.format(ex))
                     logger.error('Record: {0}'.format(row.__dict__))
