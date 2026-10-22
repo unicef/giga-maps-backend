@@ -1,4 +1,5 @@
 import os
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from django.conf import settings
 
@@ -8,6 +9,38 @@ from celery.schedules import crontab
 if not settings.configured:
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.dev')
 
+# redis-py options for the redbeat client (lock and schedule), so that a dead Redis connection raises instead of
+# hanging the beat. redbeat 2.2.0 ignores these keys in redbeat_redis_options for redis:// and rediss:// URLs,
+# so they travel in the URL query string, which redis-py parses.
+REDBEAT_REDIS_URL_OPTIONS = {
+    'socket_timeout': '10',
+    'socket_connect_timeout': '10',
+    'socket_keepalive': 'true',
+    'health_check_interval': '30',
+    'retry_on_timeout': 'true',
+}
+
+
+def add_redis_url_options(url, options):
+    """
+    add_redis_url_options
+        Method to add redis-py connection options to the query string of a Redis URL.
+        Options already present in the URL are kept as they are.
+
+    :param url: redis:// or rediss:// URL
+    :param options: dict of option name to value
+    :return: URL with the options, or the URL unchanged if it is not a Redis URL
+    """
+    if not url or not url.startswith(('redis://', 'rediss://')):
+        return url
+
+    parts = urlsplit(url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    for name, value in options.items():
+        query.setdefault(name, value)
+    return urlunsplit(parts._replace(query=urlencode(query)))
+
+
 app = Celery('proco')
 
 app.config_from_object('django.conf:settings', namespace='CELERY')
@@ -16,7 +49,10 @@ app.conf.timezone = 'UTC'
 app.conf.broker_transport_options = {"visibility_timeout": 36000}  # 10h
 app.conf.worker_deduplicate_successful_tasks = True
 app.conf.redbeat_key_prefix = 'gigamaps:'
-app.conf.redbeat_lock_timeout = 36000
+app.conf.redbeat_lock_timeout = getattr(settings, 'REDBEAT_LOCK_TIMEOUT', None)
+app.conf.redbeat_redis_url = add_redis_url_options(
+    getattr(settings, 'CELERY_BROKER_URL', None), REDBEAT_REDIS_URL_OPTIONS,
+)
 
 
 @app.on_after_finalize.connect
