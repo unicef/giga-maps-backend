@@ -1,8 +1,16 @@
+import io
+import shutil
+import tempfile
+
 from django.contrib.gis.geos import GEOSGeometry
 from django.core.cache import cache
-from django.test import TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase, override_settings
 from django.urls import resolve, reverse
+
 from rest_framework import status
+
+from PIL import Image
 
 from proco.connection_statistics.tests.factories import CountryWeeklyStatusFactory
 from proco.custom_auth.tests import test_utils as test_utilities
@@ -344,3 +352,100 @@ class CountryDataViewSetTestCase(TestAPIViewSetMixin, TestCase):
             response = self.forced_auth_req('get', url, user=self.user, view=view)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+
+class CountryDataSourceDescriptionTestCase(TestAPIViewSetMixin, TestCase):
+    databases = ['default']
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = test_utilities.setup_admin_user_by_role()
+
+    def setUp(self):
+        cache.clear()
+        self.media_root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.media_root, True)
+        media_override = override_settings(MEDIA_ROOT=self.media_root)
+        media_override.enable()
+        self.addCleanup(media_override.disable)
+
+        # The admin update re-validates the stored flag when the request omits it, so it must be a real image.
+        flag_bytes = io.BytesIO()
+        Image.new('RGB', (1, 1)).save(flag_bytes, format='PNG')
+        self.country = CountryFactory(
+            flag=SimpleUploadedFile('flag.png', flag_bytes.getvalue(), content_type='image/png'),
+            data_source_description='Schools source [link](https://example.org)',
+            health_data_source_description='Health source [contact us](mailto:gigamaps@unicef.org)',
+        )
+        super().setUp()
+
+    def _update_country(self, data):
+        url, view, view_info = locations_url((self.country.id,), {}, view_name='update-retrieve-country')
+        payload = {
+            'name': self.country.name,
+            'code': self.country.code,
+            'benchmark_metadata': {},
+            'active_layers_list': [],
+            'active_filters_list': [],
+        }
+        payload.update(data)
+        return self.forced_auth_req('put', url, user=self.user, data=payload, view=view, view_info=view_info)
+
+    def test_v2_country_detail_returns_data_source_descriptions(self):
+        url = reverse('entities:retrieve-entity-country', args=[self.country.code.lower()])
+
+        response = self.forced_auth_req('get', url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['data_source_description'], self.country.data_source_description)
+        self.assertEqual(
+            response.data['health_data_source_description'], self.country.health_data_source_description,
+        )
+
+    def test_v2_country_list_returns_data_source_descriptions(self):
+        response = self.forced_auth_req('get', reverse('entities:list-entity-countries'))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['data_source_description'], self.country.data_source_description)
+        self.assertEqual(
+            response.data[0]['health_data_source_description'], self.country.health_data_source_description,
+        )
+
+    def test_health_data_source_description_defaults_to_empty_string(self):
+        country = CountryFactory()
+
+        self.assertEqual(country.health_data_source_description, '')
+
+    def test_update_persists_data_source_descriptions_up_to_1000_chars(self):
+        schools_description = 'S' * 1000
+        health_description = 'H' * 1000
+
+        response = self._update_country({
+            'data_source_description': schools_description,
+            'health_data_source_description': health_description,
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['data_source_description'], schools_description)
+        self.assertEqual(response.data['health_data_source_description'], health_description)
+
+        self.country.refresh_from_db()
+        self.assertEqual(self.country.data_source_description, schools_description)
+        self.assertEqual(self.country.health_data_source_description, health_description)
+
+    def test_update_rejects_data_source_descriptions_over_1000_chars(self):
+        response = self._update_country({
+            'data_source_description': 'S' * 1001,
+            'health_data_source_description': 'H' * 1001,
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('data_source_description', response.data)
+        self.assertIn('health_data_source_description', response.data)
+
+        self.country.refresh_from_db()
+        self.assertEqual(self.country.data_source_description, 'Schools source [link](https://example.org)')
+        self.assertEqual(
+            self.country.health_data_source_description, 'Health source [contact us](mailto:gigamaps@unicef.org)',
+        )
