@@ -967,6 +967,21 @@ def normalize_health_entity_master_data_frame(df):
             lambda val: str(val).lower()).replace('thisnanwillreplaceback', np.nan)
     else:
         df['facility_id_govt'] = None
+
+    # Health Master sends the coverage as cellular_coverage_type (same as School Master);
+    # keep coverage_type when a country already sends it.
+    if 'cellular_coverage_type' in df.columns:
+        if 'coverage_type' in df.columns:
+            df['coverage_type'] = df['coverage_type'].where(
+                df['coverage_type'].apply(lambda val: not (pd.isna(val) or core_utilities.is_blank_string(val))),
+                df['cellular_coverage_type'],
+            )
+        else:
+            df['coverage_type'] = df['cellular_coverage_type']
+
+    for source_column in ['nearest_LTE_distance', 'nearest_NR_distance']:
+        if source_column in df.columns and source_column.lower() not in df.columns:
+            df[source_column.lower()] = df[source_column]
     return df
 
 

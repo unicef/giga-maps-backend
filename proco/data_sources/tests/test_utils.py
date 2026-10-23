@@ -29,6 +29,64 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
         df = pd.DataFrame.from_dict({'facility_name': ['Test Clinic']})
         self.assertEqual(len(sources_utilities.normalize_health_master_data_frame(df)), len(df))
 
+    def test_normalize_health_entity_master_data_frame_maps_cellular_coverage_type(self):
+        df = pd.DataFrame.from_dict({
+            'facility_name': ['Clinic A', 'Clinic B'],
+            'cellular_coverage_type': ['4G', '5G'],
+            'nearest_LTE_distance': [1.5, None],
+            'nearest_NR_distance': [6.5, None],
+        })
+        df = sources_utilities.normalize_health_entity_master_data_frame(df)
+        self.assertEqual(df['coverage_type'].tolist(), ['4G', '5G'])
+        self.assertEqual(df['nearest_lte_distance'].tolist()[0], 1.5)
+        self.assertEqual(df['nearest_nr_distance'].tolist()[0], 6.5)
+
+    def test_normalize_health_entity_master_data_frame_keeps_coverage_type(self):
+        df = pd.DataFrame.from_dict({
+            'facility_name': ['Clinic A', 'Clinic B', 'Clinic C'],
+            'coverage_type': ['3G', None, ' '],
+            'cellular_coverage_type': ['4G', '5G', '2G'],
+        })
+        df = sources_utilities.normalize_health_entity_master_data_frame(df)
+        self.assertEqual(df['coverage_type'].tolist(), ['3G', '5G', '2G'])
+
+        df = pd.DataFrame.from_dict({'facility_name': ['Clinic A'], 'coverage_type': ['4G']})
+        df = sources_utilities.normalize_health_entity_master_data_frame(df)
+        self.assertEqual(df['coverage_type'].tolist(), ['4G'])
+
+    def test_sync_health_data_keeps_coverage_and_network_distances(self):
+        from delta_sharing.reader import DeltaSharingReader
+        from proco.locations.tests.factories import CountryFactory
+
+        country = CountryFactory(iso3_format='GMB')
+        health_master_fields = [
+            f.name for f in sources_models.HealthEntityMasterIntermediateData._meta.get_fields()]
+        df = pd.DataFrame.from_dict({
+            'health_id_giga': ['hf-1'],
+            'facility_name': ['Clinic A'],
+            'facility_hours': ['24_7'],
+            'cellular_coverage_type': ['4G'],
+            'fiber_node_distance': [2.5],
+            'microwave_node_distance': [3.5],
+            'nearest_LTE_distance': [4.5],
+            'nearest_NR_distance': [5.5],
+            'column_unknown_to_giga_maps': ['dropped'],
+            DeltaSharingReader._change_type_col_name(): ['insert'],
+            DeltaSharingReader._commit_version_col_name(): [1],
+            DeltaSharingReader._commit_timestamp_col_name(): [pd.Timestamp('2026-10-01')],
+        })
+
+        df, cols_to_delete = sources_utilities.sort_and_modify_dataframe(
+            df, health_master_fields, {}, 1, country, 'GMB', None)
+        sources_utilities.sync_health_data(df, cols_to_delete, country, [])
+
+        row = sources_models.HealthEntityMasterIntermediateData.objects.get(health_id_giga='hf-1')
+        self.assertEqual(row.coverage_type, '4G')
+        self.assertEqual(row.fiber_node_distance, 2.5)
+        self.assertEqual(row.microwave_node_distance, 3.5)
+        self.assertEqual(row.nearest_lte_distance, 4.5)
+        self.assertEqual(row.nearest_nr_distance, 5.5)
+
     def test_normalize_qos_data_frame(self):
         df = pd.DataFrame.from_dict({'school_name': ['Test School'], 'school_id_govt': ['1234567']})
         self.assertEqual(len(sources_utilities.normalize_qos_data_frame(df)), len(df))
