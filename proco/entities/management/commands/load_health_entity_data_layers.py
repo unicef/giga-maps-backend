@@ -284,6 +284,15 @@ health_data_source_json = [
                 'count_labels': ['good', 'moderate', 'bad'],
             },
             {
+                'name': 'nearest_nr_distance',
+                'type': 'float',
+                'is_parameter': True,
+                'alias': 'Nearest NR (5G) Distance (nearest_nr_distance)',
+                'unit': 'km',
+                'display_unit': 'km',
+                'count_labels': ['good', 'moderate', 'bad'],
+            },
+            {
                 'name': 'connectivity_type',
                 'type': 'str',
                 'is_parameter': True,
