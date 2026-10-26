@@ -4,6 +4,17 @@ from redbeat.schedulers import RedBeatScheduler, get_redis
 
 logger = logging.getLogger('gigamaps.' + __name__)
 
+# KEYS[1] - lock name, ARGV[1] - longest TTL allowed in milliseconds.
+# Shortens the lock's TTL to ARGV[1] if it is longer; returns 1 if it did, otherwise 0.
+LUA_CAP_TTL_SCRIPT = """
+    local ttl = redis.call('pttl', KEYS[1])
+    if ttl > tonumber(ARGV[1]) then
+        redis.call('pexpire', KEYS[1], ARGV[1])
+        return 1
+    end
+    return 0
+"""
+
 
 class SelfHealingRedBeatScheduler(RedBeatScheduler):
     """
@@ -12,9 +23,37 @@ class SelfHealingRedBeatScheduler(RedBeatScheduler):
         redbeat stores them only when a beat process starts, so if Redis loses them (eviction under memory
         pressure, flush) the lock holder keeps running but schedules nothing until some beat restarts.
         Here every tick checks them first and stores the missing ones again.
+        At start-up it also shortens a lock left with a longer TTL than its own lock timeout.
 
     Inherits: `RedBeatScheduler`
     """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not kwargs.get('lazy'):
+            self.cap_lock_ttl()
+
+    def cap_lock_ttl(self):
+        """
+        cap_lock_ttl
+            Method to shorten the TTL of the beat lock to this beat's lock timeout when it is longer, as with
+            the 10 h lock of earlier releases. Runs before this beat tries to acquire the lock. A live holder
+            renews the lock to its own timeout on its next tick, before sending any task; a dead holder (beat
+            killed by a deploy or a VM replacement) stops blocking the other beats after lock_timeout seconds
+            instead of hours.
+
+        :return: True if the TTL was shortened
+        """
+        if not self.lock_key:
+            return False
+
+        client = get_redis(self.app)
+        capped = client.register_script(LUA_CAP_TTL_SCRIPT)(
+            keys=[self.lock_key], args=[int(self.lock_timeout * 1000)],
+        )
+        if capped:
+            logger.warning('beat: lock %s had a TTL longer than %ss, shortened to it', self.lock_key, self.lock_timeout)
+        return bool(capped)
 
     def tick(self, *args, **kwargs):
         # Runs before redbeat renews the lock. A beat that has just lost the lock writes the same static

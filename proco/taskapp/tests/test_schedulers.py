@@ -120,3 +120,36 @@ class SelfHealingRedBeatSchedulerTestCase(SimpleTestCase):
         self.scheduler.lock.extend.assert_called_once_with(self.scheduler.lock_timeout)
         self.assertEqual([call.args[0].name for call in apply_async.call_args_list], ['hourly'])
         self.assertEqual(self.redis.zcard(self.conf.schedule_key), 2)
+
+    def test_start_up_shortens_a_longer_lock_ttl(self):
+        limit_ms = int(self.scheduler.lock_timeout * 1000)
+        self.redis.set(self.conf.lock_key, 'old-beat-token', px=36000 * 1000)
+
+        SelfHealingRedBeatScheduler(app=self.app)
+
+        ttl_ms = self.redis.pttl(self.conf.lock_key)
+        self.assertGreater(ttl_ms, limit_ms - 5000)
+        self.assertLessEqual(ttl_ms, limit_ms)
+        self.assertEqual(self.redis.get(self.conf.lock_key), 'old-beat-token')
+
+    def test_start_up_keeps_a_shorter_lock_ttl(self):
+        short_ms = int(self.scheduler.lock_timeout * 1000) // 2
+        self.redis.set(self.conf.lock_key, 'live-beat-token', px=short_ms)
+
+        self.assertFalse(SelfHealingRedBeatScheduler(app=self.app).cap_lock_ttl())
+
+        ttl_ms = self.redis.pttl(self.conf.lock_key)
+        self.assertGreater(ttl_ms, short_ms - 5000)
+        self.assertLessEqual(ttl_ms, short_ms)
+
+    def test_start_up_without_lock_creates_none(self):
+        SelfHealingRedBeatScheduler(app=self.app)
+
+        self.assertFalse(self.redis.exists(self.conf.lock_key))
+
+    def test_lazy_scheduler_leaves_the_lock_alone(self):
+        self.redis.set(self.conf.lock_key, 'old-beat-token', px=36000 * 1000)
+
+        SelfHealingRedBeatScheduler(app=self.app, lazy=True)
+
+        self.assertGreater(self.redis.pttl(self.conf.lock_key), int(self.scheduler.lock_timeout * 1000))
