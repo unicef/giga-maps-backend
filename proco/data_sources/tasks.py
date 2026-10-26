@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import os
@@ -17,6 +18,7 @@ from django.core.cache import cache
 from django.db import connection, transaction
 from django.db.models import Max
 from django.db.utils import DataError
+from django.utils.dateparse import parse_datetime
 from requests.exceptions import HTTPError
 from rest_framework import status
 
@@ -247,10 +249,104 @@ def load_data_from_school_master_apis(country_iso3_format=None):
             send_school_master_data_change_slack_notification.delay(country_iso3_format)
 
 
-@app.task(soft_time_limit=3 * 55 * 60, time_limit=3 * 60 * 60)
-def handle_published_school_master_data_row(published_row=None, country_ids=None, publish_source='auto_publish'):
+def get_school_master_country_task_key(task_name, country_ids, published_at=None):
     """
-    Background task to handle all the published rows of school master data source
+    get_school_master_country_task_key
+        Build the BackgroundTask name of a School Master publish task for a list of countries.
+        Without published_at the name is per clock hour, so a second run for the same countries in the same hour
+        is skipped. With published_at (one country publish request) the name is unique per request.
+        Names longer than BackgroundTask.name allows use a hash of the country ids instead.
+
+    :param task_name: Name of the task
+    :param country_ids: List of country ids
+    :param published_at: DateTime of the country publish request
+    :return: Task key
+    """
+    current_time = format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H')
+    ids = '_'.join([str(c_id) for c_id in country_ids])
+    suffix = '_at_{0}'.format(published_at.strftime('%Y%m%d%H%M%S%f')) if published_at else ''
+
+    task_key = '{0}_status_{1}_country_ids_{2}{3}'.format(task_name, current_time, ids, suffix)
+    if len(task_key) > BackgroundTask._meta.get_field('name').max_length:
+        ids = hashlib.sha256(ids.encode('utf-8')).hexdigest()
+        task_key = '{0}_status_{1}_country_ids_{2}{3}'.format(task_name, current_time, ids, suffix)
+    return task_key
+
+
+def get_school_master_publish_task_details(row_kind, row=None, country_ids=None, published_at=None):
+    """
+    get_school_master_publish_task_details
+        BackgroundTask name and description of handle_published/handle_deleted_school_master_data_row,
+        for a list of countries, for one row or for every row
+
+    :param row_kind: 'published' or 'deleted'
+    :param row: SchoolMasterData instance
+    :param country_ids: List of country ids
+    :param published_at: DateTime of the country publish request
+    :return: Tuple of task key and task description
+    """
+    task_name = 'handle_{0}_school_master_data_row'.format(row_kind)
+
+    if country_ids and len(country_ids) > 0:
+        return (
+            get_school_master_country_task_key(task_name, country_ids, published_at=published_at),
+            'Handle {0} school master data rows for countries'.format(row_kind),
+        )
+
+    current_time = format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H')
+    if row:
+        return (
+            '{0}_status_{1}_row_id_{2}'.format(task_name, current_time, row.id),
+            'Handle {0} school master data row for single record'.format(row_kind),
+        )
+    return '{0}_status_{1}'.format(task_name, current_time), 'Handle {0} school master data rows'.format(row_kind)
+
+
+def parse_published_at(published_at):
+    """
+    parse_published_at
+        Celery sends the task kwargs as JSON, so published_at can arrive as an ISO 8601 string
+
+    :param published_at: DateTime instance, ISO 8601 string or None
+    :return: DateTime instance or None
+    """
+    if published_at and not isinstance(published_at, datetime):
+        parsed_published_at = parse_datetime(published_at)
+        if parsed_published_at is None:
+            logger.warning('Invalid published_at "%s" ignored, handling every published row.', published_at)
+        return parsed_published_at
+    return published_at
+
+
+def filter_school_master_rows_to_handle(queryset, row=None, country_ids=None, published_at=None):
+    """
+    filter_school_master_rows_to_handle
+        Limit the rows a School Master publish task handles to one row, to a list of countries and/or to the
+        rows of one country publish request
+
+    :param queryset: SchoolMasterData queryset
+    :param row: SchoolMasterData instance
+    :param country_ids: List of country ids
+    :param published_at: DateTime of the country publish request
+    :return: SchoolMasterData queryset
+    """
+    if row:
+        queryset = queryset.filter(pk=row.id)
+
+    if country_ids and len(country_ids) > 0:
+        queryset = queryset.filter(country_id__in=country_ids)
+
+    if published_at:
+        queryset = queryset.filter(published_at=published_at)
+    return queryset
+
+
+@app.task(soft_time_limit=3 * 55 * 60, time_limit=3 * 60 * 60)
+def handle_published_school_master_data_row(published_row=None, country_ids=None, publish_source='auto_publish',
+                                            published_at=None):
+    """
+    Background task to handle all the published rows of school master data source.
+    With published_at (country publish from the admin portal) only the rows published by that request are handled.
 
     Execution Frequency: Every 12 hours
     """
@@ -262,23 +358,10 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
         'rural': 'rural',
     }
     change_summary = {}
+    published_at = parse_published_at(published_at)
 
-    if country_ids and len(country_ids) > 0:
-        task_key = 'handle_published_school_master_data_row_status_{current_time}_country_ids_{ids}'.format(
-            current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'),
-            ids='_'.join([str(c_id) for c_id in country_ids]),
-        )
-        task_description = 'Handle published school master data rows for countries'
-    elif published_row:
-        task_key = 'handle_published_school_master_data_row_status_{current_time}_row_id_{ids}'.format(
-            current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'),
-            ids=published_row.id,
-        )
-        task_description = 'Handle published school master data row for single record'
-    else:
-        task_key = 'handle_published_school_master_data_row_status_{current_time}'.format(
-            current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
-        task_description = 'Handle published school master data rows'
+    task_key, task_description = get_school_master_publish_task_details(
+        'published', row=published_row, country_ids=country_ids, published_at=published_at)
 
     task_id = current_task.request.id or str(uuid.uuid4())
     task_instance = background_task_utilities.task_on_start(
@@ -295,11 +378,8 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                 status=sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED, is_read=False,
             ).select_related('country', 'school', 'school__admin1', 'school__admin2', 'school__last_weekly_status')
 
-            if published_row:
-                new_published_records = new_published_records.filter(pk=published_row.id)
-
-            if country_ids and len(country_ids) > 0:
-                new_published_records = new_published_records.filter(country_id__in=country_ids)
+            new_published_records = filter_school_master_rows_to_handle(
+                new_published_records, row=published_row, country_ids=country_ids, published_at=published_at)
 
             task_instance.info('Total published records to update: {}'.format(new_published_records.count()))
 
@@ -568,30 +648,20 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
 
 
 @app.task(soft_time_limit=2 * 55 * 60, time_limit=2 * 55 * 60)
-def handle_deleted_school_master_data_row(deleted_row=None, country_ids=None, publish_source='auto_publish'):
+def handle_deleted_school_master_data_row(deleted_row=None, country_ids=None, publish_source='auto_publish',
+                                          published_at=None):
     """
-    Background task to handle all the deleted rows of school master data source
+    Background task to handle all the deleted rows of school master data source.
+    With published_at (country publish from the admin portal) only the rows published by that request are handled.
 
     Execution Frequency: Every day
     """
     change_summary = {}
     logger.info('Handling the deleted school master data rows.')
-    if country_ids and len(country_ids) > 0:
-        task_key = 'handle_deleted_school_master_data_row_status_{current_time}_country_ids_{ids}'.format(
-            current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'),
-            ids='_'.join([str(c_id) for c_id in country_ids]),
-        )
-        task_description = 'Handle deleted school master data rows for countries'
-    elif deleted_row:
-        task_key = 'handle_deleted_school_master_data_row_status_{current_time}_row_id_{ids}'.format(
-            current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'),
-            ids=deleted_row.id,
-        )
-        task_description = 'Handle deleted school master data row for single record'
-    else:
-        task_key = 'handle_deleted_school_master_data_row_status_{current_time}'.format(
-            current_time=format_date(core_utilities.get_current_datetime_object(), frmt='%d%m%Y_%H'))
-        task_description = 'Handle deleted school master data rows'
+    published_at = parse_published_at(published_at)
+
+    task_key, task_description = get_school_master_publish_task_details(
+        'deleted', row=deleted_row, country_ids=country_ids, published_at=published_at)
 
     task_id = current_task.request.id or str(uuid.uuid4())
     task_instance = background_task_utilities.task_on_start(task_id, task_key, task_description)
@@ -604,11 +674,8 @@ def handle_deleted_school_master_data_row(deleted_row=None, country_ids=None, pu
             school__isnull=False,
         )
 
-        if deleted_row:
-            new_deleted_records = new_deleted_records.filter(pk=deleted_row.id)
-
-        if country_ids and len(country_ids) > 0:
-            new_deleted_records = new_deleted_records.filter(country_id__in=country_ids)
+        new_deleted_records = filter_school_master_rows_to_handle(
+            new_deleted_records, row=deleted_row, country_ids=country_ids, published_at=published_at)
 
         current_date = core_utilities.get_current_datetime_object()
         task_instance.info('Total records to update: {}'.format(new_deleted_records.count()))

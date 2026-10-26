@@ -46,3 +46,10 @@ class ZeroSchoolMasterDataRowError(BaseInvalidValidationError):
     message = _('Zero School Master Data row to update.')
     description = _('Zero rows to update.')
     code = 'invalid_school_master_data_row_count'
+
+
+class InvalidCountryPublishQueryParamError(BaseInvalidValidationError):
+    message = _('Unsupported query param(s) for School Master country publish: "{params}". '
+                'Supported query params: "{allowed}".')
+    description = _('Country publish only accepts the supported filter query params.')
+    code = 'invalid_country_publish_query_param'
