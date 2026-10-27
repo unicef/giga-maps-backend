@@ -2281,6 +2281,27 @@ class DataLayerInfoApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['no_of_schools_measure'], 4)
 
+        # Same count from the v2 entities layer info API, which the map uses for the country view
+        url = reverse('entities:entity-info-data-layer')
+        view = resolve(url)
+        url += '?country_id={0}&school_layer_id={1}&school_benchmark=global&school_start_date=24-06-2024' \
+               '&school_end_date=30-06-2024&school_is_weekly=true'.format(self.country.id, layer_id)
+
+        cache.clear()
+        with self.settings(
+            READ_ONLY_DB_KEY='default',
+            LIVE_LAYER_RT_SOURCE_FILTER_COUNTRIES=[self.country.iso3_format],
+        ):
+            response = self.forced_auth_req(
+                'get',
+                url,
+                view=view,
+                view_info=view.func,
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['school']['no_of_entities_measure'], 4)
+
     def test_live_data_layer_map_school_view(self):
         url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')
 

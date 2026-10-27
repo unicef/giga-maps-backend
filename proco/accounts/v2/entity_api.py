@@ -3027,6 +3027,9 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 'national_benchmark': benchmark_value,
                 'base_benchmark': base_benchmark,
                 'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
+                'rt_source_condition': (
+                    DataLayerInfoViewSet.get_rt_source_condition(self, live_data_sources) if is_legacy else ''
+                ),
                 'parameter_col': parameter_col,
                 'parameter_col_function_sql': column_function_sql,
                 'is_reverse': data_layer_instance.is_reverse,
