@@ -1,5 +1,12 @@
+from datetime import timedelta
+from unittest import mock
+from unittest.mock import patch
+
 from django.core.cache import cache
 from django.test import TestCase
+
+import requests
+from celery.exceptions import SoftTimeLimitExceeded
 
 from proco.background.models import BackgroundTask
 from proco.core.utils import get_current_datetime_object
@@ -77,6 +84,184 @@ class DataSourcesTasksTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(sources_models.SchoolMasterData.objects.all().count(), 3)
         sources_tasks.handle_deleted_school_master_data_row(country_ids=[self.country.id])
         self.assertEqual(sources_models.SchoolMasterData.objects.filter(is_read=False).count(), 2)
+
+    def assert_school_master_task_stopped(self, task_name_prefix, log_message):
+        """The task stopped by the soft time limit is closed, with the reason in its log"""
+        self.assertFalse(BackgroundTask.objects.filter(status=BackgroundTask.STATUSES.running).exists())
+        task = BackgroundTask.objects.get(name__startswith=task_name_prefix)
+        self.assertEqual(task.status, BackgroundTask.STATUSES.completed)
+        self.assertIn(log_message, task.log)
+
+    def test_school_master_tasks_hard_time_limit_is_later_than_soft(self):
+        # With equal limits the worker is killed right after the soft signal, before any stop handler runs
+        for task in (
+            sources_tasks.handle_published_school_master_data_row,
+            sources_tasks.handle_deleted_school_master_data_row,
+        ):
+            self.assertGreater(task.time_limit, task.soft_time_limit, task.name)
+
+    @mock.patch('proco.data_sources.tasks.populate_school_new_fields_task.delay')
+    @mock.patch('proco.data_sources.tasks.send_slack_notifications')
+    @mock.patch('proco.data_sources.tasks.compare_target_model_changes', side_effect=SoftTimeLimitExceeded())
+    def test_handle_published_school_master_data_row_stops_on_soft_time_limit(
+        self, mock_compare, mock_slack, mock_populate,
+    ):
+        with self.assertRaises(SoftTimeLimitExceeded):
+            sources_tasks.handle_published_school_master_data_row()
+
+        # The task must stop at the first row instead of moving on to the next one
+        self.assertEqual(mock_compare.call_count, 1)
+        self.assertEqual(sources_models.SchoolMasterData.objects.filter(is_read=False).count(), 3)
+        mock_populate.assert_not_called()
+        mock_slack.assert_called_once()
+        self.assert_school_master_task_stopped(
+            'handle_published_school_master_data_row_status_',
+            'Stopped on soft time limit after 0 published records.',
+        )
+
+    @mock.patch('proco.data_sources.tasks.populate_school_new_fields_task.delay')
+    @mock.patch('proco.data_sources.tasks.send_slack_notifications')
+    @mock.patch('proco.data_sources.tasks.compare_target_model_changes', side_effect=[
+        {'school_model': {'school_name': 1}, 'school_weekly': {}, 'rt_registration': {}},
+        SoftTimeLimitExceeded(),
+    ])
+    def test_handle_published_school_master_data_row_soft_time_limit_after_first_row(
+        self, mock_compare, mock_slack, mock_populate,
+    ):
+        with self.assertRaises(SoftTimeLimitExceeded):
+            sources_tasks.handle_published_school_master_data_row()
+
+        self.assertEqual(mock_compare.call_count, 2)
+        self.assertEqual(sources_models.SchoolMasterData.objects.filter(is_read=False).count(), 2)
+
+        # The first row was published, so its school must still be sent to populate
+        published_school_id = sources_models.SchoolMasterData.objects.get(pk=self.row_one.pk).school_id
+        mock_populate.assert_called_once_with(None, None, None, school_ids=[published_school_id])
+
+        # The Slack summary counts only the row that was saved, not the interrupted one
+        mock_slack.assert_called_once()
+        country_summary = mock_slack.call_args[0][0][self.country.iso3_format]
+        self.assertEqual(country_summary['updated_schools'], 1)
+        self.assertEqual(country_summary['new_schools'], 0)
+        self.assertEqual(dict(country_summary['school_model_changes']), {'school_name': 1})
+
+        self.assert_school_master_task_stopped(
+            'handle_published_school_master_data_row_status_',
+            'Stopped on soft time limit after 1 published records.',
+        )
+
+    def patch_save_then_soft_time_limit(self):
+        """
+        Make SchoolMasterData.save() store the row and then raise SoftTimeLimitExceeded, as when the limit
+        hits while save() waits on the DB (seen with a real worker)
+        """
+        real_save = sources_models.SchoolMasterData.save
+
+        def save_then_soft_time_limit(instance, *args, **kwargs):
+            real_save(instance, *args, **kwargs)
+            raise SoftTimeLimitExceeded()
+
+        return mock.patch.object(
+            sources_models.SchoolMasterData, 'save', autospec=True, side_effect=save_then_soft_time_limit,
+        )
+
+    @mock.patch('proco.data_sources.tasks.populate_school_new_fields_task.delay')
+    @mock.patch('proco.data_sources.tasks.send_slack_notifications')
+    @mock.patch('proco.data_sources.tasks.compare_target_model_changes', return_value={
+        'school_model': {'school_name': 1}, 'school_weekly': {}, 'rt_registration': {},
+    })
+    def test_handle_published_school_master_data_row_soft_time_limit_inside_row_save(
+        self, mock_compare, mock_slack, mock_populate,
+    ):
+        with self.patch_save_then_soft_time_limit(), self.assertRaises(SoftTimeLimitExceeded):
+            sources_tasks.handle_published_school_master_data_row()
+
+        # The row was stored as read before the limit hit, so it must be reported and populated now
+        self.assertEqual(sources_models.SchoolMasterData.objects.filter(is_read=False).count(), 2)
+        published_school_id = sources_models.SchoolMasterData.objects.get(pk=self.row_one.pk).school_id
+        mock_populate.assert_called_once_with(None, None, None, school_ids=[published_school_id])
+        self.assertEqual(mock_slack.call_args[0][0][self.country.iso3_format]['updated_schools'], 1)
+        self.assert_school_master_task_stopped(
+            'handle_published_school_master_data_row_status_',
+            'Stopped on soft time limit after 1 published records.',
+        )
+
+    @mock.patch('proco.data_sources.tasks.populate_school_new_fields_task.delay')
+    @mock.patch('proco.data_sources.tasks.send_slack_notifications', side_effect=requests.HTTPError('500'))
+    @mock.patch('proco.data_sources.tasks.compare_target_model_changes', side_effect=SoftTimeLimitExceeded())
+    def test_handle_published_school_master_data_row_soft_time_limit_with_slack_error(
+        self, mock_compare, mock_slack, mock_populate,
+    ):
+        # A Slack error while stopping must not replace the soft time limit as the reason the task stopped
+        with self.assertRaises(SoftTimeLimitExceeded):
+            sources_tasks.handle_published_school_master_data_row()
+
+        mock_slack.assert_called_once()
+        self.assert_school_master_task_stopped(
+            'handle_published_school_master_data_row_status_',
+            'Stopped on soft time limit after 0 published records.',
+        )
+
+    def create_second_deleted_row(self):
+        """A second deleted row, so stopping before or after the first one is observable"""
+        return sources_test_models.SchoolMasterDataFactory(
+            country=self.country,
+            school=SchoolFactory(country=self.country),
+            status=sources_models.SchoolMasterData.ROW_STATUS_DELETED_PUBLISHED,
+            is_read=False,
+        )
+
+    @mock.patch('proco.data_sources.tasks.send_slack_notifications')
+    @mock.patch('proco.schools.models.School.delete', side_effect=SoftTimeLimitExceeded())
+    def test_handle_deleted_school_master_data_row_stops_on_soft_time_limit(self, mock_delete, mock_slack):
+        self.create_second_deleted_row()
+
+        with self.assertRaises(SoftTimeLimitExceeded):
+            sources_tasks.handle_deleted_school_master_data_row()
+
+        # The task must stop at the first row instead of moving on to the next one
+        self.assertEqual(mock_delete.call_count, 1)
+        self.assertEqual(sources_models.SchoolMasterData.objects.filter(is_read=False).count(), 4)
+        mock_slack.assert_called_once()
+        self.assertEqual(mock_slack.call_args[0][0][self.country.iso3_format]['deleted_schools'], 0)
+        self.assert_school_master_task_stopped(
+            'handle_deleted_school_master_data_row_status_',
+            'Stopped on soft time limit. Remaining records: 2',
+        )
+
+    @mock.patch('proco.data_sources.tasks.send_slack_notifications')
+    @mock.patch('proco.schools.models.School.delete', side_effect=[None, SoftTimeLimitExceeded()])
+    def test_handle_deleted_school_master_data_row_soft_time_limit_after_first_row(self, mock_delete, mock_slack):
+        self.create_second_deleted_row()
+
+        with self.assertRaises(SoftTimeLimitExceeded):
+            sources_tasks.handle_deleted_school_master_data_row()
+
+        self.assertEqual(mock_delete.call_count, 2)
+        self.assertEqual(sources_models.SchoolMasterData.objects.filter(is_read=False).count(), 3)
+
+        # The school deleted before the stop must still be reported, no later run will do it
+        mock_slack.assert_called_once()
+        self.assertEqual(mock_slack.call_args[0][0][self.country.iso3_format]['deleted_schools'], 1)
+        self.assert_school_master_task_stopped(
+            'handle_deleted_school_master_data_row_status_',
+            'Stopped on soft time limit. Remaining records: 1',
+        )
+
+    @mock.patch('proco.data_sources.tasks.send_slack_notifications')
+    def test_handle_deleted_school_master_data_row_soft_time_limit_inside_row_save(self, mock_slack):
+        self.create_second_deleted_row()
+
+        with self.patch_save_then_soft_time_limit(), self.assertRaises(SoftTimeLimitExceeded):
+            sources_tasks.handle_deleted_school_master_data_row()
+
+        # The row was stored as read before the limit hit, so its school must be reported now
+        self.assertEqual(sources_models.SchoolMasterData.objects.filter(is_read=False).count(), 3)
+        self.assertEqual(mock_slack.call_args[0][0][self.country.iso3_format]['deleted_schools'], 1)
+        self.assert_school_master_task_stopped(
+            'handle_deleted_school_master_data_row_status_',
+            'Stopped on soft time limit. Remaining records: 1',
+        )
 
     def test_email_reminder_to_editor_and_publisher_for_review_waiting_records(self):
         self.assertEqual(sources_models.SchoolMasterData.objects.all().count(), 3)
@@ -229,3 +414,145 @@ class DataSourcesTasksTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(health_entity.microwave_node_distance, 3.5)
         self.assertEqual(health_entity.nearest_lte_distance, 4.5)
         self.assertEqual(health_entity.nearest_nr_distance, 5.5)
+
+
+# The task keys include the clock hour: pin it so that every run in these tests happens in "the same hour"
+@patch('proco.data_sources.tasks.format_date', return_value='26102026_10')
+class SchoolMasterCountryPublishTasksTestCase(TestCase):
+    """
+    SchoolMasterCountryPublishTasksTestCase
+        Country publish ("Publish all") passes published_at to the publish tasks, so that each request is handled
+        by its own task run limited to its own rows, while the scheduled runs (no arguments) keep handling
+        everything that is left.
+    """
+    databases = ['default']
+
+    def setUp(self):
+        cache.clear()
+        BackgroundTask.objects.all().delete()
+        self.country = CountryFactory()
+        self.first_publish_at = get_current_datetime_object() - timedelta(minutes=20)
+        self.second_publish_at = get_current_datetime_object() - timedelta(minutes=5)
+        super().setUp()
+
+    def _create_rows(self, row_status, published_at, count=1):
+        return [
+            sources_test_models.SchoolMasterDataFactory(
+                country=self.country,
+                status=row_status,
+                is_read=False,
+                published_at=published_at,
+            )
+            for _ in range(count)
+        ]
+
+    def _unread_ids(self, rows):
+        return set(
+            sources_models.SchoolMasterData.objects.filter(
+                id__in=[row.id for row in rows],
+                is_read=False,
+            ).values_list('id', flat=True),
+        )
+
+    def test_published_rows_of_two_publishes_in_the_same_hour_are_both_handled(self, _):
+        first_rows = self._create_rows(sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED, self.first_publish_at, 2)
+        second_rows = self._create_rows(sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED, self.second_publish_at)
+
+        sources_tasks.handle_published_school_master_data_row(
+            country_ids=[self.country.id], publish_source='admin_portal_country',
+            published_at=self.first_publish_at.isoformat())
+
+        # Only the rows of the first publish are handled
+        self.assertEqual(self._unread_ids(first_rows), set())
+        self.assertEqual(self._unread_ids(second_rows), {row.id for row in second_rows})
+
+        sources_tasks.handle_published_school_master_data_row(
+            country_ids=[self.country.id], publish_source='admin_portal_country',
+            published_at=self.second_publish_at.isoformat())
+
+        # The second publish of the same country in the same hour is not skipped
+        self.assertEqual(self._unread_ids(second_rows), set())
+        self.assertEqual(BackgroundTask.objects.filter(
+            name__startswith='handle_published_school_master_data_row_status_26102026_10_country_ids_',
+        ).count(), 2)
+
+    def test_deleted_rows_of_two_publishes_in_the_same_hour_are_both_handled(self, _):
+        first_rows = self._create_rows(
+            sources_models.SchoolMasterData.ROW_STATUS_DELETED_PUBLISHED, self.first_publish_at, 2)
+        second_rows = self._create_rows(
+            sources_models.SchoolMasterData.ROW_STATUS_DELETED_PUBLISHED, self.second_publish_at)
+
+        sources_tasks.handle_deleted_school_master_data_row(
+            country_ids=[self.country.id], publish_source='admin_portal_country',
+            published_at=self.first_publish_at.isoformat())
+
+        self.assertEqual(self._unread_ids(first_rows), set())
+        self.assertEqual(self._unread_ids(second_rows), {row.id for row in second_rows})
+
+        sources_tasks.handle_deleted_school_master_data_row(
+            country_ids=[self.country.id], publish_source='admin_portal_country',
+            published_at=self.second_publish_at.isoformat())
+
+        self.assertEqual(self._unread_ids(second_rows), set())
+        self.assertTrue(all(row.school.deleted is not None for row in sources_models.SchoolMasterData.objects.filter(
+            id__in=[row.id for row in first_rows + second_rows]).select_related('school')))
+
+    def test_country_runs_without_published_at_keep_the_hourly_dedup_and_scheduled_run_handles_leftovers(self, _):
+        # CLI and data recovery commands call the tasks with country_ids only: unchanged behaviour
+        first_rows = self._create_rows(sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED, self.first_publish_at)
+        sources_tasks.handle_published_school_master_data_row(country_ids=[self.country.id])
+        self.assertEqual(self._unread_ids(first_rows), set())
+
+        second_rows = self._create_rows(sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED, self.second_publish_at)
+        sources_tasks.handle_published_school_master_data_row(country_ids=[self.country.id])
+        self.assertEqual(self._unread_ids(second_rows), {row.id for row in second_rows})
+
+        # The scheduled run (no arguments) still picks up whatever was left
+        sources_tasks.handle_published_school_master_data_row()
+        self.assertEqual(self._unread_ids(second_rows), set())
+
+    def test_scheduled_deleted_run_handles_rows_left_by_a_country_publish(self, _):
+        # A country publish whose task never ran (worker down, task lost) is handled by the next scheduled run
+        rows = self._create_rows(sources_models.SchoolMasterData.ROW_STATUS_DELETED_PUBLISHED, self.first_publish_at)
+
+        sources_tasks.handle_deleted_school_master_data_row()
+
+        self.assertEqual(self._unread_ids(rows), set())
+
+    def test_task_keys(self, _):
+        # Keys and descriptions without published_at are the ones the tasks used before country publish filters
+        row = sources_test_models.SchoolMasterDataFactory(
+            country=self.country,
+            status=sources_models.SchoolMasterData.ROW_STATUS_DELETED_PUBLISHED,
+        )
+        self.assertEqual(sources_tasks.get_school_master_publish_task_details('published', country_ids=[7, 9]), (
+            'handle_published_school_master_data_row_status_26102026_10_country_ids_7_9',
+            'Handle published school master data rows for countries',
+        ))
+        self.assertEqual(sources_tasks.get_school_master_publish_task_details('deleted', row=row), (
+            'handle_deleted_school_master_data_row_status_26102026_10_row_id_{0}'.format(row.id),
+            'Handle deleted school master data row for single record',
+        ))
+        self.assertEqual(sources_tasks.get_school_master_publish_task_details('published'), (
+            'handle_published_school_master_data_row_status_26102026_10',
+            'Handle published school master data rows',
+        ))
+        self.assertEqual(
+            sources_tasks.get_school_master_country_task_key(
+                'handle_published_school_master_data_row', [7], published_at=self.first_publish_at),
+            'handle_published_school_master_data_row_status_26102026_10_country_ids_7_at_{0}'.format(
+                self.first_publish_at.strftime('%Y%m%d%H%M%S%f')),
+        )
+
+        many_country_ids = list(range(1000, 1100))
+        long_key = sources_tasks.get_school_master_country_task_key(
+            'handle_published_school_master_data_row', many_country_ids, published_at=self.first_publish_at)
+        self.assertLessEqual(len(long_key), BackgroundTask._meta.get_field('name').max_length)
+        self.assertEqual(long_key, sources_tasks.get_school_master_country_task_key(
+            'handle_published_school_master_data_row', many_country_ids, published_at=self.first_publish_at))
+
+    def test_parse_published_at(self, _):
+        self.assertEqual(sources_tasks.parse_published_at(self.first_publish_at.isoformat()), self.first_publish_at)
+        self.assertEqual(sources_tasks.parse_published_at(self.first_publish_at), self.first_publish_at)
+        self.assertIsNone(sources_tasks.parse_published_at(None))
+        self.assertIsNone(sources_tasks.parse_published_at('not a date'))
