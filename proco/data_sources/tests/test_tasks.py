@@ -1,4 +1,6 @@
+from datetime import timedelta
 from unittest import mock
+from unittest.mock import patch
 
 from django.core.cache import cache
 from django.test import TestCase
@@ -375,3 +377,145 @@ class DataSourcesTasksTestCase(TestAPIViewSetMixin, TestCase):
         sources_tasks.handle_published_entity_master_data_row()
         self.assertEqual(sources_models.HealthEntityMasterIntermediateData.objects.filter(is_read=False).count(), 0)
         self.assertTrue(Entity.objects.filter(giga_id='test-health-giga-id').exists())
+
+
+# The task keys include the clock hour: pin it so that every run in these tests happens in "the same hour"
+@patch('proco.data_sources.tasks.format_date', return_value='26102026_10')
+class SchoolMasterCountryPublishTasksTestCase(TestCase):
+    """
+    SchoolMasterCountryPublishTasksTestCase
+        Country publish ("Publish all") passes published_at to the publish tasks, so that each request is handled
+        by its own task run limited to its own rows, while the scheduled runs (no arguments) keep handling
+        everything that is left.
+    """
+    databases = ['default']
+
+    def setUp(self):
+        cache.clear()
+        BackgroundTask.objects.all().delete()
+        self.country = CountryFactory()
+        self.first_publish_at = get_current_datetime_object() - timedelta(minutes=20)
+        self.second_publish_at = get_current_datetime_object() - timedelta(minutes=5)
+        super().setUp()
+
+    def _create_rows(self, row_status, published_at, count=1):
+        return [
+            sources_test_models.SchoolMasterDataFactory(
+                country=self.country,
+                status=row_status,
+                is_read=False,
+                published_at=published_at,
+            )
+            for _ in range(count)
+        ]
+
+    def _unread_ids(self, rows):
+        return set(
+            sources_models.SchoolMasterData.objects.filter(
+                id__in=[row.id for row in rows],
+                is_read=False,
+            ).values_list('id', flat=True),
+        )
+
+    def test_published_rows_of_two_publishes_in_the_same_hour_are_both_handled(self, _):
+        first_rows = self._create_rows(sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED, self.first_publish_at, 2)
+        second_rows = self._create_rows(sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED, self.second_publish_at)
+
+        sources_tasks.handle_published_school_master_data_row(
+            country_ids=[self.country.id], publish_source='admin_portal_country',
+            published_at=self.first_publish_at.isoformat())
+
+        # Only the rows of the first publish are handled
+        self.assertEqual(self._unread_ids(first_rows), set())
+        self.assertEqual(self._unread_ids(second_rows), {row.id for row in second_rows})
+
+        sources_tasks.handle_published_school_master_data_row(
+            country_ids=[self.country.id], publish_source='admin_portal_country',
+            published_at=self.second_publish_at.isoformat())
+
+        # The second publish of the same country in the same hour is not skipped
+        self.assertEqual(self._unread_ids(second_rows), set())
+        self.assertEqual(BackgroundTask.objects.filter(
+            name__startswith='handle_published_school_master_data_row_status_26102026_10_country_ids_',
+        ).count(), 2)
+
+    def test_deleted_rows_of_two_publishes_in_the_same_hour_are_both_handled(self, _):
+        first_rows = self._create_rows(
+            sources_models.SchoolMasterData.ROW_STATUS_DELETED_PUBLISHED, self.first_publish_at, 2)
+        second_rows = self._create_rows(
+            sources_models.SchoolMasterData.ROW_STATUS_DELETED_PUBLISHED, self.second_publish_at)
+
+        sources_tasks.handle_deleted_school_master_data_row(
+            country_ids=[self.country.id], publish_source='admin_portal_country',
+            published_at=self.first_publish_at.isoformat())
+
+        self.assertEqual(self._unread_ids(first_rows), set())
+        self.assertEqual(self._unread_ids(second_rows), {row.id for row in second_rows})
+
+        sources_tasks.handle_deleted_school_master_data_row(
+            country_ids=[self.country.id], publish_source='admin_portal_country',
+            published_at=self.second_publish_at.isoformat())
+
+        self.assertEqual(self._unread_ids(second_rows), set())
+        self.assertTrue(all(row.school.deleted is not None for row in sources_models.SchoolMasterData.objects.filter(
+            id__in=[row.id for row in first_rows + second_rows]).select_related('school')))
+
+    def test_country_runs_without_published_at_keep_the_hourly_dedup_and_scheduled_run_handles_leftovers(self, _):
+        # CLI and data recovery commands call the tasks with country_ids only: unchanged behaviour
+        first_rows = self._create_rows(sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED, self.first_publish_at)
+        sources_tasks.handle_published_school_master_data_row(country_ids=[self.country.id])
+        self.assertEqual(self._unread_ids(first_rows), set())
+
+        second_rows = self._create_rows(sources_models.SchoolMasterData.ROW_STATUS_PUBLISHED, self.second_publish_at)
+        sources_tasks.handle_published_school_master_data_row(country_ids=[self.country.id])
+        self.assertEqual(self._unread_ids(second_rows), {row.id for row in second_rows})
+
+        # The scheduled run (no arguments) still picks up whatever was left
+        sources_tasks.handle_published_school_master_data_row()
+        self.assertEqual(self._unread_ids(second_rows), set())
+
+    def test_scheduled_deleted_run_handles_rows_left_by_a_country_publish(self, _):
+        # A country publish whose task never ran (worker down, task lost) is handled by the next scheduled run
+        rows = self._create_rows(sources_models.SchoolMasterData.ROW_STATUS_DELETED_PUBLISHED, self.first_publish_at)
+
+        sources_tasks.handle_deleted_school_master_data_row()
+
+        self.assertEqual(self._unread_ids(rows), set())
+
+    def test_task_keys(self, _):
+        # Keys and descriptions without published_at are the ones the tasks used before country publish filters
+        row = sources_test_models.SchoolMasterDataFactory(
+            country=self.country,
+            status=sources_models.SchoolMasterData.ROW_STATUS_DELETED_PUBLISHED,
+        )
+        self.assertEqual(sources_tasks.get_school_master_publish_task_details('published', country_ids=[7, 9]), (
+            'handle_published_school_master_data_row_status_26102026_10_country_ids_7_9',
+            'Handle published school master data rows for countries',
+        ))
+        self.assertEqual(sources_tasks.get_school_master_publish_task_details('deleted', row=row), (
+            'handle_deleted_school_master_data_row_status_26102026_10_row_id_{0}'.format(row.id),
+            'Handle deleted school master data row for single record',
+        ))
+        self.assertEqual(sources_tasks.get_school_master_publish_task_details('published'), (
+            'handle_published_school_master_data_row_status_26102026_10',
+            'Handle published school master data rows',
+        ))
+        self.assertEqual(
+            sources_tasks.get_school_master_country_task_key(
+                'handle_published_school_master_data_row', [7], published_at=self.first_publish_at),
+            'handle_published_school_master_data_row_status_26102026_10_country_ids_7_at_{0}'.format(
+                self.first_publish_at.strftime('%Y%m%d%H%M%S%f')),
+        )
+
+        many_country_ids = list(range(1000, 1100))
+        long_key = sources_tasks.get_school_master_country_task_key(
+            'handle_published_school_master_data_row', many_country_ids, published_at=self.first_publish_at)
+        self.assertLessEqual(len(long_key), BackgroundTask._meta.get_field('name').max_length)
+        self.assertEqual(long_key, sources_tasks.get_school_master_country_task_key(
+            'handle_published_school_master_data_row', many_country_ids, published_at=self.first_publish_at))
+
+    def test_parse_published_at(self, _):
+        self.assertEqual(sources_tasks.parse_published_at(self.first_publish_at.isoformat()), self.first_publish_at)
+        self.assertEqual(sources_tasks.parse_published_at(self.first_publish_at), self.first_publish_at)
+        self.assertIsNone(sources_tasks.parse_published_at(None))
+        self.assertIsNone(sources_tasks.parse_published_at('not a date'))
