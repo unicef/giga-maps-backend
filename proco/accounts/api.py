@@ -1207,33 +1207,13 @@ class BaseDataLayerAPIViewSet(APIView):
             return parameter_col_function.get('sql').format(col_name='t."{col_name}"')
         return 'AVG(t."{col_name}")'
 
-
-@method_decorator([
-    custom_cache_control(
-        public=True,
-        max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE,
-        cache_status_codes=[rest_status.HTTP_200_OK, ],
-    )
-], name='dispatch')
-class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
-    CACHE_KEY = 'cache'
-    CACHE_KEY_PREFIX = 'DATA_LAYER_INFO'
-
-    def get_cache_key(self):
-        pk = self.kwargs.get('pk')
-        params = dict(self.request.query_params)
-        params.pop(self.CACHE_KEY, None)
-        return '{0}_{1}_{2}'.format(
-            self.CACHE_KEY_PREFIX,
-            pk,
-            '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))),
-        )
-
-    def get_rt_source_condition(self, live_data_sources):
+    def get_rt_source_condition(self, live_data_sources,
+                                rt_table='"connection_statistics_schoolrealtimeregistration"'):
         """
         In the countries listed in LIVE_LAYER_RT_SOURCE_FILTER_COUNTRIES, leave out the realtime schools
         whose recorded realtime source (e.g. "gigameter, qos") is none of the layer's sources.
         Schools without a recorded realtime source are kept.
+        rt_table is the name or alias the query uses for the realtime registration table.
         """
         country_codes = settings.LIVE_LAYER_RT_SOURCE_FILTER_COUNTRIES
         if len(country_codes) == 0:
@@ -1255,13 +1235,35 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         return """
             AND (
                 "schools_school"."country_id" NOT IN ({country_ids})
-                OR COALESCE(TRIM("connection_statistics_schoolrealtimeregistration"."rt_source"), '') = ''
-                OR string_to_array(
-                    REPLACE(LOWER("connection_statistics_schoolrealtimeregistration"."rt_source"), ' ', ''), ','
-                ) && ARRAY[{rt_source_names}]::text[]
+                OR COALESCE(TRIM({rt_table}."rt_source"), '') = ''
+                OR string_to_array(REPLACE(LOWER({rt_table}."rt_source"), ' ', ''), ',')
+                    && ARRAY[{rt_source_names}]::text[]
             )""".format(
             country_ids=','.join([str(country_id) for country_id in country_ids]),
+            rt_table=rt_table,
             rt_source_names=','.join(["'" + name + "'" for name in rt_source_names]),
+        )
+
+
+@method_decorator([
+    custom_cache_control(
+        public=True,
+        max_age=settings.CACHE_CONTROL_MAX_AGE_FOR_FE,
+        cache_status_codes=[rest_status.HTTP_200_OK, ],
+    )
+], name='dispatch')
+class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
+    CACHE_KEY = 'cache'
+    CACHE_KEY_PREFIX = 'DATA_LAYER_INFO'
+
+    def get_cache_key(self):
+        pk = self.kwargs.get('pk')
+        params = dict(self.request.query_params)
+        params.pop(self.CACHE_KEY, None)
+        return '{0}_{1}_{2}'.format(
+            self.CACHE_KEY_PREFIX,
+            pk,
+            '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))),
         )
 
     def get_info_query(self):
@@ -1662,6 +1664,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             ON schools_school."id" = srr."school_id"
             AND srr."deleted" IS NULL
             AND srr."rt_registration_date" < '{end_datetime_exclusive}'
+            {school_rt_source_condition}
         LEFT JOIN (
             SELECT "schools_school"."id" AS school_id,
                 {col_function} AS "{col_name}"
@@ -1691,6 +1694,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
 
         kwargs = copy.deepcopy(self.kwargs)
         kwargs['ids'] = ','.join(kwargs['school_ids'])
+        kwargs['school_rt_source_condition'] = kwargs.get('school_rt_source_condition', '')
 
         if kwargs.get('layer_type') == accounts_models.DataLayer.LAYER_TYPE_LIVE:
             kwargs['table_name'] = 'sds'
@@ -2277,6 +2281,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     'base_benchmark': base_benchmark,
                     'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                     'rt_source_condition': self.get_rt_source_condition(live_data_sources),
+                    'school_rt_source_condition': self.get_rt_source_condition(live_data_sources, 'srr'),
                     'parameter_col': parameter_col,
                     'parameter_col_function_sql': column_function_sql,
                     'is_reverse': data_layer_instance.is_reverse,
@@ -2545,6 +2550,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                         {school_weekly_condition}
                         AND rt_status."rt_registered" = True
                         AND rt_status."rt_registration_date" < '{end_datetime_exclusive}'
+                        {rt_source_condition}
                     )
                     GROUP BY "schools_school"."id"
                     ) AS sds ON sds.school_id = "schools_school".id
@@ -2565,6 +2571,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         kwargs['country_condition'] = ''
         kwargs['admin1_condition'] = ''
         kwargs['school_condition'] = ''
+        kwargs['rt_source_condition'] = kwargs.get('rt_source_condition', '')
 
         kwargs['school_weekly_join'] = ''
         kwargs['school_weekly_condition'] = ''
@@ -2739,6 +2746,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                         {school_weekly_condition}
                         AND rt_status."rt_registered" = True
                         AND rt_status."rt_registration_date" < '{end_datetime_exclusive}'
+                        {rt_source_condition}
                     )
                 ) AS sds ON sds.school_id = "schools_school".id
                 {school_weekly_outer_join}
@@ -2844,6 +2852,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
         kwargs['country_condition'] = ''
         kwargs['admin1_condition'] = ''
         kwargs['school_condition'] = ''
+        kwargs['rt_source_condition'] = kwargs.get('rt_source_condition', '')
 
         kwargs['school_weekly_join'] = ''
         kwargs['school_weekly_condition'] = ''
@@ -3236,6 +3245,7 @@ class DataLayerMapViewSet(BaseDataLayerAPIViewSet, account_utilities.BaseTileGen
                     'national_benchmark': benchmark_value,
                     'base_benchmark': base_benchmark,
                     'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
+                    'rt_source_condition': self.get_rt_source_condition(live_data_sources, 'rt_status'),
                     'parameter_col': parameter_col,
                     'parameter_col_function_sql': column_function_sql,
                     'layer_type': accounts_models.DataLayer.LAYER_TYPE_LIVE,
