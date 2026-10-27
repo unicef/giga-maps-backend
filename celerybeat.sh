@@ -17,4 +17,4 @@ pipenv run python -m flask run --host 0.0.0.0 --port 8000 &
 
 # pipenv run celery -A proco.taskapp beat $*
 # --logfile=/code/celeryd-%n.log --loglevel=DEBUG
-pipenv run celery --app=proco.taskapp beat --scheduler=redbeat.RedBeatScheduler $*
+pipenv run celery --app=proco.taskapp beat --scheduler=proco.taskapp.schedulers.SelfHealingRedBeatScheduler $*
