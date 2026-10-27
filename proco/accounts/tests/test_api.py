@@ -1,6 +1,6 @@
 import os
 from collections import OrderedDict
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from django.conf import settings
 from django.core.cache import cache
@@ -11,6 +11,7 @@ from rest_framework import status
 
 from proco.accounts import models as accounts_models
 from proco.accounts.tests import test_utils as accounts_test_utilities
+from proco.connection_statistics import models as statistics_models
 from proco.core import utils as core_utilities
 from proco.custom_auth.tests import test_utils as test_utilities
 from proco.locations.tests.factories import CountryFactory
@@ -2187,6 +2188,98 @@ class DataLayerInfoApiTestCase(TestAPIViewSetMixin, TestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_live_data_layer_country_view_counts_schools_from_layer_sources(self):
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.admin_user,
+            view=view,
+            data=accounts_test_utilities.live_download_layer_data_pcdc(),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        layer_id = response.data['id']
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='update-or-delete-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_READY_TO_PUBLISH,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='publish-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        # The layer only uses Daily Check App/MLab, so the QoS only school must not be counted
+        # when the country is listed in LIVE_LAYER_RT_SOURCE_FILTER_COUNTRIES
+        for rt_source in ['gigameter', 'mlab', 'gigameter, qos', None, 'qos']:
+            statistics_models.SchoolRealTimeRegistration.objects.create(
+                school=SchoolFactory(country=self.country),
+                rt_registered=True,
+                rt_registration_date=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                rt_source=rt_source,
+            )
+
+        url, view, view_info = accounts_url(
+            (layer_id,),
+            {
+                'country_id': self.country.id,
+                'benchmark': 'global',
+                'start_date': '24-06-2024',
+                'end_date': '30-06-2024',
+                'is_weekly': 'true',
+            },
+            view_name='info-data-layer'
+        )
+
+        # Read the data created in this test's transaction
+        with self.settings(READ_ONLY_DB_KEY='default', LIVE_LAYER_RT_SOURCE_FILTER_COUNTRIES=[]):
+            response = self.forced_auth_req(
+                'get',
+                url,
+                view=view,
+                view_info=view_info,
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['no_of_schools_measure'], 5)
+
+        cache.clear()
+        with self.settings(
+            READ_ONLY_DB_KEY='default',
+            LIVE_LAYER_RT_SOURCE_FILTER_COUNTRIES=[self.country.iso3_format],
+        ):
+            response = self.forced_auth_req(
+                'get',
+                url,
+                view=view,
+                view_info=view_info,
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['no_of_schools_measure'], 4)
 
     def test_live_data_layer_map_school_view(self):
         url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')
