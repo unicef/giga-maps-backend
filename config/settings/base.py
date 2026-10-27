@@ -579,6 +579,13 @@ ENTITY_LIVE_DATA_ENABLE_AUTO_SYNC = env.bool('ENTITY_LIVE_DATA_ENABLE_AUTO_SYNC'
 # Separate flag so health master sync can stay off until HEALTH_MASTER feed is ready.
 GIGA_METER_ENABLE_HEALTH_AUTO_SYNC = env.bool('GIGA_METER_ENABLE_HEALTH_AUTO_SYNC', default=False)
 
+# Country ISO3 codes (e.g. "ZAF") where the live layer info counts only the realtime schools whose recorded
+# realtime source is one of the layer's sources. Empty keeps the count unchanged for every country.
+LIVE_LAYER_RT_SOURCE_FILTER_COUNTRIES = [
+    code.strip().upper() for code in env('LIVE_LAYER_RT_SOURCE_FILTER_COUNTRIES', default='').split(',')
+    if code.strip()
+]
+
 UNDER_TEST = (len(sys.argv) > 1 and sys.argv[1] == 'test')
 
 GIGA_LOGO_URL = env(

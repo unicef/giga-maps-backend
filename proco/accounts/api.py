@@ -1229,6 +1229,41 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
             '_'.join(map(lambda x: '{0}_{1}'.format(x[0], x[1]), sorted(params.items()))),
         )
 
+    def get_rt_source_condition(self, live_data_sources):
+        """
+        In the countries listed in LIVE_LAYER_RT_SOURCE_FILTER_COUNTRIES, leave out the realtime schools
+        whose recorded realtime source (e.g. "gigameter, qos") is none of the layer's sources.
+        Schools without a recorded realtime source are kept.
+        """
+        country_codes = settings.LIVE_LAYER_RT_SOURCE_FILTER_COUNTRIES
+        if len(country_codes) == 0:
+            return ''
+
+        country_ids = list(Country.objects.filter(iso3_format__in=country_codes).values_list('id', flat=True))
+        if len(country_ids) == 0:
+            return ''
+
+        rt_source_names = []
+        if statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE in live_data_sources:
+            rt_source_names.extend(['gigameter', 'mlab'])
+        if statistics_configs.QOS_SOURCE in live_data_sources:
+            rt_source_names.append('qos')
+
+        if len(rt_source_names) == 0:
+            return ''
+
+        return """
+            AND (
+                "schools_school"."country_id" NOT IN ({country_ids})
+                OR COALESCE(TRIM("connection_statistics_schoolrealtimeregistration"."rt_source"), '') = ''
+                OR string_to_array(
+                    REPLACE(LOWER("connection_statistics_schoolrealtimeregistration"."rt_source"), ' ', ''), ','
+                ) && ARRAY[{rt_source_names}]::text[]
+            )""".format(
+            country_ids=','.join([str(country_id) for country_id in country_ids]),
+            rt_source_names=','.join(["'" + name + "'" for name in rt_source_names]),
+        )
+
     def get_info_query(self):
         query = """
                 SELECT {case_conditions}
@@ -1257,7 +1292,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     {school_condition}
                     {school_weekly_condition}
                     AND "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
-                    AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date" < '{end_datetime_exclusive}')
+                    AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date" < '{end_datetime_exclusive}'
+                    {rt_source_condition})
                     ) AS sds
                     {school_weekly_outer_join} \
                 """
@@ -1271,6 +1307,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs['school_weekly_condition'] = ''
         kwargs['school_weekly_outer_join'] = ''
         kwargs['benchmark_value_sql'] = ''
+        kwargs['rt_source_condition'] = kwargs.get('rt_source_condition', '')
 
         benchmark_value = kwargs['benchmark_value']
         if benchmark_value is not None and isinstance(benchmark_value, str) and 'SQL:' in benchmark_value:
@@ -1393,7 +1430,8 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                 {school_condition}
                 {school_weekly_condition}
                 AND "connection_statistics_schoolrealtimeregistration"."rt_registered" = True
-                AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date" < '{end_datetime_exclusive}')
+                AND "connection_statistics_schoolrealtimeregistration"."rt_registration_date" < '{end_datetime_exclusive}'
+                {rt_source_condition})
         ) AS sds
         {school_weekly_outer_join}
         """
@@ -1467,6 +1505,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
         kwargs['realtime_weekly_metric_table'] = statistics_models.SchoolRealTimeWeeklyMetric._meta.db_table
         kwargs['realtime_weekly_metric_year'] = date_utilities.get_year_from_date(kwargs['start_date'])
         kwargs['realtime_weekly_metric_week'] = date_utilities.get_week_from_date(kwargs['start_date'])
+        kwargs['rt_source_condition'] = kwargs.get('rt_source_condition', '')
 
         if len(kwargs.get('admin1_ids', [])) > 0:
             kwargs['admin1_condition'] = 'AND "schools_school"."admin1_id" IN ({0})'.format(
@@ -2237,6 +2276,7 @@ class DataLayerInfoViewSet(BaseDataLayerAPIViewSet):
                     'national_benchmark': benchmark_value,
                     'base_benchmark': base_benchmark,
                     'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
+                    'rt_source_condition': self.get_rt_source_condition(live_data_sources),
                     'parameter_col': parameter_col,
                     'parameter_col_function_sql': column_function_sql,
                     'is_reverse': data_layer_instance.is_reverse,
