@@ -149,6 +149,11 @@ class HealthEntityMasterIntermediateData(TimeStampedModel, core_models.MasterDat
     connectivity_type = models.CharField(blank=True, null=True, max_length=255)
     coverage_type = models.CharField(blank=True, null=True, max_length=255, default='unknown')
 
+    fiber_node_distance = models.FloatField(blank=True, default=None, null=True)
+    microwave_node_distance = models.FloatField(blank=True, default=None, null=True)
+    nearest_lte_distance = models.FloatField(blank=True, default=None, null=True)  # nearest_LTE_distance
+    nearest_nr_distance = models.FloatField(blank=True, default=None, null=True)  # nearest_NR_distance
+
     num_community_health_workers = models.PositiveIntegerField(blank=True, default=None, null=True)
     num_community_health_workers_within_5km = models.PositiveIntegerField(blank=True, default=None, null=True)
     area_type = models.CharField(blank=True, null=True, max_length=255)

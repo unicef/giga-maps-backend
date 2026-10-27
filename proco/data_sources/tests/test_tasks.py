@@ -378,6 +378,43 @@ class DataSourcesTasksTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(sources_models.HealthEntityMasterIntermediateData.objects.filter(is_read=False).count(), 0)
         self.assertTrue(Entity.objects.filter(giga_id='test-health-giga-id').exists())
 
+    def test_handle_published_entity_master_data_row_copies_coverage_and_network_distances(self):
+        from proco.entities.models import EntityType, Entity, HealthEntity
+        EntityType.objects.get_or_create(
+            code='health',
+            name='Health Facility',
+            master_data_model='data_sources.HealthEntityMasterIntermediateData',
+            detail_model='entities.HealthEntity',
+            detail_related_name='health_entity',
+        )
+
+        sources_models.HealthEntityMasterIntermediateData.objects.create(
+            country=self.country,
+            health_id_giga='test-health-network-id',
+            facility_name='Test Health Facility',
+            latitude=10.0,
+            longitude=20.0,
+            status=sources_models.HealthEntityMasterIntermediateData.ROW_STATUS_PUBLISHED,
+            is_read=False,
+            facility_hours='24_7',
+            coverage_type='4G',
+            fiber_node_distance=2.5,
+            microwave_node_distance=3.5,
+            nearest_lte_distance=4.5,
+            nearest_nr_distance=5.5,
+        )
+
+        sources_tasks.handle_published_entity_master_data_row()
+
+        entity = Entity.objects.get(giga_id='test-health-network-id')
+        self.assertEqual(entity.coverage_type, '4g')
+        self.assertEqual(entity.coverage_status, 'good')
+        health_entity = HealthEntity.objects.get(entity=entity)
+        self.assertEqual(health_entity.fiber_node_distance, 2.5)
+        self.assertEqual(health_entity.microwave_node_distance, 3.5)
+        self.assertEqual(health_entity.nearest_lte_distance, 4.5)
+        self.assertEqual(health_entity.nearest_nr_distance, 5.5)
+
 
 # The task keys include the clock hour: pin it so that every run in these tests happens in "the same hour"
 @patch('proco.data_sources.tasks.format_date', return_value='26102026_10')
