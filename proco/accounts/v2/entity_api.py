@@ -1106,6 +1106,10 @@ class EntityDataLayerMapViewSet(EntityTypeCodeMixin, BaseEntityDataLayerAPIViewS
                     'national_benchmark': benchmark_value,
                     'base_benchmark': base_benchmark,
                     'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
+                    'rt_source_condition': (
+                        DataLayerMapViewSet.get_rt_source_condition(self, live_data_sources, 'rt_status')
+                        if is_legacy else ''
+                    ),
                     'parameter_col': parameter_col,
                     'parameter_col_function_sql': self.get_column_function_sql(
                         first_data_source.data_source_column_function
@@ -3029,6 +3033,9 @@ class EntityDataLayerInfoViewSet(BaseEntityDataLayerAPIViewSet):
                 'live_source_types': ','.join(["'" + str(source) + "'" for source in set(live_data_sources)]),
                 'rt_source_condition': (
                     DataLayerInfoViewSet.get_rt_source_condition(self, live_data_sources) if is_legacy else ''
+                ),
+                'school_rt_source_condition': (
+                    DataLayerInfoViewSet.get_rt_source_condition(self, live_data_sources, 'srr') if is_legacy else ''
                 ),
                 'parameter_col': parameter_col,
                 'parameter_col_function_sql': column_function_sql,
