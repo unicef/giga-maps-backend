@@ -5,7 +5,8 @@ from django.core.cache import cache
 from django.utils import timezone
 from django.utils.cache import add_never_cache_headers, patch_cache_control
 
-from proco.utils.tasks import update_cached_value
+from proco.core.config import app_config as core_configs
+from proco.utils.tasks import get_refresh_queued_key, update_cached_value
 
 
 class SoftCacheManager(object):
@@ -19,8 +20,15 @@ class SoftCacheManager(object):
                 (value['expired_at'] and value['expired_at'] < timezone.now().timestamp())
                 or value.get('invalidated', True)
             ) and value.get('request_path', None):
-                update_cached_value.delay(url=value['request_path'])
+                self._queue_refresh(value['request_path'])
             return value['value']
+
+    def _queue_refresh(self, request_path):
+        # One pending refresh per URL: every read of a stale entry lands here, and each refresh is a
+        # full rebuild of the view. update_cached_value releases the key when it starts.
+        queued_key = get_refresh_queued_key(request_path)
+        if cache.add(queued_key, 1, timeout=core_configs.cache_refresh_queued_timeout):
+            update_cached_value.delay(url=request_path)
 
     def _invalidate(self, key):
         value = cache.get(key, None)

@@ -399,23 +399,11 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                                 'updated_schools': 0,
                                 'deleted_schools': 0
                             }
-                        if row.school_id is None:
-                            # New Schools
-                            change_summary[country_code]['new_schools'] += 1
-
-                        if row.status == sources_models.SchoolMasterData.ROW_STATUS_DELETED:
-                            # Deleted Schools
-                            change_summary[country_code]['deleted_schools'] += 1
-
+                        # Read before the row and its school are updated below; counted only once the
+                        # row is saved, so a row that fails or is cut by the time limit is not reported
+                        is_new_school = row.school_id is None
+                        is_deleted_row = row.status == sources_models.SchoolMasterData.ROW_STATUS_DELETED
                         school_changes = compare_target_model_changes(row, row.school)
-
-                        if any(school_changes.values()):
-                            change_summary[country_code]['updated_schools'] += 1
-                            # Increase column count
-                            for model_type, field_changes in school_changes.items():
-                                for field, count in field_changes.items():
-                                    change_summary[country_code][f'{model_type}_changes'].setdefault(field, 0)
-                                    change_summary[country_code][f'{model_type}_changes'][field] += count
 
                         environment = row.school_area_type.lower() if not core_utilities.is_blank_string(
                             row.school_area_type) else ''
@@ -616,20 +604,31 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
                         updated_school_ids.append(school.id)
                         if created:
                             created_school_ids.append(school.id)
+                        add_published_row_to_change_summary(
+                            change_summary[country_code], is_new_school, is_deleted_row, school_changes,
+                        )
 
                         processed_rows_count += 1
                         if processed_rows_count % 1000 == 0:
                             task_instance.info(
                                 'Processed {0} published school master records.'.format(processed_rows_count)
                             )
+                    except SoftTimeLimitExceeded:
+                        # The limit can hit while row.save() waits on the DB, after the row is already stored
+                        # as read: record it here, as no later run will pick it up again
+                        if is_school_master_row_saved_as_read(row) and school.id not in updated_school_ids:
+                            updated_school_ids.append(school.id)
+                            add_published_row_to_change_summary(
+                                change_summary[country_code], is_new_school, is_deleted_row, school_changes,
+                            )
+                            processed_rows_count += 1
+                        raise
                     except Exception as ex:
                         logger.error('Error reported on publishing: {0}'.format(ex))
                         logger.error('Record: {0}'.format(row.__dict__))
                         task_instance.info('Error reported for ID ({0}) on publishing: {1}'.format(row.id, ex))
 
-            if len(updated_school_ids) > 0:
-                for i in range(0, len(updated_school_ids), 20):
-                    populate_school_new_fields_task.delay(None, None, None, school_ids=updated_school_ids[i:i + 20])
+            queue_populate_school_new_fields(updated_school_ids)
 
             # for new_school_id in created_school_ids:
             #     # As it's a new school added through School Master record publishing, add the school to search index
@@ -639,7 +638,12 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
             send_slack_notifications(change_summary, publish_source=publish_source)
             background_task_utilities.task_on_complete(task_instance)
         except SoftTimeLimitExceeded:
-            send_slack_notifications(change_summary, publish_source=publish_source)
+            # Rows processed so far are already marked is_read=True and won't be picked up again,
+            # so their schools must be sent to populate now
+            queue_populate_school_new_fields(updated_school_ids)
+            task_instance.info('Stopped on soft time limit after {0} published records.'.format(processed_rows_count))
+            send_slack_notifications_after_soft_time_limit(change_summary, publish_source)
+            background_task_utilities.task_on_complete(task_instance)
             raise
         except Exception as e:
             raise
@@ -647,7 +651,9 @@ def handle_published_school_master_data_row(published_row=None, country_ids=None
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
-@app.task(soft_time_limit=2 * 55 * 60, time_limit=2 * 55 * 60)
+# The hard limit must be later than the soft one: with equal limits the worker is killed right
+# after the soft signal and the stop handler below never gets to run
+@app.task(soft_time_limit=2 * 55 * 60, time_limit=2 * 60 * 60)
 def handle_deleted_school_master_data_row(deleted_row=None, country_ids=None, publish_source='auto_publish',
                                           published_at=None):
     """
@@ -680,40 +686,60 @@ def handle_deleted_school_master_data_row(deleted_row=None, country_ids=None, pu
         current_date = core_utilities.get_current_datetime_object()
         task_instance.info('Total records to update: {}'.format(new_deleted_records.count()))
 
-        for data_chunk in core_utilities.queryset_iterator(new_deleted_records, chunk_size=1000):
-            for row in data_chunk:
-                try:
-                    country_code = row.country.iso3_format
-                    if country_code not in change_summary:
-                        change_summary[country_code] = {
-                            'country_name': row.country.name,
-                            'school_model_changes': defaultdict(),
-                            'school_weekly_changes': defaultdict(),
-                            'rt_registration_changes': defaultdict(),
-                            'pulled_at_datetime': None,
-                            'new_schools': 0,
-                            'updated_schools': 0,
-                            'deleted_schools': 0
-                        }
-                    # Deleted Schools
-                    change_summary[country_code]['deleted_schools'] += 1
+        try:
+            for data_chunk in core_utilities.queryset_iterator(new_deleted_records, chunk_size=1000):
+                for row in data_chunk:
+                    try:
+                        country_code = row.country.iso3_format
+                        if country_code not in change_summary:
+                            change_summary[country_code] = {
+                                'country_name': row.country.name,
+                                'school_model_changes': defaultdict(),
+                                'school_weekly_changes': defaultdict(),
+                                'rt_registration_changes': defaultdict(),
+                                'pulled_at_datetime': None,
+                                'new_schools': 0,
+                                'updated_schools': 0,
+                                'deleted_schools': 0,
+                            }
 
-                    row.school.delete()
+                        row.school.delete()
 
-                    statistics_models.SchoolWeeklyStatus.objects.filter(school=row.school).update(deleted=current_date)
+                        statistics_models.SchoolWeeklyStatus.objects.filter(school=row.school).update(
+                            deleted=current_date,
+                        )
 
-                    statistics_models.SchoolDailyStatus.objects.filter(school=row.school).update(deleted=current_date)
+                        statistics_models.SchoolDailyStatus.objects.filter(school=row.school).update(
+                            deleted=current_date,
+                        )
 
-                    statistics_models.SchoolRealTimeRegistration.objects.filter(school=row.school).update(
-                        deleted=current_date)
+                        statistics_models.SchoolRealTimeRegistration.objects.filter(school=row.school).update(
+                            deleted=current_date,
+                        )
 
-                    row.is_read = True
-                    row.save()
+                        row.is_read = True
+                        row.save()
+                        # Deleted Schools, counted only once the row is saved
+                        change_summary[country_code]['deleted_schools'] += 1
 
-                except Exception as ex:
-                    logger.error('Error reported on deletion: {0}'.format(ex))
-                    logger.error('Record: {0}'.format(row.__dict__))
-                    task_instance.info('Error reported for ID ({0}) on deletion: {1}'.format(row.id, ex))
+                    except SoftTimeLimitExceeded:
+                        # The limit can hit while row.save() waits on the DB, after the row is already stored
+                        # as read: count it here, as no later run will report it
+                        if is_school_master_row_saved_as_read(row):
+                            change_summary[country_code]['deleted_schools'] += 1
+                        raise
+                    except Exception as ex:
+                        logger.error('Error reported on deletion: {0}'.format(ex))
+                        logger.error('Record: {0}'.format(row.__dict__))
+                        task_instance.info('Error reported for ID ({0}) on deletion: {1}'.format(row.id, ex))
+        except SoftTimeLimitExceeded:
+            # Rows deleted so far are already marked is_read=True, so no later run will report them
+            task_instance.info('Stopped on soft time limit. Remaining records: {0}'.format(
+                new_deleted_records.count(),
+            ))
+            send_slack_notifications_after_soft_time_limit(change_summary, publish_source)
+            background_task_utilities.task_on_complete(task_instance)
+            raise
 
         task_instance.info('Remaining records: {}'.format(new_deleted_records.count()))
         send_slack_notifications(change_summary, publish_source=publish_source)
@@ -2015,6 +2041,74 @@ def send_slack_notifications(change_summary, publish_source='auto_publish'):
         summary = format_changes_for_slack(country, summary)
         slack_service = SlackNotificationService()
         slack_service.send_school_master_update_notification(summary, publish_source=publish_source)
+
+
+def send_slack_notifications_after_soft_time_limit(change_summary, publish_source):
+    """
+    send_slack_notifications_after_soft_time_limit
+        Method to send the Slack notifications of a task stopped by its soft time limit, without letting a
+        Slack error replace SoftTimeLimitExceeded as the reason the task stopped
+    :param change_summary: Dictionary of the changes per country, as built by the School Master tasks
+    :param publish_source: Source of publishing
+    :return: None
+    """
+    try:
+        send_slack_notifications(change_summary, publish_source=publish_source)
+    except Exception as ex:
+        logger.error('Slack notification failed after soft time limit: {0}'.format(ex))
+
+
+def is_school_master_row_saved_as_read(row):
+    """
+    is_school_master_row_saved_as_read
+        Method to check in the DB whether a School Master row is already stored as read, e.g. when a time
+        limit interrupted the task while row.save() was returning
+    :param row: SchoolMasterData instance
+    :return: True if the row is stored with is_read=True, False if it is not or the check itself fails
+    """
+    try:
+        return sources_models.SchoolMasterData.objects.filter(pk=row.pk, is_read=True).exists()
+    except Exception as ex:
+        # Called while handling SoftTimeLimitExceeded: never let this check replace it
+        logger.error('Could not check if School Master row {0} was saved: {1}'.format(row.pk, ex))
+        return False
+
+
+def queue_populate_school_new_fields(school_ids):
+    """
+    queue_populate_school_new_fields
+        Method to schedule populate_school_new_fields_task for the given schools, in batches of 20
+    :param school_ids: List of School IDs
+    :return: None
+    """
+    for i in range(0, len(school_ids), 20):
+        populate_school_new_fields_task.delay(None, None, None, school_ids=school_ids[i:i + 20])
+
+
+def add_published_row_to_change_summary(country_summary, is_new_school, is_deleted_row, school_changes):
+    """
+    add_published_row_to_change_summary
+        Method to count a saved School Master published row in its country's Slack change summary
+    :param country_summary: change_summary entry of the row's country
+    :param is_new_school: True if the row had no school before being published
+    :param is_deleted_row: True if the row has the DELETED status
+    :param school_changes: Changes per model type and field, as returned by compare_target_model_changes
+    :return: None
+    """
+    if is_new_school:
+        country_summary['new_schools'] += 1
+
+    if is_deleted_row:
+        country_summary['deleted_schools'] += 1
+
+    if any(school_changes.values()):
+        country_summary['updated_schools'] += 1
+        # Increase column count
+        for model_type, field_changes in school_changes.items():
+            model_changes = country_summary['{0}_changes'.format(model_type)]
+            for field, count in field_changes.items():
+                model_changes.setdefault(field, 0)
+                model_changes[field] += count
 
 
 # ############################# Entity Live Data Tasks #############################
