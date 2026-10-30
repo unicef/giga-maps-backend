@@ -1104,6 +1104,10 @@ class BaseDataLayerAPIViewSet(APIView):
         permissions.AllowAny,
     )
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        account_utilities.validate_id_query_params(request.query_params)
+
     def update_kwargs(self, country_ids, layer_instance):
         query_params = self.request.query_params.dict()
         query_param_keys = query_params.keys()
