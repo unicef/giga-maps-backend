@@ -8,6 +8,7 @@ from django.http import HttpResponse
 from django.template.loader import get_template
 from rest_framework.response import Response
 
+from proco.accounts import exceptions as accounts_exceptions
 from proco.accounts.config import app_config as config
 from proco.core import utils as core_utilities
 
@@ -79,6 +80,43 @@ def rewrite_weekly_status_sql(sql_statement, entity_name='school'):
         sql_statement = re.sub(pattern, repl, sql_statement)
 
     return sql_statement
+
+
+def is_id_query_param(param_name):
+    """
+    is_id_query_param
+        Method to check if a query param carries ids. Any entity code prefix counts, because the views
+        read prefixed params without checking the entity code.
+
+    :param param_name: Query param name
+    :return: Boolean
+    """
+    base_name = param_name[:-len('__in')] if param_name.endswith('__in') else param_name
+    return any(
+        base_name == id_param or base_name.endswith('_' + id_param)
+        for id_param in config.id_query_params
+    )
+
+
+def validate_id_query_params(query_params):
+    """
+    validate_id_query_params
+        Method to reject the query params with non integer ids, as these values are used to build raw SQL.
+        Blank values are skipped.
+
+    :param query_params: QueryDict of the request
+    :return: None
+    """
+    for param_name, values in query_params.lists():
+        if not is_id_query_param(param_name):
+            continue
+
+        for value in values:
+            if core_utilities.is_blank_string(value):
+                continue
+
+            if not all(re.fullmatch(r'[0-9]+', id_value.strip()) for id_value in value.split(',')):
+                raise accounts_exceptions.InvalidIdQueryParamError(message_kwargs={'param': param_name})
 
 
 def send_standard_email(user, data):
