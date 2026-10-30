@@ -2435,6 +2435,38 @@ class DataLayerInfoApiTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
 
+class DataLayerIdQueryParamsApiTestCase(TestCase):
+    databases = {'default', settings.READ_ONLY_DB_KEY}
+
+    def assert_bad_request(self, url):
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_data_layer_info_rejects_non_numeric_ids(self):
+        url = reverse('accounts:info-data-layer', args=(1,))
+        self.assert_bad_request(url + '?school_id=all')
+        self.assert_bad_request(url + '?school_id__in=1,abc')
+
+    def test_data_layer_map_rejects_non_numeric_ids(self):
+        url = reverse('accounts:map-data-layer', args=(1,))
+        self.assert_bad_request(url + '?school_id=all')
+        self.assert_bad_request(url + '?school_id__in=1,abc')
+
+    def test_time_player_rejects_non_numeric_ids(self):
+        url = reverse('accounts:get-time-player-data-v2')
+        self.assert_bad_request(url + '?layer_id=1&country_id=abc')
+
+    def test_entity_layer_info_rejects_non_numeric_ids(self):
+        url = reverse('entities:entity-info-data-layer')
+        self.assert_bad_request(url + '?school_layer_id=1&school_id=all')
+        self.assert_bad_request(url + '?school_entity_id__in=1,abc')
+        self.assert_bad_request(url + '?a__b_entity_id=abc')
+
+    def test_entity_layer_map_rejects_non_numeric_ids(self):
+        url = reverse('entities:entity-map-data-layer')
+        self.assert_bad_request(url + '?country_id=abc')
+
+
 class InvalidateCacheApiTestCase(TestAPIViewSetMixin, TestCase):
     @classmethod
     def setUpTestData(cls):

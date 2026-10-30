@@ -276,6 +276,11 @@ class InvalidDataLayerCodeError(BaseInvalidValidationError):
     code = 'invalid_data_layer_code'
 
 
+class InvalidIdQueryParamError(BaseInvalidValidationError):
+    message = _("Query parameter '{param}' must be an integer or a comma-separated list of integers.")
+    code = 'invalid_id_query_param'
+
+
 class DuplicateDataLayerCodeError(BaseInvalidValidationError):
     message = _("Data Layer with code '{code}' already exists.")
     code = 'duplicate_data_layer_code'
