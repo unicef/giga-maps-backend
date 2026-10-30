@@ -2438,33 +2438,50 @@ class DataLayerInfoApiTestCase(TestAPIViewSetMixin, TestCase):
 class DataLayerIdQueryParamsApiTestCase(TestCase):
     databases = {'default', settings.READ_ONLY_DB_KEY}
 
-    def assert_bad_request(self, url):
-        response = self.client.get(url)
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+    def assert_rejected(self, url, param):
+        with self.subTest(url=url):
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+            self.assertEqual(response.data[0].code, 'invalid_id_query_param')
+            self.assertIn("'{0}'".format(param), str(response.data[0]))
+
+    def assert_not_rejected(self, url):
+        with self.subTest(url=url):
+            response = self.client.get(url)
+            self.assertNotIn('invalid_id_query_param', [getattr(error, 'code', None) for error in response.data or []])
 
     def test_data_layer_info_rejects_non_numeric_ids(self):
         url = reverse('accounts:info-data-layer', args=(1,))
-        self.assert_bad_request(url + '?school_id=all')
-        self.assert_bad_request(url + '?school_id__in=1,abc')
+        self.assert_rejected(url + '?school_id=all', 'school_id')
+        self.assert_rejected(url + '?school_id__in=1,abc', 'school_id__in')
 
     def test_data_layer_map_rejects_non_numeric_ids(self):
         url = reverse('accounts:map-data-layer', args=(1,))
-        self.assert_bad_request(url + '?school_id=all')
-        self.assert_bad_request(url + '?school_id__in=1,abc')
+        self.assert_rejected(url + '?school_id=all', 'school_id')
+        self.assert_rejected(url + '?school_id__in=1,abc', 'school_id__in')
 
     def test_time_player_rejects_non_numeric_ids(self):
         url = reverse('accounts:get-time-player-data-v2')
-        self.assert_bad_request(url + '?layer_id=1&country_id=abc')
+        self.assert_rejected(url + '?layer_id=1&country_id=abc', 'country_id')
 
     def test_entity_layer_info_rejects_non_numeric_ids(self):
         url = reverse('entities:entity-info-data-layer')
-        self.assert_bad_request(url + '?school_layer_id=1&school_id=all')
-        self.assert_bad_request(url + '?school_entity_id__in=1,abc')
-        self.assert_bad_request(url + '?a__b_entity_id=abc')
+        self.assert_rejected(url + '?school_layer_id=1&school_id=all', 'school_id')
+        self.assert_rejected(url + '?school_entity_id__in=1,abc', 'school_entity_id__in')
+        self.assert_rejected(url + '?a__b_entity_id=abc', 'a__b_entity_id')
 
     def test_entity_layer_map_rejects_non_numeric_ids(self):
         url = reverse('entities:entity-map-data-layer')
-        self.assert_bad_request(url + '?country_id=abc')
+        self.assert_rejected(url + '?country_id=abc', 'country_id')
+        self.assert_rejected(url + '?school_layer_id=1&country_id=abc', 'country_id')
+
+    def test_numeric_ids_are_not_rejected(self):
+        self.assert_not_rejected(
+            reverse('accounts:map-data-layer', args=(1,)) + '?school_id=1&country_id=2&admin1_id=3')
+        self.assert_not_rejected(
+            reverse('accounts:get-time-player-data-v2') + '?layer_id=1&country_id=2')
+        self.assert_not_rejected(
+            reverse('entities:entity-info-data-layer') + '?school_layer_id=1&school_id=1')
 
 
 class InvalidateCacheApiTestCase(TestAPIViewSetMixin, TestCase):
