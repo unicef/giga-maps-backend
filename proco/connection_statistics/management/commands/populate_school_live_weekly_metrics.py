@@ -20,6 +20,8 @@ logger = logging.getLogger('gigamaps.' + __name__)
 
 LIVE_METRIC_FIELDS = {
     'connectivity_speed',
+    'connectivity_speed_p90',
+    'connectivity_speed_median',
     'connectivity_upload_speed',
     'connectivity_latency',
     'uptime',

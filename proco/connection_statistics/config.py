@@ -15,6 +15,10 @@ class AppConfig(object):
 
     SCHOOL_MASTER_SOURCE = 'SCHOOL_MASTER'
 
+    # Percentiles of the raw download speed measurements stored per school per day
+    DAILY_SPEED_PERCENTILE = 0.9
+    DAILY_SPEED_MEDIAN_PERCENTILE = 0.5
+
     STATIC_DATA_SOURCE_CHOICES = (
         (SCHOOL_MASTER_SOURCE, 'School Master Data Source'),
     )

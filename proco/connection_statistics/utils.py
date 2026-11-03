@@ -13,6 +13,7 @@ from proco.connection_statistics.aggregations import (
     aggregate_coverage_by_types,
     aggregate_coverage_default,
 )
+from proco.connection_statistics.config import app_config as statistics_configs
 from proco.connection_statistics.models import (
     CountryDailyStatus,
     CountryWeeklyStatus,
@@ -22,6 +23,7 @@ from proco.connection_statistics.models import (
     EntityDailyStatus,
     EntityWeeklyStatus,
 )
+from proco.core.db_utils import Percentile
 from proco.core.utils import convert_to_int, get_current_datetime_object
 from proco.locations.models import Country
 from proco.schools.constants import ColorMapSchema
@@ -51,9 +53,14 @@ def aggregate_real_time_data_to_school_daily_status(country, date):
             connectivity_speed_mean_avg=Avg('connectivity_speed_mean'),
             connectivity_upload_speed_mean_avg=Avg('connectivity_upload_speed_mean'),
             connectivity_upload_speed_avg=Avg('connectivity_upload_speed'),
+            connectivity_speed_p90=Percentile('connectivity_speed', statistics_configs.DAILY_SPEED_PERCENTILE),
+            connectivity_speed_median=Percentile('connectivity_speed',
+                                                 statistics_configs.DAILY_SPEED_MEDIAN_PERCENTILE),
         ).order_by()
 
         for source_agg in aggregate_by_source:
+            speed_p90 = source_agg['connectivity_speed_p90']
+            speed_median = source_agg['connectivity_speed_median']
             SchoolDailyStatus.objects.update_or_create(
                 school_id=school,
                 date=date,
@@ -71,6 +78,8 @@ def aggregate_real_time_data_to_school_daily_status(country, date):
                     'connectivity_speed_mean': source_agg['connectivity_speed_mean_avg'],
                     'connectivity_upload_speed_mean': source_agg['connectivity_upload_speed_mean_avg'],
                     'connectivity_upload_speed': source_agg['connectivity_upload_speed_avg'],
+                    'connectivity_speed_p90': round(speed_p90) if speed_p90 is not None else None,
+                    'connectivity_speed_median': round(speed_median) if speed_median is not None else None,
                     'deleted': None,
                 },
             )

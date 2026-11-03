@@ -62,6 +62,50 @@ data_source_json = [
                     }
                 ]
             }, {
+                'name': 'connectivity_speed_p90',
+                'type': 'int',
+                'unit': 'bps',
+                'is_parameter': True,
+                'alias': 'Download Speed P90',
+                'base_benchmark': 1000000,
+                'display_unit': 'Mbps',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': 'Average of the daily P90 values',
+                        'sql': 'AVG({col_name})',
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': 'Median of the daily P90 values',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})',
+                    },
+                ],
+            }, {
+                'name': 'connectivity_speed_median',
+                'type': 'int',
+                'unit': 'bps',
+                'is_parameter': True,
+                'alias': 'Download Speed Median',
+                'base_benchmark': 1000000,
+                'display_unit': 'Mbps',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': 'Average of the daily median values',
+                        'sql': 'AVG({col_name})',
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': 'Median of the daily median values',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})',
+                    },
+                ],
+            }, {
                 'name': 'connectivity_upload_speed',
                 'type': 'int',
                 'unit': 'bps',
@@ -257,6 +301,52 @@ data_source_json = [
                         'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})'
                     }
                 ]
+            },
+            {
+                'name': 'connectivity_speed_p90',
+                'type': 'int',
+                'unit': 'bps',
+                'is_parameter': True,
+                'alias': 'Download Speed P90',
+                'base_benchmark': 1000000,
+                'display_unit': 'Mbps',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': 'Average of the daily P90 values',
+                        'sql': 'AVG({col_name})',
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': 'Median of the daily P90 values',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})',
+                    },
+                ],
+            },
+            {
+                'name': 'connectivity_speed_median',
+                'type': 'int',
+                'unit': 'bps',
+                'is_parameter': True,
+                'alias': 'Download Speed Median',
+                'base_benchmark': 1000000,
+                'display_unit': 'Mbps',
+                'supported_functions': [
+                    {
+                        'name': 'avg',
+                        'verbose': 'Avg',
+                        'description': 'Average of the daily median values',
+                        'sql': 'AVG({col_name})',
+                    },
+                    {
+                        'name': 'median|50',
+                        'verbose': '50th Percentile',
+                        'description': 'Median of the daily median values',
+                        'sql': 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col_name})',
+                    },
+                ],
             },
             {
                 'name': 'connectivity_upload_speed',

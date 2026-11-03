@@ -335,6 +335,12 @@ class SchoolDailyStatus(ConnectivityStatistics, TimeStampedModel, models.Model):
     school = models.ForeignKey(School, related_name='daily_status', on_delete=models.CASCADE)
     date = models.DateField()
 
+    # P90 and median of the raw download speed measurements of the day, not of an average
+    connectivity_speed_p90 = core_models.PositiveBigIntegerField(help_text=_('bps'), blank=True, null=True,
+                                                                 default=None)
+    connectivity_speed_median = core_models.PositiveBigIntegerField(help_text=_('bps'), blank=True, null=True,
+                                                                    default=None)
+
     objects = BaseManager()
 
     class Meta:
