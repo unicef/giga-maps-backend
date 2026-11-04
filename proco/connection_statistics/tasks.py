@@ -11,7 +11,8 @@ from proco.taskapp import app
 logger = logging.getLogger('gigamaps.' + __name__)
 
 
-@app.task
+# Without its own limits a task gets the worker default (celery.sh: soft 60 s), which these runs already reach
+@app.task(soft_time_limit=10 * 60, time_limit=12 * 60)
 def populate_current_school_live_weekly_metrics():
     today = timezone.localdate()
     dates_to_populate = (today - timedelta(days=7), today)
@@ -30,7 +31,7 @@ def populate_current_school_live_weekly_metrics():
         )
 
 
-@app.task
+@app.task(soft_time_limit=30 * 60, time_limit=35 * 60)
 def populate_school_live_weekly_metrics(
     country_id=None,
     layer_id=None,
@@ -70,7 +71,7 @@ def populate_school_live_weekly_metrics(
     call_command('populate_school_live_weekly_metrics', *cmd_args)
 
 
-@app.task
+@app.task(soft_time_limit=10 * 60, time_limit=12 * 60)
 def cleanup_old_school_live_weekly_metrics(retention_days=None):
     retention_days = retention_days or settings.SCHOOL_REALTIME_WEEKLY_METRIC_RETENTION_DAYS
     logger.info(
@@ -84,7 +85,7 @@ def cleanup_old_school_live_weekly_metrics(retention_days=None):
     )
 
 
-@app.task
+@app.task(soft_time_limit=30 * 60, time_limit=35 * 60)
 def backfill_school_live_weekly_metrics_for_layer(
     layer_id,
     retention_days=None,
