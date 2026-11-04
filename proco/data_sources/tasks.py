@@ -1188,6 +1188,46 @@ def update_qos_data(*args, today=True):
         logger.info('Found running Job with "{0}" name so skipping current iteration'.format(task_key))
 
 
+@app.task(soft_time_limit=4 * 60, time_limit=5 * 60)
+def check_qos_data_freshness():
+    """
+    check_qos_data_freshness
+        Background task executed once a day to report, as an error per country, the QoS data that stopped
+        updating: no new upstream version pulled or no QoS day aggregated in time.
+        The error messages stay the same while a country is stale, so Sentry keeps one issue per episode.
+    """
+    current_datetime = core_utilities.get_current_datetime_object()
+    task_key = 'check_qos_data_freshness_status_{current_time}'.format(
+        current_time=format_date(current_datetime, frmt='%d%m%Y_%H'),
+    )
+    task_id = current_task.request.id or str(uuid.uuid4())
+    task_instance = background_task_utilities.task_on_start(task_id, task_key, 'Check QoS data freshness per country')
+
+    if task_instance:
+        logger.debug('Not found running job for QoS data freshness check: %s', task_key)
+        freshness = source_utilities.get_qos_data_freshness(current_datetime)
+
+        stale_countries = [country_freshness for country_freshness in freshness if country_freshness['is_stale']]
+        for country_freshness in stale_countries:
+            message = 'QoS data is stale for {0}: last new upstream version pulled at {1} UTC, ' \
+                      'last aggregated QoS day {2}.'.format(
+                          country_freshness['iso3_format'],
+                          format_date(country_freshness['last_pulled_at'], frmt='%Y-%m-%d %H:%M'),
+                          format_date(country_freshness['last_aggregated_date'], frmt='%Y-%m-%d', default='none'),
+                      )
+            logger.error(message)
+            task_instance.info(message)
+
+        if not stale_countries:
+            message = 'QoS data is fresh for all {0} monitored countries'.format(len(freshness))
+            logger.info(message)
+            task_instance.info(message)
+
+        background_task_utilities.task_on_complete(task_instance)
+    else:
+        logger.info('Found running Job with "%s" name so skipping current iteration', task_key)
+
+
 @app.task(soft_time_limit=1 * 60 * 60, time_limit=1 * 60 * 60)
 def clean_old_live_data():
     current_datetime = core_utilities.get_current_datetime_object()
