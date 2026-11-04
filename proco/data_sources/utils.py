@@ -979,7 +979,8 @@ def normalize_health_entity_master_data_frame(df):
         else:
             df['coverage_type'] = df['cellular_coverage_type']
 
-    for source_column in ['nearest_LTE_distance', 'nearest_NR_distance']:
+    for source_column in ['nearest_LTE_distance', 'nearest_UMTS_distance', 'nearest_GSM_distance',
+                          'nearest_NR_distance']:
         if source_column in df.columns and source_column.lower() not in df.columns:
             df[source_column.lower()] = df[source_column]
     return df

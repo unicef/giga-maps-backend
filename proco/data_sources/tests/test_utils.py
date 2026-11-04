@@ -34,11 +34,15 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
             'facility_name': ['Clinic A', 'Clinic B'],
             'cellular_coverage_type': ['4G', '5G'],
             'nearest_LTE_distance': [1.5, None],
+            'nearest_UMTS_distance': [2.5, None],
+            'nearest_GSM_distance': [3.5, None],
             'nearest_NR_distance': [6.5, None],
         })
         df = sources_utilities.normalize_health_entity_master_data_frame(df)
         self.assertEqual(df['coverage_type'].tolist(), ['4G', '5G'])
         self.assertEqual(df['nearest_lte_distance'].tolist()[0], 1.5)
+        self.assertEqual(df['nearest_umts_distance'].tolist()[0], 2.5)
+        self.assertEqual(df['nearest_gsm_distance'].tolist()[0], 3.5)
         self.assertEqual(df['nearest_nr_distance'].tolist()[0], 6.5)
 
     def test_normalize_health_entity_master_data_frame_keeps_coverage_type(self):
@@ -69,6 +73,8 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
             'fiber_node_distance': [2.5],
             'microwave_node_distance': [3.5],
             'nearest_LTE_distance': [4.5],
+            'nearest_UMTS_distance': [6.5],
+            'nearest_GSM_distance': [7.5],
             'nearest_NR_distance': [5.5],
             'column_unknown_to_giga_maps': ['dropped'],
             DeltaSharingReader._change_type_col_name(): ['insert'],
@@ -85,6 +91,8 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(row.fiber_node_distance, 2.5)
         self.assertEqual(row.microwave_node_distance, 3.5)
         self.assertEqual(row.nearest_lte_distance, 4.5)
+        self.assertEqual(row.nearest_umts_distance, 6.5)
+        self.assertEqual(row.nearest_gsm_distance, 7.5)
         self.assertEqual(row.nearest_nr_distance, 5.5)
 
     def test_normalize_qos_data_frame(self):

@@ -152,6 +152,8 @@ class HealthEntityMasterIntermediateData(TimeStampedModel, core_models.MasterDat
     fiber_node_distance = models.FloatField(blank=True, default=None, null=True)
     microwave_node_distance = models.FloatField(blank=True, default=None, null=True)
     nearest_lte_distance = models.FloatField(blank=True, default=None, null=True)  # nearest_LTE_distance
+    nearest_umts_distance = models.FloatField(blank=True, default=None, null=True)  # nearest_UMTS_distance
+    nearest_gsm_distance = models.FloatField(blank=True, default=None, null=True)  # nearest_GSM_distance
     nearest_nr_distance = models.FloatField(blank=True, default=None, null=True)  # nearest_NR_distance
 
     num_community_health_workers = models.PositiveIntegerField(blank=True, default=None, null=True)
