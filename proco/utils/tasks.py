@@ -645,6 +645,7 @@ def get_entity_static_connectivity_status(master_row, field_names):
 def update_entity_records(start_time=None, end_time=None):
     from datetime import timedelta
     from proco.connection_statistics.models import EntityRealTimeRegistration, EntityWeeklyStatus
+    from proco.data_sources.tasks import normalize_coverage_type
     from proco.entities.models import Entity, EntityType
     from proco.locations.models import Country
     from proco.schools.constants import statuses_schema
@@ -809,7 +810,9 @@ def update_entity_records(start_time=None, end_time=None):
                     master_field_names = {field.name for field in master_model._meta.fields}
                     coverage_type = getattr(master_row, 'coverage_type', None)
                     if coverage_type is not None and str(coverage_type).strip():
-                        coverage_type = str(coverage_type).lower().strip()
+                        # Master rows keep the raw source value (e.g. "No coverage"): normalize it to
+                        # the Entity choices, as the publisher does, so it fits Entity.coverage_type.
+                        coverage_type = normalize_coverage_type(coverage_type)
                         entity.coverage_type = coverage_type
                         entity.coverage_status = coverage_status_by_type.get(coverage_type, 'unknown')
 
