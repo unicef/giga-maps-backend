@@ -64,7 +64,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile-dev
-    command: bash -c "sleep 10 && pipenv run celery --app=proco.taskapp beat --scheduler=redbeat.RedBeatScheduler --loglevel=DEBUG"
+    command: bash -c "sleep 10 && pipenv run celery --app=proco.taskapp beat --scheduler=proco.taskapp.schedulers.SelfHealingRedBeatScheduler --loglevel=DEBUG"
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.dev
       DATABASE_URL: postgis://test:test@db/proco

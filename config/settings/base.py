@@ -251,6 +251,13 @@ if CELERY_ENABLED:
     CELERY_TASK_SERIALIZER = 'json'
     CELERY_TASK_IGNORE_RESULT = True
 
+    # Celery beat runs on every instance; only the holder of the redbeat lock schedules. The holder renews the
+    # lock on every tick (at most CELERY_BEAT_MAX_LOOP_INTERVAL seconds apart) and the other beats retry to
+    # acquire it at the same interval, so a holder that dies without releasing it is replaced after at most
+    # REDBEAT_LOCK_TIMEOUT + CELERY_BEAT_MAX_LOOP_INTERVAL seconds.
+    CELERY_BEAT_MAX_LOOP_INTERVAL = env.int('CELERY_BEAT_MAX_LOOP_INTERVAL', default=60)
+    REDBEAT_LOCK_TIMEOUT = env.int('REDBEAT_LOCK_TIMEOUT', default=CELERY_BEAT_MAX_LOOP_INTERVAL * 5)
+
 # Django mailing configuration
 # --------------------------------------------------------------------------
 ENABLED_API_KEY_EMAILS = env.bool('ENABLED_API_KEY_EMAILS', default=True)
