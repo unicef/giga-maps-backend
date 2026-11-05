@@ -58,6 +58,10 @@ class BaseEntityDataLayerAPIViewSet(EntityDetailFilterMixin, APIView):
         permissions.AllowAny,
     )
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        account_utilities.validate_id_query_params(request.query_params)
+
     def get_column_function_sql(self, parameter_col_function):
         if isinstance(parameter_col_function, dict) and len(parameter_col_function) > 0:
             return parameter_col_function.get('sql').format(col_name='t."{col_name}"')
