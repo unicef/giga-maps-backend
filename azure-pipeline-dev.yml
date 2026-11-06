@@ -42,6 +42,8 @@ steps:
     script: |
       sudo systemctl start postgresql.service
       sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'root';"
+      # Database named by the GIGA_METER_DATABASE_URL pipeline variable; django_prometheus connects to every alias at startup.
+      sudo -u postgres createdb postgres1
       wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
       echo "deb http://apt.postgresql.org/pub/repos/apt/ `lsb_release -cs`-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
       curl -fsSL https://packages.redis.io/gpg | sudo gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg
@@ -50,7 +52,9 @@ steps:
       sudo apt install postgis postgresql-14-postgis-3
       sudo apt-get install redis
       sudo apt install binutils libproj-dev gdal-bin
-      sudo pip install pipenv
+      # Last releases that still support Python 3.8: virtualenv 21.5.0 and pipenv 2025.0.0 dropped it.
+      # Installed with the 3.8 interpreter from UsePythonVersion, as in the Docker image build.
+      python -m pip install "pipenv==2024.4.1" "virtualenv==21.4.3"
       pipenv install --ignore-pipfile --dev
       ./scripts/runtests.sh
   continueOnError: true

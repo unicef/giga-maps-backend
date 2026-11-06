@@ -90,6 +90,7 @@ class BaseCountrySerializer(FlexFieldsModelSerializer):
             'data_source',
             'data_source_description',
             'health_data_source',
+            'health_data_source_description',
             'date_schools_mapped',
             'admin_metadata',
             'benchmark_metadata',
