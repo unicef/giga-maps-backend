@@ -1,6 +1,6 @@
 import os
 from collections import OrderedDict
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from django.conf import settings
 from django.core.cache import cache
@@ -11,6 +11,8 @@ from rest_framework import status
 
 from proco.accounts import models as accounts_models
 from proco.accounts.tests import test_utils as accounts_test_utilities
+from proco.connection_statistics import models as statistics_models
+from proco.connection_statistics.tests.factories import SchoolWeeklyStatusFactory
 from proco.core import utils as core_utilities
 from proco.custom_auth.tests import test_utils as test_utilities
 from proco.locations.tests.factories import CountryFactory
@@ -2187,6 +2189,183 @@ class DataLayerInfoApiTestCase(TestAPIViewSetMixin, TestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_live_data_layer_country_view_counts_schools_from_layer_sources(self):
+        url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')
+
+        response = self.forced_auth_req(
+            'post',
+            url,
+            user=self.admin_user,
+            view=view,
+            data=accounts_test_utilities.live_download_layer_data_pcdc(),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        layer_id = response.data['id']
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='update-or-delete-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_READY_TO_PUBLISH,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        url, _, view = accounts_url((layer_id,), {},
+                                    view_name='publish-data-layer')
+
+        put_response = self.forced_auth_req(
+            'put',
+            url,
+            user=self.admin_user,
+            data={
+                'status': accounts_models.DataLayer.LAYER_STATUS_PUBLISHED,
+            }
+        )
+
+        self.assertEqual(put_response.status_code, status.HTTP_200_OK)
+
+        # The layer only uses Daily Check App/MLab, so the QoS only school must not be counted
+        # when the country is listed in LIVE_LAYER_RT_SOURCE_FILTER_COUNTRIES
+        schools = {}
+        for rt_source in ['gigameter', 'mlab', 'gigameter, qos', None, 'qos']:
+            schools[rt_source] = SchoolFactory(country=self.country)
+            statistics_models.SchoolRealTimeRegistration.objects.create(
+                school=schools[rt_source],
+                rt_registered=True,
+                rt_registration_date=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                rt_source=rt_source,
+            )
+
+        url, view, view_info = accounts_url(
+            (layer_id,),
+            {
+                'country_id': self.country.id,
+                'benchmark': 'global',
+                'start_date': '24-06-2024',
+                'end_date': '30-06-2024',
+                'is_weekly': 'true',
+            },
+            view_name='info-data-layer'
+        )
+
+        # Read the data created in this test's transaction
+        with self.settings(READ_ONLY_DB_KEY='default', LIVE_LAYER_RT_SOURCE_FILTER_COUNTRIES=[]):
+            response = self.forced_auth_req(
+                'get',
+                url,
+                view=view,
+                view_info=view_info,
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['no_of_schools_measure'], 5)
+
+        cache.clear()
+        with self.settings(
+            READ_ONLY_DB_KEY='default',
+            LIVE_LAYER_RT_SOURCE_FILTER_COUNTRIES=[self.country.iso3_format],
+        ):
+            response = self.forced_auth_req(
+                'get',
+                url,
+                view=view,
+                view_info=view_info,
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['no_of_schools_measure'], 4)
+
+        # Same count from the v2 entities layer info API, which the map uses for the country view
+        url = reverse('entities:entity-info-data-layer')
+        view = resolve(url)
+        url += '?country_id={0}&school_layer_id={1}&school_benchmark=global&school_start_date=24-06-2024' \
+               '&school_end_date=30-06-2024&school_is_weekly=true'.format(self.country.id, layer_id)
+
+        cache.clear()
+        with self.settings(
+            READ_ONLY_DB_KEY='default',
+            LIVE_LAYER_RT_SOURCE_FILTER_COUNTRIES=[self.country.iso3_format],
+        ):
+            response = self.forced_auth_req(
+                'get',
+                url,
+                view=view,
+                view_info=view.func,
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['school']['no_of_entities_measure'], 4)
+
+        # The school view no longer shows the QoS only school as realtime connected
+        schools['qos'].last_weekly_status = SchoolWeeklyStatusFactory(school=schools['qos'])
+        schools['qos'].save()
+
+        url, view, view_info = accounts_url(
+            (layer_id,),
+            {
+                'country_id': self.country.id,
+                'school_id': schools['qos'].id,
+                'benchmark': 'global',
+                'start_date': '24-06-2024',
+                'end_date': '30-06-2024',
+                'is_weekly': 'true',
+            },
+            view_name='info-data-layer'
+        )
+
+        for filter_countries, is_rt_connected in [([], True), ([self.country.iso3_format], False)]:
+            cache.clear()
+            with self.settings(READ_ONLY_DB_KEY='default', LIVE_LAYER_RT_SOURCE_FILTER_COUNTRIES=filter_countries):
+                response = self.forced_auth_req(
+                    'get',
+                    url,
+                    view=view,
+                    view_info=view_info,
+                )
+
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertEqual(response.data[0]['is_rt_connected'], is_rt_connected)
+
+        # The map tile drops the QoS only school (all the test schools share one point)
+        url, view, view_info = accounts_url(
+            (layer_id,),
+            {
+                'country_id': self.country.id,
+                'benchmark': 'global',
+                'start_date': '24-06-2024',
+                'end_date': '30-06-2024',
+                'is_weekly': 'true',
+                'z': '0',
+                'x': '0',
+                'y': '0.mvt'
+            },
+            view_name='map-data-layer'
+        )
+
+        tiles = []
+        for filter_countries in [[], [self.country.iso3_format]]:
+            cache.clear()
+            with self.settings(READ_ONLY_DB_KEY='default', LIVE_LAYER_RT_SOURCE_FILTER_COUNTRIES=filter_countries):
+                response = self.forced_auth_req(
+                    'get',
+                    url,
+                    view=view,
+                    view_info=view_info,
+                )
+
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            tiles.append(response.content)
+
+        self.assertLess(len(tiles[1]), len(tiles[0]))
 
     def test_live_data_layer_map_school_view(self):
         url, _, view = accounts_url((), {}, view_name='list-or-create-data-layers')

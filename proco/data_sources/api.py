@@ -10,11 +10,15 @@ from proco.core import permissions as core_permissions
 from proco.core import utils as core_utilities
 from proco.core.viewsets import BaseModelViewSet
 from proco.custom_auth import models as auth_models
+from proco.data_sources import exceptions as source_exceptions
 from proco.data_sources import serializers
 from proco.data_sources import tasks as sources_tasks
 from proco.data_sources.models import SchoolMasterData, QoSData, DailyCheckAppMeasurementData
 from proco.locations.models import Country
 from proco.utils.filters import NullsAlwaysLastOrderingFilter
+
+# Shared by the School Master list and country publish, so that "Publish all" matches the filtered list
+SCHOOL_MASTER_SEARCH_FIELDS = ('school_name', 'school_id_giga', 'school_id_govt')
 
 
 class StaticAndLiveDataLoaderViewSet(APIView):
@@ -133,7 +137,7 @@ class SchoolMasterDataViewSet(BaseModelViewSet):
         'country_id': ['exact', 'in'],
     }
 
-    search_fields = ('school_name', 'school_id_giga', 'school_id_govt')
+    search_fields = SCHOOL_MASTER_SEARCH_FIELDS
 
     permit_list_expands = ['school', 'modified_by', 'published_by', 'country']
 
@@ -314,6 +318,20 @@ class SchoolMasterDataPublishByCountryViewSet(BaseModelViewSet):
         core_permissions.CanPublishSchoolMasterData,
     )
 
+    # Optional ?status__in= and ?search= params, with the same semantics as the SchoolMasterDataViewSet list,
+    # so that "Publish all" only publishes the rows the publisher sees with the filters applied.
+    # Must stay a subset of the list filters (checked in tests); any other query param is rejected.
+    filter_backends = (
+        DjangoFilterBackend,
+        SearchFilter,
+    )
+
+    filterset_fields = {
+        'status': ['in'],
+    }
+
+    search_fields = SCHOOL_MASTER_SEARCH_FIELDS
+
     def get_queryset(self, ids=None):
         """
         Return active records
@@ -334,7 +352,34 @@ class SchoolMasterDataPublishByCountryViewSet(BaseModelViewSet):
             )
         return self.apply_queryset_filters(queryset)
 
+    def validate_query_params(self, request):
+        """
+        validate_query_params
+            Reject any query param other than the supported filters.
+            DjangoFilterBackend and SearchFilter silently ignore anything else, which would publish every
+            pending row of the countries instead of the filtered ones. Empty values are accepted: the list
+            ignores them too, so "Publish all" still publishes what the publisher sees.
+
+        :param request: Request instance
+        :return:
+        """
+        allowed_params = {
+            field_name if lookup == 'exact' else '{0}__{1}'.format(field_name, lookup)
+            for field_name, lookups in self.filterset_fields.items()
+            for lookup in lookups
+        }
+        allowed_params.add(SearchFilter.search_param)
+
+        invalid_params = sorted(param for param in request.query_params.keys() if param not in allowed_params)
+        if len(invalid_params) > 0:
+            raise source_exceptions.InvalidCountryPublishQueryParamError(message_kwargs={
+                'params': ', '.join(invalid_params),
+                'allowed': ', '.join(sorted(allowed_params)),
+            })
+
     def update(self, request, *args, **kwargs):
+        self.validate_query_params(request)
+
         data = request.data
         if len(data) != 0:
             try:
@@ -357,34 +402,52 @@ class SchoolMasterDataPublishByCountryViewSet(BaseModelViewSet):
             except Exception as ex:
                 return Response(ex, status=status.HTTP_400_BAD_REQUEST)
 
-            instances = self.get_queryset(ids=id_list)
+            # Narrow the publishable rows of the countries by the optional status/search query params
+            instances = self.filter_queryset(self.get_queryset(ids=id_list))
+            # One timestamp for every row published by this request. The background tasks get it so that each
+            # request is handled by its own task run, limited to its own rows.
+            published_at = core_utilities.get_current_datetime_object()
 
+            published_count = 0
             published_instances = instances.exclude(status=SchoolMasterData.ROW_STATUS_DELETED)
-            if published_instances.exists():
-                country_ids = list(
-                    published_instances.values_list('country_id', flat=True).order_by('country_id').distinct(
-                        'country_id'))
+            country_ids = list(
+                published_instances.values_list('country_id', flat=True).order_by('country_id').distinct(
+                    'country_id'))
+            if len(country_ids) > 0:
                 # Update the rows to PUBLISHED for Insert/Update
-                published_instances.update(
+                published_count = published_instances.update(
                     status=SchoolMasterData.ROW_STATUS_PUBLISHED,
                     published_by=self.request.user,
-                    published_at=core_utilities.get_current_datetime_object(),
+                    published_at=published_at,
                 )
-                sources_tasks.handle_published_school_master_data_row.delay(country_ids=country_ids, publish_source='admin_portal_country')
+                sources_tasks.handle_published_school_master_data_row.delay(
+                    country_ids=country_ids,
+                    publish_source='admin_portal_country',
+                    published_at=published_at.isoformat(),
+                )
 
+            deleted_count = 0
             deleted_published_instances = instances.filter(status=SchoolMasterData.ROW_STATUS_DELETED)
-            if deleted_published_instances.exists():
-                country_ids = list(
-                    deleted_published_instances.values_list('country_id', flat=True).order_by('country_id').distinct(
-                        'country_id'))
+            country_ids = list(
+                deleted_published_instances.values_list('country_id', flat=True).order_by('country_id').distinct(
+                    'country_id'))
+            if len(country_ids) > 0:
                 # Update the rows to DELETED_PUBLISHED for DELETED
-                deleted_published_instances.update(
+                deleted_count = deleted_published_instances.update(
                     status=SchoolMasterData.ROW_STATUS_DELETED_PUBLISHED,
                     published_by=self.request.user,
-                    published_at=core_utilities.get_current_datetime_object(),
+                    published_at=published_at,
                 )
-                sources_tasks.handle_deleted_school_master_data_row.delay(country_ids=country_ids, publish_source='admin_portal_country')
+                sources_tasks.handle_deleted_school_master_data_row.delay(
+                    country_ids=country_ids,
+                    publish_source='admin_portal_country',
+                    published_at=published_at.isoformat(),
+                )
 
-            return Response(data={'message': 'Country record publish started. Application will be updated in minutes.'})
+            return Response(data={
+                'message': 'Country record publish started. Application will be updated in minutes.',
+                'published_count': published_count,
+                'deleted_count': deleted_count,
+            })
 
         return Response({}, status=status.HTTP_400_BAD_REQUEST)
