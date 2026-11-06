@@ -58,6 +58,44 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
         df = sources_utilities.normalize_health_entity_master_data_frame(df)
         self.assertEqual(df['coverage_type'].tolist(), ['4G'])
 
+    def test_normalize_health_entity_master_data_frame_converts_numeric_string_distances(self):
+        df = pd.DataFrame.from_dict({
+            'facility_name': ['Clinic A', 'Clinic B'],
+            'fiber_node_distance': ['123.4', '7'],
+            'microwave_node_distance': ['0.5', 2],
+        })
+        df = sources_utilities.normalize_health_entity_master_data_frame(df)
+        self.assertEqual(df['fiber_node_distance'].tolist(), [123.4, 7.0])
+        self.assertEqual(df['microwave_node_distance'].tolist(), [0.5, 2.0])
+        self.assertTrue(pd.api.types.is_numeric_dtype(df['fiber_node_distance']))
+
+    def test_normalize_health_entity_master_data_frame_coerces_invalid_distances_to_nan(self):
+        df = pd.DataFrame.from_dict({
+            'facility_name': ['Clinic A', 'Clinic B', 'Clinic C', 'Clinic D'],
+            'nearest_lte_distance': ['', 'NA', None, '1.5'],
+        })
+        df = sources_utilities.normalize_health_entity_master_data_frame(df)
+        values = df['nearest_lte_distance'].tolist()
+        self.assertTrue(all(pd.isna(value) for value in values[:3]))
+        self.assertEqual(values[3], 1.5)
+
+    def test_normalize_health_entity_master_data_frame_does_not_add_missing_distance_columns(self):
+        df = pd.DataFrame.from_dict({'facility_name': ['Clinic A'], 'fiber_node_distance': ['1.5']})
+        df = sources_utilities.normalize_health_entity_master_data_frame(df)
+        self.assertEqual(df['fiber_node_distance'].tolist(), [1.5])
+        for column in sources_utilities.HEALTH_ENTITY_MASTER_DISTANCE_COLUMNS:
+            if column != 'fiber_node_distance':
+                self.assertNotIn(column, df.columns)
+
+    def test_normalize_health_entity_master_data_frame_converts_uppercase_nr_distance_string(self):
+        df = pd.DataFrame.from_dict({
+            'facility_name': ['Clinic A', 'Clinic B'],
+            'nearest_NR_distance': ['6.5', ''],
+        })
+        df = sources_utilities.normalize_health_entity_master_data_frame(df)
+        self.assertEqual(df['nearest_nr_distance'].tolist()[0], 6.5)
+        self.assertTrue(pd.isna(df['nearest_nr_distance'].tolist()[1]))
+
     def test_sync_health_data_keeps_coverage_and_network_distances(self):
         from delta_sharing.reader import DeltaSharingReader
         from proco.locations.tests.factories import CountryFactory
@@ -94,6 +132,34 @@ class UtilsUtilitiesTestCase(TestAPIViewSetMixin, TestCase):
         self.assertEqual(row.nearest_umts_distance, 6.5)
         self.assertEqual(row.nearest_gsm_distance, 7.5)
         self.assertEqual(row.nearest_nr_distance, 5.5)
+
+    def test_sync_health_data_stores_invalid_distances_as_none(self):
+        from delta_sharing.reader import DeltaSharingReader
+        from proco.locations.tests.factories import CountryFactory
+
+        country = CountryFactory(iso3_format='GMB')
+        health_master_fields = [
+            f.name for f in sources_models.HealthEntityMasterIntermediateData._meta.get_fields()]
+        df = pd.DataFrame.from_dict({
+            'health_id_giga': ['hf-1', 'hf-2'],
+            'facility_name': ['Clinic A', 'Clinic B'],
+            'fiber_node_distance': ['2.5', 'NA'],
+            'nearest_NR_distance': ['', '5.5'],
+            DeltaSharingReader._change_type_col_name(): ['insert', 'insert'],
+            DeltaSharingReader._commit_version_col_name(): [1, 1],
+            DeltaSharingReader._commit_timestamp_col_name(): [pd.Timestamp('2026-10-01'), pd.Timestamp('2026-10-01')],
+        })
+
+        df, cols_to_delete = sources_utilities.sort_and_modify_dataframe(
+            df, health_master_fields, {}, 1, country, 'GMB', None)
+        sources_utilities.sync_health_data(df, cols_to_delete, country, [])
+
+        first = sources_models.HealthEntityMasterIntermediateData.objects.get(health_id_giga='hf-1')
+        second = sources_models.HealthEntityMasterIntermediateData.objects.get(health_id_giga='hf-2')
+        self.assertEqual(first.fiber_node_distance, 2.5)
+        self.assertIsNone(first.nearest_nr_distance)
+        self.assertIsNone(second.fiber_node_distance)
+        self.assertEqual(second.nearest_nr_distance, 5.5)
 
     def test_normalize_qos_data_frame(self):
         df = pd.DataFrame.from_dict({'school_name': ['Test School'], 'school_id_govt': ['1234567']})

@@ -40,6 +40,16 @@ response_timezone = pytz.timezone(settings.TIME_ZONE)
 
 ds_settings = settings.DATA_SOURCE_CONFIG
 
+# FloatField distance columns of HealthEntityMasterIntermediateData that Health Master can send as strings
+HEALTH_ENTITY_MASTER_DISTANCE_COLUMNS = (
+    'fiber_node_distance',
+    'microwave_node_distance',
+    'nearest_lte_distance',
+    'nearest_umts_distance',
+    'nearest_gsm_distance',
+    'nearest_nr_distance',
+)
+
 
 class ProcoSharingClient(delta_sharing.SharingClient):
 
@@ -983,6 +993,11 @@ def normalize_health_entity_master_data_frame(df):
                           'nearest_NR_distance']:
         if source_column in df.columns and source_column.lower() not in df.columns:
             df[source_column.lower()] = df[source_column]
+
+    # Blank or text distances become NaN (stored as None) instead of failing the whole bulk_create chunk
+    for distance_column in HEALTH_ENTITY_MASTER_DISTANCE_COLUMNS:
+        if distance_column in df.columns:
+            df[distance_column] = pd.to_numeric(df[distance_column], errors='coerce')
     return df
 
 
