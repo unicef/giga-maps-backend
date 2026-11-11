@@ -7,7 +7,9 @@ from django.conf import settings
 from django.test import SimpleTestCase
 
 from celery import Celery
+from celery.schedules import schedule
 from redbeat.schedulers import RedBeatSchedulerEntry, get_redis
+from redis.exceptions import LockNotOwnedError
 
 from proco.taskapp import REDBEAT_REDIS_URL_OPTIONS, add_redis_url_options
 from proco.taskapp.schedulers import SelfHealingRedBeatScheduler
@@ -48,21 +50,37 @@ class SelfHealingRedBeatSchedulerTestCase(SimpleTestCase):
 
     def setUp(self):
         self.prefix = 'gigamaps-test-{0}:'.format(uuid.uuid4().hex)
-        self.app = Celery('proco-test', set_as_current=False)
-        self.app.conf.update(
-            timezone='UTC',
-            broker_url='memory://',
-            redbeat_redis_url=settings.CACHES['default']['LOCATION'],
-            redbeat_key_prefix=self.prefix,
-            beat_schedule={
-                'hourly': {'task': 'proco.tests.hourly', 'schedule': 3600},
-                'daily': {'task': 'proco.tests.daily', 'schedule': 86400},
-            },
-        )
+        self.app = self.make_app({
+            'hourly': {'task': 'proco.tests.hourly', 'schedule': 3600},
+            'daily': {'task': 'proco.tests.daily', 'schedule': 86400},
+        })
         self.scheduler = SelfHealingRedBeatScheduler(app=self.app)
         self.conf = self.app.redbeat_conf
         self.redis = get_redis(self.app)
         self.addCleanup(self.delete_test_keys)
+
+    def make_app(self, beat_schedule):
+        app = Celery('proco-test', set_as_current=False)
+        app.conf.update(
+            timezone='UTC',
+            broker_url='memory://',
+            # Without a result backend Celery would add its celery.backend_cleanup entry to the schedule
+            result_expires=None,
+            redbeat_redis_url=settings.CACHES['default']['LOCATION'],
+            redbeat_key_prefix=self.prefix,
+            beat_schedule=beat_schedule,
+        )
+        return app
+
+    def make_overdue(self, name, app=None):
+        app = app or self.app
+        RedBeatSchedulerEntry.from_key(self.entry_key(name), app=app).reschedule(
+            last_run_at=app.now() - timedelta(hours=2),
+        )
+
+    def holding_lock(self, scheduler):
+        scheduler.lock = mock.Mock()
+        return scheduler
 
     def delete_test_keys(self):
         keys = list(self.redis.scan_iter(match=self.prefix + '*'))
@@ -117,9 +135,86 @@ class SelfHealingRedBeatSchedulerTestCase(SimpleTestCase):
         with mock.patch.object(self.scheduler, 'apply_async') as apply_async:
             self.scheduler.tick()
 
-        self.scheduler.lock.extend.assert_called_once_with(self.scheduler.lock_timeout)
+        # once before the self-healing writes, once more in redbeat's own tick
+        self.assertEqual(self.scheduler.lock.extend.call_args_list, [mock.call(self.scheduler.lock_timeout)] * 2)
         self.assertEqual([call.args[0].name for call in apply_async.call_args_list], ['hourly'])
         self.assertEqual(self.redis.zcard(self.conf.schedule_key), 2)
+
+    def test_tick_after_losing_the_lock_writes_nothing(self):
+        self.redis.delete(self.entry_key('hourly'))
+        self.scheduler.lock = mock.Mock()
+        self.scheduler.lock.extend.side_effect = LockNotOwnedError('lost')
+
+        with mock.patch.object(self.scheduler, 'apply_async') as apply_async:
+            with self.assertRaises(LockNotOwnedError):
+                self.scheduler.tick()
+
+        apply_async.assert_not_called()
+        self.assertFalse(self.redis.exists(self.entry_key('hourly')))
+
+    def test_first_tick_removes_an_entry_stored_by_an_earlier_release(self):
+        # A beat of the earlier release, which still has 'removed', held the lock and put it back
+        old_app = self.make_app(dict(
+            self.app.conf.beat_schedule, removed={'task': 'proco.tests.removed', 'schedule': 60},
+        ))
+        SelfHealingRedBeatScheduler(app=old_app)
+        self.make_overdue('removed', app=old_app)
+        self.assertIn('removed', self.redis.smembers(self.conf.statics_key))
+
+        self.holding_lock(self.scheduler)
+        with mock.patch.object(self.scheduler, 'apply_async') as apply_async:
+            self.scheduler.tick()
+
+        apply_async.assert_not_called()
+        self.assertFalse(self.redis.exists(self.entry_key('removed')))
+        self.assertIsNone(self.redis.zscore(self.conf.schedule_key, self.entry_key('removed')))
+        self.assertEqual(self.redis.smembers(self.conf.statics_key), {'hourly', 'daily'})
+
+    def test_stale_entries_are_removed_on_the_first_tick_only(self):
+        self.holding_lock(self.scheduler)
+
+        with mock.patch.object(self.scheduler, 'remove_stale_static_entries', return_value=[]) as remove_stale:
+            with mock.patch.object(self.scheduler, 'apply_async'):
+                self.scheduler.tick()
+                self.scheduler.tick()
+
+        remove_stale.assert_called_once_with()
+
+    def test_dynamic_entries_are_not_removed(self):
+        RedBeatSchedulerEntry(
+            'dynamic', 'proco.tests.dynamic', schedule(run_every=3600), app=self.app,
+        ).save()
+
+        self.assertEqual(self.scheduler.remove_stale_static_entries(), [])
+        self.assertTrue(self.redis.hexists(self.entry_key('dynamic'), 'definition'))
+
+    def test_invalid_entry_does_not_stop_the_tick_and_is_tried_once(self):
+        app = self.make_app({
+            'hourly': {'task': 'proco.tests.hourly', 'schedule': 3600},
+            'broken': {'task': 'proco.tests.broken', 'schedule': 'not-a-schedule'},
+        })
+        scheduler = self.holding_lock(SelfHealingRedBeatScheduler(app=app))
+        self.make_overdue('hourly', app=app)
+
+        with mock.patch.object(scheduler, 'update_from_dict', wraps=scheduler.update_from_dict) as update:
+            with mock.patch.object(scheduler, 'apply_async') as apply_async:
+                scheduler.tick()
+                scheduler.tick()
+
+        update.assert_called_once_with({'broken': app.conf.beat_schedule['broken']})
+        self.assertIn('hourly', [call.args[0].name for call in apply_async.call_args_list])
+        self.assertEqual(scheduler.unstorable_entries, {'broken'})
+
+    def test_failed_check_does_not_stop_the_tick(self):
+        self.make_overdue('hourly')
+        self.holding_lock(self.scheduler)
+
+        with mock.patch.object(self.scheduler, 'restore_missing_static_entries', side_effect=ConnectionError('down')):
+            with mock.patch.object(self.scheduler, 'apply_async') as apply_async:
+                with self.assertLogs('gigamaps.proco.taskapp.schedulers', level='ERROR'):
+                    self.scheduler.tick()
+
+        self.assertEqual([call.args[0].name for call in apply_async.call_args_list], ['hourly'])
 
     def test_start_up_shortens_a_longer_lock_ttl(self):
         limit_ms = int(self.scheduler.lock_timeout * 1000)

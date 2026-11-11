@@ -23,12 +23,17 @@ class SelfHealingRedBeatScheduler(RedBeatScheduler):
         redbeat stores them only when a beat process starts, so if Redis loses them (eviction under memory
         pressure, flush) the lock holder keeps running but schedules nothing until some beat restarts.
         Here every tick checks them first and stores the missing ones again.
+        On its first tick as lock holder it also removes the static entries no longer in beat_schedule, as
+        redbeat does at start-up, so an entry put back by a beat of an earlier release is not sent again.
         At start-up it also shortens a lock left with a longer TTL than its own lock timeout.
 
     Inherits: `RedBeatScheduler`
     """
 
     def __init__(self, *args, **kwargs):
+        self.stale_entries_removed = False
+        # Static entries redbeat could not store (invalid schedule); not retried until beat restarts
+        self.unstorable_entries = set()
         super().__init__(*args, **kwargs)
         if not kwargs.get('lazy'):
             self.cap_lock_ttl()
@@ -56,10 +61,42 @@ class SelfHealingRedBeatScheduler(RedBeatScheduler):
         return bool(capped)
 
     def tick(self, *args, **kwargs):
-        # Runs before redbeat renews the lock. A beat that has just lost the lock writes the same static
-        # definitions as the new holder and then stops on LockNotOwnedError, so this is harmless.
-        self.restore_missing_static_entries()
+        if self.lock_key:
+            # Renew first: a beat that lost the lock raises LockNotOwnedError here, before writing to the schedule
+            self.lock.extend(int(self.lock_timeout))
+
+        try:
+            if not self.stale_entries_removed:
+                self.remove_stale_static_entries()
+                self.stale_entries_removed = True
+            self.restore_missing_static_entries()
+        except Exception:  # noqa: B902 - best effort, it must not stop the tick that sends the due tasks
+            logger.exception('beat: could not check the static schedule entries')
+
         return super().tick(*args, **kwargs)
+
+    def remove_stale_static_entries(self):
+        """
+        remove_stale_static_entries
+            Method to delete the static entries that are in Redis but no longer in beat_schedule, the same
+            clean-up redbeat's setup_schedule does at start-up. Needed again once this beat holds the lock:
+            while a beat of an earlier release held it, that beat could store an entry this release removed.
+
+        :return: sorted list of the removed entry names
+        """
+        conf = self.app.redbeat_conf
+        client = get_redis(self.app)
+        stale = sorted(set(client.smembers(conf.statics_key)) - set(conf.schedule.keys()))
+        for name in stale:
+            self.Entry(name, app=self.app).delete()
+            client.srem(conf.statics_key, name)
+
+        if stale:
+            logger.warning(
+                'beat: removed %d static schedule entries no longer in beat_schedule: %s',
+                len(stale), ', '.join(stale),
+            )
+        return stale
 
     def restore_missing_static_entries(self):
         """
@@ -71,7 +108,7 @@ class SelfHealingRedBeatScheduler(RedBeatScheduler):
         :return: list of the restored entry names
         """
         conf = self.app.redbeat_conf
-        names = list(conf.schedule.keys())
+        names = [name for name in conf.schedule.keys() if name not in self.unstorable_entries]
         if not names:
             return []
 
@@ -93,10 +130,16 @@ class SelfHealingRedBeatScheduler(RedBeatScheduler):
                 len(missing), ', '.join(missing),
             )
             self.update_from_dict({name: conf.schedule[name] for name in missing})
-            client.sadd(conf.statics_key, *names)
+            client.sadd(conf.statics_key, *conf.schedule.keys())
 
             # update_from_dict scores each entry as if it had just run; score it again from the stored meta
             for name in missing:
-                entry = self.Entry.from_key(conf.key_prefix + name, app=self.app)
+                try:
+                    entry = self.Entry.from_key(conf.key_prefix + name, app=self.app)
+                except KeyError:
+                    # update_from_dict logged why it could not store it; the same would happen on every tick
+                    self.unstorable_entries.add(name)
+                    logger.warning('beat: static schedule entry %s could not be stored, not retrying it', name)
+                    continue
                 client.zadd(conf.schedule_key, {entry.key: entry.score})
         return missing
