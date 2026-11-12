@@ -11,6 +11,18 @@ class AppConfig(object):
         return r'[a-zA-Z0-9-\' _()#]*$'
 
     @property
+    def id_query_params(self):
+        """Query params which only accept integers, on their own or with an entity code prefix"""
+        return (
+            'admin1_id',
+            'country_id',
+            'entity_id',
+            'exclude_schools_same_coords_except_id',
+            'layer_id',
+            'school_id',
+        )
+
+    @property
     def api_key_deleted_email_template(self):
         """HTML template for API Key deletion emails"""
         return 'email/apis/api_key_deleted_email.html'
