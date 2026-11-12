@@ -447,7 +447,6 @@ DATA_SOURCE_CONFIG = {
         'EXPIRATION_TIME': env('SCHOOL_MASTER_EXPIRATION_TIME', default=None),
         'COUNTRY_EXCLUSION_LIST': env('SCHOOL_MASTER_COUNTRY_EXCLUSION_LIST', default='').split(','),
     },
-    # Health Master Delta Sharing. Credentials fall back to SCHOOL_MASTER in the load task when unset.
     'HEALTH_MASTER': {
         'SHARE_NAME': env('HEALTH_MASTER_SHARE_NAME', default='gold'),
         'SCHEMA_NAME': env('HEALTH_MASTER_SCHEMA_NAME', default='health-master'),
@@ -584,8 +583,6 @@ AI_TRANSLATION_CACHE_KEY_LIMIT = env('AI_TRANSLATION_CACHE_KEY_LIMIT', default=2
 GIGA_METER_ENABLE_AUTO_SYNC = env.bool('GIGA_METER_ENABLE_AUTO_SYNC', default=True)
 HEALTH_GIGA_METER_ENABLE_AUTO_SYNC = env.bool('HEALTH_GIGA_METER_ENABLE_AUTO_SYNC', default=False)
 ENTITY_LIVE_DATA_ENABLE_AUTO_SYNC = env.bool('ENTITY_LIVE_DATA_ENABLE_AUTO_SYNC', default=False)
-# Separate flag so health master sync can stay off until HEALTH_MASTER feed is ready.
-GIGA_METER_ENABLE_HEALTH_AUTO_SYNC = env.bool('GIGA_METER_ENABLE_HEALTH_AUTO_SYNC', default=False)
 
 # Country ISO3 codes (e.g. "ZAF") where the live layer info counts only the realtime schools whose recorded
 # realtime source is one of the layer's sources. Empty keeps the count unchanged for every country.
