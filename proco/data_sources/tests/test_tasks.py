@@ -9,12 +9,17 @@ import requests
 from celery.exceptions import SoftTimeLimitExceeded
 
 from proco.background.models import BackgroundTask
+from proco.connection_statistics.config import app_config as statistics_configs
+from proco.connection_statistics.tests.factories import CountryDailyStatusFactory
 from proco.core.utils import get_current_datetime_object
 from proco.data_sources import models as sources_models
 from proco.data_sources import tasks as sources_tasks
+from proco.data_sources import utils as source_utilities
 from proco.data_sources.tests import factories as sources_test_models
 from proco.locations.tests.factories import CountryFactory
 from proco.schools.tests.factories import SchoolFactory
+from proco.taskapp import app as celery_app
+from proco.taskapp import finalize_setup
 from proco.utils.tests import TestAPIViewSetMixin
 
 
@@ -595,3 +600,168 @@ class SchoolMasterCountryPublishTasksTestCase(TestCase):
         self.assertEqual(sources_tasks.parse_published_at(self.first_publish_at), self.first_publish_at)
         self.assertIsNone(sources_tasks.parse_published_at(None))
         self.assertIsNone(sources_tasks.parse_published_at('not a date'))
+
+
+class CheckQoSDataFreshnessTaskTestCase(TestCase):
+    databases = ['default']
+
+    logger_name = 'gigamaps.proco.data_sources.tasks'
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.now = get_current_datetime_object()
+        cls.today = cls.now.date()
+
+        cls.fresh_country = cls.create_qos_country(
+            'BRA', cls.now - timedelta(hours=2), cls.today - timedelta(days=1))
+        cls.no_new_version_country = cls.create_qos_country(
+            'KEN', cls.now - timedelta(days=3), cls.today - timedelta(days=1))
+        cls.not_aggregated_country = cls.create_qos_country(
+            'MNG', cls.now - timedelta(hours=2), cls.today - timedelta(days=5))
+        cls.never_aggregated_country = cls.create_qos_country('ZAF', cls.now - timedelta(hours=2), None)
+        cls.inactive_country = cls.create_qos_country('UZB', cls.now - timedelta(days=40), None)
+
+    @classmethod
+    def create_qos_country(cls, iso3_format, pulled_at, last_aggregated_date):
+        country = CountryFactory(iso3_format=iso3_format)
+        school = SchoolFactory(country=country)
+        sources_models.QoSData.objects.create(
+            school=school,
+            country=country,
+            timestamp=pulled_at,
+            date=pulled_at.date(),
+            school_id_giga=school.giga_id_school,
+            version=1,
+            pulled_at=pulled_at,
+        )
+
+        if last_aggregated_date:
+            CountryDailyStatusFactory(
+                country=country,
+                date=last_aggregated_date,
+                live_data_source=statistics_configs.QOS_SOURCE,
+            )
+        # Data from another live source must not count as aggregated QoS data
+        CountryDailyStatusFactory(
+            country=country,
+            date=cls.today,
+            live_data_source=statistics_configs.DAILY_CHECK_APP_MLAB_SOURCE,
+        )
+        return country
+
+    def setUp(self):
+        cache.clear()
+        super().setUp()
+
+    def get_error_messages(self, logs):
+        return [record.getMessage() for record in logs.records if record.levelname == 'ERROR']
+
+    def test_reports_each_stale_country_once(self):
+        with self.assertLogs(self.logger_name, level='INFO') as logs:
+            sources_tasks.check_qos_data_freshness()
+
+        error_messages = self.get_error_messages(logs)
+        self.assertEqual(len(error_messages), 3)
+        self.assertTrue(error_messages[0].startswith('QoS data is stale for KEN: '))
+        self.assertTrue(error_messages[1].startswith('QoS data is stale for MNG: '))
+        self.assertTrue(error_messages[2].startswith('QoS data is stale for ZAF: '))
+        self.assertFalse(any('BRA' in message or 'UZB' in message for message in error_messages))
+
+        task = BackgroundTask.objects.get(name__startswith='check_qos_data_freshness_status_')
+        self.assertEqual(task.status, BackgroundTask.STATUSES.completed)
+        self.assertIn('QoS data is stale for KEN', task.log)
+
+    def test_message_names_last_version_and_last_aggregated_day(self):
+        with self.assertLogs(self.logger_name, level='INFO') as logs:
+            sources_tasks.check_qos_data_freshness()
+
+        error_messages = self.get_error_messages(logs)
+        self.assertEqual(
+            error_messages[0],
+            'QoS data is stale for KEN: last new upstream version pulled at {0} UTC, '
+            'last aggregated QoS day {1}.'.format(
+                (self.now - timedelta(days=3)).strftime('%Y-%m-%d %H:%M'),
+                (self.today - timedelta(days=1)).strftime('%Y-%m-%d'),
+            ),
+        )
+        self.assertTrue(error_messages[2].endswith('last aggregated QoS day none.'))
+
+    def test_message_avoids_patterns_dropped_before_sending_to_sentry(self):
+        with self.assertLogs(self.logger_name, level='INFO') as logs:
+            sources_tasks.check_qos_data_freshness()
+
+        ignored_patterns = [
+            'Country with ISO3 Format', 'not found in DB', 'skipping current iteration', 'does not exist to use',
+            'Could not find version for', 'Provided Start version',
+        ]
+        for message in self.get_error_messages(logs):
+            for ignored_pattern in ignored_patterns:
+                self.assertNotIn(ignored_pattern, message)
+
+    def test_countries_in_exclusion_list_are_not_reported(self):
+        with mock.patch.dict(source_utilities.ds_settings['QOS'], {'COUNTRY_EXCLUSION_LIST': ['KEN', 'ZAF', '']}):
+            with self.assertLogs(self.logger_name, level='INFO') as logs:
+                sources_tasks.check_qos_data_freshness()
+
+        error_messages = self.get_error_messages(logs)
+        self.assertEqual(len(error_messages), 1)
+        self.assertTrue(error_messages[0].startswith('QoS data is stale for MNG: '))
+
+    def test_exclusion_entries_match_the_loader_without_stripping(self):
+        # The loader compares entries as they are, so it still pulls ' ZAF': the check must keep monitoring it
+        with mock.patch.dict(source_utilities.ds_settings['QOS'], {'COUNTRY_EXCLUSION_LIST': ['KEN', ' ZAF']}):
+            with self.assertLogs(self.logger_name, level='INFO') as logs:
+                sources_tasks.check_qos_data_freshness()
+
+        error_messages = self.get_error_messages(logs)
+        self.assertEqual(len(error_messages), 2)
+        self.assertTrue(error_messages[0].startswith('QoS data is stale for MNG: '))
+        self.assertTrue(error_messages[1].startswith('QoS data is stale for ZAF: '))
+
+    def test_uses_the_latest_pull_of_each_country(self):
+        school = self.no_new_version_country.schools.first()
+        for hours_ago in [1, 2]:
+            pulled_at = self.now - timedelta(hours=hours_ago)
+            sources_models.QoSData.objects.create(
+                school=school,
+                country=self.no_new_version_country,
+                timestamp=pulled_at,
+                date=pulled_at.date(),
+                school_id_giga=school.giga_id_school,
+                version=1 + hours_ago,
+                pulled_at=pulled_at,
+            )
+
+        freshness = source_utilities.get_qos_data_freshness()
+
+        self.assertEqual([country['iso3_format'] for country in freshness], ['BRA', 'KEN', 'MNG', 'ZAF'])
+        self.assertEqual(freshness[1]['last_pulled_at'], self.now - timedelta(hours=1))
+        self.assertFalse(freshness[1]['is_stale'])
+
+    def test_no_error_when_all_monitored_countries_are_fresh(self):
+        sources_models.QoSData.objects.exclude(country=self.fresh_country).delete()
+
+        with self.assertLogs(self.logger_name, level='INFO') as logs:
+            sources_tasks.check_qos_data_freshness()
+
+        self.assertEqual(self.get_error_messages(logs), [])
+        task = BackgroundTask.objects.get(name__startswith='check_qos_data_freshness_status_')
+        self.assertIn('QoS data is fresh for all 1 monitored countries', task.log)
+
+    def test_skips_when_already_run_in_the_same_hour(self):
+        sources_tasks.check_qos_data_freshness()
+
+        with self.assertLogs(self.logger_name, level='INFO') as logs:
+            sources_tasks.check_qos_data_freshness()
+
+        self.assertEqual(self.get_error_messages(logs), [])
+        self.assertTrue(any('skipping current iteration' in record.getMessage() for record in logs.records))
+        self.assertEqual(BackgroundTask.objects.filter(name__startswith='check_qos_data_freshness_status_').count(), 1)
+
+    def test_scheduled_daily_after_qos_load_and_cleanup(self):
+        finalize_setup(sender=celery_app)
+
+        entry = celery_app.conf.beat_schedule['proco.data_sources.tasks.check_qos_data_freshness']
+        self.assertEqual(entry['task'], 'proco.data_sources.tasks.check_qos_data_freshness')
+        self.assertEqual(entry['schedule'].hour, {6})
+        self.assertEqual(entry['schedule'].minute, {30})

@@ -40,5 +40,20 @@ class AppConfig(object):
 
         {dashboard_url}{delete_msg}{error_msg}"""
 
+    @property
+    def qos_freshness_active_window_days(self):
+        """Countries with a new QoS version pulled within these days are checked for freshness."""
+        return 30
+
+    @property
+    def qos_freshness_max_hours_without_new_version(self):
+        """QoS data of a country is stale when no new upstream version was pulled within these hours."""
+        return 24
+
+    @property
+    def qos_freshness_max_days_without_aggregated_data(self):
+        """QoS data of a country is stale when its last aggregated QoS day is older than these days."""
+        return 2
+
 
 app_config = AppConfig()

@@ -146,6 +146,12 @@ def finalize_setup(sender, **kwargs):
             'schedule': crontab(hour=6, minute=10),
             'args': (),
         },
+        'proco.data_sources.tasks.check_qos_data_freshness': {
+            'task': 'proco.data_sources.tasks.check_qos_data_freshness',
+            # Executes once a day at 6:30 AM, after the 4:00 AM QoS load with its aggregation and the 5:10 AM cleanup
+            'schedule': crontab(hour=6, minute=30),
+            'args': (),
+        },
         'proco.data_sources.tasks.clean_historic_data': {
             'task': 'proco.data_sources.tasks.clean_historic_data',
             'schedule': crontab(day_of_week='0,6', hour=5, minute=20),
