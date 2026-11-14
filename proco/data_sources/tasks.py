@@ -1004,13 +1004,15 @@ def cleanup_health_entity_master_rows():
                     )
                 """, [country_id, country_id])
 
+                # Not published_at: handle_published_entity_master_data_row leaves it NULL and Postgres
+                # sorts NULL first on DESC, so the stale row was kept and every update was deleted.
                 cursor.execute("""
                     DELETE FROM data_sources_healthentitymasterintermediatedata
                     WHERE country_id = %s AND id IN (
                         SELECT id FROM (
                             SELECT id, ROW_NUMBER() OVER (
                                 PARTITION BY health_id_giga
-                                ORDER BY published_at DESC
+                                ORDER BY created DESC, id DESC
                             ) as rn
                             FROM data_sources_healthentitymasterintermediatedata
                             WHERE country_id = %s AND status = 'PUBLISHED'
