@@ -283,6 +283,37 @@ class DataSourcesTasksTestCase(TestAPIViewSetMixin, TestCase):
         sources_tasks.cleanup_school_master_rows()
         self.assertEqual(sources_models.SchoolMasterData.objects.all().count(), 3)
 
+    def test_cleanup_health_entity_master_rows_keeps_latest_published_row(self):
+        # Mirrors production: the first load is published with published_at NULL,
+        # every later load for an existing entity arrives already PUBLISHED with published_at set.
+        health_model = sources_models.HealthEntityMasterIntermediateData
+        old_row = health_model.objects.create(
+            country=self.country,
+            health_id_giga='health-giga-id-cleanup',
+            facility_name='Health Facility',
+            version=5,
+            fiber_node_distance=None,
+            status=health_model.ROW_STATUS_PUBLISHED,
+            is_read=True,
+            published_at=None,
+        )
+        new_row = health_model.objects.create(
+            country=self.country,
+            health_id_giga='health-giga-id-cleanup',
+            facility_name='Health Facility',
+            version=8,
+            fiber_node_distance=7.08,
+            status=health_model.ROW_STATUS_PUBLISHED,
+            is_read=False,
+            published_at=get_current_datetime_object(),
+        )
+
+        sources_tasks.cleanup_health_entity_master_rows()
+
+        remaining = list(health_model.objects.filter(health_id_giga='health-giga-id-cleanup').values_list('id', flat=True))
+        self.assertEqual(remaining, [new_row.id])
+        self.assertFalse(health_model.objects.filter(id=old_row.id).exists())
+
     def test_clean_old_live_data(self):
         self.assertEqual(sources_models.SchoolMasterData.objects.all().count(), 3)
         self.assertEqual(sources_models.DailyCheckAppMeasurementData.objects.all().count(), 0)
