@@ -364,7 +364,7 @@ class CountrySearchStatListAPIView(CachedListMixin, ListAPIView):
         countries = {
             row.get('id'): row
             for row in self.model.objects.filter(id__in=country_ids).values(
-                'id', 'name', 'code', 'last_weekly_status__integration_status',
+                'id', 'name', 'code', 'school_data_type', 'last_weekly_status__integration_status',
             )
         }
         admins = {
@@ -384,6 +384,7 @@ class CountrySearchStatListAPIView(CachedListMixin, ListAPIView):
                 'id': country.get('id'),
                 'name': country.get('name'),
                 'code': country.get('code'),
+                'school_data_type': country.get('school_data_type'),
                 'last_weekly_status__integration_status': country.get(
                     'last_weekly_status__integration_status',
                 ),
@@ -419,7 +420,7 @@ class CountrySearchStatListAPIView(CachedListMixin, ListAPIView):
         )
 
         qs = queryset.values(
-            'id', 'name', 'code', 'last_weekly_status__integration_status',
+            'id', 'name', 'code', 'school_data_type', 'last_weekly_status__integration_status',
         ).order_by('name')
 
         return qs
@@ -456,6 +457,7 @@ class CountrySearchStatListAPIView(CachedListMixin, ListAPIView):
                 'country_name': resp_data.get('name'),
                 'country_code': resp_data.get('code'),
                 'integration_status': resp_data.get('last_weekly_status__integration_status'),
+                'school_data_type': resp_data.get('school_data_type'),
                 'data': OrderedDict(),
             })
 

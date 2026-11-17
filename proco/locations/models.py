@@ -4,6 +4,7 @@ from django.db import models
 from django.utils import timezone
 from django.utils.translation import ugettext as _
 from jsonfield import JSONField
+from model_utils import Choices
 from model_utils.models import TimeStampedModel
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.metrics import DistanceMetric
@@ -30,6 +31,16 @@ class GeometryMixin(models.Model):
 
 
 class Country(GeometryMixin, TimeStampedModel):
+    SCHOOL_DATA_TYPE_GOVERNMENT = 'government'
+    SCHOOL_DATA_TYPE_OSM = 'osm'
+    SCHOOL_DATA_TYPE_NOT_MAPPED = 'not_mapped'
+
+    SCHOOL_DATA_TYPE_CHOICES = Choices(
+        (SCHOOL_DATA_TYPE_GOVERNMENT, _('Government')),
+        (SCHOOL_DATA_TYPE_OSM, _('OSM')),
+        (SCHOOL_DATA_TYPE_NOT_MAPPED, _('Not mapped')),
+    )
+
     name = models.CharField(max_length=255)
     code = models.CharField(max_length=32)
 
@@ -50,6 +61,13 @@ class Country(GeometryMixin, TimeStampedModel):
     benchmark_metadata = JSONField(null=True, default=dict)
 
     country_disclaimer = models.CharField(max_length=500, null=True, blank=True)
+
+    # Curated by the Giga team, independent of last_weekly_status.integration_status (pipeline progress).
+    school_data_type = models.CharField(
+        max_length=32,
+        choices=SCHOOL_DATA_TYPE_CHOICES,
+        default=SCHOOL_DATA_TYPE_NOT_MAPPED,
+    )
 
     last_weekly_status = models.ForeignKey(
         'connection_statistics.CountryWeeklyStatus',
@@ -80,7 +98,8 @@ class Country(GeometryMixin, TimeStampedModel):
             'SCHOOLS_{0}_*'.format(code),
             'CONNECTIVITY_CONFIGURATIONS_STATS_*_country_id_*{}*'.format(self.id),
             'DATA_LAYER_INFO_*_country_id_*{}*'.format(self.id),
-            "*V2_ENTITY_COUNTRIES_LIST_",
+            '*GLOBAL_COUNTRY_SEARCH_MAPPING_*',
+            '*V2_ENTITY_COUNTRIES_LIST_*',
             "*V2_ENTITY_LAYERS_LIST_*",
             "*V2_ENTITY_FILTERS_LIST_*",
             "*V2_ENTITY_COUNTRY_DETAIL_pk_{0}".format(code),
