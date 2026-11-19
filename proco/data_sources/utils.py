@@ -17,17 +17,19 @@ from delta_sharing.protocol import Schema, Share
 from delta_sharing.reader import DeltaSharingReader
 from django.conf import settings
 from django.core.cache import cache
-from django.db.models import Avg, Q
+from django.db.models import Avg, Max, Q
 from django.db.models.functions import Lower
 from rest_framework import status
 
 from proco.accounts.models import APIKey
 from proco.connection_statistics.config import app_config as statistics_configs
 from proco.connection_statistics.models import RealTimeConnectivity, SchoolRealTimeRegistration, EntityRealTimeConnectivity, EntityDailyStatus, EntityRealTimeRegistration
+from proco.connection_statistics.models import CountryDailyStatus
 from proco.core import utils as core_utilities
 from proco.core.config import app_config as core_configs
 from proco.custom_auth.models import ApplicationUser
 from proco.data_sources import models as sources_models
+from proco.data_sources.config import app_config as sources_config
 from proco.entities.models import Entity, EntityType
 from proco.locations.models import Country
 from proco.schools.models import School
@@ -876,6 +878,72 @@ def load_qos_data_source_response_to_model(changes_for_countries):
         os.remove(profile_file)
     except OSError:
         pass
+
+
+def get_qos_data_freshness(current_datetime=None):
+    """
+    get_qos_data_freshness
+        Method to get the QoS data freshness of every country that received a new QoS version recently.
+        A country is stale when no new upstream version was pulled or no QoS day was aggregated in time.
+        Countries in the QoS exclusion list are skipped, as their data is not pulled on purpose.
+
+    :param current_datetime: DateTime instance to check the freshness against, now by default
+    :return: list of dicts with iso3_format, last_pulled_at, last_aggregated_date and is_stale, by iso3_format
+    """
+    if not current_datetime:
+        current_datetime = core_utilities.get_current_datetime_object()
+
+    active_since = current_datetime - timedelta(days=sources_config.qos_freshness_active_window_days)
+    version_stale_before = current_datetime - timedelta(
+        hours=sources_config.qos_freshness_max_hours_without_new_version)
+    aggregation_stale_before = current_datetime.date() - timedelta(
+        days=sources_config.qos_freshness_max_days_without_aggregated_data)
+
+    # Same matching as load_qos_data_source_response_to_model: entries are not stripped, so a country the
+    # loader still pulls (e.g. ' ZAF') stays monitored
+    country_codes_for_exclusion = [
+        iso3_format
+        for iso3_format in ds_settings.get('QOS')['COUNTRY_EXCLUSION_LIST']
+        if iso3_format
+    ]
+
+    # Empty order_by() as the QoSData default ordering would add timestamp to the GROUP BY
+    last_pulled_at_by_country = dict(sources_models.QoSData.objects.filter(
+        pulled_at__isnull=False,
+    ).order_by().values('country_id').annotate(
+        last_pulled_at=Max('pulled_at'),
+    ).filter(
+        last_pulled_at__gte=active_since,
+    ).values_list('country_id', 'last_pulled_at'))
+
+    last_aggregated_date_by_country = dict(CountryDailyStatus.objects.filter(
+        country_id__in=list(last_pulled_at_by_country.keys()),
+        live_data_source=statistics_configs.QOS_SOURCE,
+    ).order_by().values('country_id').annotate(
+        last_aggregated_date=Max('date'),
+    ).values_list('country_id', 'last_aggregated_date'))
+
+    countries = Country.objects.filter(
+        id__in=list(last_pulled_at_by_country.keys()),
+    ).exclude(
+        iso3_format__in=country_codes_for_exclusion,
+    ).order_by('iso3_format').values_list('id', 'iso3_format')
+
+    freshness = []
+    for country_id, iso3_format in countries:
+        last_pulled_at = last_pulled_at_by_country[country_id]
+        last_aggregated_date = last_aggregated_date_by_country.get(country_id)
+        freshness.append({
+            'iso3_format': iso3_format,
+            'last_pulled_at': last_pulled_at,
+            'last_aggregated_date': last_aggregated_date,
+            'is_stale': (
+                last_pulled_at < version_stale_before
+                or last_aggregated_date is None
+                or last_aggregated_date < aggregation_stale_before
+            ),
+        })
+    return freshness
 
 
 def sync_qos_realtime_data(country_id):
