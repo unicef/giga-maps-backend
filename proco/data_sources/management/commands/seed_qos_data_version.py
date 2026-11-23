@@ -112,7 +112,7 @@ class Command(BaseCommand):
 
         stored = {
             row['country__iso3_format']: row
-            for row in QoSData.objects.all().values('country__iso3_format').annotate(
+            for row in QoSData.objects.order_by().values('country__iso3_format').annotate(
                 db_version=Max('version'), rows=Count('id'),
             )
         }
