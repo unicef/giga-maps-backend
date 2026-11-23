@@ -12,8 +12,42 @@ from django.db.models import Count, Max
 import delta_sharing
 
 from proco.data_sources.models import QoSData
+from proco.taskapp import app as celery_app
 
 logger = logging.getLogger('gigamaps.' + __name__)
+
+QOS_LOAD_TASK_NAME = 'proco.data_sources.tasks.load_data_from_qos_apis'
+WORKER_CHECK_TIMEOUT_SECONDS = 5
+
+
+def find_qos_loads_on_workers(timeout=WORKER_CHECK_TIMEOUT_SECONDS):
+    """
+    find_qos_loads_on_workers
+        Method to ask the Celery workers which QoS loads they are running or have reserved.
+        BackgroundTask cannot tell: update_live_data and update_qos_data mark it completed right after
+        queuing the chain, while load_data_from_qos_apis can run for up to 4 h.
+
+    :param timeout: seconds to wait for the workers' replies
+    :return: (list of worker names that replied, list of 'worker: state' strings for each QoS load),
+             or (None, None) when no worker replied
+    """
+    inspector = celery_app.control.inspect(timeout=timeout)
+    replies = {
+        'active': inspector.active(),
+        'reserved': inspector.reserved(),
+    }
+    if not replies['active'] and not replies['reserved']:
+        return None, None
+
+    workers = set()
+    loads = []
+    for state, reply in replies.items():
+        for worker, tasks in (reply or {}).items():
+            workers.add(worker)
+            for task in tasks or []:
+                if task.get('name') == QOS_LOAD_TASK_NAME:
+                    loads.append('{0}: {1}'.format(worker, state))
+    return sorted(workers), loads
 
 
 def parse_version_overrides(values):
@@ -67,6 +101,10 @@ class Command(BaseCommand):
         parser.add_argument(
             '--apply', action='store_true', dest='apply', default=False,
             help='Write the versions. Without it the command only prints what it would change.',
+        )
+        parser.add_argument(
+            '--skip_worker_check', action='store_true', dest='skip_worker_check', default=False,
+            help='Write even if no Celery worker answers. Only when the workers are known to be stopped.',
         )
 
     def get_remote_versions(self, iso3_codes):
@@ -156,6 +194,24 @@ class Command(BaseCommand):
                                   'versions of the host.'.format(iso3))
             else:
                 plan[iso3] = target
+
+        if not options['skip_worker_check']:
+            workers, loads = find_qos_loads_on_workers()
+            if workers is None:
+                message = ('No Celery worker answered, so a running QoS load cannot be ruled out. '
+                           'Check the workers, or pass --skip_worker_check if they are stopped.')
+            elif loads:
+                message = ('A QoS load is running or queued on the workers ({0}). It could write versions of '
+                           'the previous host after the seed. Wait for it to finish, then run again.'.format(
+                               ', '.join(loads)))
+            else:
+                message = None
+                self.stdout.write('Workers checked, no QoS load running: {0}'.format(', '.join(workers)))
+
+            if message and options['apply']:
+                raise CommandError(message)
+            if message:
+                self.stderr.write(message)
 
         if not options['apply']:
             self.stdout.write('Dry run: nothing written. Re-run with --apply to set the target versions.')

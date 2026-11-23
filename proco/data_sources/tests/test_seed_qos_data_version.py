@@ -13,6 +13,9 @@ from proco.locations.tests.factories import CountryFactory
 from proco.schools.tests.factories import SchoolFactory
 
 GET_TABLE_VERSION = 'proco.data_sources.management.commands.seed_qos_data_version.delta_sharing.get_table_version'
+INSPECT = 'proco.data_sources.management.commands.seed_qos_data_version.celery_app.control.inspect'
+QOS_LOAD_TASK = {'name': 'proco.data_sources.tasks.load_data_from_qos_apis', 'id': 'task-1'}
+OTHER_TASK = {'name': 'proco.utils.tasks.update_cached_value', 'id': 'task-2'}
 
 
 def get_version_from_table_url(versions):
@@ -43,6 +46,14 @@ class SeedQoSDataVersionCommandTestCase(TestCase):
 
     def setUp(self):
         cache.clear()
+        inspect_patcher = patch(INSPECT)
+        self.inspect = inspect_patcher.start()
+        self.addCleanup(inspect_patcher.stop)
+        self.set_worker_replies(active={'celery@w1': [OTHER_TASK]}, reserved={'celery@w1': []})
+
+    def set_worker_replies(self, active, reserved):
+        self.inspect.return_value.active.return_value = active
+        self.inspect.return_value.reserved.return_value = reserved
 
     def run_command(self, *args):
         out, err = StringIO(), StringIO()
@@ -54,6 +65,8 @@ class SeedQoSDataVersionCommandTestCase(TestCase):
             out, _ = self.run_command()
 
         self.assertIn('DRY RUN', out)
+        bra_line = [line for line in out.splitlines() if line.startswith('BRA ')][0].split()
+        self.assertEqual(bra_line[1:3], ['3', '4902'])
         self.assertEqual(QoSData.get_last_version('BRA'), 4902)
         self.assertEqual(QoSData.get_last_version('KEN'), 23857)
 
@@ -98,3 +111,48 @@ class SeedQoSDataVersionCommandTestCase(TestCase):
     def test_invalid_set_version_raises(self):
         with self.assertRaises(CommandError):
             self.run_command('--set_version', 'BRA:650')
+
+    def test_apply_refused_while_qos_load_is_active(self):
+        self.set_worker_replies(active={'celery@w1': [QOS_LOAD_TASK]}, reserved={'celery@w1': []})
+
+        with patch(GET_TABLE_VERSION, side_effect=get_version_from_table_url({'BRA': 700, 'KEN': 64})):
+            with self.assertRaisesMessage(CommandError, 'celery@w1: active'):
+                self.run_command('--apply')
+
+        self.assertEqual(QoSData.get_last_version('BRA'), 4902)
+
+    def test_apply_refused_while_qos_load_is_reserved(self):
+        self.set_worker_replies(active={'celery@w1': []}, reserved={'celery@w2': [QOS_LOAD_TASK]})
+
+        with patch(GET_TABLE_VERSION, side_effect=get_version_from_table_url({'BRA': 700, 'KEN': 64})):
+            with self.assertRaisesMessage(CommandError, 'celery@w2: reserved'):
+                self.run_command('--apply')
+
+        self.assertEqual(QoSData.get_last_version('KEN'), 23857)
+
+    def test_apply_refused_when_no_worker_answers(self):
+        self.set_worker_replies(active=None, reserved=None)
+
+        with patch(GET_TABLE_VERSION, side_effect=get_version_from_table_url({'BRA': 700, 'KEN': 64})):
+            with self.assertRaisesMessage(CommandError, 'No Celery worker answered'):
+                self.run_command('--apply')
+
+        self.assertEqual(QoSData.get_last_version('BRA'), 4902)
+
+    def test_skip_worker_check_applies_without_asking_workers(self):
+        self.set_worker_replies(active=None, reserved=None)
+
+        with patch(GET_TABLE_VERSION, side_effect=get_version_from_table_url({'BRA': 700, 'KEN': 64})):
+            self.run_command('--apply', '--skip_worker_check')
+
+        self.inspect.assert_not_called()
+        self.assertEqual(QoSData.get_last_version('BRA'), 698)
+
+    def test_dry_run_reports_running_load_without_failing(self):
+        self.set_worker_replies(active={'celery@w1': [QOS_LOAD_TASK]}, reserved={'celery@w1': []})
+
+        with patch(GET_TABLE_VERSION, side_effect=get_version_from_table_url({'BRA': 700, 'KEN': 64})):
+            out, err = self.run_command()
+
+        self.assertIn('A QoS load is running or queued', err)
+        self.assertIn('Dry run: nothing written', out)
