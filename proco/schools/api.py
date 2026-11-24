@@ -577,6 +577,7 @@ class SchoolStatusConnectivityTileGenerator(BaseTileGenerator):
             prioritized_schools AS (
                 SELECT
                     schools_school.id,
+                    schools_school.country_id,
                     schools_school.geopoint,
                     schools_school.connectivity_status,
                     ROW_NUMBER() OVER (
@@ -604,7 +605,7 @@ class SchoolStatusConnectivityTileGenerator(BaseTileGenerator):
                     {same_school_coords_condition}
             ),
             sampled_schools AS (
-                SELECT id, geopoint, connectivity_status, has_multiple_school_on_same_lat_lng
+                SELECT id, country_id, geopoint, connectivity_status, has_multiple_school_on_same_lat_lng
                 FROM prioritized_schools
                 WHERE priority_rank = 1
                 {random_order}
@@ -613,6 +614,7 @@ class SchoolStatusConnectivityTileGenerator(BaseTileGenerator):
             mvtgeom AS (
                 SELECT ST_AsMVTGeom(ST_Transform(sampled_schools.geopoint, 3857), bounds.b2d) AS geom,
                 sampled_schools.id,
+                sampled_schools.country_id,
                 CASE WHEN sampled_schools.connectivity_status IN ('good', 'moderate') THEN 'connected'
                     WHEN sampled_schools.connectivity_status = 'no' THEN 'not_connected'
                     ELSE 'unknown'

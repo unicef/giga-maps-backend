@@ -223,6 +223,7 @@ class EntityStatusConnectivityTileGenerator(RawEntityDetailFilterMixin, BaseTile
             mvtgeom AS (
                 SELECT ST_AsMVTGeom(ST_Transform(entities_entity.geopoint, 3857), bounds.b2d) AS geom,
                 entities_entity.id,
+                entities_entity.country_id,
                 entities_entity_type.code AS entity_type,
                 CASE WHEN entities_entity.connectivity_status IN ('good', 'moderate', 'bad') THEN 'connected'
                     WHEN entities_entity.connectivity_status = 'no' THEN 'not_connected'
@@ -909,6 +910,7 @@ class EntityConnectivityTileGenerator(RawEntityDetailFilterMixin, EntityTypeCode
             school_mvtgeom  AS (
                 SELECT ST_AsMVTGeom(ST_Transform(schools_school.geopoint, 3857), bounds.b2d) AS geom,
                 schools_school.id,
+                schools_school.country_id,
                 CASE WHEN c.id is NULL AND rt_status.rt_registered = True {rt_date_condition} THEN 'unknown'
                     WHEN c.id is NULL THEN NULL
                     WHEN c.connectivity_speed >  {benchmark} THEN 'good'
@@ -942,6 +944,7 @@ class EntityConnectivityTileGenerator(RawEntityDetailFilterMixin, EntityTypeCode
             entity_mvtgeom  AS (
                 SELECT ST_AsMVTGeom(ST_Transform(entities_entity.geopoint, 3857), bounds.b2d) AS geom,
                 entities_entity.id,
+                entities_entity.country_id,
                 CASE WHEN c.id is NULL AND rt_status.rt_registered = True {rt_date_condition} THEN 'unknown'
                     WHEN c.id is NULL THEN NULL
                     WHEN c.connectivity_speed >  {benchmark} THEN 'good'
